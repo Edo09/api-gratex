@@ -1,0 +1,7 @@
+POST http://localhost/api-gratex/index.php/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "alex_smith",
+  "password": "password123"
+}

@@ -1,0 +1,72 @@
+### testAPI - Cotizaciones Endpoint Tests
+### Base URL: http://localhost/testAPI
+
+### Step 1: Login to get authentication token
+POST http://localhost/testAPI/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "alex_smith",
+  "password": "password123"
+}
+
+###
+
+### Step 2: Get all cotizaciones (use token from Step 1)
+GET http://localhost/testAPI/index.php/api/cotizaciones
+X-API-KEY: 782913c20001aa10d22d06bf8425d9ad
+
+###
+
+### Step 3: Get specific cotizacion by ID
+GET http://localhost/testAPI/api/cotizaciones?id=1
+X-API-KEY: YOUR_TOKEN_HERE
+
+###
+
+### Step 4: Create new cotizacion
+POST http://localhost/testAPI/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: YOUR_TOKEN_HERE
+
+{
+  "code": "SKU_NEW_001",
+  "amount": 100,
+  "client": "New Client Company",
+  "description": "A new quotation for testing purposes"
+}
+
+###
+
+### Step 5: Update cotizacion (ID 1)
+PUT http://localhost/testAPI/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: YOUR_TOKEN_HERE
+
+{
+  "id": 1,
+  "code": "SKU_913_UPDATED",
+  "amount": 50,
+  "client": "Updated Client Name",
+  "description": "Updated description for testing"
+}
+
+###
+
+### Step 6: Delete cotizacion (ID 51 or any test ID)
+DELETE http://localhost/testAPI/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: YOUR_TOKEN_HERE
+
+{
+  "id": 51
+}
+
+###
+
+### Alternative: Using Bearer Token Format
+### Get all cotizaciones with Bearer token
+GET http://localhost/testAPI/api/cotizaciones
+Authorization: Bearer YOUR_TOKEN_HERE
+
+###

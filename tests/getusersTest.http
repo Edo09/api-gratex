@@ -1,0 +1,2 @@
+GET http://localhost/testAPI/index.php/api/clients
+Authorization: Bearer 782913c20001aa10d22d06bf8425d9ad

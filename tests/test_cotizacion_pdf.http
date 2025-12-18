@@ -1,0 +1,18 @@
+### Test Cotizacion PDF Generation
+### Requires X-API-KEY header with valid token
+
+### Get PDF for cotizacion ID 1 (download format)
+GET http://localhost/api-gratex/index.php/api/cotizaciones/1/pdf
+X-API-KEY: 2d86caf90600a9359b3c182a45c96ada
+
+###
+
+### Get PDF for cotizacion ID 1 (base64 format - for embedding in frontend)
+GET http://localhost/api-gratex/index.php/api/cotizaciones/1/pdf?format=base64
+X-API-KEY: 2d86caf90600a9359b3c182a45c96ada
+
+###
+
+### Get PDF for cotizacion ID 5 (download format)
+GET http://localhost/api-gratex/index.php/api/cotizaciones/5/pdf
+X-API-KEY: 2d86caf90600a9359b3c182a45c96ada

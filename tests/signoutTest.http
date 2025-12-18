@@ -1,0 +1,6 @@
+
+
+### Then signout with the token from above
+POST http://localhost/testAPI/index.php/api/auth/signout
+Content-Type: application/json
+X-API-KEY: 0b211bf774b431ec4f1db8517592b3ca
