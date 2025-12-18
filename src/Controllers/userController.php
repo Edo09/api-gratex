@@ -75,7 +75,7 @@ switch($_SERVER['REQUEST_METHOD']){
         echo json_encode($respuesta);
     break;
 
-    case 'DELETE';
+    case 'DELETE':
         $_DELETE= json_decode(file_get_contents('php://input',true));
         if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
             $respuesta= ['status' => false, 'error','User ID is empty'];

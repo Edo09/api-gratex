@@ -251,18 +251,29 @@ class CotizacionPdfGenerator extends FPDF
         $this->SetTextColor(0, 0, 0);
         $this->SetFont('Arial', '', 10);
 
-        // Data row
-        $this->Cell(30, 6, $this->cotizacion['code'] ?? '', 1, 0, 'C');
-        $this->Cell(30, 6, $this->cotizacion['amount'] ?? '0', 1, 0, 'C');
-        
-        // Description with multi-cell
-        $x = $this->GetX();
-        $y = $this->GetY();
-        $this->MultiCell(100, 6, $this->convertEncoding($this->cotizacion['description'] ?? ''), 1, 'L');
-        $descHeight = $this->GetY() - $y;
-        
-        $this->SetXY($x + 100, $y);
-        $this->Cell(30, $descHeight > 6 ? $descHeight : 6, '$' . number_format($this->cotizacion['amount'] ?? 0, 2), 1, 1, 'R');
+        // Show each item as a row
+        if (isset($this->cotizacion['items']) && is_array($this->cotizacion['items'])) {
+            foreach ($this->cotizacion['items'] as $item) {
+                $this->Cell(30, 6, $this->cotizacion['code'] ?? '', 1, 0, 'C');
+                $this->Cell(30, 6, $item['quantity'] ?? '1', 1, 0, 'C');
+                $x = $this->GetX();
+                $y = $this->GetY();
+                $this->MultiCell(100, 6, $this->convertEncoding($item['description'] ?? ''), 1, 'L');
+                $descHeight = $this->GetY() - $y;
+                $this->SetXY($x + 100, $y);
+                $this->Cell(30, $descHeight > 6 ? $descHeight : 6, '$' . number_format($item['subtotal'] ?? 0, 2), 1, 1, 'R');
+            }
+        } else {
+            // Fallback for legacy data
+            $this->Cell(30, 6, $this->cotizacion['code'] ?? '', 1, 0, 'C');
+            $this->Cell(30, 6, '1', 1, 0, 'C');
+            $x = $this->GetX();
+            $y = $this->GetY();
+            $this->MultiCell(100, 6, $this->convertEncoding($this->cotizacion['description'] ?? ''), 1, 'L');
+            $descHeight = $this->GetY() - $y;
+            $this->SetXY($x + 100, $y);
+            $this->Cell(30, $descHeight > 6 ? $descHeight : 6, '$' . number_format($this->cotizacion['total'] ?? 0, 2), 1, 1, 'R');
+        }
 
         $this->Ln(5);
 
@@ -271,7 +282,15 @@ class CotizacionPdfGenerator extends FPDF
         $this->SetFont('Arial', 'B', 10);
         $this->SetFillColor(240, 240, 240);
         
-        $subtotal = floatval($this->cotizacion['amount'] ?? 0);
+        // Calculate subtotal from items if available, else fallback
+        if (isset($this->cotizacion['items']) && is_array($this->cotizacion['items'])) {
+            $subtotal = 0;
+            foreach ($this->cotizacion['items'] as $item) {
+                $subtotal += floatval($item['subtotal'] ?? 0);
+            }
+        } else {
+            $subtotal = floatval($this->cotizacion['total'] ?? 0);
+        }
         $itbis = $subtotal * 0.18;
         $total = $subtotal + $itbis;
 

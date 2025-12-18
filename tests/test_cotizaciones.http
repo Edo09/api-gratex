@@ -2,7 +2,7 @@
 ### Base URL: http://localhost/testAPI
 
 ### Step 1: Login to get authentication token
-POST http://localhost/testAPI/api/auth/login
+POST http://localhost:8000/api/auth/login
 Content-Type: application/json
 
 {
@@ -13,19 +13,19 @@ Content-Type: application/json
 ###
 
 ### Step 2: Get all cotizaciones (use token from Step 1)
-GET http://localhost/testAPI/index.php/api/cotizaciones
-X-API-KEY: 782913c20001aa10d22d06bf8425d9ad
+GET http://localhost:8000/api/cotizaciones
+X-API-KEY: db0a4ca524a2050651861b45dbcd53c4
 
 ###
 
 ### Step 3: Get specific cotizacion by ID
-GET http://localhost/testAPI/api/cotizaciones?id=1
-X-API-KEY: YOUR_TOKEN_HERE
+GET http://localhost:8000/api/cotizaciones?id=1
+X-API-KEY: db0a4ca524a2050651861b45dbcd53c4
 
 ###
 
 ### Step 4: Create new cotizacion
-POST http://localhost/testAPI/api/cotizaciones
+POST http://localhost:8000/api/cotizaciones
 Content-Type: application/json
 X-API-KEY: YOUR_TOKEN_HERE
 
@@ -39,7 +39,7 @@ X-API-KEY: YOUR_TOKEN_HERE
 ###
 
 ### Step 5: Update cotizacion (ID 1)
-PUT http://localhost/testAPI/api/cotizaciones
+PUT http://localhost:8000/api/cotizaciones
 Content-Type: application/json
 X-API-KEY: YOUR_TOKEN_HERE
 
@@ -54,7 +54,7 @@ X-API-KEY: YOUR_TOKEN_HERE
 ###
 
 ### Step 6: Delete cotizacion (ID 51 or any test ID)
-DELETE http://localhost/testAPI/api/cotizaciones
+DELETE http://localhost:8000/api/cotizaciones
 Content-Type: application/json
 X-API-KEY: YOUR_TOKEN_HERE
 
@@ -66,7 +66,7 @@ X-API-KEY: YOUR_TOKEN_HERE
 
 ### Alternative: Using Bearer Token Format
 ### Get all cotizaciones with Bearer token
-GET http://localhost/testAPI/api/cotizaciones
+GET http://localhost:8000/api/cotizaciones
 Authorization: Bearer YOUR_TOKEN_HERE
 
 ###

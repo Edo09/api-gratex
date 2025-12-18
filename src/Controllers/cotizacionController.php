@@ -83,24 +83,50 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'POST':
         $_POST= json_decode(file_get_contents('php://input',true));
-        if(!isset($_POST->code) || is_null($_POST->code) || empty(trim($_POST->code)) || strlen($_POST->code) > 50){
-            $respuesta= ['status' => false, 'error','Code must not be empty and no more than 50 characters'];
+        if(!isset($_POST->client_id) || is_null($_POST->client_id)){
+            $respuesta= ['status' => false, 'error' => 'Client ID is required'];
         }
-        else if(!isset($_POST->amount) || is_null($_POST->amount) || empty(trim($_POST->amount)) || !is_numeric($_POST->amount)){
-            $respuesta= ['status' => false, 'error','Amount must not be empty and must be a valid number'];
+        else if(!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100){
+            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
         }
-        else if(!isset($_POST->client) || is_null($_POST->client) || empty(trim($_POST->client)) || strlen($_POST->client) > 100){
-            $respuesta= ['status' => false, 'error','Client must not be empty and no more than 100 characters'];
+        else if(!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0){
+            $respuesta= ['status' => false, 'error' => 'At least one item is required'];
         }
-        else if(!isset($_POST->description) || is_null($_POST->description) || empty(trim($_POST->description))){
-            $respuesta= ['status' => false, 'error','Description must not be empty'];
+        else if(!isset($_POST->total) || !is_numeric($_POST->total)){
+            $respuesta= ['status' => false, 'error' => 'Total must be a valid number'];
         }
         else{
-            $result = $cotizacionModel->saveCotizacion($_POST->code,$_POST->amount,$_POST->client,$_POST->description);
-            if($result[0] === 'success'){
-                $respuesta = ['status' => true, 'data' => $result[1]];
+            // Validate each item
+            $itemsValid = true;
+            $itemError = '';
+            foreach($_POST->items as $index => $item) {
+                if(!isset($item->description) || empty(trim($item->description))) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Description is required';
+                    break;
+                }
+                if(!isset($item->amount) || !is_numeric($item->amount)) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
+                    break;
+                }
+                if(!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
+                    break;
+                }
+            }
+            
+            if(!$itemsValid) {
+                $respuesta = ['status' => false, 'error' => $itemError];
             } else {
-                $respuesta = ['status' => false, 'error' => $result[1]];
+                $date = isset($_POST->date) ? $_POST->date : '';
+                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $_POST->client_name, $date, $_POST->items, $_POST->total);
+                if($result[0] === 'success'){
+                    $respuesta = ['status' => true, 'data' => $result[1]];
+                } else {
+                    $respuesta = ['status' => false, 'error' => $result[1]];
+                }
             }
         }
         echo json_encode($respuesta);
@@ -108,27 +134,53 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'PUT':
         $_PUT= json_decode(file_get_contents('php://input',true));
-        if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
-            $respuesta= ['status' => false, 'error','Cotization ID is empty'];
+        if(!isset($_PUT->id) || is_null($_PUT->id)){
+            $respuesta= ['status' => false, 'error' => 'Cotization ID is required'];
         }
-        else if(!isset($_PUT->code) || is_null($_PUT->code) || empty(trim($_PUT->code)) || strlen($_PUT->code) > 50){
-            $respuesta= ['status' => false, 'error','Code must not be empty and no more than 50 characters'];
+        else if(!isset($_PUT->client_id) || is_null($_PUT->client_id)){
+            $respuesta= ['status' => false, 'error' => 'Client ID is required'];
         }
-        else if(!isset($_PUT->amount) || is_null($_PUT->amount) || empty(trim($_PUT->amount)) || !is_numeric($_PUT->amount)){
-            $respuesta= ['status' => false, 'error','Amount must not be empty and must be a valid number'];
+        else if(!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name)) || strlen($_PUT->client_name) > 100){
+            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
         }
-        else if(!isset($_PUT->client) || is_null($_PUT->client) || empty(trim($_PUT->client)) || strlen($_PUT->client) > 100){
-            $respuesta= ['status' => false, 'error','Client must not be empty and no more than 100 characters'];
+        else if(!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0){
+            $respuesta= ['status' => false, 'error' => 'At least one item is required'];
         }
-        else if(!isset($_PUT->description) || is_null($_PUT->description) || empty(trim($_PUT->description))){
-            $respuesta= ['status' => false, 'error','Description must not be empty'];
+        else if(!isset($_PUT->total) || !is_numeric($_PUT->total)){
+            $respuesta= ['status' => false, 'error' => 'Total must be a valid number'];
         }
         else{
-            $result = $cotizacionModel->updateCotizacion($_PUT->id,$_PUT->code,$_PUT->amount,$_PUT->client,$_PUT->description);
-            if($result[0] === 'success'){
-                $respuesta = ['status' => true, 'data' => $result[1]];
+            // Validate each item
+            $itemsValid = true;
+            $itemError = '';
+            foreach($_PUT->items as $index => $item) {
+                if(!isset($item->description) || empty(trim($item->description))) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Description is required';
+                    break;
+                }
+                if(!isset($item->amount) || !is_numeric($item->amount)) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
+                    break;
+                }
+                if(!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
+                    $itemsValid = false;
+                    $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
+                    break;
+                }
+            }
+            
+            if(!$itemsValid) {
+                $respuesta = ['status' => false, 'error' => $itemError];
             } else {
-                $respuesta = ['status' => false, 'error' => $result[1]];
+                $date = isset($_PUT->date) ? $_PUT->date : '';
+                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $_PUT->client_name, $date, $_PUT->items, $_PUT->total);
+                if($result[0] === 'success'){
+                    $respuesta = ['status' => true, 'data' => $result[1]];
+                } else {
+                    $respuesta = ['status' => false, 'error' => $result[1]];
+                }
             }
         }
         echo json_encode($respuesta);
@@ -136,8 +188,8 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'DELETE':
         $_DELETE= json_decode(file_get_contents('php://input',true));
-        if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
-            $respuesta= ['status' => false, 'error','Cotization ID is empty'];
+        if(!isset($_DELETE->id) || is_null($_DELETE->id)){
+            $respuesta= ['status' => false, 'error' => 'Cotization ID is required'];
         }
         else{
             $result = $cotizacionModel->deleteCotizacion($_DELETE->id);

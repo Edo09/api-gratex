@@ -202,66 +202,10 @@ CREATE TABLE `cotizaciones` (
   `id` int(11) NOT NULL,
   `code` varchar(50) NOT NULL,
   `date` datetime DEFAULT CURRENT_TIMESTAMP,
-  `amount` int(11) NOT NULL,
-  `client` varchar(100) NOT NULL,
-  `description` text
+  `client_id` int(11) DEFAULT NULL,
+  `client_name` varchar(100) NOT NULL,
+  `total` decimal(10,2) NOT NULL DEFAULT 0.00
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
-
---
--- Dumping data for table `cotizaciones`
---
-
-INSERT INTO `cotizaciones` (`id`, `code`, `date`, `amount`, `client`, `description`) VALUES
-(1, 'SKU_913', NOW(), 32, 'Ettie Foale', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(2, 'SKU_820', NOW(), 47, 'Herb Fraschetti', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(3, 'SKU_27', NOW(), 95, 'Stuart Anersen', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(4, 'SKU_490', NOW(), 55, 'Blythe Schirak', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(5, 'SKU_387', NOW(), 70, 'Fawne Durrett', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(6, 'SKU_33', NOW(), 57, 'Booth Kubach', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(7, 'SKU_316', NOW(), 27, 'Jilly Windrum', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(8, 'SKU_263', NOW(), 56, 'Caron Littrell', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(9, 'SKU_260', NOW(), 76, 'Lexy Harriott', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(10, 'SKU_24', NOW(), 46, 'Niccolo Macquire', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(11, 'SKU_159', NOW(), 46, 'Lewie Lanegran', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(12, 'SKU_697', NOW(), 62, 'Augusta Venneur', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(13, 'SKU_112', NOW(), 81, 'Carola Scherme', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(14, 'SKU_138', NOW(), 24, 'Fawne Cornels', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(15, 'SKU_362', NOW(), 69, 'Nicola Turton', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(16, 'SKU_290', NOW(), 92, 'Will Doyle', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(17, 'SKU_879', NOW(), 67, 'Pandora Veare', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(18, 'SKU_871', NOW(), 79, 'Yank Vanin', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(19, 'SKU_456', NOW(), 46, 'Noelle Hucklesby', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(20, 'SKU_260', NOW(), 95, 'Davy Aldiss', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(21, 'SKU_636', NOW(), 32, 'Gwen Eccleston', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(22, 'SKU_622', NOW(), 26, 'Maurise Feore', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(23, 'SKU_600', NOW(), 41, 'Tobey Weatherburn', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(24, 'SKU_873', NOW(), 7, 'Conchita Craiker', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(25, 'SKU_1', NOW(), 38, 'Jim Godmar', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(26, 'SKU_72', NOW(), 7, 'Micah Beston', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(27, 'SKU_857', NOW(), 24, 'Conchita Brito', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(28, 'SKU_450', NOW(), 2, 'Lorelle Cassell', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(29, 'SKU_359', NOW(), 58, 'Augusta Iverson', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(30, 'SKU_454', NOW(), 76, 'Jim Sambiedge', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(31, 'SKU_330', NOW(), 8, 'Nevsa Whisker', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(32, 'SKU_735', NOW(), 80, 'Ulick Kenafaque', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(33, 'SKU_891', NOW(), 19, 'Halie Hefforde', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(34, 'SKU_65', NOW(), 69, 'Nevsa Borth', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(35, 'SKU_56', NOW(), 27, 'Richardo O''Hengerty', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(36, 'SKU_492', NOW(), 26, 'Mona Clutten', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(37, 'SKU_692', NOW(), 38, 'Geno Blackmoor', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(38, 'SKU_717', NOW(), 2, 'Benedetta Eagell', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(39, 'SKU_741', NOW(), 18, 'Sella Gristock', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(40, 'SKU_533', NOW(), 27, 'Lorelle Pyne', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(41, 'SKU_120', NOW(), 83, 'Angelia Hammerson', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(42, 'SKU_998', NOW(), 13, 'Sharlene Mayfield', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(43, 'SKU_876', NOW(), 44, 'Huntington Brockman', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(44, 'SKU_189', NOW(), 83, 'Stephani Carnoghan', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(45, 'SKU_650', NOW(), 52, 'Vicki Peet', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(46, 'SKU_623', NOW(), 36, 'Nicholas Lenton', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(47, 'SKU_193', NOW(), 7, 'Ivar Abdee', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(48, 'SKU_677', NOW(), 48, 'Chloe Cathro', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(49, 'SKU_83', NOW(), 83, 'Auria Blanchflower', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.'),
-(50, 'SKU_881', NOW(), 47, 'Sella Esposi', 'Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.');
 
 --
 -- Indexes for table `cotizaciones`
@@ -273,7 +217,128 @@ ALTER TABLE `cotizaciones`
 -- AUTO_INCREMENT for table `cotizaciones`
 --
 ALTER TABLE `cotizaciones`
-  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=51;
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=21;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `cotizacion_items`
+--
+
+CREATE TABLE `cotizacion_items` (
+  `id` int(11) NOT NULL,
+  `cotizacion_id` int(11) NOT NULL,
+  `description` text NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `quantity` int(11) NOT NULL DEFAULT 1,
+  `subtotal` decimal(10,2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `cotizacion_items`
+--
+ALTER TABLE `cotizacion_items`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `cotizacion_id` (`cotizacion_id`);
+
+--
+-- AUTO_INCREMENT for table `cotizacion_items`
+--
+ALTER TABLE `cotizacion_items`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=36;
+
+--
+-- Constraints for table `cotizacion_items`
+--
+ALTER TABLE `cotizacion_items`
+  ADD CONSTRAINT `cotizacion_items_ibfk_1` FOREIGN KEY (`cotizacion_id`) REFERENCES `cotizaciones` (`id`) ON DELETE CASCADE;
+
+--
+-- Dumping data for table `cotizaciones`
+--
+
+INSERT INTO `cotizaciones` (`id`, `code`, `date`, `client_id`, `client_name`, `total`) VALUES
+(1, 'COT_20251201_001', '2025-12-01 09:30:00', 1, 'Caron Melley', 1250.00),
+(2, 'COT_20251201_002', '2025-12-01 11:45:00', 2, 'Eustace Guy', 3500.00),
+(3, 'COT_20251202_001', '2025-12-02 08:15:00', 3, 'Eugene Foale', 780.50),
+(4, 'COT_20251202_002', '2025-12-02 14:20:00', 4, 'Eugenius Feldheim', 2100.00),
+(5, 'COT_20251203_001', '2025-12-03 10:00:00', 5, 'Niccolo Whitsey', 4500.00),
+(6, 'COT_20251203_002', '2025-12-03 16:30:00', 6, 'Itch Whitsey', 890.00),
+(7, 'COT_20251204_001', '2025-12-04 09:00:00', 7, 'Lyndsey Wilber', 1675.50),
+(8, 'COT_20251205_001', '2025-12-05 11:00:00', 8, 'Von Fissenden', 3200.00),
+(9, 'COT_20251206_001', '2025-12-06 13:45:00', 9, 'Darrin De Robertis', 550.00),
+(10, 'COT_20251207_001', '2025-12-07 15:30:00', 10, 'Armin Stachini', 2850.00),
+(11, 'COT_20251208_001', '2025-12-08 08:30:00', 11, 'Eugenius Bohey', 1950.00),
+(12, 'COT_20251209_001', '2025-12-09 10:15:00', 12, 'Nissa Menzies', 4200.00),
+(13, 'COT_20251210_001', '2025-12-10 14:00:00', 13, 'Stefania Brizell', 680.00),
+(14, 'COT_20251211_001', '2025-12-11 09:45:00', 14, 'Lorelle Godmar', 3750.00),
+(15, 'COT_20251212_001', '2025-12-12 11:30:00', 15, 'Ettie Guy', 1100.00),
+(16, 'COT_20251213_001', '2025-12-13 16:00:00', 16, 'Mar Tomkin', 2400.00),
+(17, 'COT_20251214_001', '2025-12-14 08:00:00', 17, 'Herb Spellissy', 5600.00),
+(18, 'COT_20251215_001', '2025-12-15 12:30:00', 18, 'Briant Boshers', 920.00),
+(19, 'COT_20251216_001', '2025-12-16 14:45:00', 19, 'Ferdinande Texton', 3100.00),
+(20, 'COT_20251217_001', '2025-12-17 10:30:00', 20, 'Harmony Gecks', 1800.00);
+
+--
+-- Dumping data for table `cotizacion_items`
+--
+
+INSERT INTO `cotizacion_items` (`id`, `cotizacion_id`, `description`, `amount`, `quantity`, `subtotal`) VALUES
+-- Cotizacion 1 items
+(1, 1, 'Servicio de diseño web básico', 500.00, 1, 500.00),
+(2, 1, 'Hosting anual', 150.00, 2, 300.00),
+(3, 1, 'Dominio .com', 15.00, 1, 15.00),
+(4, 1, 'Mantenimiento mensual', 145.00, 3, 435.00),
+-- Cotizacion 2 items
+(5, 2, 'Desarrollo de aplicación móvil', 2500.00, 1, 2500.00),
+(6, 2, 'Integración API', 500.00, 2, 1000.00),
+-- Cotizacion 3 items
+(7, 3, 'Consultoría técnica', 150.50, 3, 451.50),
+(8, 3, 'Capacitación de personal', 329.00, 1, 329.00),
+-- Cotizacion 4 items
+(9, 4, 'Servidor dedicado', 700.00, 3, 2100.00),
+-- Cotizacion 5 items
+(10, 5, 'Sistema ERP personalizado', 3000.00, 1, 3000.00),
+(11, 5, 'Módulo de inventario', 750.00, 2, 1500.00),
+-- Cotizacion 6 items
+(12, 6, 'Soporte técnico mensual', 89.00, 10, 890.00),
+-- Cotizacion 7 items
+(13, 7, 'Diseño de logo', 350.00, 1, 350.00),
+(14, 7, 'Manual de marca', 425.50, 1, 425.50),
+(15, 7, 'Tarjetas de presentación', 45.00, 20, 900.00),
+-- Cotizacion 8 items
+(16, 8, 'Auditoría de seguridad', 1200.00, 1, 1200.00),
+(17, 8, 'Implementación firewall', 800.00, 2, 1600.00),
+(18, 8, 'Certificado SSL', 200.00, 2, 400.00),
+-- Cotizacion 9 items
+(19, 9, 'Reparación de equipos', 110.00, 5, 550.00),
+-- Cotizacion 10 items
+(20, 10, 'Licencia software empresarial', 950.00, 3, 2850.00),
+-- Cotizacion 11 items
+(21, 11, 'Migración de datos', 650.00, 1, 650.00),
+(22, 11, 'Configuración de servidores', 325.00, 4, 1300.00),
+-- Cotizacion 12 items
+(23, 12, 'Desarrollo e-commerce', 3500.00, 1, 3500.00),
+(24, 12, 'Pasarela de pagos', 350.00, 2, 700.00),
+-- Cotizacion 13 items
+(25, 13, 'Mantenimiento preventivo', 85.00, 8, 680.00),
+-- Cotizacion 14 items
+(26, 14, 'Sistema de facturación', 1500.00, 1, 1500.00),
+(27, 14, 'Módulo de reportes', 750.00, 2, 1500.00),
+(28, 14, 'Integración contable', 750.00, 1, 750.00),
+-- Cotizacion 15 items
+(29, 15, 'Rediseño de página web', 800.00, 1, 800.00),
+(30, 15, 'SEO básico', 150.00, 2, 300.00),
+-- Cotizacion 16 items
+(31, 16, 'Cableado estructurado', 120.00, 20, 2400.00),
+-- Cotizacion 17 items
+(32, 17, 'Sistema de videovigilancia', 2800.00, 2, 5600.00),
+-- Cotizacion 18 items
+(33, 18, 'Backup en la nube', 92.00, 10, 920.00),
+-- Cotizacion 19 items
+(34, 19, 'Desarrollo de API REST', 1550.00, 2, 3100.00),
+-- Cotizacion 20 items
+(35, 20, 'Consultoría IT', 450.00, 4, 1800.00);
 
 COMMIT;
 

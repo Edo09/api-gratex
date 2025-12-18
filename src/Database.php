@@ -8,7 +8,7 @@ class Database
     {
         try {
             $this->conexion = new PDO(
-                'mysql:host=localhost;dbname=test;charset=utf8mb4',
+                'mysql:host=localhost:3306;dbname=test;charset=utf8mb4',
                 'root',
                 '',
                 [
