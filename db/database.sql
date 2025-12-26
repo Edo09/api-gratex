@@ -253,9 +253,6 @@ ALTER TABLE `cotizacion_items`
 ALTER TABLE `cotizacion_items`
   ADD CONSTRAINT `cotizacion_items_ibfk_1` FOREIGN KEY (`cotizacion_id`) REFERENCES `cotizaciones` (`id`) ON DELETE CASCADE;
 
---
--- Dumping data for table `cotizaciones`
---
 
 INSERT INTO `cotizaciones` (`id`, `code`, `date`, `client_id`, `client_name`, `total`) VALUES
 (1, 'COT_20251201_001', '2025-12-01 09:30:00', 1, 'Caron Melley', 1250.00),
@@ -279,6 +276,85 @@ INSERT INTO `cotizaciones` (`id`, `code`, `date`, `client_id`, `client_name`, `t
 (19, 'COT_20251216_001', '2025-12-16 14:45:00', 19, 'Ferdinande Texton', 3100.00),
 (20, 'COT_20251217_001', '2025-12-17 10:30:00', 20, 'Harmony Gecks', 1800.00);
 
+
+-- --------------------------------------------------------
+
+-- Table structure for table `facturas`
+
+CREATE TABLE `facturas` (
+  `id` int(11) NOT NULL,
+  `no_factura` varchar(50) NOT NULL,
+  `date` datetime DEFAULT CURRENT_TIMESTAMP,
+  `client_id` int(11) DEFAULT NULL,
+  `client_name` varchar(100) NOT NULL,
+  `total` decimal(10,2) NOT NULL DEFAULT 0.00,
+  `NCF` varchar(50) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `facturas`
+--
+ALTER TABLE `facturas`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- AUTO_INCREMENT for table `facturas`
+--
+ALTER TABLE `facturas`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+-- --------------------------------------------------------
+
+-- Table structure for table `factura_items`
+
+CREATE TABLE `factura_items` (
+  `id` int(11) NOT NULL,
+  `factura_id` int(11) NOT NULL,
+  `description` text NOT NULL,
+  `amount` decimal(10,2) NOT NULL,
+  `quantity` int(11) NOT NULL DEFAULT 1,
+  `subtotal` decimal(10,2) NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `factura_items`
+--
+ALTER TABLE `factura_items`
+  ADD PRIMARY KEY (`id`),
+  ADD KEY `factura_id` (`factura_id`);
+
+--
+-- AUTO_INCREMENT for table `factura_items`
+--
+ALTER TABLE `factura_items`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- Constraints for table `factura_items`
+--
+ALTER TABLE `factura_items`
+  ADD CONSTRAINT `factura_items_ibfk_1` FOREIGN KEY (`factura_id`) REFERENCES `facturas` (`id`) ON DELETE CASCADE;
+
+--
+-- Dumping data for table `facturas`
+--
+INSERT INTO `facturas` (`id`, `no_factura`, `date`, `client_id`, `client_name`, `total`, `NCF`) VALUES
+(1, 'FAC_20251201_001', '2025-12-01 10:00:00', 1, 'Caron Melley', 1500.00, 'B0100000001'),
+(2, 'FAC_20251201_002', '2025-12-01 12:30:00', 2, 'Eustace Guy', 3200.00, 'B0100000002'),
+(3, 'FAC_20251202_001', '2025-12-02 09:15:00', 3, 'Eugene Foale', 950.50, 'B0100000003'),
+(4, 'FAC_20251202_002', '2025-12-02 15:20:00', 4, 'Eugenius Feldheim', 2100.00, 'B0100000004'),
+(5, 'FAC_20251203_001', '2025-12-03 11:00:00', 5, 'Niccolo Whitsey', 4100.00, 'B0100000005');
+
+--
+-- Dumping data for table `factura_items`
+--
+INSERT INTO `factura_items` (`id`, `factura_id`, `description`, `amount`, `quantity`, `subtotal`) VALUES
+(1, 1, 'Servicio de consultoría', 500.00, 2, 1000.00),
+(2, 1, 'Licencia anual software', 250.00, 2, 500.00),
+(3, 2, 'Desarrollo web', 1600.00, 2, 3200.00),
+(4, 3, 'Soporte técnico', 475.25, 2, 950.50),
+(5, 4, 'Implementación de red', 1050.00, 2, 2100.00),
+(6, 5, 'Mantenimiento de sistemas', 820.00, 5, 4100.00);
 --
 -- Dumping data for table `cotizacion_items`
 --

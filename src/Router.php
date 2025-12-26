@@ -37,6 +37,10 @@ switch ($route) {
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';
         break;
+    case 'facturas':
+        // Factura CRUD endpoints - token required
+        require_once 'src/Controllers/facturaController.php';
+        break;
     
     default:
         // Handle default and 404 cases

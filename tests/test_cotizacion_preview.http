@@ -1,0 +1,14 @@
+### Preview Cotizacion PDF
+POST http://localhost:8000/api/cotizaciones/preview
+Content-Type: application/json
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+
+{
+  "client_id": 2,
+  "client_name": "Eustace Guy",
+  "date": "2025-12-23",
+  "items": [
+    { "description": "test", "amount": 123, "quantity": 1, "subtotal": 123 }
+  ],
+  "total": 123
+}

@@ -21,9 +21,113 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 // Check if this is a PDF request
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isPdfRequest = preg_match('/\/api\/cotizaciones\/(\d+)\/pdf/', $endpoint, $pdfMatches);
+// Preview PDF endpoint
+$isPreviewRequest = preg_match('/\/api\/cotizaciones\/preview$/', $endpoint);
 
 switch($_SERVER['REQUEST_METHOD']){
     case 'GET':
+        // Handle PDF generation request
+        if ($isPdfRequest) {
+            $cotizacionId = $pdfMatches[1];
+            $cotizacion = $cotizacionModel->getCotizaciones($cotizacionId);
+            if (empty($cotizacion)) {
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode(['status' => false, 'error' => 'Cotizacion not found']);
+                http_response_code(404);
+                break;
+            }
+            // Include PDF generator
+            require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
+            // Generate and output PDF
+            $pdf = new CotizacionPdfGenerator('P', 'mm', 'Letter');
+            $pdf->setCotizacion($cotizacion[0]);
+            $pdfContent = $pdf->generatePdf();
+            // Check if user wants base64 or download
+            $format = isset($_GET['format']) ? $_GET['format'] : 'download';
+            if ($format === 'base64') {
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode([
+                    'status' => true,
+                    'data' => [
+                        'filename' => 'Cotizacion_' . $cotizacion[0]['code'] . '.pdf',
+                        'content' => base64_encode($pdfContent),
+                        'mime_type' => 'application/pdf'
+                    ]
+                ]);
+            } else {
+                // Output as PDF download
+                header('Content-Type: application/pdf');
+                header('Content-Disposition: attachment; filename="Cotizacion_' . $cotizacion[0]['code'] . '.pdf"');
+                header('Content-Length: ' . strlen($pdfContent));
+                echo $pdfContent;
+            }
+            break;
+        }
+        // Standard GET request for cotizaciones list or single item
+        $id = isset($_GET['id']) ? $_GET['id'] : null;
+        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
+        $pageSize = isset($_GET['pageSize']) ? (int)$_GET['pageSize'] : 10;
+        $query = isset($_GET['query']) ? $_GET['query'] : null;
+        $cotizaciones = $cotizacionModel->getCotizaciones($id, $page, $pageSize, $query);
+        $respuesta = [
+            'status' => true,
+            'data' => $cotizaciones
+        ];
+        echo json_encode($respuesta);
+        break;
+
+            case 'POST':
+                // PDF preview endpoint
+                if ($isPreviewRequest) {
+                    $_POST = json_decode(file_get_contents('php://input', true));
+                    // Validate required fields
+                    if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
+                        $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+                    } else if (!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100) {
+                        $respuesta = ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
+                    } else if (!isset($_POST->items) || !is_array($_POST->items)) {
+                        $respuesta = ['status' => false, 'error' => 'Items must be an array'];
+                    } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
+                        $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+                    } else {
+                        // Convert items to associative arrays
+                        $items = array_map(function($item) { return (array)$item; }, $_POST->items);
+                        // Prepare a fake cotizacion array (as in getCotizaciones)
+                        $cotizacion = [[
+                            'id' => null,
+                            'code' => 'PREVIEW',
+                            'date' => isset($_POST->date) ? $_POST->date : '',
+                            'client_id' => $_POST->client_id,
+                            'client_name' => $_POST->client_name,
+                            'total' => $_POST->total,
+                            'items' => $items,
+                            'description' => '',
+                        ]];
+                        // Generate PDF
+                        require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
+                        $pdf = new CotizacionPdfGenerator('P', 'mm', 'Letter');
+                        $pdf->setCotizacion($cotizacion[0]);
+                        $pdfContent = $pdf->generatePdf();
+
+
+                        
+                        // Return as base64 JSON (same as open cotizacion)
+                        header('content-type: application/json; charset=utf-8');
+                        echo json_encode([
+                            'status' => true,
+                            'data' => [
+                                'filename' => 'Cotizacion_Preview.pdf',
+                                'content' => base64_encode($pdfContent),
+                                'mime_type' => 'application/pdf'
+                            ]
+                        ]);
+                        return;
+                    }
+                    echo json_encode($respuesta);
+
+                    return;
+                }
+                // ...existing POST logic...
         // Handle PDF generation request
         if ($isPdfRequest) {
             $cotizacionId = $pdfMatches[1];

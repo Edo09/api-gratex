@@ -22,6 +22,34 @@ if (file_exists($composerPath)) {
  */
 class CotizacionPdfGenerator extends FPDF
 {
+    /**
+     * Print a table row with multi-cell support
+     * @param array $data Array of cell values
+     */
+    public function Row($data)
+    {
+        $nb = 0;
+        $mockValues = ['N/A', 'Sample', '---', 'No Data', 'Test'];
+        for ($i = 0; $i < count($data); $i++) {
+            // If null, use mock value (cycle through mockValues for variety)
+            if ($data[$i] === null || $data[$i] === '') {
+                $data[$i] = $mockValues[$i % count($mockValues)];
+            }
+            $width = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
+            $nb = max($nb, $this->NbLines($width, $data[$i]));
+        }
+        $h = $this->lineHeight * $nb;
+        $this->CheckPageBreak($h);
+        for ($i = 0; $i < count($data); $i++) {
+            $w = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
+            $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
+            $x = $this->GetX();
+            $y = $this->GetY();
+            $this->MultiCell($w, $this->lineHeight, $data[$i], 0, $a);
+            $this->SetXY($x + $w, $y);
+        }
+        $this->Ln($h);
+    }
     private $cotizacion;
     private $widths;
     private $aligns;
@@ -72,31 +100,6 @@ class CotizacionPdfGenerator extends FPDF
     public function SetLineHeight($h)
     {
         $this->lineHeight = $h;
-    }
-
-    /**
-     * Calculate and render a row with multi-cell support
-     * @param array $data Row data
-     */
-    public function Row($data)
-    {
-        $nb = 0;
-        for ($i = 0; $i < count($data); $i++) {
-            $nb = max($nb, $this->NbLines($this->widths[$i], $data[$i]));
-        }
-
-        $h = $this->lineHeight * $nb;
-        $this->CheckPageBreak($h);
-
-        for ($i = 0; $i < count($data); $i++) {
-            $w = $this->widths[$i];
-            $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
-            $x = $this->GetX();
-            $y = $this->GetY();
-            $this->MultiCell($w, $this->lineHeight, $data[$i], 0, $a);
-            $this->SetXY($x + $w, $y);
-        }
-        $this->Ln($h);
     }
 
     /**
@@ -173,23 +176,38 @@ class CotizacionPdfGenerator extends FPDF
      */
     public function Header()
     {
-        // Company Header
-        $this->SetFont('Arial', 'B', 14);
-        $this->Cell(0, 8, 'COTIZACION', 0, 1, 'C');
-        $this->SetFont('Arial', '', 10);
-        $this->Cell(0, 5, 'Quotation Document', 0, 1, 'C');
-        $this->Ln(5);
-
-        // Quotation info box
-        $this->SetFont('Arial', 'B', 11);
-        $this->SetFillColor(240, 240, 240);
-        
-        if ($this->cotizacion) {
-            $this->Cell(95, 7, 'Cotizacion #' . $this->cotizacion['code'], 1, 0, 'L', true);
-            $date = isset($this->cotizacion['date']) ? date('d/m/Y', strtotime($this->cotizacion['date'])) : date('d/m/Y');
-            $this->Cell(95, 7, 'Fecha: ' . $date, 1, 1, 'R', true);
+        // Custom Gratex Header (logo, address, etc.)
+        // Add custom fonts if available
+        if (method_exists($this, 'AddFont')) {
+            // Uncomment if you have these fonts available
+            $this->AddFont('Arial-narrow', '', 'arial-narrow.php');
+            $this->AddFont('Arial-narrow-bold', '', 'arial-narrow-bold.php');
         }
-        
+        // Logo (adjust path as needed)
+        $logoPath = __DIR__ . '/../../logo2020.png';
+        if (file_exists($logoPath)) {
+            $this->Image($logoPath, 5, 10, 65); // X, Y, Width
+        }
+        $this->SetFont('Arial', 'B', 8);
+        $this->SetY(10);
+        $this->SetX(-78);
+        $this->Cell(70, 3.2, $this->convertEncoding('Calle José Nicolás Casimiro #85'), 0, 1, 'R');
+        $this->SetX(-78);
+        $this->Cell(70, 3.2, 'Ensanche Espaillat, Santo Domingo, D.N.', 0, 1, 'R');
+        $this->SetX(-78);
+        $this->Cell(70, 3.2, $this->convertEncoding('Tel.: 809-681-5141 - E-mail:info@gratex.net'), 0, 1, 'R');
+        $this->SetX(-78);
+        $this->Cell(70, 3.2, 'www.gratex.net', 0, 1, 'R');
+
+        $this->SetY(30);
+        $this->SetFont('Arial', 'B', 12);
+        $this->Cell(30, 4, $this->convertEncoding('Cotización/Factura Proforma'), 0, 1, 'L');
+        $this->Ln(1);
+        $this->SetFont('Arial', '', 14);
+        $this->Cell(22, 5, '#' . ($this->cotizacion['code'] ?? ''), 0, 1, 'L');
+        $this->Ln(1);
+        $this->SetFont('Arial', '', 10);
+        $this->MultiCell(200, 4, $this->convertEncoding('Esta cotización/factura proforma es para uso provisional. Al momento de la entrega del pedido se emitirá una factura válida para crédito fiscal.'), 0, 'L');
         $this->Ln(5);
     }
 
@@ -198,20 +216,23 @@ class CotizacionPdfGenerator extends FPDF
      */
     public function Footer()
     {
-        $this->SetY(-30);
-        
-        // Signature lines
-        $this->Line(20, $this->GetY(), 80, $this->GetY());
-        $this->Line(130, $this->GetY(), 190, $this->GetY());
-        
-        $this->SetFont('Arial', '', 9);
-        $this->Cell(95, 10, 'Firma Cliente', 0, 0, 'C');
-        $this->Cell(95, 10, 'Firma Empresa', 0, 1, 'C');
-        
-        // Page number
-        $this->SetY(-15);
-        $this->SetFont('Arial', 'I', 8);
-        $this->Cell(0, 10, 'Pagina ' . $this->PageNo() . '/{nb}', 0, 0, 'C');
+        // Firmas
+        $this->Line(15, 268, 70, 268);
+        $this->SetY(-10);
+        $this->SetX(40);
+        $this->SetFont('Arial-narrow', '', 9);
+        $this->Cell(15, 6, 'Firma y sello cliente', 0, 0, 'R');
+
+        $this->Line(145, 268, 200, 268);
+        $this->SetY(-10);
+        $this->SetX(-40);
+        // Sello image (adjust path as needed)
+        $selloPath = __DIR__ . '/../../sello.png';
+        if (file_exists($selloPath)) {
+            $this->Image($selloPath, 145, 252, -400);
+        }
+        $this->SetFont('Arial-narrow', '', 9);
+        $this->Cell(15, 6, 'Firma y sello empresa', 0, 0, 'R');
     }
 
     /**
@@ -221,107 +242,151 @@ class CotizacionPdfGenerator extends FPDF
     public function generatePdf()
     {
         $this->AliasNbPages();
+        $this->SetMargins(5, 10, 5);
         $this->AddPage();
-        $this->SetMargins(10, 10, 10);
 
-        // Client Information Section
+        // Fetch client data from DB if client_id is present
+        $cliente = $this->cotizacion['client_name'] ?? '';
+        $telefono = '';
+        $email = '';
+        $contacto = $this->cotizacion['client_contact'] ?? $this->cotizacion['contacto'] ?? '';
+        if (!empty($this->cotizacion['client_id'])) {
+            try {
+                $db = new \PDO('mysql:host=localhost;dbname=test', 'root', '');
+                $db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+                $stmt = $db->prepare('SELECT client_name, email, phone_number FROM clients WHERE id = :id LIMIT 1');
+                $stmt->execute([':id' => $this->cotizacion['client_id']]);
+                $clientRow = $stmt->fetch(\PDO::FETCH_ASSOC);
+                if ($clientRow) {
+                    $cliente = $clientRow['client_name'];
+                    $email = $clientRow['email'];
+                    $telefono = $clientRow['phone_number'];
+                }
+            } catch (\Exception $e) {
+                // fallback to whatever is in cotizacion
+            }
+        }
+        if (!$cliente) $cliente = $this->cotizacion['client_name'] ?? $this->cotizacion['client'] ?? '';
+        if (!$email) $email = $this->cotizacion['email'] ?? '';
+        if (!$telefono) $telefono = $this->cotizacion['phone_number'] ?? '';
+        $fulltelandcel = trim('Tel.: ' . $telefono);
+        $condiciones = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
+
+        // Client info section styled as a table row (like products)
         $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor(51, 51, 51);
+        $this->SetFillColor(0, 0, 0);
         $this->SetTextColor(255, 255, 255);
-        $this->Cell(0, 7, 'INFORMACION DEL CLIENTE', 1, 1, 'L', true);
-        
-        $this->SetTextColor(0, 0, 0);
+        $this->Cell(45, 6, 'Cliente', 0, 0, 'L', 1);
+        $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
+        $this->Cell(50, 6, 'Correo', 0, 0, 'L', 1);
+        $this->Cell(30, 6, 'Contacto', 0, 0, 'L', 1);
+        $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
         $this->SetFont('Arial', '', 10);
-        $this->SetFillColor(250, 250, 250);
-        
-        $this->Cell(40, 6, 'Cliente:', 1, 0, 'L', true);
-        $this->Cell(150, 6, $this->convertEncoding($this->cotizacion['client'] ?? 'N/A'), 1, 1, 'L');
-        
-        $this->Ln(5);
+        $this->SetTextColor(0, 0, 0);
+        $this->Cell(45, 7, $this->convertEncoding($cliente), 0, 0, 'L');
+        $this->Cell(40, 7, $this->convertEncoding($fulltelandcel), 0, 0, 'L');
+        $this->Cell(50, 7, $this->convertEncoding($email), 0, 0, 'L');
+        $this->Cell(30, 7, $this->convertEncoding($contacto), 0, 0, 'L');
+        // Use MultiCell for Condiciones de Pago so each line is stacked
+        $x = $this->GetX();
+        $y = $this->GetY();
+        $this->SetXY($x, $y);
+        $this->MultiCell(40, 5, $this->convertEncoding($condiciones), 0, 'L');
+        $this->Ln(2);
 
-        // Quotation Details Section
+        // Second header row: Fecha, Cliente, Cliente#, Cantidad, Descripcion Producto, ITBIS, Valor Unit
         $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor(51, 51, 51);
+        $this->SetFillColor(0, 0, 0);
         $this->SetTextColor(255, 255, 255);
-        $this->Cell(30, 7, 'Codigo', 1, 0, 'C', true);
-        $this->Cell(30, 7, 'Cantidad', 1, 0, 'C', true);
-        $this->Cell(100, 7, 'Descripcion', 1, 0, 'C', true);
-        $this->Cell(30, 7, 'Monto', 1, 1, 'C', true);
+        $this->Cell(25, 6, 'Fecha', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'Cantidad', 0, 0, 'L', 1);
+        $this->Cell(105, 6, 'Descripcion Producto', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'ITBIS', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'Valor Unit', 0, 0, 'L', 1);
+        $this->Ln(7);
 
+        $this->SetWidths([25, 25, 105, 25, 25]);
+        $this->SetLineHeight(4.5);
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('Arial', '', 10);
+        $this->SetFont('Arial', '', 11);
 
-        // Show each item as a row
+        $fecha = isset($this->cotizacion['date']) ? date('d/m/Y', strtotime($this->cotizacion['date'])) : date('d/m/Y');
+        $codcliente = $this->cotizacion['client_id'] ?? '';
+
+        $subtotal = 0;
         if (isset($this->cotizacion['items']) && is_array($this->cotizacion['items'])) {
             foreach ($this->cotizacion['items'] as $item) {
-                $this->Cell(30, 6, $this->cotizacion['code'] ?? '', 1, 0, 'C');
-                $this->Cell(30, 6, $item['quantity'] ?? '1', 1, 0, 'C');
-                $x = $this->GetX();
-                $y = $this->GetY();
-                $this->MultiCell(100, 6, $this->convertEncoding($item['description'] ?? ''), 1, 'L');
-                $descHeight = $this->GetY() - $y;
-                $this->SetXY($x + 100, $y);
-                $this->Cell(30, $descHeight > 6 ? $descHeight : 6, '$' . number_format($item['subtotal'] ?? 0, 2), 1, 1, 'R');
+                $cantidad = $item['quantity'] ?? 1;
+                $descripcion = $item['description'] ?? '';
+                $unitario = $item['amount'] ?? 0;
+                $itbis = $unitario * 0.18;
+                $subtotal += $cantidad * $unitario;
+                $this->Row([
+                    $fecha,
+
+                    $cantidad,
+                    $this->convertEncoding(html_entity_decode($descripcion)),
+                    '$' . number_format($itbis, 2),
+                    '$' . number_format($unitario, 2)
+                ]);
             }
-        } else {
-            // Fallback for legacy data
-            $this->Cell(30, 6, $this->cotizacion['code'] ?? '', 1, 0, 'C');
-            $this->Cell(30, 6, '1', 1, 0, 'C');
-            $x = $this->GetX();
-            $y = $this->GetY();
-            $this->MultiCell(100, 6, $this->convertEncoding($this->cotizacion['description'] ?? ''), 1, 'L');
-            $descHeight = $this->GetY() - $y;
-            $this->SetXY($x + 100, $y);
-            $this->Cell(30, $descHeight > 6 ? $descHeight : 6, '$' . number_format($this->cotizacion['total'] ?? 0, 2), 1, 1, 'R');
         }
+        $itbistotal = $subtotal * 0.18;
 
-        $this->Ln(5);
+        // Subtotal, Descuento, ITBIS, Total
+        $this->SetFont('Arial', 'B', 9);
+        $this->SetY(-90);
+        $this->Cell(31, 4, 'Condiciones de pago', 0, 1, 'L', 0);
+        $this->SetFont('Arial', '', 9);
+        $this->MultiCell(144, 4, $this->convertEncoding('Persona Jurídica (empresa) 60% avance del total de la Cotización/Factura Proforma y/o envío de una orden de compra/carta constancia firmada y sellada. Restante 40% será pagado al momento de la entrega del pedido. Personas Físicas deben hacer pago por adelantado.'), 0, 'L');
+        $this->Ln(7);
+        $this->SetFont('Arial', 'B', 9);
+        $this->Cell(31, 4, 'Forma y constancias de pago', 0, 1, 'L', 0);
+        $this->SetFont('Arial', '', 9);
+        $this->MultiCell(144, 4, $this->convertEncoding('Pagos vía transferencia electrónica o con depósito a la cuenta corriente #790371603 a nombre de Gratex EIRL en el Banco Popular Dominicano. Constancia del pago debe ser enviada al e-mail pagoenlinea@gratex.net o whatsapp 849-401-1017.'), 0, 'L');
 
-        // Totals Section
-        $this->SetX(130);
-        $this->SetFont('Arial', 'B', 10);
+        $this->SetY(-92);
+        // $this->SetX(7);
+        $this->Cell(144, 20, '', 1);
+        $this->SetY(-69);
+        // $this->SetX(7);
+        $this->Cell(144, 20, '', 1);
+
+        // Subtotal
+        $this->SetY(-92);
+        $this->SetX(-53);
+        $this->SetFont('Arial', 'B', 11);
+        $this->Cell(25, 5, 'Sub Total', 0, 0, 'R', 0);
         $this->SetFillColor(240, 240, 240);
-        
-        // Calculate subtotal from items if available, else fallback
-        if (isset($this->cotizacion['items']) && is_array($this->cotizacion['items'])) {
-            $subtotal = 0;
-            foreach ($this->cotizacion['items'] as $item) {
-                $subtotal += floatval($item['subtotal'] ?? 0);
-            }
-        } else {
-            $subtotal = floatval($this->cotizacion['total'] ?? 0);
-        }
-        $itbis = $subtotal * 0.18;
-        $total = $subtotal + $itbis;
+        $this->SetFont('Arial', '', 11);
+        $this->Cell(20, 7, number_format($subtotal, 2), 1, 1, 'R', 1);
 
-        $this->Cell(30, 6, 'Subtotal:', 1, 0, 'L', true);
-        $this->Cell(30, 6, '$' . number_format($subtotal, 2), 1, 1, 'R');
-        
-        $this->SetX(130);
-        $this->Cell(30, 6, 'ITBIS (18%):', 1, 0, 'L', true);
-        $this->Cell(30, 6, '$' . number_format($itbis, 2), 1, 1, 'R');
-        
-        $this->SetX(130);
-        $this->SetFillColor(51, 51, 51);
-        $this->SetTextColor(255, 255, 255);
-        $this->Cell(30, 7, 'TOTAL:', 1, 0, 'L', true);
-        $this->Cell(30, 7, '$' . number_format($total, 2), 1, 1, 'R', true);
+        // Descuento
+        $this->SetY(-83);
+        $this->SetX(-53);
+        $this->SetFont('Arial', 'B', 11);
+        $this->Cell(25, 5, 'Descuento', 0, 0, 'R', 0);
+        $this->SetFillColor(240, 240, 240);
+        $this->SetFont('Arial', '', 11);
+        $this->Cell(20, 7, '0.00', 1, 1, 'R', 1);
 
-        $this->SetTextColor(0, 0, 0);
-        $this->Ln(10);
+        // ITBIS
+        $this->SetY(-74);
+        $this->SetX(-53);
+        $this->SetFont('Arial', 'B', 11);
+        $this->Cell(25, 5, 'ITBIS', 0, 0, 'R', 0);
+        $this->SetFillColor(240, 240, 240);
+        $this->SetFont('Arial', '', 11);
+        $this->Cell(20, 7, number_format($itbistotal, 2), 1, 1, 'R', 1);
 
-        // Terms and Conditions
-        $this->SetFont('Arial', 'B', 9);
-        $this->Cell(0, 5, 'Condiciones de Pago:', 0, 1, 'L');
-        $this->SetFont('Arial', '', 9);
-        $this->MultiCell(0, 4, $this->convertEncoding('60% al ordenar con orden de compra. 40% restante a la entrega del pedido.'), 0, 'L');
-        
-        $this->Ln(3);
-        
-        $this->SetFont('Arial', 'B', 9);
-        $this->Cell(0, 5, 'Validez de la Cotizacion:', 0, 1, 'L');
-        $this->SetFont('Arial', '', 9);
-        $this->MultiCell(0, 4, 'Esta cotizacion tiene una validez de 30 dias a partir de la fecha de emision.', 0, 'L');
+        // Total
+        $this->SetY(-65);
+        $this->SetX(-53);
+        $this->SetFont('Arial', 'B', 11);
+        $this->Cell(25, 5, 'Total RD$', 0, 0, 'R', 0);
+        $this->SetFillColor(240, 240, 240);
+        $this->SetFont('Arial', '', 11);
+        $this->Cell(20, 7, number_format(($subtotal + $itbistotal), 2), 1, 1, 'R', 1);
 
         return $this->Output('S');
     }

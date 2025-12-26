@@ -1,0 +1,49 @@
+### Get first page of facturas (default pageSize=10)
+GET http://localhost:8000/api/facturas?page=1&pageSize=10
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+
+### Get second page of facturas (pageSize=2)
+GET http://localhost:8000/api/facturas?page=2&pageSize=2
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+
+### Get single factura by id
+GET http://localhost:8000/api/facturas?id=1
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+
+### Create a new factura
+POST http://localhost:8000/api/facturas
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+Content-Type: application/json
+
+{
+  "no_factura": "FAC_20251224_001",
+  "date": "2025-12-24 09:00:00",
+  "client_id": 1,
+  "client_name": "Caron Melley",
+  "total": 2000.00,
+  "NCF": "B0100000006"
+}
+
+### Update a factura
+PUT http://localhost:8000/api/facturas
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+Content-Type: application/json
+
+{
+  "id": 1,
+  "no_factura": "FAC_20251201_001-EDITED",
+  "date": "2025-12-01 10:00:00",
+  "client_id": 1,
+  "client_name": "Caron Melley",
+  "total": 1550.00,
+  "NCF": "B0100000001"
+}
+
+### Delete a factura
+DELETE http://localhost:8000/api/facturas
+X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+Content-Type: application/json
+
+{
+  "id": 1
+}

@@ -1,4 +1,4 @@
-POST http://localhost/api-gratex/index.php/api/auth/login
+POST http://localhost:8000/api/auth/login
 Content-Type: application/json
 
 {
