@@ -166,4 +166,57 @@ class facturaModel
                 return 0;
             }
         }
+
+    /**
+     * Get NCF information for a specific factura
+     * @param int $factura_id The factura ID
+     * @return array|null NCF data or null if not found
+     */
+    public function getNCF($factura_id)
+    {
+        try {
+            $sql = "SELECT id, no_factura, NCF FROM facturas WHERE id = :id";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':id' => $factura_id]);
+            $result = $stmt->fetch();
+            return $result ? $result : null;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Update only the NCF field for a factura
+     * @param int $factura_id The factura ID
+     * @param string $ncf The new NCF value
+     * @return array Status array [status, message/data]
+     */
+    public function updateNCF($factura_id, $ncf)
+    {
+        try {
+            // First check if factura exists
+            $check_sql = "SELECT id FROM facturas WHERE id = :id";
+            $check_stmt = $this->conexion->prepare($check_sql);
+            $check_stmt->execute([':id' => $factura_id]);
+            
+            if (!$check_stmt->fetch()) {
+                return ['error', 'Factura not found'];
+            }
+
+            // Update NCF
+            $sql = "UPDATE facturas SET NCF = :ncf WHERE id = :id";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':id' => $factura_id,
+                ':ncf' => $ncf
+            ]);
+            
+            return ['success', [
+                'id' => $factura_id,
+                'NCF' => $ncf
+            ]];
+        } catch (PDOException $e) {
+            return ['error', 'Failed to update NCF'];
+        }
+    }
 }

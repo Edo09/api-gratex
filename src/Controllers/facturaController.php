@@ -5,9 +5,11 @@ header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
 header("Allow: GET, POST, OPTIONS, PUT, DELETE");
 header('content-type: application/json; charset=utf-8');
 require_once(__DIR__ . '/../Models/facturaModel.php');
+require_once(__DIR__ . '/../Models/ncfModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
 
 $facturaModel = new facturaModel();
+$ncfModel = new ncfModel();
 $auth = new AuthMiddleware();
 
 // Validate token for all requests except OPTIONS
@@ -18,33 +20,33 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     }
 }
 
-switch($_SERVER['REQUEST_METHOD']){
+switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
-            if (isset($_GET['id'])) {
-                $facturas = $facturaModel->getFacturas($_GET['id']);
-                $respuesta = [
-                    'status' => true,
-                    'data' => $facturas
-                ];
-            } else {
-                // Pagination logic
-                $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int)$_GET['page'] : 1;
-                $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int)$_GET['pageSize'] : 10;
-                $offset = ($page - 1) * $pageSize;
-                $facturas = $facturaModel->getFacturasPaginated($offset, $pageSize);
-                $total = $facturaModel->getFacturasCount();
-                $respuesta = [
-                    'status' => true,
-                    'data' => $facturas,
-                    'pagination' => [
-                        'page' => $page,
-                        'pageSize' => $pageSize,
-                        'total' => $total,
-                        'totalPages' => ceil($total / $pageSize)
-                    ]
-                ];
-            }
-            echo json_encode($respuesta);
+        if (isset($_GET['id'])) {
+            $facturas = $facturaModel->getFacturas($_GET['id']);
+            $respuesta = [
+                'status' => true,
+                'data' => $facturas
+            ];
+        } else {
+            // Pagination logic
+            $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
+            $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
+            $offset = ($page - 1) * $pageSize;
+            $facturas = $facturaModel->getFacturasPaginated($offset, $pageSize);
+            $total = $facturaModel->getFacturasCount();
+            $respuesta = [
+                'status' => true,
+                'data' => $facturas,
+                'pagination' => [
+                    'page' => $page,
+                    'pageSize' => $pageSize,
+                    'total' => $total,
+                    'totalPages' => ceil($total / $pageSize)
+                ]
+            ];
+        }
+        echo json_encode($respuesta);
         break;
 
     case 'POST':
@@ -75,6 +77,10 @@ switch($_SERVER['REQUEST_METHOD']){
             $no_factura = 'FAC_' . date('Ymd_His');
             $result = $facturaModel->saveFacturaWithItems($no_factura, $_POST->date, $_POST->client_id, $_POST->client, $total, $_POST->ncf, $_POST->items);
             if ($result[0] === 'success') {
+                // Increment NCF sequence
+                // Assumption: we are using B01 type. In a more complex app, we'd extract type from NCF string.
+                $ncfModel->updateSequence('B01', 1);
+
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
@@ -84,52 +90,44 @@ switch($_SERVER['REQUEST_METHOD']){
         break;
 
     case 'PUT':
-        $_PUT= json_decode(file_get_contents('php://input',true));
-        if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
-            $respuesta= ['status' => false, 'error','Factura ID is empty'];
-        }
-        else if(!isset($_PUT->no_factura) || is_null($_PUT->no_factura) || empty(trim($_PUT->no_factura))){
-            $respuesta= ['status' => false, 'error','No Factura must not be empty'];
-        }
-        else if(!isset($_PUT->date) || is_null($_PUT->date) || empty(trim($_PUT->date))){
-            $respuesta= ['status' => false, 'error','Date must not be empty'];
-        }
-        else if(!isset($_PUT->client_id) || is_null($_PUT->client_id) || empty(trim($_PUT->client_id))){
-            $respuesta= ['status' => false, 'error','Client ID must not be empty'];
-        }
-        else if(!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name))){
-            $respuesta= ['status' => false, 'error','Client Name must not be empty'];
-        }
-        else if(!isset($_PUT->total) || is_null($_PUT->total) || !is_numeric($_PUT->total)){
-            $respuesta= ['status' => false, 'error','Total must be a number'];
-        }
-        else if(!isset($_PUT->NCF) || is_null($_PUT->NCF) || empty(trim($_PUT->NCF))){
-            $respuesta= ['status' => false, 'error','NCF must not be empty'];
-        }
-        else{
-            $result = $facturaModel->updateFactura($_PUT->id,$_PUT->no_factura,$_PUT->date,$_PUT->client_id,$_PUT->client_name,$_PUT->total,$_PUT->NCF);
-            if($result[0] === 'success'){
+        $_PUT = json_decode(file_get_contents('php://input', true));
+        if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))) {
+            $respuesta = ['status' => false, 'error', 'Factura ID is empty'];
+        } else if (!isset($_PUT->no_factura) || is_null($_PUT->no_factura) || empty(trim($_PUT->no_factura))) {
+            $respuesta = ['status' => false, 'error', 'No Factura must not be empty'];
+        } else if (!isset($_PUT->date) || is_null($_PUT->date) || empty(trim($_PUT->date))) {
+            $respuesta = ['status' => false, 'error', 'Date must not be empty'];
+        } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id) || empty(trim($_PUT->client_id))) {
+            $respuesta = ['status' => false, 'error', 'Client ID must not be empty'];
+        } else if (!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name))) {
+            $respuesta = ['status' => false, 'error', 'Client Name must not be empty'];
+        } else if (!isset($_PUT->total) || is_null($_PUT->total) || !is_numeric($_PUT->total)) {
+            $respuesta = ['status' => false, 'error', 'Total must be a number'];
+        } else if (!isset($_PUT->NCF) || is_null($_PUT->NCF) || empty(trim($_PUT->NCF))) {
+            $respuesta = ['status' => false, 'error', 'NCF must not be empty'];
+        } else {
+            $result = $facturaModel->updateFactura($_PUT->id, $_PUT->no_factura, $_PUT->date, $_PUT->client_id, $_PUT->client_name, $_PUT->total, $_PUT->NCF);
+            if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
         }
         echo json_encode($respuesta);
-    break;
+        break;
 
     case 'DELETE':
-        $_DELETE= json_decode(file_get_contents('php://input',true));
-        if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
-            $respuesta= ['status' => false, 'error','Factura ID is empty'];
-        }
-        else{
+        $_DELETE = json_decode(file_get_contents('php://input', true));
+        if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))) {
+            $respuesta = ['status' => false, 'error', 'Factura ID is empty'];
+        } else {
             $result = $facturaModel->deleteFactura($_DELETE->id);
-            if($result[0] === 'success'){
+            if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
         }
         echo json_encode($respuesta);
-    break;
+        break;
 }

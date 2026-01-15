@@ -22,17 +22,17 @@ switch ($route) {
         // Auth endpoints - no token required
         require_once 'src/Controllers/authController.php';
         break;
-    
+
     case 'users':
         // User CRUD endpoints - token required
         require_once 'src/Controllers/userController.php';
         break;
-    
+
     case 'clients':
         // Client CRUD endpoints - token required
         require_once 'src/Controllers/clientController.php';
         break;
-    
+
     case 'cotizaciones':
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';
@@ -41,7 +41,17 @@ switch ($route) {
         // Factura CRUD endpoints - token required
         require_once 'src/Controllers/facturaController.php';
         break;
-    
+
+    case 'ncf':
+        // NCF management endpoints - token required
+        require_once 'src/Controllers/ncfController.php';
+        break;
+
+    case 'landing':
+        // Landing page configuration endpoints
+        require_once 'src/Controllers/landingController.php';
+        break;
+
     default:
         // Handle default and 404 cases
         if ($endpoint === '/' || $endpoint === '/index.php') {
