@@ -355,6 +355,50 @@ INSERT INTO `factura_items` (`id`, `factura_id`, `description`, `amount`, `quant
 (4, 3, 'Soporte técnico', 475.25, 2, 950.50),
 (5, 4, 'Implementación de red', 1050.00, 2, 2100.00),
 (6, 5, 'Mantenimiento de sistemas', 820.00, 5, 4100.00);
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `ncf_sequences`
+--
+
+CREATE TABLE `ncf_sequences` (
+  `id` int(11) NOT NULL,
+  `type` varchar(10) NOT NULL,
+  `prefix` varchar(10) NOT NULL,
+  `current_value` int(11) NOT NULL DEFAULT 0,
+  `description` varchar(100) DEFAULT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `ncf_sequences`
+--
+ALTER TABLE `ncf_sequences`
+  ADD PRIMARY KEY (`id`),
+  ADD UNIQUE KEY `type` (`type`);
+
+--
+-- AUTO_INCREMENT for table `ncf_sequences`
+--
+ALTER TABLE `ncf_sequences`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT, AUTO_INCREMENT=1;
+
+--
+-- Dumping data for table `ncf_sequences`
+-- NCF Types for Dominican Republic:
+-- B01 - Facturas de Crédito Fiscal
+-- B02 - Facturas de Consumidor Final
+-- B14 - Regímenes Especiales
+-- B15 - Gubernamental
+--
+INSERT INTO `ncf_sequences` (`id`, `type`, `prefix`, `current_value`, `description`) VALUES
+(1, 'B01', 'B01', 5, 'Facturas de Crédito Fiscal'),
+(2, 'B02', 'B02', 0, 'Facturas de Consumidor Final'),
+(3, 'B14', 'B14', 0, 'Regímenes Especiales'),
+(4, 'B15', 'B15', 0, 'Gubernamental');
+
 --
 -- Dumping data for table `cotizacion_items`
 --
