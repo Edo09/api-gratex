@@ -9,8 +9,8 @@ class Database
         try {
             $this->conexion = new PDO(
                 'mysql:host=localhost:3306;dbname=test;charset=utf8mb4',
-                'edo',
-                '1234',
+                'root',
+                '123qwe',
                 [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

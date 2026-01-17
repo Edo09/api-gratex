@@ -12,6 +12,13 @@ $request_method = $_SERVER['REQUEST_METHOD'];
 // Remove base path if needed and parse endpoint
 $endpoint = parse_url($request_uri, PHP_URL_PATH);
 
+// Serve API documentation
+if ($endpoint === '/' || $endpoint === '/docs' || $endpoint === '/api/docs' || $endpoint === '/docs/' || $endpoint === '/index.php') {
+    header('Content-Type: text/html; charset=utf-8');
+    readfile(__DIR__ . '/../public/docs.html');
+    exit;
+}
+
 // Extract the first part of the route (e.g., 'auth' from '/api/auth/login')
 preg_match('/\/api\/(\w+)/', $endpoint, $matches);
 $route = $matches[1] ?? 'default';
