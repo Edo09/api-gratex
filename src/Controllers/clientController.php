@@ -22,11 +22,24 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 
 switch($_SERVER['REQUEST_METHOD']){
     case 'GET':
-        $clients = (!isset($_GET['id'])) ? $clientModel->getClients() : $clientModel->getClients($_GET['id']);
-        $respuesta = [
-            'status' => true,
-            'data' => $clients
-        ];
+        if (isset($_GET['id'])) {
+            $clients = $clientModel->getClients($_GET['id']);
+            if (empty($clients)) {
+                $respuesta = ['status' => false, 'error' => 'Client not found'];
+                http_response_code(404);
+            } else {
+                $respuesta = [
+                    'status' => true,
+                    'data' => $clients[0]
+                ];
+            }
+        } else {
+            $clients = $clientModel->getClients();
+            $respuesta = [
+                'status' => true,
+                'data' => $clients
+            ];
+        }
         echo json_encode($respuesta);
     break;
 

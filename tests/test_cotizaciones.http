@@ -20,7 +20,7 @@ X-API-KEY: db0a4ca524a2050651861b45dbcd53c4
 
 ### Step 3: Get specific cotizacion by ID
 GET http://localhost:8000/api/cotizaciones?id=1
-X-API-KEY: db0a4ca524a2050651861b45dbcd53c4
+X-API-KEY: 79e3d8903b541d0c6b119118cc0568e9
 
 ###
 

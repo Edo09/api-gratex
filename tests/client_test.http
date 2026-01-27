@@ -1,0 +1,9 @@
+### Get All Clients
+GET http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 79e3d8903b541d0c6b119118cc0568e9
+
+### Get Client by ID (Assuming ID 1 exists)
+GET http://localhost:8000/api/clients?id=1
+Content-Type: application/json
+X-API-KEY: 79e3d8903b541d0c6b119118cc0568e9

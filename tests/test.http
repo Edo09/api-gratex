@@ -1,7 +1,92 @@
+### Update an existing Cotizacion (PUT)
+# Adjust the ID and content as needed
+# MAKE SURE TO REPLACE 'YOUR_API_TOKEN' WITH A VALID TOKEN obtained from login
+
+### Step 1: Login to get authentication token
 POST http://localhost:8000/api/auth/login
 Content-Type: application/json
 
 {
   "emailOrUsername": "alex_smith",
   "password": "password123"
+}
+
+###
+
+
+
+
+
+PUT http://localhost:8000/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: 79e3d8903b541d0c6b119118cc0568e9
+
+{
+    "id": 1,
+    "client_id": 1,
+    "client_name": "aofpaf",
+    "date": "2023-11-01",
+    "total": 300.00,
+    "items": [
+        {
+            "description": "Updated Service 423",
+            "amount": 100.00,
+            "quantity": 1,
+            "subtotal": 100.00
+        },
+        {
+            "description": "New Product B",
+            "amount": 100.00,
+            "quantity": 2,
+            "subtotal": 200.00
+        }
+    ]
+}
+
+### Create a new Cotizacion (POST)
+POST http://localhost:8000/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: YOUR_API_TOKEN
+
+{
+    "client_id": 1,
+    "client_name": "New Client",
+    "date": "2023-11-02",
+    "total": 150.00,
+    "items": [
+        {
+            "description": "Service C",
+            "amount": 150.00,
+            "quantity": 1,
+            "subtotal": 150.00
+        }
+    ]
+}
+
+### Preview PDF (POST)
+POST http://localhost:8000/api/cotizaciones/preview
+Content-Type: application/json
+X-API-KEY: YOUR_API_TOKEN
+
+{
+    "client_id": 1,
+    "client_name": "Preview Client",
+    "total": 150.00,
+    "items": [
+        {
+            "description": "Preview Service",
+            "amount": 150.00,
+            "quantity": 1,
+            "subtotal": 150.00
+        }
+    ]
+}
+
+### Delete a Cotizacion (DELETE)
+DELETE http://localhost:8000/api/cotizaciones
+Content-Type: application/json
+X-API-KEY: YOUR_API_TOKEN
+
+{
+    "id": 1
 }
