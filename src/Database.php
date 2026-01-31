@@ -1,4 +1,5 @@
 <?php
+//YourStrongPasswordHere
 class Database
 {
     private static $instance = null;
@@ -10,7 +11,7 @@ class Database
             $this->conexion = new PDO(
                 'mysql:host=localhost:3306;dbname=test;charset=utf8mb4',
                 'root',
-                'YourStrongPasswordHere',
+                '123qwe',
                 [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
