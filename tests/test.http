@@ -11,12 +11,15 @@ Content-Type: application/json
   "password": "password123"
 }
 
+###POST https://gratex.net/api/index.php/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "alex_smith",
+  "password": "password123"
+}
+
 ###
-
-
-
-
-
 PUT http://localhost:8000/api/cotizaciones
 Content-Type: application/json
 X-API-KEY: 79e3d8903b541d0c6b119118cc0568e9

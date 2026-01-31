@@ -19,9 +19,12 @@ if ($endpoint === '/' || $endpoint === '/docs' || $endpoint === '/api/docs' || $
     exit;
 }
 
-// Extract the first part of the route (e.g., 'auth' from '/api/auth/login')
-preg_match('/\/api\/(\w+)/', $endpoint, $matches);
-$route = $matches[1] ?? 'default';
+// Extract the first part of the route after the last '/api/' segment
+// This handles: /api/auth, /api/api/auth, and /api/index.php/api/auth
+$parts = explode('/api/', $endpoint);
+$route_part = end($parts);
+$route_segments = explode('/', ltrim($route_part, '/'));
+$route = $route_segments[0] ?? 'default';
 
 // Route to appropriate controller
 switch ($route) {
