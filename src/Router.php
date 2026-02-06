@@ -13,7 +13,8 @@ $request_method = $_SERVER['REQUEST_METHOD'];
 $endpoint = parse_url($request_uri, PHP_URL_PATH);
 
 // Serve API documentation
-if ($endpoint === '/' || $endpoint === '/docs' || $endpoint === '/api/docs' || $endpoint === '/docs/' || $endpoint === '/index.php') {
+$is_root = $endpoint === '/' || $endpoint === '/index.php' || str_ends_with($endpoint, '/index.php') || str_ends_with($endpoint, '/');
+if ($is_root || str_ends_with($endpoint, '/docs') || str_ends_with($endpoint, '/docs/') || str_ends_with($endpoint, '/api/docs')) {
     header('Content-Type: text/html; charset=utf-8');
     readfile(__DIR__ . '/../public/docs.html');
     exit;
@@ -64,7 +65,7 @@ switch ($route) {
 
     default:
         // Handle default and 404 cases
-        if ($endpoint === '/' || $endpoint === '/index.php') {
+        if ($is_root) {
             require_once 'src/Controllers/userController.php';
         } else {
             header('content-type: application/json; charset=utf-8');
