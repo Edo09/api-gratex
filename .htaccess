@@ -1,7 +1,11 @@
+# Disable automatic directory slash redirect that breaks CORS preflight
+DirectorySlash Off
+
 RewriteEngine On
 
-# Allow all HTTP methods for the API
-RewriteCond %{REQUEST_METHOD} ^(GET|POST|PUT|DELETE|OPTIONS|PATCH)$
+# Prevent trailing slash redirects for API endpoints (breaks CORS preflight)
+RewriteCond %{REQUEST_URI} ^/api/
+RewriteRule ^(.+)/$ /$1 [R=307,L]
 
 # Redirect all requests to index.php if the file or directory doesn't exist
 RewriteCond %{REQUEST_FILENAME} !-f
