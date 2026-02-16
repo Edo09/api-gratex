@@ -6,6 +6,19 @@
  *   /api/users/* -> User CRUD endpoints (requires token)
  */
 
+// Handle CORS at the router level FIRST, before any other logic
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
+header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
+header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
+header('Content-Type: application/json; charset=utf-8');
+
+// Handle OPTIONS request immediately (preflight)
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
 $request_uri = $_SERVER['REQUEST_URI'];
 $request_method = $_SERVER['REQUEST_METHOD'];
 
@@ -13,7 +26,11 @@ $request_method = $_SERVER['REQUEST_METHOD'];
 $endpoint = parse_url($request_uri, PHP_URL_PATH);
 
 // Serve API documentation
-$is_root = $endpoint === '/' || $endpoint === '/index.php' || str_ends_with($endpoint, '/index.php') || str_ends_with($endpoint, '/');
+$is_root = $endpoint === '/' || 
+$endpoint === '/index.php' || 
+str_ends_with($endpoint, '/index.php') || 
+str_ends_with($endpoint, '/');
+
 if ($is_root || str_ends_with($endpoint, '/docs') || str_ends_with($endpoint, '/docs/') || str_ends_with($endpoint, '/api/docs')) {
     header('Content-Type: text/html; charset=utf-8');
     readfile(__DIR__ . '/../public/docs.html');

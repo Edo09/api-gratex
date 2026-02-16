@@ -9,9 +9,9 @@ class Database
     {
         try {
             $this->conexion = new PDO(
-                'mysql:host=localhost:3306;dbname=test;charset=utf8mb4',
-                'root',
-                '123qwe',
+                'mysql:host=sh00032.hostgator.com:3306;dbname=mtldtmte_new_gratexdb;charset=utf8mb4',
+                'mtldtmte_edwin',
+                'gratexdb.',
                 [
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
