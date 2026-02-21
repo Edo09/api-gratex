@@ -1,0 +1,14 @@
+# Disable automatic directory slash redirect that breaks CORS preflight
+DirectorySlash Off
+
+RewriteEngine On
+
+# Force all /api/* requests through index.php (even if directories exist)
+# This is critical for CORS to work since Router.php sets the headers
+RewriteCond %{REQUEST_URI} ^/(.*/)?api/
+RewriteRule ^ index.php [QSA,L]
+
+# Redirect all other requests to index.php if the file or directory doesn't exist
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^ index.php [QSA,L]
