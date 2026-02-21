@@ -460,6 +460,60 @@ INSERT INTO `cotizacion_items` (`id`, `cotizacion_id`, `description`, `amount`, 
 -- Cotizacion 20 items
 (35, 20, 'Consultoría IT', 450.00, 4, 1800.00);
 
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `landing_carousel`
+--
+
+CREATE TABLE `landing_carousel` (
+  `id` int(11) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `subtitle` varchar(255) DEFAULT NULL,
+  `image_path` varchar(500) NOT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `landing_carousel`
+--
+ALTER TABLE `landing_carousel`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- AUTO_INCREMENT for table `landing_carousel`
+--
+ALTER TABLE `landing_carousel`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+-- --------------------------------------------------------
+
+--
+-- Table structure for table `landing_services`
+--
+
+CREATE TABLE `landing_services` (
+  `id` int(11) NOT NULL,
+  `title` varchar(255) NOT NULL,
+  `description` text DEFAULT NULL,
+  `image_path` varchar(500) NOT NULL,
+  `created_at` datetime DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
+
+--
+-- Indexes for table `landing_services`
+--
+ALTER TABLE `landing_services`
+  ADD PRIMARY KEY (`id`);
+
+--
+-- AUTO_INCREMENT for table `landing_services`
+--
+ALTER TABLE `landing_services`
+  MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
+
+-- --------------------------------------------------------
+
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
