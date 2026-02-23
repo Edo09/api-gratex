@@ -91,8 +91,8 @@ class AuthMiddleware
      */
     public function sendUnauthorized($message = 'Unauthorized')
     {
-        echo json_encode(['error', $message]);
         http_response_code(401);
+        echo json_encode(['status' => false, 'error' => $message]);
         exit;
     }
 }
