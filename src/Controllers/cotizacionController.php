@@ -83,8 +83,6 @@ switch($_SERVER['REQUEST_METHOD']){
             // Validate required fields
             if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
                 $respuesta = ['status' => false, 'error' => 'Client ID is required'];
-            } else if (!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100) {
-                $respuesta = ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
             } else if (!isset($_POST->items) || !is_array($_POST->items)) {
                 $respuesta = ['status' => false, 'error' => 'Items must be an array'];
             } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
@@ -92,13 +90,18 @@ switch($_SERVER['REQUEST_METHOD']){
             } else {
                 // Convert items to associative arrays
                 $items = array_map(function($item) { return (array)$item; }, $_POST->items);
+                // Look up client_name from clients table
+                require_once(__DIR__ . '/../Models/clientModel.php');
+                $clientModelInstance = new clientModel();
+                $clientData = $clientModelInstance->getClients($_POST->client_id);
+                $client_name = (!empty($clientData) && isset($clientData[0]['client_name'])) ? $clientData[0]['client_name'] : '';
                 // Prepare a fake cotizacion array (as in getCotizaciones)
                 $cotizacion = [[
                     'id' => null,
                     'code' => 'PREVIEW',
                     'date' => isset($_POST->date) ? $_POST->date : '',
                     'client_id' => $_POST->client_id,
-                    'client_name' => $_POST->client_name,
+                    'client_name' => $client_name,
                     'total' => $_POST->total,
                     'items' => $items,
                     'description' => '',
@@ -129,9 +132,6 @@ switch($_SERVER['REQUEST_METHOD']){
         $_POST = json_decode(file_get_contents('php://input'));
         if(!isset($_POST->client_id) || is_null($_POST->client_id)){
             $respuesta= ['status' => false, 'error' => 'Client ID is required'];
-        }
-        else if(!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100){
-            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
         }
         else if(!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0){
             $respuesta= ['status' => false, 'error' => 'At least one item is required'];
@@ -165,7 +165,7 @@ switch($_SERVER['REQUEST_METHOD']){
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
-                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $_POST->client_name, $date, $_POST->items, $_POST->total);
+                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total);
                 if($result[0] === 'success'){
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
@@ -183,9 +183,6 @@ switch($_SERVER['REQUEST_METHOD']){
         }
         else if(!isset($_PUT->client_id) || is_null($_PUT->client_id)){
             $respuesta= ['status' => false, 'error' => 'Client ID is required'];
-        }
-        else if(!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name)) || strlen($_PUT->client_name) > 100){
-            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
         }
         else if(!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0){
             $respuesta= ['status' => false, 'error' => 'At least one item is required'];
@@ -219,7 +216,7 @@ switch($_SERVER['REQUEST_METHOD']){
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
-                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $_PUT->client_name, $date, $_PUT->items, $_PUT->total);
+                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total);
                 if($result[0] === 'success'){
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {

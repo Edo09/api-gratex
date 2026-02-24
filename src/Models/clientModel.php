@@ -24,6 +24,7 @@ class clientModel
             }
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            var_dump($e->getMessage());
             return [];
         }
     }
@@ -46,6 +47,7 @@ class clientModel
             }
             return $resultado;
         } catch (PDOException $e) {
+            var_dump($e->getMessage());
             return ['error', 'Failed to save client'];
         }
     }

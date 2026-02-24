@@ -18,11 +18,11 @@ class cotizacionModel
                 $whereClause = "";
                 $params = [];
                 if ($query) {
-                    $whereClause = "WHERE (code LIKE :query OR client_name LIKE :query)";
+                    $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query)";
                     $params[':query'] = "%{$query}%";
                 }
                 // Get total count
-                $countSql = "SELECT COUNT(*) as total FROM cotizaciones {$whereClause}";
+                $countSql = "SELECT COUNT(*) as total FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause}";
                 $countStmt = $this->conexion->prepare($countSql);
                 if ($query) {
                     $countStmt->execute($params);
@@ -36,7 +36,7 @@ class cotizacionModel
                 $pageSize = (int)$pageSize;
                 $offset = (int)$offset;
                 // Fetch paginated results
-                $sql = "SELECT * FROM cotizaciones {$whereClause} ORDER BY date DESC LIMIT {$pageSize} OFFSET {$offset}";
+                $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause} ORDER BY c.date DESC LIMIT {$pageSize} OFFSET {$offset}";
                 $stmt = $this->conexion->prepare($sql);
                 if ($query) {
                     $stmt->execute($params);
@@ -63,7 +63,7 @@ class cotizacionModel
                 ];
             } else {
                 // Get single record by ID with items
-                $sql = "SELECT * FROM cotizaciones WHERE id = :id";
+                $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id WHERE c.id = :id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([':id' => $id]);
                 $cotizacion = $stmt->fetch();
@@ -83,7 +83,7 @@ class cotizacionModel
         }
     }
 
-    public function saveCotizacion($client_id, $client_name, $date, $items, $total)
+    public function saveCotizacion($client_id, $date, $items, $total)
     {
         try {
             // Custom code generation logic with uniqueness check
@@ -113,13 +113,12 @@ class cotizacionModel
             $this->conexion->beginTransaction();
 
             // Insert main cotizacion record
-            $sql = "INSERT INTO cotizaciones(code, date, client_id, client_name, total) VALUES(:code, :date, :client_id, :client_name, :total)";
+            $sql = "INSERT INTO cotizaciones(code, date, client_id, total) VALUES(:code, :date, :client_id, :total)";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':code' => $code,
                 ':date' => $cotizacion_date,
                 ':client_id' => $client_id,
-                ':client_name' => $client_name,
                 ':total' => $total
             ]);
 
@@ -219,7 +218,7 @@ class cotizacionModel
         }
     }
 
-    public function updateCotizacion($id, $client_id, $client_name, $date, $items, $total)
+    public function updateCotizacion($id, $client_id, $date, $items, $total)
     {
         try {
             $existe = $this->getCotizaciones($id);
@@ -234,12 +233,11 @@ class cotizacionModel
             $cotizacion_date = !empty($date) ? $date : $existe[0]['date'];
             
             // Update main cotizacion record
-            $sql = "UPDATE cotizaciones SET client_id = :client_id, client_name = :client_name, date = :date, total = :total WHERE id = :id";
+            $sql = "UPDATE cotizaciones SET client_id = :client_id, date = :date, total = :total WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':id' => $id,
                 ':client_id' => $client_id,
-                ':client_name' => $client_name,
                 ':date' => $cotizacion_date,
                 ':total' => $total
             ]);

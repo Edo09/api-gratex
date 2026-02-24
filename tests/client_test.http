@@ -1,7 +1,13 @@
 ### Get All Clients
+
 GET http://gratex.net/api/clients
 Content-Type: application/json
-X-API-KEY: 29a393cbea663961ce6771279c8206c3
+X-API-KEY: 515370b3a6caccf859e862636be6e26e
+###
+
+GET http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 515370b3a6caccf859e862636be6e26e
 
 ### Get Client by ID (Assuming ID 1 exists)
 GET http://gratex.net/api/clients?id=1
