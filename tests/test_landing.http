@@ -1,0 +1,85 @@
+### ===== LANDING PAGE ENDPOINTS =====
+
+### Get all carousel items
+GET http://gratex.net/api/landing/carousel
+Content-Type: application/json
+
+###
+
+### Get all services
+GET http://gratex.net/api/landing/services
+Content-Type: application/json
+
+###
+
+### Add a carousel item (with image upload)
+POST http://gratex.net/api/landing/carousel
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="title"
+
+Welcome to Gratex
+------Boundary
+Content-Disposition: form-data; name="subtitle"
+
+Your trusted partner
+------Boundary
+Content-Disposition: form-data; name="image"; filename="test-carousel.jpg"
+Content-Type: image/jpeg
+
+< ./test-image.jpg
+------Boundary--
+
+###
+
+### Add a service (with image upload)
+POST http://gratex.net/api/landing/services
+Content-Type: multipart/form-data; boundary=----Boundary
+
+------Boundary
+Content-Disposition: form-data; name="title"
+
+Web Development
+------Boundary
+Content-Disposition: form-data; name="description"
+
+Professional web development services
+------Boundary
+Content-Disposition: form-data; name="image"; filename="test-service.jpg"
+Content-Type: image/jpeg
+
+< ./test-image.jpg
+------Boundary--
+
+###
+
+### Delete a carousel item (by ID in body)
+DELETE http://gratex.net/api/landing/carousel
+Content-Type: application/json
+
+{
+    "id": 1
+}
+
+###
+
+### Delete a carousel item (by ID in query string)
+DELETE http://gratex.net/api/landing/carousel?id=1
+Content-Type: application/json
+
+###
+
+### Delete a service (by ID in body)
+DELETE http://gratex.net/api/landing/services
+Content-Type: application/json
+
+{
+    "id": 1
+}
+
+###
+
+### Delete a service (by ID in query string)
+DELETE http://gratex.net/api/landing/services?id=1
+Content-Type: application/json
