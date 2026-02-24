@@ -3,6 +3,11 @@ DirectorySlash Off
 
 RewriteEngine On
 
+# Allow direct access to existing files (uploads, assets, etc.)
+RewriteCond %{REQUEST_URI} ^/(.*/)?api/public/
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
 # Force all /api/* requests through index.php (even if directories exist)
 # This is critical for CORS to work since Router.php sets the headers
 RewriteCond %{REQUEST_URI} ^/(.*/)?api/
