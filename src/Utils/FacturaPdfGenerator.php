@@ -324,7 +324,7 @@ class FacturaPdfGenerator extends FPDF
 
         // Table rows
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('Arial', '', 11);
+        $this->SetFont('Arial', '', 10);
         $this->SetAligns(array('C', 'L', 'C', 'C', 'C'));
         $this->SetLineHeight(4);
         $this->SetWidths(array(25, 110, 20, 20, 25));

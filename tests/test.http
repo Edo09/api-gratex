@@ -7,11 +7,12 @@ POST http://localhost:8000/api/auth/login
 Content-Type: application/json
 
 {
-  "emailOrUsername": "alex_smith",
+  "emailOrUsername": "edo09",
   "password": "password123"
 }
+####
 
-###POST https://gratex.net/api/index.php/api/auth/login
+POST https://gratex.net/api/index.php/api/auth/login
 Content-Type: application/json
 
 {
