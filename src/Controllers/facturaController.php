@@ -32,9 +32,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
             // Pagination logic
             $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
             $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
+            $query = isset($_GET['query']) ? $_GET['query'] : null;
             $offset = ($page - 1) * $pageSize;
-            $facturas = $facturaModel->getFacturasPaginated($offset, $pageSize);
-            $total = $facturaModel->getFacturasCount();
+            $facturas = $facturaModel->getFacturasPaginated($offset, $pageSize, $query);
+            $total = $facturaModel->getFacturasCount($query);
             $respuesta = [
                 'status' => true,
                 'data' => $facturas,

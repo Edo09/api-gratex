@@ -14,12 +14,12 @@ class facturaModel
     {
         try {
             if ($id == null) {
-                $sql = "SELECT * FROM facturas";
+                $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute();
                 $facturas = $stmt->fetchAll();
             } else {
-                $sql = "SELECT * FROM facturas WHERE id = :id";
+                $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id WHERE f.id = :id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([':id' => $id]);
                 $facturas = $stmt->fetchAll();
@@ -135,12 +135,21 @@ class facturaModel
         }
     }
 
-        // Pagination support
-    public function getFacturasPaginated($offset, $limit)
+        // Pagination support with optional search query
+    public function getFacturasPaginated($offset, $limit, $query = null)
     {
         try {
-            $sql = "SELECT * FROM facturas ORDER BY id DESC LIMIT :limit OFFSET :offset";
+            $whereClause = "";
+            $params = [];
+            if ($query) {
+                $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query)";
+                $params[':query'] = "%{$query}%";
+            }
+            $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);
+            if ($query) {
+                $stmt->bindValue(':query', "%{$query}%", \PDO::PARAM_STR);
+            }
             $stmt->bindValue(':limit', (int)$limit, \PDO::PARAM_INT);
             $stmt->bindValue(':offset', (int)$offset, \PDO::PARAM_INT);
             $stmt->execute();
@@ -154,12 +163,22 @@ class facturaModel
         }
     }
 
-        public function getFacturasCount()
+        public function getFacturasCount($query = null)
         {
             try {
-                $sql = "SELECT COUNT(*) as total FROM facturas";
+                $whereClause = "";
+                $params = [];
+                if ($query) {
+                    $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query)";
+                    $params[':query'] = "%{$query}%";
+                }
+                $sql = "SELECT COUNT(*) as total FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause}";
                 $stmt = $this->conexion->prepare($sql);
-                $stmt->execute();
+                if ($query) {
+                    $stmt->execute($params);
+                } else {
+                    $stmt->execute();
+                }
                 $row = $stmt->fetch();
                 return $row ? (int)$row['total'] : 0;
             } catch (PDOException $e) {

@@ -18,7 +18,7 @@ class cotizacionModel
                 $whereClause = "";
                 $params = [];
                 if ($query) {
-                    $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query)";
+                    $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
                     $params[':query'] = "%{$query}%";
                 }
                 // Get total count
