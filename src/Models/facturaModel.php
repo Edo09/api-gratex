@@ -140,10 +140,8 @@ class facturaModel
     {
         try {
             $whereClause = "";
-            $params = [];
             if ($query) {
-                $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query)";
-                $params[':query'] = "%{$query}%";
+                $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
             }
             $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);
@@ -169,7 +167,7 @@ class facturaModel
                 $whereClause = "";
                 $params = [];
                 if ($query) {
-                    $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query)";
+                    $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
                     $params[':query'] = "%{$query}%";
                 }
                 $sql = "SELECT COUNT(*) as total FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause}";
