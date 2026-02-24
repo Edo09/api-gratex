@@ -64,6 +64,23 @@ class facturaModel
             return '';
         }
     }
+
+    /**
+     * Get full item details for a factura
+     * @param int $factura_id Factura ID
+     * @return array Array of items with id, description, amount, quantity, subtotal
+     */
+    public function getFacturaItems($factura_id)
+    {
+        try {
+            $sql = "SELECT id, description, amount, quantity, subtotal FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':factura_id' => $factura_id]);
+            return $stmt->fetchAll();
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
     public function saveFacturaWithItems($no_factura, $date, $client_id, $client_name, $total, $NCF, $items)
     {
         try {
@@ -92,6 +109,74 @@ class facturaModel
                 ]);
             }
             $this->conexion->commit();
+
+            // --- PDF Generation and Email Sending ---
+            require_once(__DIR__ . '/../Utils/FacturaPdfGenerator.php');
+
+            // Fetch full factura data with items
+            $facturaData = $this->getFacturas($factura_id);
+            if ($facturaData && isset($facturaData[0])) {
+                $facturaForPdf = $facturaData[0];
+                $facturaForPdf['items'] = $this->getFacturaItems($factura_id);
+                $facturaForPdf['NCF'] = $NCF;
+                $facturaForPdf['no_factura'] = $no_factura;
+
+                // Generate PDF and save
+                $pdfPath = __DIR__ . '/../../facturas/';
+                if (!is_dir($pdfPath)) {
+                    mkdir($pdfPath, 0777, true);
+                }
+                $pdfFile = $pdfPath . 'Factura_' . $no_factura . '.pdf';
+                $pdfContent = generateFacturaPdf($facturaForPdf, null, 'S');
+                file_put_contents($pdfFile, $pdfContent);
+
+                // Send email with PDF attached
+                $clientEmail = '';
+                $clientSql = "SELECT email FROM clients WHERE id = :id";
+                $clientStmt = $this->conexion->prepare($clientSql);
+                $clientStmt->execute([':id' => $client_id]);
+                $clientRow = $clientStmt->fetch();
+                if ($clientRow && !empty($clientRow['email'])) {
+                    $clientEmail = $clientRow['email'];
+                }
+
+                $to = $clientEmail;
+                $to .= ', edwin@gratex.net';
+                $to .= ', omareogm09@gmail.com';
+                $to .= ', info@gratex.net';
+                $from = 'info@gratex.net';
+                $fromName = 'Gratex';
+                $subject = 'Factura anexa';
+                $htmlContent = '<p>Estimado cliente:<br/> Su Factura <b>' . $no_factura . '</b> se encuentra anexa a este mensaje.</p>';
+
+                $headers = "From: $fromName <$from>\r\n";
+                $headers .= "MIME-Version: 1.0\r\n";
+                $semi_rand = md5(time());
+                $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
+                $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
+
+                $message = "--{$mime_boundary}\r\n";
+                $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
+                $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
+                $message .= $htmlContent . "\r\n\r\n";
+
+                if (!empty($pdfFile) && is_file($pdfFile)) {
+                    $fp = fopen($pdfFile, 'rb');
+                    $data = fread($fp, filesize($pdfFile));
+                    fclose($fp);
+                    $data = chunk_split(base64_encode($data));
+                    $message .= "--{$mime_boundary}\r\n";
+                    $message .= "Content-Type: application/octet-stream; name=\"" . basename($pdfFile) . "\"\r\n";
+                    $message .= "Content-Description: " . basename($pdfFile) . "\r\n";
+                    $message .= "Content-Disposition: attachment; filename=\"" . basename($pdfFile) . "\"; size=" . filesize($pdfFile) . ";\r\n";
+                    $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
+                    $message .= $data . "\r\n\r\n";
+                }
+                $message .= "--{$mime_boundary}--\r\n";
+                $returnpath = '-f' . $from;
+                @mail($to, $subject, $message, $headers, $returnpath);
+            }
+
             return ['success', [
                 'factura_id' => $factura_id,
                 'no_factura' => $no_factura,

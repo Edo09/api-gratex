@@ -112,4 +112,46 @@ class clientModel
             return [];
         }
     }
+
+    public function getClientsPaginated($offset, $limit, $query = null)
+    {
+        try {
+            $whereClause = "";
+            if ($query) {
+                $whereClause = "WHERE (client_name LIKE :query OR company_name LIKE :query OR email LIKE :query OR phone_number LIKE :query OR rnc LIKE :query)";
+            }
+            $sql = "SELECT * FROM clients {$whereClause} ORDER BY id DESC LIMIT :limit OFFSET :offset";
+            $stmt = $this->conexion->prepare($sql);
+            if ($query) {
+                $stmt->bindValue(':query', "%{$query}%", \PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', (int)$limit, \PDO::PARAM_INT);
+            $stmt->bindValue(':offset', (int)$offset, \PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll();
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
+    public function getClientsCount($query = null)
+    {
+        try {
+            $whereClause = "";
+            if ($query) {
+                $whereClause = "WHERE (client_name LIKE :query OR company_name LIKE :query OR email LIKE :query OR phone_number LIKE :query OR rnc LIKE :query)";
+            }
+            $sql = "SELECT COUNT(*) as total FROM clients {$whereClause}";
+            $stmt = $this->conexion->prepare($sql);
+            if ($query) {
+                $stmt->execute([':query' => "%{$query}%"]);
+            } else {
+                $stmt->execute();
+            }
+            $row = $stmt->fetch();
+            return $row ? (int)$row['total'] : 0;
+        } catch (PDOException $e) {
+            return 0;
+        }
+    }
 }

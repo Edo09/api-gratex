@@ -20,8 +20,47 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     }
 }
 
+// Check if this is a PDF request
+$endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$isPdfRequest = preg_match('/\/api\/facturas\/(\d+)\/pdf/', $endpoint, $pdfMatches);
+
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
+        // Handle PDF generation request
+        if ($isPdfRequest) {
+            $facturaId = $pdfMatches[1];
+            $facturas = $facturaModel->getFacturas($facturaId);
+            if (empty($facturas)) {
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode(['status' => false, 'error' => 'Factura not found']);
+                http_response_code(404);
+                break;
+            }
+            $facturaData = $facturas[0];
+            $facturaData['items'] = $facturaModel->getFacturaItems($facturaId);
+            require_once(__DIR__ . '/../Utils/FacturaPdfGenerator.php');
+            $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+            $pdf->setFactura($facturaData);
+            $pdfContent = $pdf->generatePdf();
+            $format = isset($_GET['format']) ? $_GET['format'] : 'download';
+            if ($format === 'base64') {
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode([
+                    'status' => true,
+                    'data' => [
+                        'filename' => 'Factura_' . $facturaData['no_factura'] . '.pdf',
+                        'content' => base64_encode($pdfContent),
+                        'mime_type' => 'application/pdf'
+                    ]
+                ]);
+            } else {
+                header('Content-Type: application/pdf');
+                header('Content-Disposition: attachment; filename="Factura_' . $facturaData['no_factura'] . '.pdf"');
+                header('Content-Length: ' . strlen($pdfContent));
+                echo $pdfContent;
+            }
+            break;
+        }
         if (isset($_GET['id'])) {
             $facturas = $facturaModel->getFacturas($_GET['id']);
             $respuesta = [
@@ -74,8 +113,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 }
                 $total += $item->amount * $item->quantity;
             }
-            // Generate no_factura (simple example, should be improved for production)
-            $no_factura = 'FAC_' . date('Ymd_His');
+            // Generate no_factura: sequential 4-digit number + date (ddmmyy)
+            $nextNum = $facturaModel->getFacturasCount() + 1;
+            $no_factura = str_pad($nextNum, 4, '0', STR_PAD_LEFT) . '-' . date('dmy');
             $result = $facturaModel->saveFacturaWithItems($no_factura, $_POST->date, $_POST->client_id, $_POST->client, $total, $_POST->ncf, $_POST->items);
             if ($result[0] === 'success') {
                 // Increment NCF sequence

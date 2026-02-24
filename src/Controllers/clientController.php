@@ -34,11 +34,31 @@ switch($_SERVER['REQUEST_METHOD']){
                 ];
             }
         } else {
-            $clients = $clientModel->getClients();
-            $respuesta = [
-                'status' => true,
-                'data' => $clients
-            ];
+            // If pagination params provided, use paginated response; otherwise return all
+            if (isset($_GET['page']) || isset($_GET['pageSize']) || isset($_GET['query'])) {
+                $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
+                $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
+                $query = isset($_GET['query']) ? $_GET['query'] : null;
+                $offset = ($page - 1) * $pageSize;
+                $clients = $clientModel->getClientsPaginated($offset, $pageSize, $query);
+                $total = $clientModel->getClientsCount($query);
+                $respuesta = [
+                    'status' => true,
+                    'data' => $clients,
+                    'pagination' => [
+                        'page' => $page,
+                        'pageSize' => $pageSize,
+                        'total' => $total,
+                        'totalPages' => ceil($total / $pageSize)
+                    ]
+                ];
+            } else {
+                $clients = $clientModel->getClients();
+                $respuesta = [
+                    'status' => true,
+                    'data' => $clients
+                ];
+            }
         }
         echo json_encode($respuesta);
     break;
