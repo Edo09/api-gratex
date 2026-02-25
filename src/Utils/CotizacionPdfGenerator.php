@@ -249,22 +249,25 @@ class CotizacionPdfGenerator extends FPDF
         $cliente = $this->cotizacion['client_name'] ?? '';
         $telefono = '';
         $email = '';
-        $contacto = $this->cotizacion['client_contact'] ?? $this->cotizacion['contacto'] ?? '';
         if (!empty($this->cotizacion['client_id'])) {
             try {
                 $db = Database::getInstance()->getConnection();
-                $stmt = $db->prepare('SELECT client_name, email, phone_number FROM clients WHERE id = :id LIMIT 1');
+                $stmt = $db->prepare('SELECT client_name, email, phone_number,company_name FROM clients WHERE id = :id LIMIT 1');
                 $stmt->execute([':id' => $this->cotizacion['client_id']]);
                 $clientRow = $stmt->fetch(\PDO::FETCH_ASSOC);
                 if ($clientRow) {
                     $cliente = $clientRow['client_name'];
                     $email = $clientRow['email'];
                     $telefono = $clientRow['phone_number'];
+                    $companyName = $clientRow['company_name'];
                 }
             } catch (\Exception $e) {
                 // fallback to whatever is in cotizacion
             }
         }
+
+        $contacto = $companyName;
+
         if (!$cliente) $cliente = $this->cotizacion['client_name'] ?? $this->cotizacion['client'] ?? '';
         if (!$email) $email = $this->cotizacion['email'] ?? '';
         if (!$telefono) $telefono = $this->cotizacion['phone_number'] ?? '';
