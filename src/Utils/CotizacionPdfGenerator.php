@@ -246,7 +246,7 @@ class CotizacionPdfGenerator extends FPDF
         $this->AddPage();
 
         // Fetch client data from DB if client_id is present
-        $cliente = $this->cotizacion['client_name'] ?? '';
+        $contacto = $this->cotizacion['client_name'] ?? '';
         $telefono = '';
         $email = '';
         if (!empty($this->cotizacion['client_id'])) {
@@ -266,9 +266,8 @@ class CotizacionPdfGenerator extends FPDF
             }
         }
 
-        $contacto = $companyName;
 
-        if (!$cliente) $cliente = $this->cotizacion['client_name'] ?? $this->cotizacion['client'] ?? '';
+        if (!$cliente) $cliente = $companyName ?? $companyName ?? '';
         if (!$email) $email = $this->cotizacion['email'] ?? '';
         if (!$telefono) $telefono = $this->cotizacion['phone_number'] ?? '';
         $fulltelandcel = trim('Tel.: ' . $telefono);
