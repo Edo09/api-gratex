@@ -246,7 +246,7 @@ class CotizacionPdfGenerator extends FPDF
         $this->AddPage();
 
         // Fetch client data from DB if client_id is present
-        $contacto = $this->cotizacion['client_name'] ?? '';
+        $contacto = '';
         $telefono = '';
         $email = '';
         if (!empty($this->cotizacion['client_id'])) {
@@ -256,20 +256,16 @@ class CotizacionPdfGenerator extends FPDF
                 $stmt->execute([':id' => $this->cotizacion['client_id']]);
                 $clientRow = $stmt->fetch(\PDO::FETCH_ASSOC);
                 if ($clientRow) {
-                    $cliente = $clientRow['client_name'];
+                    $contacto = $clientRow['client_name'];
                     $email = $clientRow['email'];
                     $telefono = $clientRow['phone_number'];
-                    $companyName = $clientRow['company_name'];
+                    $cliente = $clientRow['company_name'];
                 }
             } catch (\Exception $e) {
                 // fallback to whatever is in cotizacion
             }
         }
 
-
-        if (!$cliente) $cliente = $companyName ?? $companyName ?? '';
-        if (!$email) $email = $this->cotizacion['email'] ?? '';
-        if (!$telefono) $telefono = $this->cotizacion['phone_number'] ?? '';
         $fulltelandcel = trim('Tel.: ' . $telefono);
         $condiciones = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
 
