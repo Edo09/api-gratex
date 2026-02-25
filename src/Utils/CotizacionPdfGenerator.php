@@ -275,8 +275,8 @@ class CotizacionPdfGenerator extends FPDF
         $this->SetTextColor(255, 255, 255);
         $this->Cell(45, 6, 'Cliente', 0, 0, 'L', 1);
         $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
-        $this->Cell(50, 6, 'Correo', 0, 0, 'L', 1);
-        $this->Cell(30, 6, 'Contacto', 0, 0, 'L', 1);
+        $this->Cell(50, 6, 'Correo Electronico', 0, 0, 'L', 1);
+        $this->Cell(30, 6, 'PersonaContacto', 0, 0, 'L', 1);
         $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
         $this->SetFont('Arial', '', 10);
         $this->SetTextColor(0, 0, 0);
