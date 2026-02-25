@@ -270,12 +270,12 @@ class CotizacionPdfGenerator extends FPDF
         $condiciones = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
 
         // Client info section styled as a table row (like products)
-        $this->SetFont('Arial', '', 9);
+        $this->SetFont('Arial', 'B', 10);
         $this->SetFillColor(0, 0, 0);
         $this->SetTextColor(255, 255, 255);
-        $this->Cell(45, 6, 'Cliente', 0, 0, 'L', 1);
+        $this->Cell(40, 6, 'Cliente', 0, 0, 'L', 1);
         $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
-        $this->Cell(50, 6, 'Correo Electronico', 0, 0, 'L', 1);
+        $this->Cell(55, 6, 'Correo Electronico', 0, 0, 'L', 1);
         $this->Cell(30, 6, 'Contacto', 0, 0, 'L', 1);
         $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
         $this->SetFont('Arial', '', 10);
@@ -284,17 +284,17 @@ class CotizacionPdfGenerator extends FPDF
         $startY = $this->GetY();
         $startX = $this->GetX();
         // Cliente (wrap)
-        $this->MultiCell(45, $rowHeight, $this->convertEncoding($cliente), 0, 'L');
-        $this->SetXY($startX + 45, $startY);
+        $this->MultiCell(40, $rowHeight, $this->convertEncoding($cliente), 0, 'L');
+        $this->SetXY($startX + 40, $startY);
         // Telefono/Celular
         $this->MultiCell(40, $rowHeight, $this->convertEncoding($fulltelandcel), 0, 'L');
-        $this->SetXY($startX + 45 + 40, $startY);
+        $this->SetXY($startX + 40 + 40, $startY);
         // Correo Electronico (wrap)
-        $this->MultiCell(50, $rowHeight, $this->convertEncoding($email), 0, 'L');
-        $this->SetXY($startX + 45 + 40 + 50, $startY);
+        $this->MultiCell(55, $rowHeight, $this->convertEncoding($email), 0, 'L');
+        $this->SetXY($startX + 40 + 40 + 55, $startY);
         // Contacto (wrap)
         $this->MultiCell(30, $rowHeight, $this->convertEncoding($contacto), 0, 'L');
-        $this->SetXY($startX + 45 + 40 + 50 + 30, $startY);
+        $this->SetXY($startX + 40 + 40 + 55 + 30, $startY);
         // Condiciones de Pago (wrap)
         $this->MultiCell(40, 5, $this->convertEncoding($condiciones), 0, 'L');
         $this->Ln(2);
