@@ -16,7 +16,7 @@ class LandingModel
      */
     public function getCarouselItems()
     {
-        $sql = "SELECT * FROM landing_carousel ORDER BY id DESC";
+        $sql = "SELECT * FROM landing_carousel ORDER BY id ASC";
         $stmt = $this->conexion->prepare($sql);
         $stmt->execute();
         return $stmt->fetchAll();
