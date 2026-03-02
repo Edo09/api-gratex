@@ -337,25 +337,31 @@ class CotizacionPdfGenerator extends FPDF
             }
         }
         $itbistotal = $subtotal * 0.18;
+        $this->SetX(7);
 
         // Subtotal, Descuento, ITBIS, Total
         $this->SetFont('Arial', 'B', 9);
         $this->SetY(-90);
+           $this->SetX(7);
         $this->Cell(31, 4, 'Condiciones de pago', 0, 1, 'L', 0);
         $this->SetFont('Arial', '', 9);
+           $this->SetX(7);
         $this->MultiCell(144, 4, $this->convertEncoding('Persona Jurídica (empresa) 60% avance del total de la Cotización/Factura Proforma y/o envío de una orden de compra/carta constancia firmada y sellada. Restante 40% será pagado al momento de la entrega del pedido. Personas Físicas deben hacer pago por adelantado.'), 0, 'L');
         $this->Ln(7);
+        
         $this->SetFont('Arial', 'B', 9);
+           $this->SetX(7);
         $this->Cell(31, 4, 'Forma y constancias de pago', 0, 1, 'L', 0);
         $this->SetFont('Arial', '', 9);
+           $this->SetX(7);
         $this->MultiCell(144, 4, $this->convertEncoding('Pagos vía transferencia electrónica o con depósito a la cuenta corriente #790371603 a nombre de Gratex EIRL en el Banco Popular Dominicano. Constancia del pago debe ser enviada al e-mail pagoenlinea@gratex.net o whatsapp 849-401-1017.'), 0, 'L');
 
         $this->SetY(-92);
-        // $this->SetX(7);
-        $this->Cell(144, 20, '', 1);
+
+        $this->Cell(147, 20, '', 1);
         $this->SetY(-69);
         // $this->SetX(7);
-        $this->Cell(144, 20, '', 1);
+        $this->Cell(147, 20, '', 1);
 
         // Subtotal
         $this->SetY(-92);
