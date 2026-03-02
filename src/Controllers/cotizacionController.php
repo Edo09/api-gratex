@@ -24,23 +24,25 @@ $isPdfRequest = preg_match('/\/api\/cotizaciones\/(\d+)\/pdf/', $endpoint, $pdfM
 // Preview PDF endpoint
 $isPreviewRequest = preg_match('/\/api\/cotizaciones\/preview$/', $endpoint);
 
-switch($_SERVER['REQUEST_METHOD']){
+switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
         // Handle PDF generation request
         if ($isPdfRequest) {
             $cotizacionId = $pdfMatches[1];
-            $cotizacion = $cotizacionModel->getCotizaciones($cotizacionId);
-            if (empty($cotizacion)) {
+            $cotizaciones = $cotizacionModel->getCotizaciones($cotizacionId);
+            if (empty($cotizaciones)) {
                 header('content-type: application/json; charset=utf-8');
                 echo json_encode(['status' => false, 'error' => 'Cotizacion not found']);
                 http_response_code(404);
                 break;
             }
+            $cotizacionData = $cotizaciones[0];
+            $cotizacionData['items'] = $cotizacionModel->getCotizacionItems($cotizacionId);
             // Include PDF generator
             require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
             // Generate and output PDF
             $pdf = new CotizacionPdfGenerator('P', 'mm', 'Letter');
-            $pdf->setCotizacion($cotizacion[0]);
+            $pdf->setCotizacion($cotizacionData);
             $pdfContent = $pdf->generatePdf();
             // Check if user wants base64 or download
             $format = isset($_GET['format']) ? $_GET['format'] : 'download';
@@ -49,7 +51,7 @@ switch($_SERVER['REQUEST_METHOD']){
                 echo json_encode([
                     'status' => true,
                     'data' => [
-                        'filename' => 'Cotizacion_' . $cotizacion[0]['code'] . '.pdf',
+                        'filename' => 'Cotizacion_' . $cotizacionData['code'] . '.pdf',
                         'content' => base64_encode($pdfContent),
                         'mime_type' => 'application/pdf'
                     ]
@@ -57,26 +59,41 @@ switch($_SERVER['REQUEST_METHOD']){
             } else {
                 // Output as PDF download
                 header('Content-Type: application/pdf');
-                header('Content-Disposition: attachment; filename="Cotizacion_' . $cotizacion[0]['code'] . '.pdf"');
+                header('Content-Disposition: attachment; filename="Cotizacion_' . $cotizacionData['code'] . '.pdf"');
                 header('Content-Length: ' . strlen($pdfContent));
                 echo $pdfContent;
             }
             break;
         }
-        // Standard GET request for cotizaciones list or single item
-        $id = isset($_GET['id']) ? $_GET['id'] : null;
-        $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-        $pageSize = isset($_GET['pageSize']) ? (int)$_GET['pageSize'] : 10;
-        $query = isset($_GET['query']) ? $_GET['query'] : null;
-        $cotizaciones = $cotizacionModel->getCotizaciones($id, $page, $pageSize, $query);
-        $respuesta = [
-            'status' => true,
-            'data' => $cotizaciones
-        ];
+        if (isset($_GET['id'])) {
+            $cotizaciones = $cotizacionModel->getCotizaciones($_GET['id']);
+            $respuesta = [
+                'status' => true,
+                'data' => $cotizaciones
+            ];
+        } else {
+            // Pagination logic
+            $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
+            $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
+            $query = isset($_GET['query']) ? $_GET['query'] : null;
+            $offset = ($page - 1) * $pageSize;
+            $cotizaciones = $cotizacionModel->getCotizacionesPaginated($offset, $pageSize, $query);
+            $total = $cotizacionModel->getCotizacionesCount($query);
+            $respuesta = [
+                'status' => true,
+                'data' => $cotizaciones,
+                'pagination' => [
+                    'page' => $page,
+                    'pageSize' => $pageSize,
+                    'total' => $total,
+                    'totalPages' => ceil($total / $pageSize)
+                ]
+            ];
+        }
         echo json_encode($respuesta);
         break;
 
-            case 'POST':
+    case 'POST':
         // PDF preview endpoint
         if ($isPreviewRequest) {
             $_POST = json_decode(file_get_contents('php://input'));
@@ -89,7 +106,9 @@ switch($_SERVER['REQUEST_METHOD']){
                 $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
             } else {
                 // Convert items to associative arrays
-                $items = array_map(function($item) { return (array)$item; }, $_POST->items);
+                $items = array_map(function ($item) {
+                    return (array)$item;
+                }, $_POST->items);
                 // Look up client_name from clients table
                 require_once(__DIR__ . '/../Models/clientModel.php');
                 $clientModelInstance = new clientModel();
@@ -130,43 +149,40 @@ switch($_SERVER['REQUEST_METHOD']){
 
         // Standard Create Cotizacion
         $_POST = json_decode(file_get_contents('php://input'));
-        if(!isset($_POST->client_id) || is_null($_POST->client_id)){
-            $respuesta= ['status' => false, 'error' => 'Client ID is required'];
-        }
-        else if(!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0){
-            $respuesta= ['status' => false, 'error' => 'At least one item is required'];
-        }
-        else if(!isset($_POST->total) || !is_numeric($_POST->total)){
-            $respuesta= ['status' => false, 'error' => 'Total must be a valid number'];
-        }
-        else{
+        if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
+            $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+        } else if (!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0) {
+            $respuesta = ['status' => false, 'error' => 'At least one item is required'];
+        } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
+            $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+        } else {
             // Validate each item
             $itemsValid = true;
             $itemError = '';
-            foreach($_POST->items as $index => $item) {
-                if(!isset($item->description) || empty(trim($item->description))) {
+            foreach ($_POST->items as $index => $item) {
+                if (!isset($item->description) || empty(trim($item->description))) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Description is required';
                     break;
                 }
-                if(!isset($item->amount) || !is_numeric($item->amount)) {
+                if (!isset($item->amount) || !is_numeric($item->amount)) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
                     break;
                 }
-                if(!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
+                if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
                     break;
                 }
             }
-            
-            if(!$itemsValid) {
+
+            if (!$itemsValid) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
                 $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total);
-                if($result[0] === 'success'){
+                if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
                     $respuesta = ['status' => false, 'error' => $result[1]];
@@ -174,50 +190,46 @@ switch($_SERVER['REQUEST_METHOD']){
             }
         }
         echo json_encode($respuesta);
-    break;
+        break;
 
     case 'PUT':
-        $_PUT= json_decode(file_get_contents('php://input'));
-        if(!isset($_PUT->id) || is_null($_PUT->id)){
-            $respuesta= ['status' => false, 'error' => 'Cotization ID is required'];
-        }
-        else if(!isset($_PUT->client_id) || is_null($_PUT->client_id)){
-            $respuesta= ['status' => false, 'error' => 'Client ID is required'];
-        }
-        else if(!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0){
-            $respuesta= ['status' => false, 'error' => 'At least one item is required'];
-        }
-        else if(!isset($_PUT->total) || !is_numeric($_PUT->total)){
-            $respuesta= ['status' => false, 'error' => 'Total must be a valid number'];
-        }
-        else{
+        $_PUT = json_decode(file_get_contents('php://input'));
+        if (!isset($_PUT->id) || is_null($_PUT->id)) {
+            $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
+        } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id)) {
+            $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+        } else if (!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0) {
+            $respuesta = ['status' => false, 'error' => 'At least one item is required'];
+        } else if (!isset($_PUT->total) || !is_numeric($_PUT->total)) {
+            $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+        } else {
             // Validate each item
             $itemsValid = true;
             $itemError = '';
-            foreach($_PUT->items as $index => $item) {
-                if(!isset($item->description) || empty(trim($item->description))) {
+            foreach ($_PUT->items as $index => $item) {
+                if (!isset($item->description) || empty(trim($item->description))) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Description is required';
                     break;
                 }
-                if(!isset($item->amount) || !is_numeric($item->amount)) {
+                if (!isset($item->amount) || !is_numeric($item->amount)) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
                     break;
                 }
-                if(!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
+                if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
                     $itemsValid = false;
                     $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
                     break;
                 }
             }
-            
-            if(!$itemsValid) {
+
+            if (!$itemsValid) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
                 $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total);
-                if($result[0] === 'success'){
+                if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
                     $respuesta = ['status' => false, 'error' => $result[1]];
@@ -225,21 +237,20 @@ switch($_SERVER['REQUEST_METHOD']){
             }
         }
         echo json_encode($respuesta);
-    break;
+        break;
 
     case 'DELETE':
-        $_DELETE= json_decode(file_get_contents('php://input'));
-        if(!isset($_DELETE->id) || is_null($_DELETE->id)){
-            $respuesta= ['status' => false, 'error' => 'Cotization ID is required'];
-        }
-        else{
+        $_DELETE = json_decode(file_get_contents('php://input'));
+        if (!isset($_DELETE->id) || is_null($_DELETE->id)) {
+            $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
+        } else {
             $result = $cotizacionModel->deleteCotizacion($_DELETE->id);
-            if($result[0] === 'success'){
+            if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
         }
         echo json_encode($respuesta);
-    break;
+        break;
 }

@@ -10,76 +10,89 @@ class cotizacionModel
         $this->conexion = Database::getInstance()->getConnection();
     }
 
-    public function getCotizaciones($id = null, $page = 1, $pageSize = 10, $query = null)
+    public function getCotizaciones($id = null)
     {
         try {
             if ($id == null) {
-                // Build WHERE clause for query search
-                $whereClause = "";
-                $params = [];
-                if ($query) {
-                    $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
-                    $params[':query'] = "%{$query}%";
-                }
-                // Get total count
-                $countSql = "SELECT COUNT(*) as total FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause}";
-                $countStmt = $this->conexion->prepare($countSql);
-                if ($query) {
-                    $countStmt->execute($params);
-                } else {
-                    $countStmt->execute();
-                }
-                $countResult = $countStmt->fetch();
-                $total = $countResult['total'];
-                // Calculate offset
-                $offset = ((int)$page - 1) * (int)$pageSize;
-                $pageSize = (int)$pageSize;
-                $offset = (int)$offset;
-                // Fetch paginated results
-                $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause} ORDER BY c.date DESC LIMIT {$pageSize} OFFSET {$offset}";
+                $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id";
                 $stmt = $this->conexion->prepare($sql);
-                if ($query) {
-                    $stmt->execute($params);
-                } else {
-                    $stmt->execute();
-                }
-                $data = $stmt->fetchAll();
-
-                // For each cotizacion, fetch item descriptions and join with line breaks
-                foreach ($data as &$cotizacion) {
-                    $itemsSql = "SELECT description FROM cotizacion_items WHERE cotizacion_id = :cotizacion_id";
-                    $itemsStmt = $this->conexion->prepare($itemsSql);
-                    $itemsStmt->execute([':cotizacion_id' => $cotizacion['id']]);
-                    $descriptions = array_column($itemsStmt->fetchAll(), 'description');
-                    $cotizacion['description'] = implode("\n", $descriptions);
-                }
-                unset($cotizacion);
-
-                return [
-                    'total' => (int)$total,
-                    'page' => (int)$page,
-                    'pageSize' => (int)$pageSize,
-                    'data' => $data
-                ];
+                $stmt->execute();
+                $cotizaciones = $stmt->fetchAll();
             } else {
-                // Get single record by ID with items
                 $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id WHERE c.id = :id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([':id' => $id]);
-                $cotizacion = $stmt->fetch();
-                
-                if ($cotizacion) {
-                    // Get items for this cotizacion
-                    $itemsSql = "SELECT id, description, amount, quantity, subtotal FROM cotizacion_items WHERE cotizacion_id = :cotizacion_id";
-                    $itemsStmt = $this->conexion->prepare($itemsSql);
-                    $itemsStmt->execute([':cotizacion_id' => $id]);
-                    $cotizacion['items'] = $itemsStmt->fetchAll();
-                    return [$cotizacion];
-                }
-                return [];
+                $cotizaciones = $stmt->fetchAll();
             }
+            // Add concatenated description for each cotizacion
+            foreach ($cotizaciones as &$cotizacion) {
+                $cotizacion['description'] = $this->getCotizacionItemsDescription($cotizacion['id']);
+            }
+            return $cotizaciones;
         } catch (PDOException $e) {
-            return ($id == null) ? ['total' => 0, 'page' => 0, 'pageSize' => 0, 'data' => []] : [];
+            return [];
+        }
+    }
+
+    public function getCotizacionItemsDescription($cotizacion_id)
+    {
+        try {
+            $sql = "SELECT description FROM cotizacion_items WHERE cotizacion_id = :cotizacion_id ORDER BY id ASC";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':cotizacion_id' => $cotizacion_id]);
+            $descriptions = array_map(function($row) { return $row['description']; }, $stmt->fetchAll());
+            return implode("\n", $descriptions);
+        } catch (PDOException $e) {
+            return '';
+        }
+    }
+
+    // Pagination support with optional search query
+    public function getCotizacionesPaginated($offset, $limit, $query = null)
+    {
+        try {
+            $whereClause = "";
+            if ($query) {
+                $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
+            }
+            $sql = "SELECT c.*, cl.client_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause} ORDER BY c.date DESC LIMIT :limit OFFSET :offset";
+            $stmt = $this->conexion->prepare($sql);
+            if ($query) {
+                $stmt->bindValue(':query', "%{$query}%", \PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', (int)$limit, \PDO::PARAM_INT);
+            $stmt->bindValue(':offset', (int)$offset, \PDO::PARAM_INT);
+            $stmt->execute();
+            $cotizaciones = $stmt->fetchAll();
+            foreach ($cotizaciones as &$cotizacion) {
+                $cotizacion['description'] = $this->getCotizacionItemsDescription($cotizacion['id']);
+            }
+            return $cotizaciones;
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
+    public function getCotizacionesCount($query = null)
+    {
+        try {
+            $whereClause = "";
+            $params = [];
+            if ($query) {
+                $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
+                $params[':query'] = "%{$query}%";
+            }
+            $sql = "SELECT COUNT(*) as total FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause}";
+            $stmt = $this->conexion->prepare($sql);
+            if ($query) {
+                $stmt->execute($params);
+            } else {
+                $stmt->execute();
+            }
+            $row = $stmt->fetch();
+            return $row ? (int)$row['total'] : 0;
+        } catch (PDOException $e) {
+            return 0;
         }
     }
 
@@ -153,6 +166,7 @@ class cotizacionModel
             // Fetch cotizacion data for PDF (with items)
             $cotizacionData = $this->getCotizaciones($cotizacion_id);
             if ($cotizacionData && isset($cotizacionData[0])) {
+                $cotizacionData[0]['items'] = $this->getCotizacionItems($cotizacion_id);
                 $pdfContent = generateCotizacionPdf($cotizacionData[0], 'S');
                 file_put_contents($pdfFile, $pdfContent);
             }
