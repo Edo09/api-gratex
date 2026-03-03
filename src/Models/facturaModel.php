@@ -81,11 +81,11 @@ class facturaModel
             return [];
         }
     }
-    public function saveFacturaWithItems($no_factura, $date, $client_id, $client_name, $total, $NCF, $items)
+    public function saveFacturaWithItems($no_factura, $date, $client_id, $client_name, $total, $NCF, $items, $user_id = null)
     {
         try {
             $this->conexion->beginTransaction();
-            $sql = "INSERT INTO facturas(no_factura, date, client_id, client_name, total, NCF) VALUES(:no_factura, :date, :client_id, :client_name, :total, :NCF)";
+            $sql = "INSERT INTO facturas(no_factura, date, client_id, client_name, total, NCF, user_id) VALUES(:no_factura, :date, :client_id, :client_name, :total, :NCF, :user_id)";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $no_factura,
@@ -93,7 +93,8 @@ class facturaModel
                 ':client_id' => $client_id,
                 ':client_name' => $client_name,
                 ':total' => $total,
-                ':NCF' => $NCF
+                ':NCF' => $NCF,
+                ':user_id' => $user_id
             ]);
             $factura_id = $this->conexion->lastInsertId();
             $sql_item = "INSERT INTO factura_items(factura_id, description, amount, quantity, subtotal) VALUES(:factura_id, :description, :amount, :quantity, :subtotal)";
@@ -188,10 +189,10 @@ class facturaModel
         }
     }
 
-    public function updateFactura($id, $no_factura, $date, $client_id, $client_name, $total, $NCF)
+    public function updateFactura($id, $no_factura, $date, $client_id, $client_name, $total, $NCF, $user_id = null)
     {
         try {
-            $sql = "UPDATE facturas SET no_factura = :no_factura, date = :date, client_id = :client_id, client_name = :client_name, total = :total, NCF = :NCF WHERE id = :id";
+            $sql = "UPDATE facturas SET no_factura = :no_factura, date = :date, client_id = :client_id, client_name = :client_name, total = :total, NCF = :NCF, user_id = :user_id WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':id' => $id,
@@ -200,7 +201,8 @@ class facturaModel
                 ':client_id' => $client_id,
                 ':client_name' => $client_name,
                 ':total' => $total,
-                ':NCF' => $NCF
+                ':NCF' => $NCF,
+                ':user_id' => $user_id
             ]);
             return ['success', 'Factura updated'];
         } catch (PDOException $e) {
