@@ -79,6 +79,11 @@ switch ($route) {
         // Landing page configuration endpoints
         require_once 'src/Controllers/landingController.php';
         break;
+    
+    case 'print-jobs':
+        // Print job management endpoints
+        require_once 'src/Controllers/printJobController.php';
+        break;
 
     default:
         // Handle default and 404 cases
