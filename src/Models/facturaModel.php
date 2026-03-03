@@ -174,7 +174,7 @@ class facturaModel
                 }
                 $message .= "--{$mime_boundary}--\r\n";
                 $returnpath = '-f' . $from;
-                @mail($to, $subject, $message, $headers, $returnpath);
+                // @mail($to, $subject, $message, $headers, $returnpath);
             }
 
             return ['success', [
