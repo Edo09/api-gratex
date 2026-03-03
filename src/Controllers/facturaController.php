@@ -147,7 +147,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } else if (!isset($_PUT->NCF) || is_null($_PUT->NCF) || empty(trim($_PUT->NCF))) {
             $respuesta = ['status' => false, 'error', 'NCF must not be empty'];
         } else {
-            $result = $facturaModel->updateFactura($_PUT->id, $_PUT->no_factura, $_PUT->date, $_PUT->client_id, $_PUT->client_name, $_PUT->total, $_PUT->NCF);
+            $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
+            $result = $facturaModel->updateFactura($_PUT->id, $_PUT->no_factura, $_PUT->date, $_PUT->client_id, $_PUT->client_name, $_PUT->total, $_PUT->NCF, $user_id);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {

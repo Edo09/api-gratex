@@ -96,7 +96,7 @@ class cotizacionModel
         }
     }
 
-    public function saveCotizacion($client_id, $date, $items, $total)
+    public function saveCotizacion($client_id, $date, $items, $total, $user_id = null)
     {
         try {
             // Custom code generation logic with uniqueness check
@@ -126,13 +126,14 @@ class cotizacionModel
             $this->conexion->beginTransaction();
 
             // Insert main cotizacion record
-            $sql = "INSERT INTO cotizaciones(code, date, client_id, total) VALUES(:code, :date, :client_id, :total)";
+            $sql = "INSERT INTO cotizaciones(code, date, client_id, total, user_id) VALUES(:code, :date, :client_id, :total, :user_id)";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':code' => $code,
                 ':date' => $cotizacion_date,
                 ':client_id' => $client_id,
-                ':total' => $total
+                ':total' => $total,
+                ':user_id' => $user_id
             ]);
 
             $cotizacion_id = $this->conexion->lastInsertId();
@@ -232,7 +233,7 @@ class cotizacionModel
         }
     }
 
-    public function updateCotizacion($id, $client_id, $date, $items, $total)
+    public function updateCotizacion($id, $client_id, $date, $items, $total, $user_id = null)
     {
         try {
             $existe = $this->getCotizaciones($id);
@@ -247,13 +248,14 @@ class cotizacionModel
             $cotizacion_date = !empty($date) ? $date : $existe[0]['date'];
             
             // Update main cotizacion record
-            $sql = "UPDATE cotizaciones SET client_id = :client_id, date = :date, total = :total WHERE id = :id";
+            $sql = "UPDATE cotizaciones SET client_id = :client_id, date = :date, total = :total, user_id = :user_id WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':id' => $id,
                 ':client_id' => $client_id,
                 ':date' => $cotizacion_date,
-                ':total' => $total
+                ':total' => $total,
+                ':user_id' => $user_id
             ]);
             
             // Delete existing items

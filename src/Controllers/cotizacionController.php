@@ -181,7 +181,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
-                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total);
+                $user_id = isset($_POST->user_id) ? $_POST->user_id : null;
+                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total, $user_id);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
@@ -228,7 +229,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
-                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total);
+                $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
+                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total, $user_id);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
