@@ -23,6 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 // Check if this is a PDF request
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isPdfRequest = preg_match('/\/api\/facturas\/(\d+)\/pdf/', $endpoint, $pdfMatches);
+// Preview PDF endpoint
+$isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
@@ -90,6 +92,74 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'POST':
+        // PDF preview endpoint
+        if ($isPreviewRequest) {
+            $_POST = json_decode(file_get_contents('php://input', true));
+            // Validate required fields
+            if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
+                $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+            } else if (!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) === 0) {
+                $respuesta = ['status' => false, 'error' => 'At least one item is required'];
+            } else if (!isset($_POST->ncf) || is_null($_POST->ncf) || empty(trim($_POST->ncf))) {
+                $respuesta = ['status' => false, 'error' => 'NCF is required'];
+            } else {
+                // Convert items to associative arrays
+                $items = array_map(function ($item) {
+                    return (array)$item;
+                }, $_POST->items);
+
+                // Look up client data from clients table
+                require_once(__DIR__ . '/../Models/clientModel.php');
+                $clientModelInstance = new clientModel();
+                $clientData = $clientModelInstance->getClients($_POST->client_id);
+                $client_name = (!empty($clientData) && isset($clientData[0]['client_name'])) ? $clientData[0]['client_name'] : '';
+
+                // Calculate total from items
+                $total = 0;
+                foreach ($items as $item) {
+                    $amount = isset($item['amount']) && is_numeric($item['amount']) ? $item['amount'] : 0;
+                    $quantity = isset($item['quantity']) && is_numeric($item['quantity']) ? $item['quantity'] : 1;
+                    $total += $amount * $quantity;
+                }
+
+                // Prepare a preview factura array
+                $factura = [
+                    'id' => null,
+                    'no_factura' => 'PREVIEW',
+                    'date' => isset($_POST->date) ? $_POST->date : date('Y-m-d'),
+                    'client_id' => $_POST->client_id,
+                    'client_name' => $client_name,
+                    'total' => $total,
+                    'NCF' => $_POST->ncf,
+                    'items' => $items,
+                ];
+
+                // Generate PDF
+                require_once(__DIR__ . '/../Utils/FacturaPdfGenerator.php');
+                $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+                $pdf->setFactura($factura);
+                if (!empty($clientData)) {
+                    $pdf->setClientData($clientData[0]);
+                }
+                $pdfContent = $pdf->generatePdf();
+
+                // Return as base64 JSON
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode([
+                    'status' => true,
+                    'data' => [
+                        'filename' => 'Factura_Preview.pdf',
+                        'content' => base64_encode($pdfContent),
+                        'mime_type' => 'application/pdf'
+                    ]
+                ]);
+                return;
+            }
+            echo json_encode($respuesta);
+            return;
+        }
+
+        // Standard Create Factura
         $_POST = json_decode(file_get_contents('php://input', true));
         // Validate required fields for new structure
         if (!isset($_POST->date) || is_null($_POST->date) || empty(trim($_POST->date))) {
