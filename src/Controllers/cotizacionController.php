@@ -182,7 +182,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
                 $user_id = isset($_POST->user_id) ? $_POST->user_id : null;
-                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total, $user_id);
+                $send_email = isset($_POST->sent_email) && $_POST->sent_email === true;
+                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total, $user_id, $send_email);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
