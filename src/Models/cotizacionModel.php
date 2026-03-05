@@ -248,14 +248,15 @@ class cotizacionModel
             $cotizacion_date = !empty($date) ? $date : $existe[0]['date'];
             
             // Update main cotizacion record
-            $sql = "UPDATE cotizaciones SET client_id = :client_id, date = :date, total = :total, user_id = :user_id WHERE id = :id";
+            $sql = "UPDATE cotizaciones SET client_id = :client_id, date = :date, total = :total, user_id = :user_id, updated_at = :updated_at WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':id' => $id,
                 ':client_id' => $client_id,
                 ':date' => $cotizacion_date,
                 ':total' => $total,
-                ':user_id' => $user_id
+                ':user_id' => $user_id,
+                ':updated_at' => date('Y-m-d H:i:s')
             ]);
             
             // Delete existing items
