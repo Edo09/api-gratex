@@ -240,7 +240,7 @@ class cotizacionModel
         }
     }
 
-    public function updateCotizacion($id, $client_id, $date, $items, $total, $user_id = null)
+    public function updateCotizacion($id, $client_id, $date, $items, $total, $user_id = null, $send_email = false)
     {
         try {
             $existe = $this->getCotizaciones($id);
@@ -287,8 +287,81 @@ class cotizacionModel
             
             // Commit transaction
             $this->conexion->commit();
-            
-            return ['success', 'Cotization updated'];
+
+            if (!$send_email) {
+                return ['success', 'Cotization updated'];
+            }
+
+            // --- PDF Generation and Email Sending ---
+            // Get the cotizacion code
+            $codeSql = "SELECT code FROM cotizaciones WHERE id = :id";
+            $codeStmt = $this->conexion->prepare($codeSql);
+            $codeStmt->execute([':id' => $id]);
+            $codeRow = $codeStmt->fetch();
+            $code = $codeRow ? $codeRow['code'] : $id;
+
+            // 1. Generate PDF and save to cotizaciones/ folder
+            $pdfPath = __DIR__ . '/../../cotizaciones/';
+            if (!is_dir($pdfPath)) {
+                mkdir($pdfPath, 0777, true);
+            }
+            $pdfFile = $pdfPath . 'Cotizacion_' . $code . '.pdf';
+            require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
+            $cotizacionData = $this->getCotizaciones($id);
+            if ($cotizacionData && isset($cotizacionData[0])) {
+                $cotizacionData[0]['items'] = $this->getCotizacionItems($id);
+                $pdfContent = generateCotizacionPdf($cotizacionData[0], 'S');
+                file_put_contents($pdfFile, $pdfContent);
+            }
+
+            // 2. Send email with PDF attached
+            $clientEmail = '';
+            $clientSql = "SELECT email FROM clients WHERE id = :id";
+            $clientStmt = $this->conexion->prepare($clientSql);
+            $clientStmt->execute([':id' => $client_id]);
+            $clientRow = $clientStmt->fetch();
+            if ($clientRow && !empty($clientRow['email'])) {
+                $clientEmail = $clientRow['email'];
+            }
+
+            $to = $clientEmail;
+            $to .= ', edwin@gratex.net';
+            $to .= ', omareogm09@gmail.com';
+            $to .= ', info@gratex.net';
+            $from = "info@gratex.net";
+            $fromName = "Gratex";
+            $subject = "Cotizacion anexa";
+            $file = $pdfFile;
+            $htmlContent = '<p>Estimado cliente:<br/> Su Cotizaci&oacute;n <b>' . $code . '</b> se encuentra anexa a este mensaje.</p>';
+
+            $headers = "From: $fromName <$from>\r\n";
+            $headers .= "MIME-Version: 1.0\r\n";
+            $semi_rand = md5(time());
+            $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
+            $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
+
+            $message = "--{$mime_boundary}\r\n";
+            $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
+            $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
+            $message .= $htmlContent . "\r\n\r\n";
+
+            if (!empty($file) && is_file($file)) {
+                $fp = fopen($file, "rb");
+                $data = fread($fp, filesize($file));
+                fclose($fp);
+                $data = chunk_split(base64_encode($data));
+                $message .= "--{$mime_boundary}\r\n";
+                $message .= "Content-Type: application/octet-stream; name=\"" . basename($file) . "\"\r\n";
+                $message .= "Content-Description: " . basename($file) . "\r\n";
+                $message .= "Content-Disposition: attachment; filename=\"" . basename($file) . "\"; size=" . filesize($file) . ";\r\n";
+                $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
+                $message .= $data . "\r\n\r\n";
+            }
+            $message .= "--{$mime_boundary}--\r\n";
+            $returnpath = "-f" . $from;
+            @mail($to, $subject, $message, $headers, $returnpath);
+
+            return ['success', 'Cotization updated and emailed'];
         } catch (PDOException $e) {
             $this->conexion->rollBack();
             return ['error', 'Failed to update cotization: ' . $e->getMessage()];
