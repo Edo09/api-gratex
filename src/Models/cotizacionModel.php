@@ -98,7 +98,7 @@ class cotizacionModel
         }
     }
 
-    public function saveCotizacion($client_id, $date, $items, $total, $user_id = null)
+    public function saveCotizacion($client_id, $date, $items, $total, $user_id = null, $send_email = false)
     {
         try {
             // Custom code generation logic with uniqueness check
@@ -158,6 +158,11 @@ class cotizacionModel
             $this->conexion->commit();
 
             // --- PDF Generation and Email Sending ---
+            // Only generate PDF and send email if send_email is true
+            if (!$send_email) {
+                return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => 'Cotization saved']];
+            }
+
             // 1. Generate PDF and save to cotizaciones/ folder
             $pdfPath = __DIR__ . '/../../cotizaciones/';
             if (!is_dir($pdfPath)) {
