@@ -27,6 +27,7 @@ class cotizacionModel
             // Add concatenated description for each cotizacion
             foreach ($cotizaciones as &$cotizacion) {
                 $cotizacion['description'] = $this->getCotizacionItemsDescription($cotizacion['id']);
+                $cotizacion['items'] = $this->getCotizacionItems($cotizacion['id']);
             }
             return $cotizaciones;
         } catch (PDOException $e) {
@@ -66,6 +67,7 @@ class cotizacionModel
             $cotizaciones = $stmt->fetchAll();
             foreach ($cotizaciones as &$cotizacion) {
                 $cotizacion['description'] = $this->getCotizacionItemsDescription($cotizacion['id']);
+                $cotizacion['items'] = $this->getCotizacionItems($cotizacion['id']);
             }
             return $cotizaciones;
         } catch (PDOException $e) {
