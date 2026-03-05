@@ -231,7 +231,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
                 $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
-                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total, $user_id);
+                $send_email = isset($_PUT->sent_email) && $_PUT->sent_email === true;
+                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total, $user_id, $send_email);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
                 } else {
