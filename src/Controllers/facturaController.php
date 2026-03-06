@@ -186,7 +186,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             // Generate no_factura: sequential 4-digit number + date (ddmmyy)
             $nextNum = $facturaModel->getFacturasCount() + 1;
             $no_factura = str_pad($nextNum, 4, '0', STR_PAD_LEFT) . '-' . date('dmy');
-            $result = $facturaModel->saveFacturaWithItems($no_factura, $_POST->date, $_POST->client_id, $_POST->client, $total, $_POST->ncf, $_POST->items);
+            $user_id = isset($_POST->user_id) ? $_POST->user_id : null;
+            $result = $facturaModel->saveFacturaWithItems($no_factura, $_POST->date, $_POST->client_id, $_POST->client, $total, $_POST->ncf, $_POST->items, $user_id);
             if ($result[0] === 'success') {
                 // Increment NCF sequence
                 // Assumption: we are using B01 type. In a more complex app, we'd extract type from NCF string.

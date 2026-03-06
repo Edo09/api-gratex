@@ -288,7 +288,8 @@ CREATE TABLE `facturas` (
   `client_id` int(11) DEFAULT NULL,
   `client_name` varchar(100) NOT NULL,
   `total` decimal(10,2) NOT NULL DEFAULT 0.00,
-  `NCF` varchar(50) NOT NULL
+  `NCF` varchar(50) NOT NULL,
+  `user_id` int(11) DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_swedish_ci;
 
 --
