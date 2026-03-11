@@ -41,9 +41,22 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $facturaData = $facturas[0];
             $facturaData['items'] = $facturaModel->getFacturaItems($facturaId);
             require_once(__DIR__ . '/../Utils/FacturaPdfGenerator.php');
+            require_once(__DIR__ . '/../Models/clientModel.php');
+            $clientModelInstance = new clientModel();
+            $clientData = $clientModelInstance->getClients($facturaData['client_id']);
+            try {
             $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
             $pdf->setFactura($facturaData);
+            if (!empty($clientData)) {
+                $pdf->setClientData($clientData[0]);
+            }
             $pdfContent = $pdf->generatePdf();
+            } catch (\Throwable $e) {
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode(['status' => false, 'error' => 'PDF generation failed: ' . $e->getMessage()]);
+                http_response_code(500);
+                break;
+            }
             $format = isset($_GET['format']) ? $_GET['format'] : 'download';
             if ($format === 'base64') {
                 header('content-type: application/json; charset=utf-8');
@@ -204,19 +217,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'PUT':
         $_PUT = json_decode(file_get_contents('php://input', true));
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))) {
-            $respuesta = ['status' => false, 'error', 'Factura ID is empty'];
+            $respuesta = ['status' => false, 'error' => 'Factura ID is empty'];
         } else if (!isset($_PUT->no_factura) || is_null($_PUT->no_factura) || empty(trim($_PUT->no_factura))) {
-            $respuesta = ['status' => false, 'error', 'No Factura must not be empty'];
+            $respuesta = ['status' => false, 'error' => 'No Factura must not be empty'];
         } else if (!isset($_PUT->date) || is_null($_PUT->date) || empty(trim($_PUT->date))) {
-            $respuesta = ['status' => false, 'error', 'Date must not be empty'];
+            $respuesta = ['status' => false, 'error' => 'Date must not be empty'];
         } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id) || empty(trim($_PUT->client_id))) {
-            $respuesta = ['status' => false, 'error', 'Client ID must not be empty'];
+            $respuesta = ['status' => false, 'error' => 'Client ID must not be empty'];
         } else if (!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name))) {
-            $respuesta = ['status' => false, 'error', 'Client Name must not be empty'];
+            $respuesta = ['status' => false, 'error' => 'Client Name must not be empty'];
         } else if (!isset($_PUT->total) || is_null($_PUT->total) || !is_numeric($_PUT->total)) {
-            $respuesta = ['status' => false, 'error', 'Total must be a number'];
+            $respuesta = ['status' => false, 'error' => 'Total must be a number'];
         } else if (!isset($_PUT->NCF) || is_null($_PUT->NCF) || empty(trim($_PUT->NCF))) {
-            $respuesta = ['status' => false, 'error', 'NCF must not be empty'];
+            $respuesta = ['status' => false, 'error' => 'NCF must not be empty'];
         } else {
             $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
             $result = $facturaModel->updateFactura($_PUT->id, $_PUT->no_factura, $_PUT->date, $_PUT->client_id, $_PUT->client_name, $_PUT->total, $_PUT->NCF, $user_id);
@@ -232,7 +245,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'DELETE':
         $_DELETE = json_decode(file_get_contents('php://input', true));
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))) {
-            $respuesta = ['status' => false, 'error', 'Factura ID is empty'];
+            $respuesta = ['status' => false, 'error' => 'Factura ID is empty'];
         } else {
             $result = $facturaModel->deleteFactura($_DELETE->id);
             if ($result[0] === 'success') {
