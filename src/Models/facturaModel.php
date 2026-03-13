@@ -14,12 +14,12 @@ class facturaModel
     {
         try {
             if ($id == null) {
-                $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id";
+                $sql = "SELECT f.*, cl.client_name, cl.company_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute();
                 $facturas = $stmt->fetchAll();
             } else {
-                $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id WHERE f.id = :id";
+                $sql = "SELECT f.*, cl.client_name, cl.company_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id WHERE f.id = :id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([':id' => $id]);
                 $facturas = $stmt->fetchAll();
@@ -230,7 +230,7 @@ class facturaModel
             if ($query) {
                 $whereClause = "WHERE (f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
             }
-            $sql = "SELECT f.*, cl.client_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
+            $sql = "SELECT f.*, cl.client_name, cl.company_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);
             if ($query) {
                 $stmt->bindValue(':query', "%{$query}%", \PDO::PARAM_STR);
