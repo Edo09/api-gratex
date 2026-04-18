@@ -13,3 +13,16 @@ X-API-KEY: 515370b3a6caccf859e862636be6e26e
 GET http://gratex.net/api/clients?id=1
 Content-Type: application/json
 X-API-KEY: 29a393cbea663961ce6771279c8206c3
+
+### Create Client And Send Welcome Email
+POST http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 515370b3a6caccf859e862636be6e26e
+
+{
+	"email": "new.client@example.com",
+	"client_name": "Nuevo Cliente",
+	"company_name": "Gratex Demo",
+	"phone_number": "809-555-0101",
+	"sent_mail": true
+}

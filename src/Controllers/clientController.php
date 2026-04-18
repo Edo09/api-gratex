@@ -8,6 +8,7 @@ header('content-type: application/json; charset=utf-8');
 
 require_once(__DIR__ . '/../Models/clientModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
+require_once(__DIR__ . '/../Utils/WelcomeEmailService.php');
 
 $clientModel = new clientModel();
 $auth = new AuthMiddleware();
@@ -81,6 +82,20 @@ switch($_SERVER['REQUEST_METHOD']){
             $result = $clientModel->saveClient($_POST->email,$_POST->client_name,$_POST->company_name,$_POST->phone_number);
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
+
+                $shouldSendWelcomeEmail = isset($_POST->sent_mail) && filter_var($_POST->sent_mail, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
+                if ($shouldSendWelcomeEmail) {
+                    $mailResult = sendClientWelcomeEmail([
+                        'id' => $result[2] ?? null,
+                        'email' => $_POST->email,
+                        'client_name' => $_POST->client_name,
+                        'company_name' => $_POST->company_name,
+                        'phone_number' => $_POST->phone_number
+                    ]);
+
+                    $respuesta['mail_sent'] = $mailResult['success'];
+                    $respuesta['mail_message'] = $mailResult['message'];
+                }
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }

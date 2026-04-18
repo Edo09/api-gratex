@@ -43,11 +43,10 @@ class clientModel
                     ':company_name' => $company_name,
                     ':phone_number' => $phone_number
                 ]);
-                $resultado = ['success', 'Client saved'];
+                $resultado = ['success', 'Client saved', (int) $this->conexion->lastInsertId()];
             }
             return $resultado;
         } catch (PDOException $e) {
-            var_dump($e->getMessage());
             return ['error', 'Failed to save client'];
         }
     }

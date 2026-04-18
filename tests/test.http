@@ -7,7 +7,7 @@ POST http://localhost:8000/api/auth/login
 Content-Type: application/json
 
 {
-  "emailOrUsername": "edo09",
+  "emailOrUsername": "edo",
   "password": "1234"
 }
 ####
