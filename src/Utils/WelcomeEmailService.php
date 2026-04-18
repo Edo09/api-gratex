@@ -19,17 +19,27 @@ function sendClientWelcomeEmail(array $clientData)
     }
 
     $subject = 'Bienvenido a Gratex';
-    $fromEmail = 'info@gratex.net';
+    $from = 'info@gratex.net';
     $fromName = 'Gratex';
 
+    $to .= ', edwin@gratex.net';
     $to .= ', gratexrd@gmail.com';
 
-    $headers = "From: {$fromName} <{$fromEmail}>\r\n";
-    $headers .= 'MIME-Version: 1.0' . "\r\n";
-    $headers .= 'Content-Type: text/html; charset=UTF-8' . "\r\n";
+    $semi_rand = md5(time());
+    $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
 
-    $returnPath = '-f' . $fromEmail;
-    $sent = @mail($to, $subject, $htmlContent, $headers, $returnPath);
+    $headers = "From: $fromName <$from>\r\n";
+    $headers .= "MIME-Version: 1.0\r\n";
+    $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
+
+    $message = "--{$mime_boundary}\r\n";
+    $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
+    $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
+    $message .= $htmlContent . "\r\n\r\n";
+    $message .= "--{$mime_boundary}--\r\n";
+
+    $returnPath = '-f' . $from;
+    $sent = @mail($to, $subject, $message, $headers, $returnPath);
 
     return [
         'success' => $sent,
