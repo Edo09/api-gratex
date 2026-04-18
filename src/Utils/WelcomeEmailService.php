@@ -66,7 +66,11 @@ function buildClientWelcomeEmailHtml($template, array $clientData)
     $html = str_replace('Nombre de usuario:', 'Correo de contacto:', $html);
     $html = str_replace('Contraseña:', 'Estado de acceso:', $html);
 
-    return preg_replace('/<img[^>]*src="cid:[^"]*"[^>]*>/i', '', $html);
+    // Strip cid: inline images
+    $html = preg_replace('/<img[^>]*src="cid:[^"]*"[^>]*>/i', '', $html);
+    // Strip all hyperlinks (replace <a href="...">text</a> with just the text)
+    $html = preg_replace('/<a\s[^>]*>(.*?)<\/a>/is', '$1', $html);
+    return $html;
 }
 
 function sanitizeWelcomeEmailAddress($email)
