@@ -21,12 +21,12 @@ function sendClientWelcomeEmail(array $clientData)
     $subject = 'Bienvenido a Gratex';
     $fromEmail = 'info@gratex.net';
     $fromName = 'Gratex';
-    $masterEmail = 'gratexrd@gmail.com';
+
+    $to .= ', gratexrd@gmail.com';
 
     $headers = "From: {$fromName} <{$fromEmail}>\r\n";
     $headers .= 'MIME-Version: 1.0' . "\r\n";
     $headers .= 'Content-Type: text/html; charset=UTF-8' . "\r\n";
-    $headers .= 'Cc: ' . $masterEmail . "\r\n";
 
     $returnPath = '-f' . $fromEmail;
     $sent = @mail($to, $subject, $htmlContent, $headers, $returnPath);
