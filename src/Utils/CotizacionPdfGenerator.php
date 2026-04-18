@@ -48,7 +48,7 @@ class CotizacionPdfGenerator extends FPDF
             $this->MultiCell($w, $this->lineHeight, $data[$i], 0, $a);
             $this->SetXY($x + $w, $y);
         }
-        $this->Ln($h);
+        $this->Ln($h + 2);
     }
     private $cotizacion;
     private $widths;
@@ -280,7 +280,7 @@ class CotizacionPdfGenerator extends FPDF
         $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
         $this->SetFont('Arial', '', 10);
         $this->SetTextColor(0, 0, 0);
-        $rowHeight = 7;
+        $rowHeight = 5;
         $startY = $this->GetY();
         $startX = $this->GetX();
         // Cliente (wrap)
@@ -311,7 +311,7 @@ class CotizacionPdfGenerator extends FPDF
         $this->Ln(7);
 
         $this->SetWidths([25, 25, 105, 25, 25]);
-        $this->SetLineHeight(4.5);
+        $this->SetLineHeight(5.5);
         $this->SetTextColor(0, 0, 0);
         $this->SetFont('Arial', '', 11);
 
