@@ -26,17 +26,38 @@ function sendClientWelcomeEmail(array $clientData)
     $to .= ', gratexrd@gmail.com';
 
     $semi_rand = md5(time());
-    $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
+    $mixed_boundary = "==Mixed_Boundary_x{$semi_rand}x";
+    $related_boundary = "==Related_Boundary_x{$semi_rand}x";
+
+    $logoPath = __DIR__ . '/../../logo2020.png';
+    $logoData = is_file($logoPath) ? base64_encode(file_get_contents($logoPath)) : null;
 
     $headers = "From: $fromName <$from>\r\n";
     $headers .= "MIME-Version: 1.0\r\n";
-    $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
+    $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mixed_boundary}\"";
 
-    $message = "--{$mime_boundary}\r\n";
+    // multipart/related wrapper (HTML + inline image)
+    $message = "--{$mixed_boundary}\r\n";
+    $message .= "Content-Type: multipart/related;\r\n boundary=\"{$related_boundary}\"\r\n\r\n";
+
+    // HTML part
+    $message .= "--{$related_boundary}\r\n";
     $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
     $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
     $message .= $htmlContent . "\r\n\r\n";
-    $message .= "--{$mime_boundary}--\r\n";
+
+    // Inline logo image
+    if ($logoData !== null) {
+        $message .= "--{$related_boundary}\r\n";
+        $message .= "Content-Type: image/png; name=\"logo2020.png\"\r\n";
+        $message .= "Content-Transfer-Encoding: base64\r\n";
+        $message .= "Content-ID: <logo>\r\n";
+        $message .= "Content-Disposition: inline; filename=\"logo2020.png\"\r\n\r\n";
+        $message .= chunk_split($logoData) . "\r\n";
+    }
+
+    $message .= "--{$related_boundary}--\r\n\r\n";
+    $message .= "--{$mixed_boundary}--\r\n";
 
     $returnPath = '-f' . $from;
     $sent = @mail($to, $subject, $message, $headers, $returnPath);
@@ -66,8 +87,8 @@ function buildClientWelcomeEmailHtml($template, array $clientData)
     $html = str_replace('Nombre de usuario:', 'Correo de contacto:', $html);
     $html = str_replace('Contraseña:', 'Estado de acceso:', $html);
 
-    // Strip cid: inline images
-    $html = preg_replace('/<img[^>]*src="cid:[^"]*"[^>]*>/i', '', $html);
+    // Strip cid: inline images EXCEPT the logo
+    $html = preg_replace('/<img[^>]*src="cid:(?!logo)[^"]*"[^>]*>/i', '', $html);
     // Strip all hyperlinks (replace <a href="...">text</a> with just the text)
     $html = preg_replace('/<a\s[^>]*>(.*?)<\/a>/is', '$1', $html);
     return $html;
