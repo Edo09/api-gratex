@@ -125,7 +125,7 @@ class facturaModel
                 // Generate PDF and save
                 $pdfPath = __DIR__ . '/../../facturas/';
                 if (!is_dir($pdfPath)) {
-                    mkdir($pdfPath, 0777, true);
+                    mkdir($pdfPath, 0755, true);
                 }
                 $pdfFile = $pdfPath . 'Factura_' . $no_factura . '.pdf';
                 $pdfContent = generateFacturaPdf($facturaForPdf, null, 'S');

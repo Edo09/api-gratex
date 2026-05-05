@@ -24,7 +24,6 @@ class clientModel
             }
             return $stmt->fetchAll();
         } catch (PDOException $e) {
-            var_dump($e->getMessage());
             return [];
         }
     }

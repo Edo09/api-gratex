@@ -166,7 +166,7 @@ class cotizacionModel
             // 1. Generate PDF and save to cotizaciones/ folder
             $pdfPath = __DIR__ . '/../../cotizaciones/';
             if (!is_dir($pdfPath)) {
-                mkdir($pdfPath, 0777, true);
+                mkdir($pdfPath, 0755, true);
             }
             $pdfFile = $pdfPath . 'Cotizacion_' . $code . '.pdf';
             // Use PDF generator utility (generateCotizacionPdf helper)
@@ -190,48 +190,7 @@ class cotizacionModel
                 $clientEmail = $clientRow['email'];
             }
 
-            $to = $clientEmail;
-            $to .= ', edwin@gratex.net';
-            $to .= ', omareogm09@gmail.com';
-            $to .= ', info@gratex.net';
-            $from = "info@gratex.net";
-            $fromName = "Gratex";
-            $subject = "Cotizacion anexa";
-            $file = $pdfFile;
-            $htmlContent = '<p>Estimado cliente:<br/> Su Cotizaci&oacute;n <b>' . $code . '</b> se encuentra anexa a este mensaje.</p>';
-
-            // Prepare headers
-            $headers = "From: $fromName <$from>\r\n";
-            $headers .= "MIME-Version: 1.0\r\n";
-            $semi_rand = md5(time());
-            $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
-            $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
-
-            // Multipart boundary
-            $message = "--{$mime_boundary}\r\n";
-            $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
-            $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
-            $message .= $htmlContent . "\r\n\r\n";
-
-            // Attachment section
-            if (!empty($file) && is_file($file)) {
-                $fp = fopen($file, "rb");
-                $data = fread($fp, filesize($file));
-                fclose($fp);
-                $data = chunk_split(base64_encode($data));
-                $message .= "--{$mime_boundary}\r\n";
-                $message .= "Content-Type: application/octet-stream; name=\"" . basename($file) . "\"\r\n";
-                $message .= "Content-Description: " . basename($file) . "\r\n";
-                $message .= "Content-Disposition: attachment; filename=\"" . basename($file) . "\"; size=" . filesize($file) . ";\r\n";
-                $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-                $message .= $data . "\r\n\r\n";
-            }
-            // End boundary
-            $message .= "--{$mime_boundary}--\r\n";
-            // Return path for the email
-            $returnpath = "-f" . $from;
-            // Send email
-            @mail($to, $subject, $message, $headers, $returnpath);
+            $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
 
             return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => 'Cotization saved and emailed']];
         } catch (PDOException $e) {
@@ -303,7 +262,7 @@ class cotizacionModel
             // 1. Generate PDF and save to cotizaciones/ folder
             $pdfPath = __DIR__ . '/../../cotizaciones/';
             if (!is_dir($pdfPath)) {
-                mkdir($pdfPath, 0777, true);
+                mkdir($pdfPath, 0755, true);
             }
             $pdfFile = $pdfPath . 'Cotizacion_' . $code . '.pdf';
             require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
@@ -324,42 +283,7 @@ class cotizacionModel
                 $clientEmail = $clientRow['email'];
             }
 
-            $to = $clientEmail;
-            $to .= ', edwin@gratex.net';
-            $to .= ', omareogm09@gmail.com';
-            $to .= ', info@gratex.net';
-            $from = "info@gratex.net";
-            $fromName = "Gratex";
-            $subject = "Cotizacion anexa";
-            $file = $pdfFile;
-            $htmlContent = '<p>Estimado cliente:<br/> Su Cotizaci&oacute;n <b>' . $code . '</b> se encuentra anexa a este mensaje.</p>';
-
-            $headers = "From: $fromName <$from>\r\n";
-            $headers .= "MIME-Version: 1.0\r\n";
-            $semi_rand = md5(time());
-            $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
-            $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
-
-            $message = "--{$mime_boundary}\r\n";
-            $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
-            $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
-            $message .= $htmlContent . "\r\n\r\n";
-
-            if (!empty($file) && is_file($file)) {
-                $fp = fopen($file, "rb");
-                $data = fread($fp, filesize($file));
-                fclose($fp);
-                $data = chunk_split(base64_encode($data));
-                $message .= "--{$mime_boundary}\r\n";
-                $message .= "Content-Type: application/octet-stream; name=\"" . basename($file) . "\"\r\n";
-                $message .= "Content-Description: " . basename($file) . "\r\n";
-                $message .= "Content-Disposition: attachment; filename=\"" . basename($file) . "\"; size=" . filesize($file) . ";\r\n";
-                $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
-                $message .= $data . "\r\n\r\n";
-            }
-            $message .= "--{$mime_boundary}--\r\n";
-            $returnpath = "-f" . $from;
-            @mail($to, $subject, $message, $headers, $returnpath);
+            $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
 
             return ['success', 'Cotization updated and emailed'];
         } catch (PDOException $e) {
@@ -407,5 +331,37 @@ class cotizacionModel
             return [];
         }
     }
+
+    private function sendCotizacionPdfEmail(string $clientEmail, string $code, string $pdfFile): void
+    {
+        $to = $clientEmail . ', edwin@gratex.net, omareogm09@gmail.com, info@gratex.net';
+        $from = 'info@gratex.net';
+        $subject = 'Cotizacion anexa';
+        $htmlContent = '<p>Estimado cliente:<br/> Su Cotizaci&oacute;n <b>' . $code . '</b> se encuentra anexa a este mensaje.</p>';
+
+        $mime_boundary = '==Multipart_Boundary_x' . md5(time()) . 'x';
+        $headers = "From: Gratex <{$from}>\r\n";
+        $headers .= "MIME-Version: 1.0\r\n";
+        $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
+
+        $message = "--{$mime_boundary}\r\n";
+        $message .= "Content-Type: text/html; charset=\"UTF-8\"\r\n";
+        $message .= "Content-Transfer-Encoding: 7bit\r\n\r\n";
+        $message .= $htmlContent . "\r\n\r\n";
+
+        if (!empty($pdfFile) && is_file($pdfFile)) {
+            $fp = fopen($pdfFile, 'rb');
+            $data = chunk_split(base64_encode(fread($fp, filesize($pdfFile))));
+            fclose($fp);
+            $message .= "--{$mime_boundary}\r\n";
+            $message .= "Content-Type: application/octet-stream; name=\"" . basename($pdfFile) . "\"\r\n";
+            $message .= "Content-Description: " . basename($pdfFile) . "\r\n";
+            $message .= "Content-Disposition: attachment; filename=\"" . basename($pdfFile) . "\"; size=" . filesize($pdfFile) . ";\r\n";
+            $message .= "Content-Transfer-Encoding: base64\r\n\r\n";
+            $message .= $data . "\r\n\r\n";
+        }
+        $message .= "--{$mime_boundary}--\r\n";
+
+        mail($to, $subject, $message, $headers, '-f' . $from);
+    }
 }
-?>

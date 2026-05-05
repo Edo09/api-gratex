@@ -1,0 +1,35 @@
+### Obtener semilla DGII
+### X-API-KEY es el token interno de nuestra API; el token DGII se usa luego como Authorization: Bearer hacia DGII.
+GET http://localhost:8000/api/facturacion-electronica/autenticacion/semilla?ambiente=testecf
+X-API-KEY: {{api_token}}
+
+### Autenticacion completa: semilla -> firma -> validar semilla
+POST http://localhost:8000/api/facturacion-electronica/autenticacion/token
+X-API-KEY: {{api_token}}
+Content-Type: application/json
+
+{
+  "ambiente": "testecf",
+  "certificate_password": "password-del-certificado"
+}
+
+### Validar semilla ya obtenida en XML
+POST http://localhost:8000/api/facturacion-electronica/autenticacion/validar-semilla
+X-API-KEY: {{api_token}}
+Content-Type: application/json
+
+{
+  "ambiente": "testecf",
+  "certificate_password": "password-del-certificado",
+  "semilla_xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?><SemillaModel xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"><valor>...</valor><fecha>2026-05-05T12:50:25.1304197-04:00</fecha></SemillaModel>"
+}
+
+### Validar semilla firmada previamente
+POST http://localhost:8000/api/facturacion-electronica/autenticacion/validar-semilla
+X-API-KEY: {{api_token}}
+Content-Type: application/json
+
+{
+  "ambiente": "testecf",
+  "signed_xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?><SemillaModel>...</SemillaModel>"
+}
