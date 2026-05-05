@@ -19,19 +19,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (preg_match('/\/api\/auth\/register/', $endpoint)) {
             // Validate required fields
             if (!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email))) {
-                $respuesta = ['error', 'Email is required'];
+                $respuesta = ['success' => false, 'error' => 'Email is required'];
             } else if (!filter_var($_POST->email, FILTER_VALIDATE_EMAIL)) {
-                $respuesta = ['error', 'Invalid email format'];
+                $respuesta = ['success' => false, 'error' => 'Invalid email format'];
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
-                $respuesta = ['error', 'Password is required'];
+                $respuesta = ['success' => false, 'error' => 'Password is required'];
             } else if (strlen($_POST->password) < 4) {
-                $respuesta = ['error', 'Password must be at least 4 characters'];
+                $respuesta = ['success' => false, 'error' => 'Password must be at least 4 characters'];
             } else if (!isset($_POST->name) || is_null($_POST->name) || empty(trim($_POST->name))) {
-                $respuesta = ['error', 'Name is required'];
+                $respuesta = ['success' => false, 'error' => 'Name is required'];
             } else if (!isset($_POST->username) || is_null($_POST->username) || empty(trim($_POST->username))) {
-                $respuesta = ['error', 'Username is required'];
+                $respuesta = ['success' => false, 'error' => 'Username is required'];
             } else if (strlen($_POST->username) < 3) {
-                $respuesta = ['error', 'Username must be at least 3 characters'];
+                $respuesta = ['success' => false, 'error' => 'Username must be at least 3 characters'];
             } else {
                 $register_result = $authModel->registerUser($_POST->email, $_POST->password, $_POST->name, $_POST->username);
                 
@@ -54,9 +54,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Handle login endpoint
         else if (preg_match('/\/api\/auth\/login/', $endpoint)) {
             if (!isset($_POST->emailOrUsername) || is_null($_POST->emailOrUsername) || empty(trim($_POST->emailOrUsername))) {
-                $respuesta = ['error', 'Email or username is required'];
+                $respuesta = ['success' => false, 'error' => 'Email or username is required'];
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
-                $respuesta = ['error', 'Password is required'];
+                $respuesta = ['success' => false, 'error' => 'Password is required'];
             } else {
                 $login_result = $authModel->loginUser($_POST->emailOrUsername, $_POST->password);
                 
@@ -135,13 +135,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Generate token for a user (existing endpoint)
         else if (isset($_POST->action) && $_POST->action == 'generate_token') {
             if (!isset($_POST->user_id) || is_null($_POST->user_id) || empty(trim($_POST->user_id))) {
-                $respuesta = ['error', 'User ID is required'];
+                $respuesta = ['success' => false, 'error' => 'User ID is required'];
             } else {
                 $respuesta = $authModel->createToken($_POST->user_id);
             }
             echo json_encode($respuesta);
         } else {
-            echo json_encode(['error', 'Invalid action']);
+            echo json_encode(['success' => false, 'error' => 'Invalid action']);
         }
         break;
 
@@ -150,9 +150,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (isset($_GET['user_id'])) {
             $user_id = $_GET['user_id'];
             $tokens = $authModel->getUserTokens($user_id);
-            echo json_encode(['success', $tokens]);
+            echo json_encode(['success' => true, 'data' => $tokens]);
         } else {
-            echo json_encode(['error', 'User ID is required']);
+            echo json_encode(['success' => false, 'error' => 'User ID is required']);
         }
         break;
 
@@ -161,7 +161,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         
         // Revoke a token
         if (!isset($_DELETE->token_id) || is_null($_DELETE->token_id) || empty(trim($_DELETE->token_id))) {
-            $respuesta = ['error', 'Token ID is required'];
+            $respuesta = ['success' => false, 'error' => 'Token ID is required'];
         } else {
             $respuesta = $authModel->revokeToken($_DELETE->token_id);
         }
@@ -169,6 +169,6 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     default:
-        echo json_encode(['error', 'Method not allowed']);
+        echo json_encode(['success' => false, 'error' => 'Method not allowed']);
         break;
 }

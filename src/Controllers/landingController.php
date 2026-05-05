@@ -19,7 +19,7 @@ $resource = end($endpoint_parts); // carousel or services
 // Public uploads directory
 $uploadDir = __DIR__ . '/../../public/uploads/';
 if (!file_exists($uploadDir)) {
-    mkdir($uploadDir, 0777, true);
+    mkdir($uploadDir, 0755, true);
 }
 
 switch ($method) {
@@ -106,6 +106,6 @@ switch ($method) {
 
     default:
         http_response_code(405);
-        echo json_encode(['error', 'Method not allowed']);
+        echo json_encode(['success' => false, 'error' => 'Method not allowed']);
         break;
 }
