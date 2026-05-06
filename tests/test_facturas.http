@@ -1,49 +1,93 @@
-### Get first page of facturas (default pageSize=10)
+### Listar facturas paginado
 GET http://localhost:8000/api/facturas?page=1&pageSize=10
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 
-### Get second page of facturas (pageSize=2)
-GET http://localhost:8000/api/facturas?page=2&pageSize=2
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
-
-### Get single factura by id
+### Obtener factura por id
 GET http://localhost:8000/api/facturas?id=1
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 
-### Create a new factura
+### Descargar PDF de una factura
+GET http://localhost:8000/api/facturas/1/pdf
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Consultar estado en DGII de una factura ya emitida
+GET http://localhost:8000/api/facturas/1/estado
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### ============================================================================
+### Emitir e-CF tipo 31 (Credito Fiscal Electronico)
+### Requiere: cliente con RNC, razon_social y direccion configurados.
+### El sistema toma automaticamente el siguiente e-NCF de la secuencia E31.
+### ============================================================================
 POST http://localhost:8000/api/facturas
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
 
 {
-  "no_factura": "FAC_20251224_001",
-  "date": "2025-12-24 09:00:00",
+  "tipo_ecf": "31",
   "client_id": 1,
-  "client_name": "Caron Melley",
-  "total": 2000.00,
-  "NCF": "B0100000006"
+  "fecha_emision": "05-05-2026",
+  "tipo_ingresos": "01",
+  "tipo_pago": 1,
+  "items": [
+    {
+      "nombre_item": "Servicio de consultoria",
+      "descripcion": "Consultoria tecnica mensual",
+      "indicador_facturacion": 1,
+      "indicador_bien_servicio": 2,
+      "cantidad": 1,
+      "precio_unitario": 5000.00
+    },
+    {
+      "nombre_item": "Licencia software",
+      "indicador_facturacion": 1,
+      "indicador_bien_servicio": 1,
+      "cantidad": 2,
+      "precio_unitario": 1500.00
+    }
+  ]
 }
 
-### Update a factura
-PUT http://localhost:8000/api/facturas
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+### Emitir e-CF tipo 32 (Consumo Electronico) - cliente sin RNC permitido
+POST http://localhost:8000/api/facturas
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
 
 {
-  "id": 1,
-  "no_factura": "FAC_20251201_001-EDITED",
-  "date": "2025-12-01 10:00:00",
-  "client_id": 1,
-  "client_name": "Caron Melley",
-  "total": 1550.00,
-  "NCF": "B0100000001"
+  "tipo_ecf": "32",
+  "client_id": 2,
+  "items": [
+    {
+      "nombre_item": "Producto de consumo",
+      "indicador_facturacion": 1,
+      "indicador_bien_servicio": 1,
+      "cantidad": 3,
+      "precio_unitario": 250.00
+    }
+  ]
 }
 
-### Delete a factura
-DELETE http://localhost:8000/api/facturas
-X-API-KEY: 7dce312866dfdbcdde6d07b9cb086c2b
+### Emitir Nota de Credito Electronica (E34) referenciando un e-CF anterior
+POST http://localhost:8000/api/facturas
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
 
 {
-  "id": 1
+  "tipo_ecf": "34",
+  "client_id": 1,
+  "items": [
+    {
+      "nombre_item": "Devolucion parcial",
+      "indicador_facturacion": 1,
+      "indicador_bien_servicio": 2,
+      "cantidad": 1,
+      "precio_unitario": 1000.00
+    }
+  ],
+  "informacion_referencia": {
+    "ncf_modificado": "E310000000001",
+    "rnc_otro_contribuyente": "00109122788",
+    "fecha_ncf_modificado": "05-05-2026",
+    "codigo_modificacion": "1"
+  }
 }

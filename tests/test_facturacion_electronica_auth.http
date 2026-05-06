@@ -1,35 +1,49 @@
-### Obtener semilla DGII
-### X-API-KEY es el token interno de nuestra API; el token DGII se usa luego como Authorization: Bearer hacia DGII.
+### Variables globales:
+###   {{api_token}}        Token interno de nuestra API (X-API-KEY)
+### Configuracion en .env:
+###   DGII_ECF_ENVIRONMENT     Ambiente DGII (testecf | certecf | ecf)
+###   DGII_ECF_CERT_PATH       Ruta del .p12
+###   DGII_ECF_CERT_PASSWORD   Password del certificado
+### Para sobrescribir el .env por peticion, agrega "ambiente" y/o "certificate_password" al body.
+
+### Obtener semilla DGII (usa ambiente del .env)
+GET http://localhost:8000/api/facturacion-electronica/autenticacion/semilla
+X-API-KEY: {{api_token}}
+
+### Obtener semilla forzando ambiente testecf
 GET http://localhost:8000/api/facturacion-electronica/autenticacion/semilla?ambiente=testecf
 X-API-KEY: {{api_token}}
 
-### Autenticacion completa: semilla -> firma -> validar semilla
+### Autenticacion completa: semilla -> firma -> validar semilla (usa .env)
+POST http://localhost:8000/api/facturacion-electronica/autenticacion/token
+X-API-KEY: {{api_token}}
+Content-Type: application/json
+
+{}
+
+### Autenticacion completa sobrescribiendo ambiente
 POST http://localhost:8000/api/facturacion-electronica/autenticacion/token
 X-API-KEY: {{api_token}}
 Content-Type: application/json
 
 {
-  "ambiente": "testecf",
-  "certificate_password": "password-del-certificado"
+  "ambiente": "testecf"
 }
 
-### Validar semilla ya obtenida en XML
+### Validar semilla XML (firma + valida)
 POST http://localhost:8000/api/facturacion-electronica/autenticacion/validar-semilla
 X-API-KEY: {{api_token}}
 Content-Type: application/json
 
 {
-  "ambiente": "testecf",
-  "certificate_password": "password-del-certificado",
   "semilla_xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?><SemillaModel xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:xsd=\"http://www.w3.org/2001/XMLSchema\"><valor>...</valor><fecha>2026-05-05T12:50:25.1304197-04:00</fecha></SemillaModel>"
 }
 
-### Validar semilla firmada previamente
+### Validar semilla ya firmada
 POST http://localhost:8000/api/facturacion-electronica/autenticacion/validar-semilla
 X-API-KEY: {{api_token}}
 Content-Type: application/json
 
 {
-  "ambiente": "testecf",
   "signed_xml": "<?xml version=\"1.0\" encoding=\"utf-8\"?><SemillaModel>...</SemillaModel>"
 }
