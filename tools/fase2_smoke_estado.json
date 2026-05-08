@@ -1,0 +1,33 @@
+[
+    {
+        "caso": "131256432E310000000005",
+        "e_ncf": "E310000000005",
+        "factura_id": 678,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo MontoGravadoI2 del área Totales de la sección Encabezado no es válidoEl campo MontoGravadoI1 del área Totales de la sección Encabezado no coincide con la sumatoria de los valores del detalle gravado con tasa 18% menos descuentos mas recargos.La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [1940]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 678,
+                "e_ncf": "E310000000005",
+                "track_id": "bfd6e585-5d0b-4012-8c3f-3a10db4cb26f",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "bfd6e585-5d0b-4012-8c3f-3a10db4cb26f",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000005",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:52:54 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo MontoGravadoI2 del área Totales de la sección Encabezado no es válidoEl campo MontoGravadoI1 del área Totales de la sección Encabezado no coincide con la sumatoria de los valores del detalle gravado con tasa 18% menos descuentos mas recargos.La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos.",
+                            "codigo": 1940
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

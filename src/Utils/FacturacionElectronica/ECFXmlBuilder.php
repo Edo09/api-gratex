@@ -130,15 +130,53 @@ class ECFXmlBuilder
     private function buildTotales(DOMDocument $doc, array $totales): DOMElement
     {
         $node = $doc->createElement('Totales');
-        $this->appendIfNotEmpty($doc, $node, 'MontoGravadoTotal', $this->money($totales['monto_gravado_total'] ?? null));
-        $this->appendIfNotEmpty($doc, $node, 'MontoGravadoI1', $this->money($totales['monto_gravado_i1'] ?? null));
-        $this->appendIfNotEmpty($doc, $node, 'MontoExento', $this->money($totales['monto_exento'] ?? null));
 
-        $totalItbis = $totales['total_itbis'] ?? null;
-        if ($totalItbis !== null && (float) $totalItbis > 0) {
+        $i1 = (float) ($totales['monto_gravado_i1'] ?? 0);
+        $i2 = (float) ($totales['monto_gravado_i2'] ?? 0);
+        $i3 = (float) ($totales['monto_gravado_i3'] ?? 0);
+        $exento = (float) ($totales['monto_exento'] ?? 0);
+        $itbis1 = (float) ($totales['total_itbis1'] ?? 0);
+        $itbis2 = (float) ($totales['total_itbis2'] ?? 0);
+        $itbis3 = (float) ($totales['total_itbis3'] ?? 0);
+
+        if ($i1 + $i2 + $i3 > 0) {
+            $node->appendChild($doc->createElement('MontoGravadoTotal', $this->money($i1 + $i2 + $i3)));
+        }
+        if ($i1 > 0) {
+            $node->appendChild($doc->createElement('MontoGravadoI1', $this->money($i1)));
+        }
+        if ($i2 > 0) {
+            $node->appendChild($doc->createElement('MontoGravadoI2', $this->money($i2)));
+        }
+        if ($i3 > 0) {
+            $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($i3)));
+        }
+        if ($exento > 0) {
+            $node->appendChild($doc->createElement('MontoExento', $this->money($exento)));
+        }
+
+        if ($i1 > 0) {
             $node->appendChild($doc->createElement('ITBIS1', '18'));
+        }
+        if ($i2 > 0) {
+            $node->appendChild($doc->createElement('ITBIS2', '16'));
+        }
+        if ($i3 > 0) {
+            $node->appendChild($doc->createElement('ITBIS3', '0'));
+        }
+
+        $totalItbis = $itbis1 + $itbis2 + $itbis3;
+        if ($totalItbis > 0) {
             $node->appendChild($doc->createElement('TotalITBIS', $this->money($totalItbis)));
-            $node->appendChild($doc->createElement('TotalITBIS1', $this->money($totalItbis)));
+        }
+        if ($i1 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS1', $this->money($itbis1)));
+        }
+        if ($i2 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS2', $this->money($itbis2)));
+        }
+        if ($i3 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS3', $this->money($itbis3)));
         }
 
         $node->appendChild($doc->createElement('MontoTotal', $this->money($totales['monto_total'] ?? 0)));
