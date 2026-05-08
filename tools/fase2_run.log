@@ -1,105 +1,93 @@
 ==> Leyendo xlsx: samples\131256432-05052026110320.xlsx
 ==> 25 casos en hoja ECF
-==> Excluye: E310000000005 -> 24 casos
+==> Excluye: E320000000011,E320000000012,E320000000013,E320000000015 -> 21 casos
 
-[1/24] 131256432E330000000001 (E33, E330000000001)
-    OK  estado=ENVIADO track=5a0c14d2-5ee7-4aa1-8d2d-4b85a1d560c0 rfce=- flujo=-
+[1/21] 131256432E330000000001 (E33, E330000000001)
+    OK  estado=ENVIADO track=7c9d6278-335f-4591-bc56-1f2ce425439c rfce=- flujo=-
 
-[2/24] 131256432E320000000006 (E32, E320000000006)
-    OK  estado=ENVIADO track=5a4e0361-64c8-4002-b399-ca11e5d767ba rfce=- flujo=-
+[2/21] 131256432E320000000006 (E32, E320000000006)
+    OK  estado=ENVIADO track=04465678-c3cb-4c0b-a43e-a2e4474b7e9e rfce=- flujo=-
 
-[3/24] 131256432E340000000016 (E34, E340000000016)
-    OK  estado=ENVIADO track=847103ed-bfd8-44d3-9665-ec2610763367 rfce=- flujo=-
+[3/21] 131256432E340000000016 (E34, E340000000016)
+    OK  estado=ENVIADO track=c8debc72-7fc3-4d75-8acb-c09548a8db22 rfce=- flujo=-
 
-[4/24] 131256432E340000000002 (E34, E340000000002)
-    OK  estado=ENVIADO track=8447926b-cf4e-4184-a463-efda27693fc8 rfce=- flujo=-
+[4/21] 131256432E340000000002 (E34, E340000000002)
+    OK  estado=ENVIADO track=ed9d41af-cc02-4825-885b-f134ba0fa3fa rfce=- flujo=-
 
-[5/24] 131256432E310000000034 (E31, E310000000034)
-    OK  estado=ENVIADO track=3b6fefb8-1553-4cd5-b3ee-73954d12bf61 rfce=- flujo=-
+[5/21] 131256432E310000000034 (E31, E310000000034)
+    OK  estado=ENVIADO track=d6deb51a-a596-413c-a0c5-9b803d0d8ef8 rfce=- flujo=-
 
-[6/24] 131256432E410000000010 (E41, E410000000010)
-    OK  estado=ENVIADO track=851e479c-04cd-43cf-9eb3-624a913e7836 rfce=- flujo=-
+[6/21] 131256432E410000000010 (E41, E410000000010)
+    OK  estado=ENVIADO track=9f695071-f0b4-42e1-a18d-385c8909776b rfce=- flujo=-
 
-[7/24] 131256432E310000000012 (E31, E310000000012)
-    OK  estado=ENVIADO track=96b2c736-4b62-4294-a417-600e662e7b77 rfce=- flujo=-
+[7/21] 131256432E310000000005 (E31, E310000000005)
+    OK  estado=ENVIADO track=cc5306b2-b54c-492e-a0f7-e7dc325efa20 rfce=- flujo=-
 
-[8/24] 131256432E310000000007 (E31, E310000000007)
-    OK  estado=ENVIADO track=3b35aa8f-1124-43bd-a38b-6064e4e91ae7 rfce=- flujo=-
+[8/21] 131256432E310000000012 (E31, E310000000012)
+    OK  estado=ENVIADO track=b1098967-2d57-414b-9511-121251f1d707 rfce=- flujo=-
 
-[9/24] 131256432E320000000011 (E32, E320000000011)
-    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000011, no existe en nuestra colección de datos."}],"encf":"E320000000011","secuenciaUtilizada":false}
+[9/21] 131256432E310000000007 (E31, E310000000007)
+    OK  estado=ENVIADO track=ba36b090-a19b-4542-b262-0ceb1d1ff8da rfce=- flujo=-
 
-[10/24] 131256432E320000000012 (E32, E320000000012)
-    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000012, no existe en nuestra colección de datos."}],"encf":"E320000000012","secuenciaUtilizada":false}
+[10/21] 131256432E320000000002 (E32, E320000000002)
+    OK  estado=ENVIADO track=b0a1eda8-f64b-4d93-a23e-277fe5388d44 rfce=- flujo=-
 
-[11/24] 131256432E320000000013 (E32, E320000000013)
-    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000013, no existe en nuestra colección de datos."}],"encf":"E320000000013","secuenciaUtilizada":false}
+[11/21] 131256432E410000000007 (E41, E410000000007)
+    OK  estado=ENVIADO track=ecf302b4-8b8d-4518-bd97-a34cb0385c25 rfce=- flujo=-
 
-[12/24] 131256432E320000000015 (E32, E320000000015)
-    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000015, no existe en nuestra colección de datos."}],"encf":"E320000000015","secuenciaUtilizada":false}
+[12/21] 131256432E430000000001 (E43, E430000000001)
+    OK  estado=ENVIADO track=7c61474f-5c5c-4726-8009-9f8d648763ce rfce=- flujo=-
 
-[13/24] 131256432E320000000002 (E32, E320000000002)
-    OK  estado=ENVIADO track=cbb0c60b-60a6-42d6-978a-f0aaa1a2bbf5 rfce=- flujo=-
+[13/21] 131256432E430000000009 (E43, E430000000009)
+    OK  estado=ENVIADO track=ecd148dc-d7f0-47ea-9dca-af5a3e59814c rfce=- flujo=-
 
-[14/24] 131256432E410000000007 (E41, E410000000007)
-    OK  estado=ENVIADO track=c968eb76-c533-47a6-ba11-e3a304cfd94b rfce=- flujo=-
+[14/21] 131256432E440000000007 (E44, E440000000007)
+    OK  estado=ENVIADO track=7b6ee90d-2869-430d-a399-546574bc68f4 rfce=- flujo=-
 
-[15/24] 131256432E430000000001 (E43, E430000000001)
-    OK  estado=ENVIADO track=e4d39d3d-86c1-403c-b678-1ee91fd367d8 rfce=- flujo=-
+[15/21] 131256432E440000000008 (E44, E440000000008)
+    OK  estado=ENVIADO track=0c1afee1-718e-49dc-8dbb-d849da1cd874 rfce=- flujo=-
 
-[16/24] 131256432E430000000009 (E43, E430000000009)
-    OK  estado=ENVIADO track=249cbcde-99db-4c44-aa17-e00ab7996922 rfce=- flujo=-
+[16/21] 131256432E450000000009 (E45, E450000000009)
+    OK  estado=ENVIADO track=91524c7c-d0c2-41c3-abb0-81dace5e29c7 rfce=- flujo=-
 
-[17/24] 131256432E440000000007 (E44, E440000000007)
-    OK  estado=ENVIADO track=39862421-20fd-4166-9ede-7478ae331f67 rfce=- flujo=-
+[17/21] 131256432E450000000011 (E45, E450000000011)
+    OK  estado=ENVIADO track=1126dc5b-2284-4cad-88b9-69ef4629fc15 rfce=- flujo=-
 
-[18/24] 131256432E440000000008 (E44, E440000000008)
-    OK  estado=ENVIADO track=85d8d9f3-b852-487b-b937-71b1f2d945cf rfce=- flujo=-
+[18/21] 131256432E460000000007 (E46, E460000000007)
+    OK  estado=ENVIADO track=9c49bafa-e686-481d-ba1a-b2363550a98c rfce=- flujo=-
 
-[19/24] 131256432E450000000009 (E45, E450000000009)
-    OK  estado=ENVIADO track=2673d6af-55ed-4e36-816a-9ffb5bb24ef4 rfce=- flujo=-
+[19/21] 131256432E460000000011 (E46, E460000000011)
+    OK  estado=ENVIADO track=c18f0bce-52a9-488c-96f8-f183076fccd0 rfce=- flujo=-
 
-[20/24] 131256432E450000000011 (E45, E450000000011)
-    OK  estado=ENVIADO track=6b412249-b2fd-467d-a0c7-386de652f457 rfce=- flujo=-
+[20/21] 131256432E470000000009 (E47, E470000000009)
+    OK  estado=ENVIADO track=418d8ab9-6a91-4997-812b-61032825ce0f rfce=- flujo=-
 
-[21/24] 131256432E460000000007 (E46, E460000000007)
-    OK  estado=ENVIADO track=1b2a4e2c-25d6-40cf-abff-80c4e60b6ad0 rfce=- flujo=-
-
-[22/24] 131256432E460000000011 (E46, E460000000011)
-    OK  estado=ENVIADO track=c2e3d1a0-cc1c-45e9-a817-7653863bf9c9 rfce=- flujo=-
-
-[23/24] 131256432E470000000009 (E47, E470000000009)
-    OK  estado=ENVIADO track=ce154955-7876-496a-b4ae-aeadae3545c4 rfce=- flujo=-
-
-[24/24] 131256432E470000000001 (E47, E470000000001)
-    OK  estado=ENVIADO track=b76f2737-7c36-4483-9142-484189ea7723 rfce=- flujo=-
+[21/21] 131256432E470000000001 (E47, E470000000001)
+    OK  estado=ENVIADO track=47751c3d-77dc-40ee-aa84-1e6b3e710b29 rfce=- flujo=-
 
 ========================================
-Resumen: 20/24 OK, 4 fallaron
+Resumen: 21/21 OK, 0 fallaron
 ========================================
-  + 131256432E330000000001 | E33 | E330000000001 | ENVIADO track=5a0c14d2-5ee7-4aa1-8d2d-4b85a1d560c0
-  + 131256432E320000000006 | E32 | E320000000006 | ENVIADO track=5a4e0361-64c8-4002-b399-ca11e5d767ba
-  + 131256432E340000000016 | E34 | E340000000016 | ENVIADO track=847103ed-bfd8-44d3-9665-ec2610763367
-  + 131256432E340000000002 | E34 | E340000000002 | ENVIADO track=8447926b-cf4e-4184-a463-efda27693fc8
-  + 131256432E310000000034 | E31 | E310000000034 | ENVIADO track=3b6fefb8-1553-4cd5-b3ee-73954d12bf61
-  + 131256432E410000000010 | E41 | E410000000010 | ENVIADO track=851e479c-04cd-43cf-9eb3-624a913e7836
-  + 131256432E310000000012 | E31 | E310000000012 | ENVIADO track=96b2c736-4b62-4294-a417-600e662e7b77
-  + 131256432E310000000007 | E31 | E310000000007 | ENVIADO track=3b35aa8f-1124-43bd-a38b-6064e4e91ae7
-  - 131256432E320000000011 | E32 | E320000000011 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000011, no existe en nuestra colección de datos."}],"encf":"E320000000011","secuenciaUtilizada":false}
-  - 131256432E320000000012 | E32 | E320000000012 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000012, no existe en nuestra colección de datos."}],"encf":"E320000000012","secuenciaUtilizada":false}
-  - 131256432E320000000013 | E32 | E320000000013 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000013, no existe en nuestra colección de datos."}],"encf":"E320000000013","secuenciaUtilizada":false}
-  - 131256432E320000000015 | E32 | E320000000015 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000015, no existe en nuestra colección de datos."}],"encf":"E320000000015","secuenciaUtilizada":false}
-  + 131256432E320000000002 | E32 | E320000000002 | ENVIADO track=cbb0c60b-60a6-42d6-978a-f0aaa1a2bbf5
-  + 131256432E410000000007 | E41 | E410000000007 | ENVIADO track=c968eb76-c533-47a6-ba11-e3a304cfd94b
-  + 131256432E430000000001 | E43 | E430000000001 | ENVIADO track=e4d39d3d-86c1-403c-b678-1ee91fd367d8
-  + 131256432E430000000009 | E43 | E430000000009 | ENVIADO track=249cbcde-99db-4c44-aa17-e00ab7996922
-  + 131256432E440000000007 | E44 | E440000000007 | ENVIADO track=39862421-20fd-4166-9ede-7478ae331f67
-  + 131256432E440000000008 | E44 | E440000000008 | ENVIADO track=85d8d9f3-b852-487b-b937-71b1f2d945cf
-  + 131256432E450000000009 | E45 | E450000000009 | ENVIADO track=2673d6af-55ed-4e36-816a-9ffb5bb24ef4
-  + 131256432E450000000011 | E45 | E450000000011 | ENVIADO track=6b412249-b2fd-467d-a0c7-386de652f457
-  + 131256432E460000000007 | E46 | E460000000007 | ENVIADO track=1b2a4e2c-25d6-40cf-abff-80c4e60b6ad0
-  + 131256432E460000000011 | E46 | E460000000011 | ENVIADO track=c2e3d1a0-cc1c-45e9-a817-7653863bf9c9
-  + 131256432E470000000009 | E47 | E470000000009 | ENVIADO track=ce154955-7876-496a-b4ae-aeadae3545c4
-  + 131256432E470000000001 | E47 | E470000000001 | ENVIADO track=b76f2737-7c36-4483-9142-484189ea7723
+  + 131256432E330000000001 | E33 | E330000000001 | ENVIADO track=7c9d6278-335f-4591-bc56-1f2ce425439c
+  + 131256432E320000000006 | E32 | E320000000006 | ENVIADO track=04465678-c3cb-4c0b-a43e-a2e4474b7e9e
+  + 131256432E340000000016 | E34 | E340000000016 | ENVIADO track=c8debc72-7fc3-4d75-8acb-c09548a8db22
+  + 131256432E340000000002 | E34 | E340000000002 | ENVIADO track=ed9d41af-cc02-4825-885b-f134ba0fa3fa
+  + 131256432E310000000034 | E31 | E310000000034 | ENVIADO track=d6deb51a-a596-413c-a0c5-9b803d0d8ef8
+  + 131256432E410000000010 | E41 | E410000000010 | ENVIADO track=9f695071-f0b4-42e1-a18d-385c8909776b
+  + 131256432E310000000005 | E31 | E310000000005 | ENVIADO track=cc5306b2-b54c-492e-a0f7-e7dc325efa20
+  + 131256432E310000000012 | E31 | E310000000012 | ENVIADO track=b1098967-2d57-414b-9511-121251f1d707
+  + 131256432E310000000007 | E31 | E310000000007 | ENVIADO track=ba36b090-a19b-4542-b262-0ceb1d1ff8da
+  + 131256432E320000000002 | E32 | E320000000002 | ENVIADO track=b0a1eda8-f64b-4d93-a23e-277fe5388d44
+  + 131256432E410000000007 | E41 | E410000000007 | ENVIADO track=ecf302b4-8b8d-4518-bd97-a34cb0385c25
+  + 131256432E430000000001 | E43 | E430000000001 | ENVIADO track=7c61474f-5c5c-4726-8009-9f8d648763ce
+  + 131256432E430000000009 | E43 | E430000000009 | ENVIADO track=ecd148dc-d7f0-47ea-9dca-af5a3e59814c
+  + 131256432E440000000007 | E44 | E440000000007 | ENVIADO track=7b6ee90d-2869-430d-a399-546574bc68f4
+  + 131256432E440000000008 | E44 | E440000000008 | ENVIADO track=0c1afee1-718e-49dc-8dbb-d849da1cd874
+  + 131256432E450000000009 | E45 | E450000000009 | ENVIADO track=91524c7c-d0c2-41c3-abb0-81dace5e29c7
+  + 131256432E450000000011 | E45 | E450000000011 | ENVIADO track=1126dc5b-2284-4cad-88b9-69ef4629fc15
+  + 131256432E460000000007 | E46 | E460000000007 | ENVIADO track=9c49bafa-e686-481d-ba1a-b2363550a98c
+  + 131256432E460000000011 | E46 | E460000000011 | ENVIADO track=c18f0bce-52a9-488c-96f8-f183076fccd0
+  + 131256432E470000000009 | E47 | E470000000009 | ENVIADO track=418d8ab9-6a91-4997-812b-61032825ce0f
+  + 131256432E470000000001 | E47 | E470000000001 | ENVIADO track=47751c3d-77dc-40ee-aa84-1e6b3e710b29
 
 ==> Reporte guardado en: tools\fase2_results.json
