@@ -2,28 +2,28 @@
     {
         "caso": "131256432E310000000005",
         "e_ncf": "E310000000005",
-        "factura_id": 679,
+        "factura_id": 680,
         "estado_dgii": "RECHAZADO",
-        "detalle": "La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [0]",
+        "detalle": "-The element 'IdDoc' has invalid child element 'IndicadorMontoGravado'. List of possible elements expected: 'FechaVencimientoSecuencia'.La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [3]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 679,
+                "factura_id": 680,
                 "e_ncf": "E310000000005",
-                "track_id": "700eb690-9133-4bb5-9192-e72c874060be",
+                "track_id": "f3d647d2-d9df-44b8-ab3f-dbfba6c2f0f9",
                 "estado_dgii": "RECHAZADO",
                 "consulta": {
-                    "trackId": "700eb690-9133-4bb5-9192-e72c874060be",
+                    "trackId": "f3d647d2-d9df-44b8-ab3f-dbfba6c2f0f9",
                     "codigo": "2",
                     "estado": "Rechazado",
                     "rnc": "131256432",
                     "encf": "E310000000005",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 3:56:17 PM",
+                    "fechaRecepcion": "5\/8\/2026 4:02:54 PM",
                     "mensajes": [
                         {
-                            "valor": "La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos.",
-                            "codigo": 0
+                            "valor": "\n-The element 'IdDoc' has invalid child element 'IndicadorMontoGravado'. List of possible elements expected: 'FechaVencimientoSecuencia'.La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos.",
+                            "codigo": 3
                         }
                     ]
                 }
