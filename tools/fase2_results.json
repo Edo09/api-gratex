@@ -1,28 +1,28 @@
 [
     {
-        "caso": "131256432E470000000001",
-        "tipo_ecf": "47",
-        "e_ncf": "E470000000001",
+        "caso": "131256432E410000000010",
+        "tipo_ecf": "41",
+        "e_ncf": "E410000000010",
         "ok": true,
         "dry_run": true,
         "payload": {
-            "tipo_ecf": "47",
-            "e_ncf": "E470000000001",
+            "tipo_ecf": "41",
+            "e_ncf": "E410000000010",
             "client_id": 3511,
             "fecha_emision": "01-04-2020",
             "fecha_vencimiento_secuencia": "31-12-2028",
             "tipo_ingresos": "",
-            "tipo_pago": null,
+            "tipo_pago": "1",
             "fecha_limite_pago": null,
             "termino_pago": null,
             "tipo_cuenta_pago": null,
-            "numero_cuenta_pago": "BB00058745214789635111111111",
-            "banco_pago": "BB0111111111111111111111111111111111111111111111111111111111111111111111111",
+            "numero_cuenta_pago": null,
+            "banco_pago": null,
             "fecha_desde": null,
             "fecha_hasta": null,
             "total_paginas": null,
-            "indicador_monto_gravado": "",
-            "indicador_nota_credito": "",
+            "indicador_monto_gravado": "0",
+            "indicador_nota_credito": null,
             "strict_input": true,
             "emisor": {
                 "rnc": "131256432",
@@ -30,23 +30,23 @@
                 "nombre_comercial": "DOCUMENTOS ELECTRONICOS DE 02",
                 "sucursal": "",
                 "direccion": "AVE. ISABEL AGUIAR NO. 269, ZONA INDUSTRIAL DE HERRERA",
-                "municipio": "010101",
+                "municipio": "010100",
                 "provincia": "010000",
                 "telefono": "809-472-7676",
                 "correo": "DOCUMENTOSELECTRONICOSDE0612345678969789+9000000000000000000000000000001@123.COM",
-                "website": "www.facturaelectronica.com",
+                "website": "",
                 "actividad_economica": "",
                 "codigo_vendedor": "",
-                "numero_factura_interna": "123456789016",
-                "numero_pedido_interno": "123456789016",
+                "numero_factura_interna": "",
+                "numero_pedido_interno": "",
                 "zona_venta": "",
                 "ruta_venta": "",
                 "informacion_adicional": ""
             },
             "comprador": {
-                "rnc": "",
-                "identificador_extranjero": "533445888",
-                "razon_social": "ALEJA FERMIN SANTOS",
+                "rnc": "131880681",
+                "identificador_extranjero": "",
+                "razon_social": "DOCUMENTOS ELECTRONICOS DE 11",
                 "contacto": "",
                 "correo": "",
                 "direccion": "",
@@ -65,26 +65,219 @@
             "items": [
                 {
                     "numero_linea": 1,
-                    "indicador_facturacion": 4,
+                    "indicador_facturacion": 1,
                     "indicador_agente_retencion_percepcion": "1",
-                    "monto_itbis_retenido": "",
-                    "monto_isr_retenido": "48600.00",
-                    "nombre_item": "LICENCIA WYI",
+                    "monto_itbis_retenido": "971.60",
+                    "monto_isr_retenido": "544.78",
+                    "nombre_item": "Servicio Profesional Legislativo",
                     "indicador_bien_servicio": 2,
                     "descripcion": "",
-                    "cantidad": 1,
-                    "cantidad_raw": "1.00",
+                    "cantidad": 15,
+                    "cantidad_raw": "15.00",
+                    "unidad_medida": "23",
+                    "cantidad_referencia": null,
+                    "unidad_referencia": null,
+                    "subcantidades": [],
+                    "grados_alcohol": null,
+                    "precio_unitario_referencia": null,
+                    "fecha_elaboracion": null,
+                    "fecha_vencimiento_item": null,
+                    "precio_unitario": 385,
+                    "precio_unitario_raw": "385.0000",
+                    "descuento_monto": "385.00",
+                    "subdescuentos": [
+                        {
+                            "tipo_sub_descuento": "$",
+                            "monto_sub_descuento": "385.00"
+                        }
+                    ],
+                    "recargo_monto": "57.75",
+                    "subrecargos": [
+                        {
+                            "tipo_sub_recargo": "%",
+                            "sub_recargo_porcentaje": "1.00",
+                            "monto_sub_recargo": "57.75"
+                        }
+                    ],
+                    "impuestos_adicionales": [],
+                    "monto_item": 5447.75,
+                    "monto_item_raw": "5447.75"
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "441.45",
+                    "monto_isr_retenido": "250.25",
+                    "nombre_item": "Asesoria Legal",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "cantidad_raw": "5.00",
                     "unidad_medida": "43",
-                    "precio_unitario": 180000,
-                    "precio_unitario_raw": "180000.00",
-                    "monto_item": 180000,
-                    "monto_item_raw": "180000.00"
+                    "cantidad_referencia": null,
+                    "unidad_referencia": null,
+                    "subcantidades": [],
+                    "grados_alcohol": null,
+                    "precio_unitario_referencia": null,
+                    "fecha_elaboracion": null,
+                    "fecha_vencimiento_item": null,
+                    "precio_unitario": 550,
+                    "precio_unitario_raw": "550.0000",
+                    "descuento_monto": "275.00",
+                    "subdescuentos": [
+                        {
+                            "tipo_sub_descuento": "%",
+                            "sub_descuento_porcentaje": "10.00",
+                            "monto_sub_descuento": "275.00"
+                        }
+                    ],
+                    "recargo_monto": "27.50",
+                    "subrecargos": [
+                        {
+                            "tipo_sub_recargo": "%",
+                            "sub_recargo_porcentaje": "1.00",
+                            "monto_sub_recargo": "27.50"
+                        }
+                    ],
+                    "impuestos_adicionales": [],
+                    "monto_item": 2502.5,
+                    "monto_item_raw": "2502.50"
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "373.05",
+                    "monto_isr_retenido": "212.25",
+                    "nombre_item": "Gestiones Legales",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 9,
+                    "cantidad_raw": "9.00",
+                    "unidad_medida": "13",
+                    "cantidad_referencia": null,
+                    "unidad_referencia": null,
+                    "subcantidades": [],
+                    "grados_alcohol": null,
+                    "precio_unitario_referencia": null,
+                    "fecha_elaboracion": null,
+                    "fecha_vencimiento_item": null,
+                    "precio_unitario": 250,
+                    "precio_unitario_raw": "250.0000",
+                    "descuento_monto": "150.00",
+                    "subdescuentos": [
+                        {
+                            "tipo_sub_descuento": "$",
+                            "monto_sub_descuento": "150.00"
+                        }
+                    ],
+                    "recargo_monto": "22.50",
+                    "subrecargos": [
+                        {
+                            "tipo_sub_recargo": "%",
+                            "sub_recargo_porcentaje": "1.00",
+                            "monto_sub_recargo": "22.50"
+                        }
+                    ],
+                    "impuestos_adicionales": [],
+                    "monto_item": 2122.5,
+                    "monto_item_raw": "2122.50"
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 2,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "647.61",
+                    "monto_isr_retenido": "409.76",
+                    "nombre_item": "Legalizacion de documentos",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 23,
+                    "cantidad_raw": "23.00",
+                    "unidad_medida": "15",
+                    "cantidad_referencia": null,
+                    "unidad_referencia": null,
+                    "subcantidades": [],
+                    "grados_alcohol": null,
+                    "precio_unitario_referencia": null,
+                    "fecha_elaboracion": null,
+                    "fecha_vencimiento_item": null,
+                    "precio_unitario": 185,
+                    "precio_unitario_raw": "185.0000",
+                    "descuento_monto": "200.00",
+                    "subdescuentos": [
+                        {
+                            "tipo_sub_descuento": "$",
+                            "monto_sub_descuento": "200.00"
+                        }
+                    ],
+                    "recargo_monto": "42.55",
+                    "subrecargos": [
+                        {
+                            "tipo_sub_recargo": "%",
+                            "sub_recargo_porcentaje": "1.00",
+                            "monto_sub_recargo": "42.55"
+                        }
+                    ],
+                    "impuestos_adicionales": [],
+                    "monto_item": 4097.55,
+                    "monto_item_raw": "4097.55"
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "132.00",
+                    "monto_isr_retenido": "87.50",
+                    "nombre_item": "Servicios ambulatorio",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 7,
+                    "cantidad_raw": "7.00",
+                    "unidad_medida": "23",
+                    "cantidad_referencia": null,
+                    "unidad_referencia": null,
+                    "subcantidades": [],
+                    "grados_alcohol": null,
+                    "precio_unitario_referencia": null,
+                    "fecha_elaboracion": null,
+                    "fecha_vencimiento_item": null,
+                    "precio_unitario": 125,
+                    "precio_unitario_raw": "125.0000",
+                    "descuento_monto": "8.75",
+                    "subdescuentos": [
+                        {
+                            "tipo_sub_descuento": "%",
+                            "sub_descuento_porcentaje": "1.00",
+                            "monto_sub_descuento": "8.75"
+                        }
+                    ],
+                    "recargo_monto": "8.75",
+                    "subrecargos": [
+                        {
+                            "tipo_sub_recargo": "%",
+                            "sub_recargo_porcentaje": "1.00",
+                            "monto_sub_recargo": "8.75"
+                        }
+                    ],
+                    "impuestos_adicionales": [],
+                    "monto_item": 875,
+                    "monto_item_raw": "875.00"
                 }
             ],
             "totales": {
-                "monto_exento": 180000,
-                "monto_total": 180000,
-                "total_isr_retencion": 48600
+                "monto_gravado_total": 15045.3,
+                "monto_gravado_i1": 10072.75,
+                "monto_gravado_i2": 4972.55,
+                "itbis1": 18,
+                "itbis2": 16,
+                "total_itbis": 2608.7,
+                "total_itbis1": 1813.1,
+                "total_itbis2": 795.61,
+                "monto_total": 17654,
+                "total_itbis_retenido": 2565.7,
+                "total_isr_retencion": 1504.53
             },
             "user_id": 2
         }

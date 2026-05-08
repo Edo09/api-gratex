@@ -86,11 +86,11 @@ class ECFEmissionService
             'website' => $emisor['website'] ?? null,
             'actividad_economica' => $emisor['actividad_economica'] ?? null,
         ];
+        $strictInput = !empty($payload['strict_input']);
         $emisorOverride = is_array($payload['emisor_override'] ?? null) ? $payload['emisor_override'] : [];
-        $emisorMerged = array_merge(
-            $emisorBase,
-            array_filter($emisorOverride, fn($v) => $v !== null && $v !== '')
-        );
+        $emisorMerged = $strictInput
+            ? array_merge($emisorBase, $emisorOverride)
+            : array_merge($emisorBase, array_filter($emisorOverride, fn($v) => $v !== null && $v !== ''));
 
         $xmlData = [
             'tipo_ecf' => $tipoEcf,
