@@ -136,22 +136,34 @@ class ECFEmissionService
         $usaRFCE = $tipoEcf === '32' && $montoTotal < self::RFCE_THRESHOLD;
 
         if ($usaRFCE) {
+            $rfceEmisorOverride = is_array($payload['rfce_emisor_override'] ?? null) ? $payload['rfce_emisor_override'] : [];
+            $rfceCompradorOverride = is_array($payload['rfce_comprador_override'] ?? null) ? $payload['rfce_comprador_override'] : [];
+
+            $rfceEmisor = array_merge(
+                [
+                    'rnc' => $emisorMerged['rnc'],
+                    'razon_social' => $emisorMerged['razon_social'],
+                ],
+                array_filter($rfceEmisorOverride, fn($v) => $v !== null && $v !== '')
+            );
+            $rfceComprador = array_merge(
+                [
+                    'rnc' => $payload['comprador']['rnc'] ?? null,
+                    'identificador_extranjero' => $payload['comprador']['identificador_extranjero'] ?? null,
+                    'razon_social' => $payload['comprador']['razon_social'] ?? null,
+                ],
+                array_filter($rfceCompradorOverride, fn($v) => $v !== null && $v !== '')
+            );
+
             $rfceXmlData = [
                 'tipo_ecf' => '32',
                 'e_ncf' => $eNcf,
                 'tipo_ingresos' => $xmlData['tipo_ingresos'],
                 'tipo_pago' => $xmlData['tipo_pago'],
                 'formas_pago' => $payload['formas_pago'] ?? [],
-                'emisor' => [
-                    'rnc' => $emisor['rnc'],
-                    'razon_social' => $emisor['razon_social'],
-                ],
+                'emisor' => $rfceEmisor,
                 'fecha_emision' => $xmlData['fecha_emision'],
-                'comprador' => [
-                    'rnc' => $payload['comprador']['rnc'] ?? null,
-                    'identificador_extranjero' => $payload['comprador']['identificador_extranjero'] ?? null,
-                    'razon_social' => $payload['comprador']['razon_social'] ?? null,
-                ],
+                'comprador' => $rfceComprador,
                 'totales' => $payload['totales'] ?? [],
                 'codigo_seguridad_ecf' => $codigoSeguridad,
             ];

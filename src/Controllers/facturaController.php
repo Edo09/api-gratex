@@ -156,6 +156,8 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'indicador_nota_credito' => $input['indicador_nota_credito'] ?? null,
         'ambiente' => $input['ambiente'] ?? null,
         'emisor_override' => is_array($input['emisor'] ?? null) ? $input['emisor'] : null,
+        'rfce_emisor_override' => is_array($input['rfce_emisor'] ?? null) ? $input['rfce_emisor'] : null,
+        'rfce_comprador_override' => is_array($input['rfce_comprador'] ?? null) ? $input['rfce_comprador'] : null,
         'comprador' => $comprador,
         'items' => mapItemsForXml($items),
         'totales' => $totales,
