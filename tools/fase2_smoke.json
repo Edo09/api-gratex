@@ -8,24 +8,24 @@
         "response": {
             "status": true,
             "data": {
-                "factura_id": 680,
+                "factura_id": 681,
                 "e_ncf": "E310000000005",
-                "track_id": "f3d647d2-d9df-44b8-ab3f-dbfba6c2f0f9",
+                "track_id": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
                 "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "JL6F1Z",
+                "codigo_seguridad": "OPVIDS",
                 "total": 96282.7,
                 "tipo_ecf": "31",
                 "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:02:54",
+                "fecha_emision_dgii": "2026-05-08 15:11:14",
                 "dgii_response": {
-                    "trackId": "f3d647d2-d9df-44b8-ab3f-dbfba6c2f0f9",
+                    "trackId": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
                     "error": null,
                     "mensaje": null
                 }
             }
         },
-        "factura_id": 680,
-        "track_id": "f3d647d2-d9df-44b8-ab3f-dbfba6c2f0f9",
+        "factura_id": 681,
+        "track_id": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
         "rfce_track_id": null,
         "estado_dgii": "ENVIADO",
         "flujo": null
