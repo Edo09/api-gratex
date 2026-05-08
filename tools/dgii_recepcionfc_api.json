@@ -1,0 +1,131 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "FE Recepcion RFCE API Certificacion",
+    "description": "Web Api para la recepción de Resumen de Facturas de Consumo que contienen las informaciones principales del eCF y su monto es inferior a los RD$250,000.00.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/certecf/RecepcionFC"
+    }
+  ],
+  "paths": {
+    "/api/recepcion/ecf": {
+      "post": {
+        "tags": [
+          "RecepcionFC"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "xml"
+                ],
+                "type": "object",
+                "properties": {
+                  "xml": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              },
+              "encoding": {
+                "xml": {
+                  "style": "form"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Respuesta"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/Respuesta"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "EstadoeCF": {
+        "enum": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "type": "integer",
+        "format": "int32"
+      },
+      "MensajeRespuesta": {
+        "type": "object",
+        "properties": {
+          "codigo": {
+            "type": "string",
+            "nullable": true
+          },
+          "valor": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "Respuesta": {
+        "type": "object",
+        "properties": {
+          "codigo": {
+            "$ref": "#/components/schemas/EstadoeCF"
+          },
+          "estado": {
+            "type": "string",
+            "nullable": true
+          },
+          "mensajes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MensajeRespuesta"
+            },
+            "nullable": true
+          },
+          "encf": {
+            "type": "string",
+            "nullable": true
+          },
+          "secuenciaUtilizada": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "apiKey",
+        "description": "JWT Authorization header usando el esquema Bearer. Ejemplo: \"Authorization: Bearer {token}\"",
+        "name": "Authorization",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "Bearer": [ ]
+    }
+  ]
+}

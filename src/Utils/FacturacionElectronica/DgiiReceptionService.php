@@ -4,12 +4,13 @@ require_once __DIR__ . '/DgiiAuthService.php';
 
 /**
  * Sends signed e-CF XML to DGII reception endpoint and queries status.
- * DGII reception URL pattern (e-CF integro):
- *   {base_url}/{ambiente}/emisionrecepcion/api/recepcion/ecf
- * RFCE summary reception URL pattern (E32 < 250,000 DOP):
- *   https://fc.dgii.gov.do/{ambiente}/recepcionfc/api/recepcion/ecf
- * Status query URL pattern:
- *   {base_url}/{ambiente}/emisionrecepcion/api/consultas/estado?trackId={...}&rnc={...}&encf={...}
+ * URLs verified against DGII Swagger spec at /api-docs/v1/definition.json:
+ *   - Recepcion e-CF integro:
+ *       {base_url}/{ambiente}/Recepcion/api/FacturasElectronicas
+ *   - Recepcion RFCE (resumen E32 < 250,000 DOP):
+ *       https://fc.dgii.gov.do/{ambiente}/RecepcionFC/api/recepcion/ecf
+ *   - Consulta estado:
+ *       {base_url}/{ambiente}/ConsultaResultado/api/Consultas/Estado?trackId=...&rnc=...&encf=...
  */
 class DgiiReceptionService
 {
@@ -28,7 +29,7 @@ class DgiiReceptionService
     public function recibir(string $signedXml, string $bearerToken, array $options = []): array
     {
         $environment = $this->resolveEnvironment($options);
-        $path = sprintf('%s/recepcion/api/recepcion/ecf', $environment);
+        $path = sprintf('%s/Recepcion/api/FacturasElectronicas', $environment);
 
         $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
         $body = $this->buildMultipartBody($boundary, 'xml', 'ecf.xml', 'text/xml', $signedXml);
@@ -64,7 +65,7 @@ class DgiiReceptionService
     {
         $environment = $this->resolveEnvironment($options);
         $baseUrl = rtrim((string) ($options['fc_base_url'] ?? getenv('DGII_FC_BASE_URL') ?: self::DEFAULT_FC_BASE_URL), '/');
-        $url = sprintf('%s/%s/recepcionfc/api/recepcion/ecf', $baseUrl, $environment);
+        $url = sprintf('%s/%s/RecepcionFC/api/recepcion/ecf', $baseUrl, $environment);
 
         $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
         $body = $this->buildMultipartBody($boundary, 'xml', 'rfce.xml', 'text/xml', $signedXml);
@@ -102,7 +103,7 @@ class DgiiReceptionService
             'rnc' => $rnc,
             'encf' => $eNcf,
         ]);
-        $path = sprintf('%s/emisionrecepcion/api/consultas/estado?%s', $environment, $query);
+        $path = sprintf('%s/ConsultaResultado/api/Consultas/Estado?%s', $environment, $query);
 
         $response = $this->auth->consultarEndpointAutenticado(
             'GET',
