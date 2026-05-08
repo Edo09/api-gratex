@@ -144,6 +144,7 @@ class ECFXmlBuilder
             $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) ($item['indicador_bien_servicio'] ?? 2)));
             $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
             $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad'] ?? 1)));
+            $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
             $itemEl->appendChild($doc->createElement('PrecioUnitarioItem', $this->money($item['precio_unitario'] ?? 0)));
             $itemEl->appendChild($doc->createElement('MontoItem', $this->money($item['monto_item'] ?? 0)));
             $detalles->appendChild($itemEl);

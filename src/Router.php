@@ -80,6 +80,27 @@ switch ($route) {
         require_once 'src/Controllers/facturacionElectronicaController.php';
         break;
 
+    case 'ecf':
+        // Public e-CF receiver endpoints registered with DGII:
+        //   /api/ecf/recepcion             -> incoming e-CFs from emisores
+        //   /api/ecf/aprobacion-comercial  -> commercial approvals/rejections
+        //   /api/ecf/autenticacion         -> seed/validate flow (own auth)
+        $sub = strtolower($route_segments[1] ?? '');
+        if ($sub === 'recepcion') {
+            require_once 'src/Controllers/ecfRecepcionController.php';
+        } elseif ($sub === 'aprobacion-comercial' || $sub === 'aprobacioncomercial') {
+            require_once 'src/Controllers/ecfAprobacionComercialController.php';
+        } elseif ($sub === 'autenticacion') {
+            require_once 'src/Controllers/ecfAutenticacionController.php';
+        } else {
+            http_response_code(404);
+            echo json_encode([
+                'status' => false,
+                'error' => 'Sub-ruta no encontrada bajo /api/ecf. Use recepcion, aprobacion-comercial o autenticacion.',
+            ]);
+        }
+        break;
+
     case 'landing':
         // Landing page configuration endpoints
         require_once 'src/Controllers/landingController.php';

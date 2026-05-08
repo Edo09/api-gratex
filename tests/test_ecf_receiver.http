@@ -1,0 +1,60 @@
+### ============================================================================
+### URL Autenticacion (rol receptor electronico)
+### Flujo: GET semilla -> firmar con certificado -> POST validarsemilla
+### ============================================================================
+
+### 1) Obtener semilla (XML)
+GET http://localhost:8000/api/ecf/autenticacion/semilla
+
+### 2) Validar semilla firmada (POST con XML firmado en campo "xml")
+###    El consumidor (DGII u otro emisor) debe firmar el XML semilla con su
+###    certificado y enviarlo aqui. La respuesta contiene el bearer token.
+POST http://localhost:8000/api/ecf/autenticacion/validarsemilla
+Content-Type: multipart/form-data; boundary=----GratexBoundary
+
+------GratexBoundary
+Content-Disposition: form-data; name="xml"; filename="semilla_firmada.xml"
+Content-Type: text/xml
+
+<SemillaModel><valor>VALOR_DE_SEMILLA</valor><fecha>2026-05-07T10:30:00</fecha><Signature>...</Signature></SemillaModel>
+------GratexBoundary--
+
+### ============================================================================
+### URL Recepcion (otro emisor nos envia un e-CF)
+### ============================================================================
+
+### 3) Recibir un e-CF firmado (POST multipart con bearer del paso 2)
+POST http://localhost:8000/api/ecf/recepcion
+Authorization: Bearer TOKEN_DEL_PASO_2
+Content-Type: multipart/form-data; boundary=----GratexBoundary
+
+------GratexBoundary
+Content-Disposition: form-data; name="xml"; filename="ecf.xml"
+Content-Type: text/xml
+
+<ECF>...</ECF>
+------GratexBoundary--
+
+### 4) Consultar estado de un e-CF recibido por trackId
+GET http://localhost:8000/api/ecf/recepcion/TRACK_ID_DEVUELTO
+Authorization: Bearer TOKEN_DEL_PASO_2
+
+### 5) Listar e-CF recibidos
+GET http://localhost:8000/api/ecf/recepcion?page=1&pageSize=20
+Authorization: Bearer TOKEN_DEL_PASO_2
+
+### ============================================================================
+### URL Aprobacion Comercial (un comprador acepta/rechaza un e-CF que emitimos)
+### ============================================================================
+
+### 6) Recibir aprobacion comercial firmada
+POST http://localhost:8000/api/ecf/aprobacion-comercial
+Authorization: Bearer TOKEN_DEL_PASO_2
+Content-Type: multipart/form-data; boundary=----GratexBoundary
+
+------GratexBoundary
+Content-Disposition: form-data; name="xml"; filename="acecf.xml"
+Content-Type: text/xml
+
+<ACECF><RNCEmisor>00109122788</RNCEmisor><eNCF>E310000000001</eNCF><RNCComprador>...</RNCComprador><Estado>1</Estado><Signature>...</Signature></ACECF>
+------GratexBoundary--

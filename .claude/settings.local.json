@@ -9,7 +9,12 @@
       "Bash(openssl pkcs12 *)",
       "Bash(echo \"Exit: $?\")",
       "Bash(php -S localhost:8000 -t .)",
-      "Bash(curl -s -X POST -H \"Content-Type: application/json\" -H \"X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c\" -d '{}' http://localhost:8000/api/facturacion-electronica/autenticacion/token)"
+      "Bash(curl -s -X POST -H \"Content-Type: application/json\" -H \"X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c\" -d '{}' http://localhost:8000/api/facturacion-electronica/autenticacion/token)",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfRecepcionController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAprobacionComercialController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAutenticacionController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\ecfRecibidoModel.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\aprobacionComercialModel.php\")"
     ]
   }
 }

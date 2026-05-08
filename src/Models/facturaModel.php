@@ -303,11 +303,13 @@ class facturaModel
             $sql = 'INSERT INTO facturas
                 (no_factura, date, client_id, client_name, total, NCF, user_id,
                  tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
-                 fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii)
+                 fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
+                 rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta)
                 VALUES
                 (:no_factura, :date, :client_id, :client_name, :total, NULL, :user_id,
                  :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
-                 :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii)';
+                 :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
+                 :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta)';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $factura['no_factura'] ?? $ecf['e_ncf'],
@@ -325,6 +327,10 @@ class facturaModel
                 ':ambiente_dgii' => $ecf['ambiente'] ?? null,
                 ':xml_firmado' => $ecf['signed_xml'] ?? null,
                 ':respuesta_dgii' => isset($ecf['dgii_response']) ? json_encode($ecf['dgii_response']) : null,
+                ':rfce_xml' => $ecf['rfce_xml'] ?? null,
+                ':rfce_track_id' => $ecf['rfce_track_id'] ?? null,
+                ':rfce_estado' => $ecf['rfce_estado'] ?? null,
+                ':rfce_respuesta' => isset($ecf['rfce_response']) ? json_encode($ecf['rfce_response']) : null,
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
 
@@ -382,6 +388,19 @@ class facturaModel
         } catch (PDOException $e) {
             return false;
         }
+    }
+
+    public function getXmlFirmado(int $facturaId, string $type = 'ecf'): ?array
+    {
+        $column = $type === 'rfce' ? 'rfce_xml' : 'xml_firmado';
+        $sql = "SELECT e_ncf, tipo_ecf, {$column} AS xml FROM facturas WHERE id = :id";
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute([':id' => $facturaId]);
+        $row = $stmt->fetch();
+        if (!$row || empty($row['xml'])) {
+            return null;
+        }
+        return $row;
     }
 
     public function getECFData(int $facturaId): ?array

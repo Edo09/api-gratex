@@ -4,13 +4,17 @@ require_once __DIR__ . '/DgiiAuthService.php';
 
 /**
  * Sends signed e-CF XML to DGII reception endpoint and queries status.
- * DGII reception URL pattern:
+ * DGII reception URL pattern (e-CF integro):
  *   {base_url}/{ambiente}/emisionrecepcion/api/recepcion/ecf
+ * RFCE summary reception URL pattern (E32 < 250,000 DOP):
+ *   https://fc.dgii.gov.do/{ambiente}/recepcionfc/api/recepcion/ecf
  * Status query URL pattern:
  *   {base_url}/{ambiente}/emisionrecepcion/api/consultas/estado?trackId={...}&rnc={...}&encf={...}
  */
 class DgiiReceptionService
 {
+    private const DEFAULT_FC_BASE_URL = 'https://fc.dgii.gov.do';
+
     private DgiiAuthService $auth;
 
     public function __construct(?DgiiAuthService $auth = null)
@@ -37,6 +41,42 @@ class DgiiReceptionService
         $response = $this->auth->consultarEndpointAutenticado(
             'POST',
             $path,
+            $bearerToken,
+            $body,
+            $options,
+            $extraHeaders
+        );
+
+        return [
+            'status_code' => $response['status_code'],
+            'data' => $response['data'],
+            'raw_body' => $response['body'],
+            'endpoint' => $response['endpoint'],
+        ];
+    }
+
+    /**
+     * Sends a signed RFCE (Resumen de Factura de Consumo Electronica) to the
+     * DGII RecepcionFC service hosted on https://fc.dgii.gov.do. Required for
+     * any E32 with monto_total < 250,000 DOP.
+     */
+    public function recibirResumen(string $signedXml, string $bearerToken, array $options = []): array
+    {
+        $environment = $this->resolveEnvironment($options);
+        $baseUrl = rtrim((string) ($options['fc_base_url'] ?? getenv('DGII_FC_BASE_URL') ?: self::DEFAULT_FC_BASE_URL), '/');
+        $url = sprintf('%s/%s/recepcionfc/api/recepcion/ecf', $baseUrl, $environment);
+
+        $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
+        $body = $this->buildMultipartBody($boundary, 'xml', 'rfce.xml', 'text/xml', $signedXml);
+
+        $extraHeaders = [
+            'Content-Type: multipart/form-data; boundary=' . $boundary,
+            'Content-Length: ' . strlen($body),
+        ];
+
+        $response = $this->auth->consultarEndpointAutenticado(
+            'POST',
+            $url,
             $bearerToken,
             $body,
             $options,

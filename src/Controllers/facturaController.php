@@ -25,6 +25,7 @@ $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isPdfRequest = preg_match('/\/api\/facturas\/(\d+)\/pdf/', $endpoint, $pdfMatches);
 $isEstadoRequest = preg_match('/\/api\/facturas\/(\d+)\/estado/', $endpoint, $estadoMatches);
 $isReenviarRequest = preg_match('/\/api\/facturas\/(\d+)\/reenviar/', $endpoint, $reenviarMatches);
+$isXmlRequest = preg_match('/\/api\/facturas\/(\d+)\/xml/', $endpoint, $xmlMatches);
 $isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
@@ -35,6 +36,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         if ($isEstadoRequest) {
             handleConsultarEstado((int) $estadoMatches[1], $facturaModel);
+            break;
+        }
+        if ($isXmlRequest) {
+            handleFacturaXml((int) $xmlMatches[1], $facturaModel);
             break;
         }
         if (isset($_GET['id'])) {
@@ -130,6 +135,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 
     $payload = [
         'tipo_ecf' => $tipoEcf,
+        'e_ncf' => $input['e_ncf'] ?? null,
         'fecha_emision' => $input['fecha_emision'] ?? date('d-m-Y'),
         'tipo_ingresos' => $input['tipo_ingresos'] ?? '01',
         'tipo_pago' => $input['tipo_pago'] ?? 1,
@@ -237,6 +243,39 @@ function handlePreview(clientModel $clientModel): void
     respond(false, 'Preview no implementado en el flujo e-CF.', 501);
 }
 
+function handleFacturaXml(int $facturaId, facturaModel $facturaModel): void
+{
+    $type = ($_GET['type'] ?? 'ecf') === 'rfce' ? 'rfce' : 'ecf';
+    $row = $facturaModel->getXmlFirmado($facturaId, $type);
+    if ($row === null) {
+        respond(false, $type === 'rfce'
+            ? 'Esta factura no tiene RFCE (no es E32 < 250,000 o no se ha emitido).'
+            : 'Factura no tiene XML firmado.', 404);
+        return;
+    }
+
+    $filenameBase = $row['e_ncf'] ?? ('factura_' . $facturaId);
+    $suffix = $type === 'rfce' ? '_RFCE' : '';
+    $format = $_GET['format'] ?? 'download';
+
+    if ($format === 'base64') {
+        echo json_encode([
+            'status' => true,
+            'data' => [
+                'filename' => $filenameBase . $suffix . '.xml',
+                'content' => base64_encode($row['xml']),
+                'mime_type' => 'application/xml',
+            ],
+        ]);
+        return;
+    }
+
+    header('Content-Type: application/xml; charset=utf-8');
+    header('Content-Disposition: attachment; filename="' . $filenameBase . $suffix . '.xml"');
+    header('Content-Length: ' . strlen($row['xml']));
+    echo $row['xml'];
+}
+
 function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientModel $clientModel): void
 {
     $facturas = $facturaModel->getFacturas($facturaId);
@@ -331,6 +370,7 @@ function mapItemsForXml(array $items): array
             'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 2),
             'descripcion' => (string) ($raw['descripcion'] ?? $raw['description'] ?? ''),
             'cantidad' => $cantidad,
+            'unidad_medida' => isset($raw['unidad_medida']) ? (string) $raw['unidad_medida'] : '',
             'precio_unitario' => $precio,
             'monto_item' => $monto,
             'itbis_amount' => $itbis,
