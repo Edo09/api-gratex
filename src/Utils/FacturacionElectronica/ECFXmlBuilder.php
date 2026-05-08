@@ -97,10 +97,10 @@ class ECFXmlBuilder
             ));
         }
 
-        if ($cfg['ind_monto_gravado']) {
+        if ($cfg['ind_monto_gravado'] && isset($data['indicador_monto_gravado']) && $data['indicador_monto_gravado'] !== '') {
             $idDoc->appendChild($doc->createElement(
                 'IndicadorMontoGravado',
-                (string) ($data['indicador_monto_gravado'] ?? '0')
+                (string) $data['indicador_monto_gravado']
             ));
         }
 
@@ -277,45 +277,49 @@ class ECFXmlBuilder
         $itbis3 = in_array(3, $cfg['rates'], true) ? (float) ($totales['total_itbis3'] ?? 0) : 0;
         $exento = $cfg['exento'] ? (float) ($totales['monto_exento'] ?? 0) : 0;
 
-        if ($cfg['gravado'] && ($i1 + $i2 + $i3) > 0) {
+        if ($cfg['gravado'] && $this->hasTotal($totales, 'monto_gravado_total')) {
+            $node->appendChild($doc->createElement('MontoGravadoTotal', $this->money($totales['monto_gravado_total'])));
+        } elseif ($cfg['gravado'] && ($i1 + $i2 + $i3) > 0) {
             $node->appendChild($doc->createElement('MontoGravadoTotal', $this->money($i1 + $i2 + $i3)));
         }
-        if ($cfg['gravado'] && $i1 > 0) {
-            $node->appendChild($doc->createElement('MontoGravadoI1', $this->money($i1)));
+        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i1') || $i1 > 0)) {
+            $node->appendChild($doc->createElement('MontoGravadoI1', $this->money($totales['monto_gravado_i1'] ?? $i1)));
         }
-        if ($cfg['gravado'] && $i2 > 0) {
-            $node->appendChild($doc->createElement('MontoGravadoI2', $this->money($i2)));
+        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i2') || $i2 > 0)) {
+            $node->appendChild($doc->createElement('MontoGravadoI2', $this->money($totales['monto_gravado_i2'] ?? $i2)));
         }
-        if ($cfg['gravado'] && $i3 > 0) {
-            $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($i3)));
+        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i3') || $i3 > 0)) {
+            $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($totales['monto_gravado_i3'] ?? $i3)));
         }
-        if ($exento > 0) {
+        if ($this->hasTotal($totales, 'monto_exento') || $exento > 0) {
             $node->appendChild($doc->createElement('MontoExento', $this->money($exento)));
         }
 
-        if ($i1 > 0) {
-            $node->appendChild($doc->createElement('ITBIS1', '18'));
+        if ($this->hasTotal($totales, 'itbis1') || $i1 > 0) {
+            $node->appendChild($doc->createElement('ITBIS1', (string) ($totales['itbis1'] ?? '18')));
         }
-        if ($i2 > 0) {
-            $node->appendChild($doc->createElement('ITBIS2', '16'));
+        if ($this->hasTotal($totales, 'itbis2') || $i2 > 0) {
+            $node->appendChild($doc->createElement('ITBIS2', (string) ($totales['itbis2'] ?? '16')));
         }
-        if ($i3 > 0) {
-            $node->appendChild($doc->createElement('ITBIS3', '0'));
+        if ($this->hasTotal($totales, 'itbis3') || $i3 > 0) {
+            $node->appendChild($doc->createElement('ITBIS3', (string) ($totales['itbis3'] ?? '0')));
         }
 
         $totalItbis = $itbis1 + $itbis2 + $itbis3;
-        if ($totalItbis > 0) {
-            $node->appendChild($doc->createElement('TotalITBIS', $this->money($totalItbis)));
+        if ($this->hasTotal($totales, 'total_itbis') || $totalItbis > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS', $this->money($totales['total_itbis'] ?? $totalItbis)));
         }
-        if ($i1 > 0) {
-            $node->appendChild($doc->createElement('TotalITBIS1', $this->money($itbis1)));
+        if ($this->hasTotal($totales, 'total_itbis1') || $i1 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS1', $this->money($totales['total_itbis1'] ?? $itbis1)));
         }
-        if ($i2 > 0) {
-            $node->appendChild($doc->createElement('TotalITBIS2', $this->money($itbis2)));
+        if ($this->hasTotal($totales, 'total_itbis2') || $i2 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS2', $this->money($totales['total_itbis2'] ?? $itbis2)));
         }
-        if ($i3 > 0) {
-            $node->appendChild($doc->createElement('TotalITBIS3', $this->money($itbis3)));
+        if ($this->hasTotal($totales, 'total_itbis3') || $i3 > 0) {
+            $node->appendChild($doc->createElement('TotalITBIS3', $this->money($totales['total_itbis3'] ?? $itbis3)));
         }
+        $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoAdicional', $totales['monto_impuesto_adicional'] ?? null);
+        $this->appendImpuestosAdicionales($doc, $node, $totales['impuestos_adicionales'] ?? []);
 
         $node->appendChild($doc->createElement('MontoTotal', $this->money($totales['monto_total'] ?? 0)));
 
@@ -351,7 +355,23 @@ class ECFXmlBuilder
             $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
             $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad_raw'] ?? $item['cantidad'] ?? 1)));
             $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
+            $this->appendNumberIfSet($doc, $itemEl, 'CantidadReferencia', $item['cantidad_referencia'] ?? null);
+            $this->appendIfNotEmpty($doc, $itemEl, 'UnidadReferencia', $item['unidad_referencia'] ?? '');
+            $this->appendSubcantidades($doc, $itemEl, $item['subcantidades'] ?? []);
+            $this->appendNumberIfSet($doc, $itemEl, 'GradosAlcohol', $item['grados_alcohol'] ?? null);
+            $this->appendNumberIfSet($doc, $itemEl, 'PrecioUnitarioReferencia', $item['precio_unitario_referencia'] ?? null);
+            if (!empty($item['fecha_elaboracion'])) {
+                $itemEl->appendChild($doc->createElement('FechaElaboracion', $this->formatDate($item['fecha_elaboracion'])));
+            }
+            if (!empty($item['fecha_vencimiento_item'])) {
+                $itemEl->appendChild($doc->createElement('FechaVencimientoItem', $this->formatDate($item['fecha_vencimiento_item'])));
+            }
             $itemEl->appendChild($doc->createElement('PrecioUnitarioItem', $this->price($item['precio_unitario_raw'] ?? $item['precio_unitario'] ?? 0)));
+            $this->appendNumberIfSet($doc, $itemEl, 'DescuentoMonto', $item['descuento_monto'] ?? null);
+            $this->appendSubDescuentos($doc, $itemEl, $item['subdescuentos'] ?? []);
+            $this->appendNumberIfSet($doc, $itemEl, 'RecargoMonto', $item['recargo_monto'] ?? null);
+            $this->appendSubRecargos($doc, $itemEl, $item['subrecargos'] ?? []);
+            $this->appendItemImpuestosAdicionales($doc, $itemEl, $item['impuestos_adicionales'] ?? []);
             $itemEl->appendChild($doc->createElement('MontoItem', $this->money($item['monto_item_raw'] ?? $item['monto_item'] ?? 0)));
             $detalles->appendChild($itemEl);
         }
@@ -378,6 +398,80 @@ class ECFXmlBuilder
         $itemEl->appendChild($retencion);
     }
 
+    private function appendSubcantidades(DOMDocument $doc, DOMElement $itemEl, array $subcantidades): void
+    {
+        if ($subcantidades === []) return;
+        $tabla = $doc->createElement('TablaSubcantidad');
+        foreach (array_slice($subcantidades, 0, 5) as $sub) {
+            if (!is_array($sub)) continue;
+            $node = $doc->createElement('SubcantidadItem');
+            $this->appendNumberIfSet($doc, $node, 'Subcantidad', $sub['subcantidad'] ?? null);
+            $this->appendIfNotEmpty($doc, $node, 'CodigoSubcantidad', $sub['codigo_subcantidad'] ?? '');
+            if ($node->childNodes->length > 0) $tabla->appendChild($node);
+        }
+        if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
+    }
+
+    private function appendSubDescuentos(DOMDocument $doc, DOMElement $itemEl, array $subdescuentos): void
+    {
+        if ($subdescuentos === []) return;
+        $tabla = $doc->createElement('TablaSubDescuento');
+        foreach (array_slice($subdescuentos, 0, 12) as $sub) {
+            if (!is_array($sub)) continue;
+            $node = $doc->createElement('SubDescuento');
+            $this->appendIfNotEmpty($doc, $node, 'TipoSubDescuento', $sub['tipo_sub_descuento'] ?? '');
+            $this->appendNumberIfSet($doc, $node, 'SubDescuentoPorcentaje', $sub['sub_descuento_porcentaje'] ?? null);
+            $this->appendNumberIfSet($doc, $node, 'MontoSubDescuento', $sub['monto_sub_descuento'] ?? null);
+            if ($node->childNodes->length > 0) $tabla->appendChild($node);
+        }
+        if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
+    }
+
+    private function appendSubRecargos(DOMDocument $doc, DOMElement $itemEl, array $subrecargos): void
+    {
+        if ($subrecargos === []) return;
+        $tabla = $doc->createElement('TablaSubRecargo');
+        foreach (array_slice($subrecargos, 0, 12) as $sub) {
+            if (!is_array($sub)) continue;
+            $node = $doc->createElement('SubRecargo');
+            $this->appendIfNotEmpty($doc, $node, 'TipoSubRecargo', $sub['tipo_sub_recargo'] ?? '');
+            $this->appendNumberIfSet($doc, $node, 'SubRecargoPorcentaje', $sub['sub_recargo_porcentaje'] ?? null);
+            $this->appendNumberIfSet($doc, $node, 'MontoSubRecargo', $sub['monto_sub_recargo'] ?? null);
+            if ($node->childNodes->length > 0) $tabla->appendChild($node);
+        }
+        if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
+    }
+
+    private function appendItemImpuestosAdicionales(DOMDocument $doc, DOMElement $itemEl, array $impuestos): void
+    {
+        if ($impuestos === []) return;
+        $tabla = $doc->createElement('TablaImpuestoAdicional');
+        foreach (array_slice($impuestos, 0, 2) as $imp) {
+            if (!is_array($imp)) continue;
+            $node = $doc->createElement('ImpuestoAdicional');
+            $this->appendIfNotEmpty($doc, $node, 'TipoImpuesto', $imp['tipo_impuesto'] ?? '');
+            if ($node->childNodes->length > 0) $tabla->appendChild($node);
+        }
+        if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
+    }
+
+    private function appendImpuestosAdicionales(DOMDocument $doc, DOMElement $totales, array $impuestos): void
+    {
+        if ($impuestos === []) return;
+        $tabla = $doc->createElement('ImpuestosAdicionales');
+        foreach (array_slice($impuestos, 0, 20) as $imp) {
+            if (!is_array($imp)) continue;
+            $node = $doc->createElement('ImpuestoAdicional');
+            $this->appendIfNotEmpty($doc, $node, 'TipoImpuesto', $imp['tipo_impuesto'] ?? '');
+            $this->appendMoneyIfSet($doc, $node, 'TasaImpuestoAdicional', $imp['tasa_impuesto_adicional'] ?? null);
+            $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoSelectivoConsumoEspecifico', $imp['monto_impuesto_selectivo_consumo_especifico'] ?? null);
+            $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoSelectivoConsumoAdvalorem', $imp['monto_impuesto_selectivo_consumo_advalorem'] ?? null);
+            $this->appendMoneyIfSet($doc, $node, 'OtrosImpuestosAdicionales', $imp['otros_impuestos_adicionales'] ?? null);
+            if ($node->childNodes->length > 0) $tabla->appendChild($node);
+        }
+        if ($tabla->childNodes->length > 0) $totales->appendChild($tabla);
+    }
+
     private function buildInformacionReferencia(DOMDocument $doc, array $ref): DOMElement
     {
         $node = $doc->createElement('InformacionReferencia');
@@ -387,6 +481,7 @@ class ECFXmlBuilder
             $node->appendChild($doc->createElement('FechaNCFModificado', $this->formatDate($ref['fecha_ncf_modificado'])));
         }
         $this->appendIfNotEmpty($doc, $node, 'CodigoModificacion', $ref['codigo_modificacion'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'RazonModificacion', $ref['razon_modificacion'] ?? '');
         return $node;
     }
 
@@ -413,6 +508,19 @@ class ECFXmlBuilder
             return;
         }
         $parent->appendChild($doc->createElement($name, $this->money($value)));
+    }
+
+    private function appendNumberIfSet(DOMDocument $doc, DOMElement $parent, string $name, $value): void
+    {
+        if ($value === null || $value === '') {
+            return;
+        }
+        $parent->appendChild($doc->createElement($name, (string) $value));
+    }
+
+    private function hasTotal(array $totales, string $key): bool
+    {
+        return array_key_exists($key, $totales) && $totales[$key] !== null && $totales[$key] !== '';
     }
 
     private function el(DOMDocument $doc, string $name, string $value): DOMElement

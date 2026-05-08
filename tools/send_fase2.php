@@ -217,8 +217,8 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'fecha_desde' => blankToNull($row['FechaDesde'] ?? null),
         'fecha_hasta' => blankToNull($row['FechaHasta'] ?? null),
         'total_paginas' => blankToNull($row['TotalPaginas'] ?? null),
-        'indicador_monto_gravado' => $row['IndicadorMontoGravado'] ?? null,
-        'indicador_nota_credito' => $row['IndicadorNotaCredito'] ?? null,
+        'indicador_monto_gravado' => blankToNull($row['IndicadorMontoGravado'] ?? null),
+        'indicador_nota_credito' => blankToNull($row['IndicadorNotaCredito'] ?? null),
         'strict_input' => true,
         'emisor' => [
             'rnc' => $row['RNCEmisor'] ?? null,
@@ -268,9 +268,10 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
     if (!empty($row['NCFModificado'])) {
         $payload['informacion_referencia'] = [
             'ncf_modificado' => $row['NCFModificado'],
-            'rnc_otro_contribuyente' => $row['RNCComprador'] ?? null,
+            'rnc_otro_contribuyente' => blankToNull($row['RNCOtroContribuyente'] ?? null),
             'fecha_ncf_modificado' => $row['FechaNCFModificado'] ?? null,
             'codigo_modificacion' => $row['CodigoModificacion'] ?? null,
+            'razon_modificacion' => blankToNull($row['RazonModificacion'] ?? null),
         ];
     }
 
@@ -309,11 +310,62 @@ function extractItems(array $row): array
             'cantidad' => (float) ($row["CantidadItem[$i]"] ?? 1),
             'cantidad_raw' => $row["CantidadItem[$i]"] ?? null,
             'unidad_medida' => $row["UnidadMedida[$i]"] ?? '',
+            'cantidad_referencia' => blankToNull($row["CantidadReferencia[$i]"] ?? null),
+            'unidad_referencia' => blankToNull($row["UnidadReferencia[$i]"] ?? null),
+            'subcantidades' => extractNestedRows($row, 'Subcantidad', $i, [
+                'Subcantidad' => 'subcantidad',
+                'CodigoSubcantidad' => 'codigo_subcantidad',
+            ]),
+            'grados_alcohol' => blankToNull($row["GradosAlcohol[$i]"] ?? null),
+            'precio_unitario_referencia' => blankToNull($row["PrecioUnitarioReferencia[$i]"] ?? null),
+            'fecha_elaboracion' => blankToNull($row["FechaElaboracion[$i]"] ?? null),
+            'fecha_vencimiento_item' => blankToNull($row["FechaVencimientoItem[$i]"] ?? null),
             'precio_unitario' => (float) ($row["PrecioUnitarioItem[$i]"] ?? 0),
             'precio_unitario_raw' => $row["PrecioUnitarioItem[$i]"] ?? null,
+            'descuento_monto' => blankToNull($row["DescuentoMonto[$i]"] ?? null),
+            'subdescuentos' => extractNestedRows($row, 'SubDescuento', $i, [
+                'TipoSubDescuento' => 'tipo_sub_descuento',
+                'SubDescuentoPorcentaje' => 'sub_descuento_porcentaje',
+                'MontoSubDescuento' => 'monto_sub_descuento',
+            ]),
+            'recargo_monto' => blankToNull($row["RecargoMonto[$i]"] ?? null),
+            'subrecargos' => extractNestedRows($row, 'SubRecargo', $i, [
+                'TipoSubRecargo' => 'tipo_sub_recargo',
+                'SubRecargoPorcentaje' => 'sub_recargo_porcentaje',
+                'MontosubRecargo' => 'monto_sub_recargo',
+                'MontoSubRecargo' => 'monto_sub_recargo',
+            ]),
+            'impuestos_adicionales' => extractNestedRows($row, 'ImpuestoAdicional', $i, [
+                'TipoImpuesto' => 'tipo_impuesto',
+            ]),
             'monto_item' => isset($row["MontoItem[$i]"]) && $row["MontoItem[$i]"] !== '' ? (float) $row["MontoItem[$i]"] : null,
             'monto_item_raw' => $row["MontoItem[$i]"] ?? null,
         ];
+    }
+    return $items;
+}
+
+function extractNestedRows(array $row, string $group, int $line, array $fieldMap): array
+{
+    $items = [];
+    for ($j = 1; $j <= 12; $j++) {
+        $entry = [];
+        foreach ($fieldMap as $xlsxBase => $payloadKey) {
+            $value = blankToNull($row[$xlsxBase . '[' . $line . '][' . $j . ']'] ?? null);
+            if ($value !== null) {
+                $entry[$payloadKey] = $value;
+            }
+        }
+        if ($entry === []) {
+            if ($j === 1) {
+                continue;
+            }
+            break;
+        }
+        $items[] = $entry;
+        if ($group === 'ImpuestoAdicional' && $j >= 2) {
+            break;
+        }
     }
     return $items;
 }
@@ -326,6 +378,9 @@ function extractTotales(array $row): array
         'MontoGravadoI2' => 'monto_gravado_i2',
         'MontoGravadoI3' => 'monto_gravado_i3',
         'MontoExento' => 'monto_exento',
+        'ITBIS1' => 'itbis1',
+        'ITBIS2' => 'itbis2',
+        'ITBIS3' => 'itbis3',
         'TotalITBIS' => 'total_itbis',
         'TotalITBIS1' => 'total_itbis1',
         'TotalITBIS2' => 'total_itbis2',
@@ -339,6 +394,7 @@ function extractTotales(array $row): array
         'TotalISRRetencion' => 'total_isr_retencion',
         'TotalITBISPercepcion' => 'total_itbis_percepcion',
         'TotalISRPercepcion' => 'total_isr_percepcion',
+        'MontoImpuestoAdicional' => 'monto_impuesto_adicional',
     ];
 
     $totales = [];
@@ -346,6 +402,26 @@ function extractTotales(array $row): array
         if (isset($row[$xlsxKey]) && $row[$xlsxKey] !== '') {
             $totales[$payloadKey] = (float) $row[$xlsxKey];
         }
+    }
+    $impuestosAdicionales = [];
+    for ($i = 1; $i <= 20; $i++) {
+        $tipo = blankToNull($row["TipoImpuesto[$i]"] ?? null);
+        if ($tipo === null) {
+            if ($i === 1) {
+                continue;
+            }
+            break;
+        }
+        $impuestosAdicionales[] = [
+            'tipo_impuesto' => $tipo,
+            'tasa_impuesto_adicional' => blankToNull($row["TasaImpuestoAdicional[$i]"] ?? null),
+            'monto_impuesto_selectivo_consumo_especifico' => blankToNull($row["MontoImpuestoSelectivoConsumoEspecifico[$i]"] ?? null),
+            'monto_impuesto_selectivo_consumo_advalorem' => blankToNull($row["MontoImpuestoSelectivoConsumoAdvalorem[$i]"] ?? null),
+            'otros_impuestos_adicionales' => blankToNull($row["OtrosImpuestosAdicionales[$i]"] ?? null),
+        ];
+    }
+    if ($impuestosAdicionales !== []) {
+        $totales['impuestos_adicionales'] = $impuestosAdicionales;
     }
     return $totales;
 }

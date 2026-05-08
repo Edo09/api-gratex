@@ -1,48 +1,56 @@
-[1] 131256432E330000000001 (E330000000001) ... estado=RECHAZADO :: El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el ca
-[2] 131256432E320000000006 (E320000000006) ... estado=RECHAZADO :: -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngre
-[3] 131256432E340000000016 (E340000000016) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E340000000016, no existe en nuestra colección de datos. [1]
-[4] 131256432E340000000002 (E340000000002) ... estado=RECHAZADO :: -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorNotaCredito'.La factura recibida con el e-NCF E340000000002, no existe en nues
-[5] 131256432E310000000034 (E310000000034) ... estado=RECHAZADO :: El campo TotalITBIS1 del área Totales de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000034, no existe en nuestra colección de datos. [11010]
-[6] 131256432E410000000010 (E410000000010) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E410000000010, no existe en nuestra colección de datos. [1]
-[7] 131256432E310000000005 (E310000000005) ... estado=RECHAZADO :: El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [176]
-[8] 131256432E310000000012 (E310000000012) ... estado=RECHAZADO :: El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000012, no existe en nuestra colección de datos. [176]
-[9] 131256432E310000000007 (E310000000007) ... estado=RECHAZADO :: El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000007, no existe en nuestra colección de datos. [176]
-[10] 131256432E320000000002 (E320000000002) ... estado=RECHAZADO :: -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngre
-[11] 131256432E410000000007 (E410000000007) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E410000000007, no existe en nuestra colección de datos. [1]
-[12] 131256432E430000000001 (E430000000001) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E430000000001, no existe en nuestra colección de datos. [1]
-[13] 131256432E430000000009 (E430000000009) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E430000000009, no existe en nuestra colección de datos. [1]
-[14] 131256432E440000000007 (E440000000007) ... estado=RECHAZADO :: -The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida co
-[15] 131256432E440000000008 (E440000000008) ... estado=RECHAZADO :: -The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida co
-[16] 131256432E450000000009 (E450000000009) ... estado=RECHAZADO :: El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000009, no existe en nuestra colección de datos. [176]
-[17] 131256432E450000000011 (E450000000011) ... estado=RECHAZADO :: El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000011, no existe en nuestra colección de datos. [176]
-[18] 131256432E460000000007 (E460000000007) ... estado=RECHAZADO :: -The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E4
-[19] 131256432E460000000011 (E460000000011) ... estado=RECHAZADO :: -The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E4
-[20] 131256432E470000000009 (E470000000009) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E470000000009, no existe en nuestra colección de datos. [1]
-[21] 131256432E470000000001 (E470000000001) ... estado=RECHAZADO :: El formato del XML no es válido.La factura recibida con el e-NCF E470000000001, no existe en nuestra colección de datos. [1]
+[1] 131256432E330000000001 (E330000000001) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del conjunto de datos entregados.La propiedad RNCOtroCont
+[2] 131256432E320000000006 (E320000000006) ... estado=ACEPTADO :: [0]
+[3] 131256432E340000000001 (E340000000001) ... estado=RECHAZADO :: El campo NCFModificado de la sección InformacionReferencia no es válido. La fecha de emisión de la nota de crédito/débito no puede ser menor a la fecha de emisión de la factura de referencia.La 
+[4] 131256432E340000000013 (E340000000013) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del conjunto de datos entregados.La propiedad RNCOtroCont
+[5] 131256432E440000000013 (E440000000013) ... estado=ACEPTADO :: [0]
+[6] 131256432E310000000001 (E310000000001) ... estado=ACEPTADO :: [0]
+[7] 131256432E310000000034 (E310000000034) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del conjunto de datos entregados. [1]
+[8] 131256432E310000000009 (E310000000009) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del conjunto de datos entregados.La propiedad DescuentoMo
+[9] 131256432E310000000002 (E310000000002) ... estado=RECHAZADO :: El campo TotalITBIS1 del área Totales de la sección Encabezado no coincide con la multiplicación de los campos de Monto Gravado 1 y ITBIS Tasa 1.El campo MontoTotal del área Totales de la sección
+[10] 131256432E320000000011 (E320000000011) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[11] 131256432E320000000012 (E320000000012) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[12] 131256432E320000000014 (E320000000014) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[13] 131256432E320000000015 (E320000000015) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[14] 131256432E320000000005 (E320000000005) ... estado=ACEPTADO :: [0]
+[15] 131256432E410000000010 (E410000000010) ... estado=RECHAZADO :: El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es válidoEl campo MontoItem de la sección DetallesItems 
+[16] 131256432E410000000008 (E410000000008) ... estado=RECHAZADO :: El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es válidoEl campo MontoItem de la sección DetallesItems 
+[17] 131256432E430000000010 (E430000000010) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de datos entregados. [1]
+[18] 131256432E430000000009 (E430000000009) ... estado=RECHAZADO :: El formato del XML no es válido.La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de datos entregados. [1]
+[19] 131256432E440000000009 (E440000000009) ... estado=ACEPTADO :: [0]
+[20] 131256432E450000000001 (E450000000001) ... estado=ACEPTADO :: [0]
+[21] 131256432E450000000003 (E450000000003) ... estado=RECHAZADO :: El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es válidoEl campo MontoItem de la sección DetallesItems 
+[22] 131256432E460000000007 (E460000000007) ... estado=RECHAZADO :: El campo TotalITBIS del área Totales de la sección Encabezado no es válidoLa propiedad TotalITBIS no es válida debido a que el valor enviado () no coincide con el valor (0.00) del conjunto de dato
+[23] 131256432E460000000001 (E460000000001) ... estado=RECHAZADO :: El campo FechaLimitePago del área IdDoc de la sección Encabezado no es válidoLa propiedad FechaLimitePago no es válida debido a que el valor enviado () no coincide con el valor (06-05-2020) del co
+[24] 131256432E470000000001 (E470000000001) ... estado=RECHAZADO :: La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de datos entregados.La propiedad NumeroCuentaPago no es válida debido a que el valor env
+[25] 131256432E470000000011 (E470000000011) ... estado=ACEPTADO :: [0]
 
 ========================================
-Resumen: 0/21 ACEPTADOS
+Resumen: 7/25 ACEPTADOS
 ========================================
-  - | E330000000001 | RECHAZADO | El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es v�
-  - | E320000000006 | RECHAZADO | -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMont
-  - | E340000000016 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E340000000016, no existe en nuestra colección de datos. [1]
-  - | E340000000002 | RECHAZADO | -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorNotaCredito'.La factura reci
-  - | E310000000034 | RECHAZADO | El campo TotalITBIS1 del área Totales de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000034, no existe en nuestra col
-  - | E410000000010 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E410000000010, no existe en nuestra colección de datos. [1]
-  - | E310000000005 | RECHAZADO | El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000005, no existe en nue
-  - | E310000000012 | RECHAZADO | El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000012, no existe en nue
-  - | E310000000007 | RECHAZADO | El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000007, no existe en nue
-  - | E320000000002 | RECHAZADO | -The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMont
-  - | E410000000007 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E410000000007, no existe en nuestra colección de datos. [1]
-  - | E430000000001 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E430000000001, no existe en nuestra colección de datos. [1]
-  - | E430000000009 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E430000000009, no existe en nuestra colección de datos. [1]
-  - | E440000000007 | RECHAZADO | -The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, Impues
-  - | E440000000008 | RECHAZADO | -The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, Impues
-  - | E450000000009 | RECHAZADO | El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000009, no existe en nue
-  - | E450000000011 | RECHAZADO | El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000011, no existe en nue
-  - | E460000000007 | RECHAZADO | -The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS
-  - | E460000000011 | RECHAZADO | -The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS
-  - | E470000000009 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E470000000009, no existe en nuestra colección de datos. [1]
-  - | E470000000001 | RECHAZADO | El formato del XML no es válido.La factura recibida con el e-NCF E470000000001, no existe en nuestra colección de datos. [1]
+  - | E330000000001 | RECHAZADO | El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del con
+  + | E320000000006 | ACEPTADO | [0]
+  - | E340000000001 | RECHAZADO | El campo NCFModificado de la sección InformacionReferencia no es válido. La fecha de emisión de la nota de crédito/débito no puede ser menor a la
+  - | E340000000013 | RECHAZADO | El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del con
+  + | E440000000013 | ACEPTADO | [0]
+  + | E310000000001 | ACEPTADO | [0]
+  - | E310000000034 | RECHAZADO | El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del con
+  - | E310000000009 | RECHAZADO | El formato del XML no es válido.La propiedad IndicadorMontoGravado no es válida debido a que el valor enviado () no coincide con el valor () del con
+  - | E310000000002 | RECHAZADO | El campo TotalITBIS1 del área Totales de la sección Encabezado no coincide con la multiplicación de los campos de Monto Gravado 1 y ITBIS Tasa 1.El
+  - | E320000000011 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000012 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000014 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000015 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  + | E320000000005 | ACEPTADO | [0]
+  - | E410000000010 | RECHAZADO | El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es váli
+  - | E410000000008 | RECHAZADO | El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es váli
+  - | E430000000010 | RECHAZADO | El formato del XML no es válido.La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de dat
+  - | E430000000009 | RECHAZADO | El formato del XML no es válido.La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de dat
+  + | E440000000009 | ACEPTADO | [0]
+  + | E450000000001 | ACEPTADO | [0]
+  - | E450000000003 | RECHAZADO | El campo MontoItem de la sección DetallesItems de la línea 1 no es válidoEl campo MontoItem de la sección DetallesItems de la línea 2 no es váli
+  - | E460000000007 | RECHAZADO | El campo TotalITBIS del área Totales de la sección Encabezado no es válidoLa propiedad TotalITBIS no es válida debido a que el valor enviado () no
+  - | E460000000001 | RECHAZADO | El campo FechaLimitePago del área IdDoc de la sección Encabezado no es válidoLa propiedad FechaLimitePago no es válida debido a que el valor envia
+  - | E470000000001 | RECHAZADO | La propiedad TipoPago no es válida debido a que el valor enviado (1) no coincide con el valor () del conjunto de datos entregados.La propiedad Numero
+  + | E470000000011 | ACEPTADO | [0]
 
-==> Detalle completo en: C:\Users\edgarcia\Documents\grat\api-gratex\tools/fase2_estados.json
+==> Detalle completo en: tools\fase2_estados.json
