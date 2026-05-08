@@ -73,26 +73,37 @@ class ECFEmissionService
             }
         }
 
+        $emisorBase = [
+            'rnc' => $emisor['rnc'],
+            'razon_social' => $emisor['razon_social'],
+            'nombre_comercial' => $emisor['nombre_comercial'] ?? null,
+            'sucursal' => $emisor['sucursal'] ?? null,
+            'direccion' => $emisor['direccion'],
+            'municipio' => $emisor['municipio'] ?? null,
+            'provincia' => $emisor['provincia'] ?? null,
+            'telefono' => $emisor['telefono'] ?? null,
+            'correo' => $emisor['correo'] ?? null,
+            'website' => $emisor['website'] ?? null,
+            'actividad_economica' => $emisor['actividad_economica'] ?? null,
+        ];
+        $emisorOverride = is_array($payload['emisor_override'] ?? null) ? $payload['emisor_override'] : [];
+        $emisorMerged = array_merge(
+            $emisorBase,
+            array_filter($emisorOverride, fn($v) => $v !== null && $v !== '')
+        );
+
         $xmlData = [
             'tipo_ecf' => $tipoEcf,
             'e_ncf' => $eNcf,
             'fecha_emision' => $payload['fecha_emision'] ?? date('d-m-Y'),
-            'fecha_vencimiento_secuencia' => $emisor['fecha_vencimiento_secuencia'] ?? '31-12-2030',
+            'fecha_vencimiento_secuencia' => $payload['fecha_vencimiento_secuencia']
+                ?? $emisor['fecha_vencimiento_secuencia']
+                ?? '31-12-2030',
             'tipo_ingresos' => $payload['tipo_ingresos'] ?? '01',
             'tipo_pago' => $payload['tipo_pago'] ?? 1,
-            'emisor' => [
-                'rnc' => $emisor['rnc'],
-                'razon_social' => $emisor['razon_social'],
-                'nombre_comercial' => $emisor['nombre_comercial'] ?? null,
-                'sucursal' => $emisor['sucursal'] ?? null,
-                'direccion' => $emisor['direccion'],
-                'municipio' => $emisor['municipio'] ?? null,
-                'provincia' => $emisor['provincia'] ?? null,
-                'telefono' => $emisor['telefono'] ?? null,
-                'correo' => $emisor['correo'] ?? null,
-                'website' => $emisor['website'] ?? null,
-                'actividad_economica' => $emisor['actividad_economica'] ?? null,
-            ],
+            'indicador_monto_gravado' => $payload['indicador_monto_gravado'] ?? null,
+            'indicador_nota_credito' => $payload['indicador_nota_credito'] ?? null,
+            'emisor' => $emisorMerged,
             'comprador' => $payload['comprador'] ?? [],
             'items' => $payload['items'] ?? [],
             'totales' => $payload['totales'] ?? [],
