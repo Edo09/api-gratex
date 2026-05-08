@@ -1,0 +1,151 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Consulta de resultado e‐CF",
+    "description": "Servicio web responsable de retornar el estado de procesamiento o validez del e‐CF tentativo enviado exclusivamente mediante el servicio web de recepción de e‐CF, a través de la presentación de un Trackid y un token asociado a una sesión válida.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/certecf/ConsultaResultado"
+    }
+  ],
+  "paths": {
+    "/api/Consultas/Estado": {
+      "get": {
+        "tags": [
+          "Consultas"
+        ],
+        "parameters": [
+          {
+            "name": "TrackId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaConsultaTrackId"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaConsultaTrackId"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Mensaje": {
+        "type": "object",
+        "properties": {
+          "valor": {
+            "type": "string",
+            "nullable": true
+          },
+          "codigo": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "RespuestaConsultaTrackId": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "nullable": true
+          },
+          "codigo": {
+            "type": "string",
+            "nullable": true
+          },
+          "estado": {
+            "type": "string",
+            "nullable": true
+          },
+          "rnc": {
+            "type": "string",
+            "nullable": true
+          },
+          "encf": {
+            "type": "string",
+            "nullable": true
+          },
+          "secuenciaUtilizada": {
+            "type": "boolean"
+          },
+          "fechaRecepcion": {
+            "type": "string",
+            "nullable": true
+          },
+          "mensajes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Mensaje"
+            },
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "apiKey",
+        "description": "JWT Authorization header usando el esquema Bearer. Ejemplo: \"Authorization: Bearer {token}\"",
+        "name": "Authorization",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "Bearer": [ ]
+    }
+  ]
+}
