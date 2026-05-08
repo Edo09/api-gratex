@@ -20,7 +20,8 @@
       "Bash(curl -s \"https://ecf.dgii.gov.do/certecf/Recepcion/help\" -o tools/dgii_help.html)",
       "Bash(python -c ' *)",
       "Bash(awk '/<xs:element name=\"IdDoc\"/,/<\\\\/xs:element>.*IdDoc|^[ ]*<\\\\/xs:complexType>.*IdDoc/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
-      "Bash(awk '/<xs:element name=\"Totales\"/,/<\\\\/xs:complexType>/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')"
+      "Bash(awk '/<xs:element name=\"Totales\"/,/<\\\\/xs:complexType>/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
+      "Bash(awk '/<xs:element name=\"Item\"/,/^[ ]*<\\\\/xs:complexType>.*Item|^[ ]+<\\\\/xs:element>$/' \"samples/e-CF 31 v.1.0.xsd\")"
     ]
   }
 }
