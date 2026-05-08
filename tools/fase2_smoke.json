@@ -1,0 +1,14 @@
+[
+    {
+        "caso": "131256432E330000000001",
+        "tipo_ecf": "33",
+        "e_ncf": "E330000000001",
+        "http_status": 502,
+        "ok": false,
+        "response": {
+            "status": false,
+            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 404 - 404 - File or directory not found.\r\n\r\n\r\n\r\n\r\n\r\nServer Error\r\n\r\n \r\n  404 - File or directory not found.\r\n  The resource you are looking for might have been removed, had its name changed, or is temporarily unavailable."
+        },
+        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 404 - 404 - File or directory not found.\r\n\r\n\r\n\r\n\r\n\r\nServer Error\r\n\r\n \r\n  404 - File or directory not found.\r\n  The resource you are looking for might have been removed, had its name changed, or is temporarily unavailable."
+    }
+]
