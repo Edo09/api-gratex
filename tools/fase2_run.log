@@ -1,93 +1,108 @@
-==> Leyendo xlsx: samples\131256432-05052026110320.xlsx
+==> Leyendo xlsx: samples\131256432-08052026161604.xlsx
 ==> 25 casos en hoja ECF
-==> Excluye: E320000000011,E320000000012,E320000000013,E320000000015 -> 21 casos
 
-[1/21] 131256432E330000000001 (E33, E330000000001)
-    OK  estado=ENVIADO track=7c9d6278-335f-4591-bc56-1f2ce425439c rfce=- flujo=-
+[1/25] 131256432E330000000001 (E33, E330000000001)
+    OK  estado=ENVIADO track=ad11cb8f-47fe-4610-9a11-7dfbc4f744b5 rfce=- flujo=-
 
-[2/21] 131256432E320000000006 (E32, E320000000006)
-    OK  estado=ENVIADO track=04465678-c3cb-4c0b-a43e-a2e4474b7e9e rfce=- flujo=-
+[2/25] 131256432E320000000006 (E32, E320000000006)
+    OK  estado=ENVIADO track=6cda859a-b120-4e91-a945-7e62e5c41bdb rfce=- flujo=-
 
-[3/21] 131256432E340000000016 (E34, E340000000016)
-    OK  estado=ENVIADO track=c8debc72-7fc3-4d75-8acb-c09548a8db22 rfce=- flujo=-
+[3/25] 131256432E340000000001 (E34, E340000000001)
+    OK  estado=ENVIADO track=a84d4a7d-b253-40cd-99f6-166664f0740a rfce=- flujo=-
 
-[4/21] 131256432E340000000002 (E34, E340000000002)
-    OK  estado=ENVIADO track=ed9d41af-cc02-4825-885b-f134ba0fa3fa rfce=- flujo=-
+[4/25] 131256432E340000000013 (E34, E340000000013)
+    OK  estado=ENVIADO track=4efdde99-e666-4c06-9ba1-4465b7c81d29 rfce=- flujo=-
 
-[5/21] 131256432E310000000034 (E31, E310000000034)
-    OK  estado=ENVIADO track=d6deb51a-a596-413c-a0c5-9b803d0d8ef8 rfce=- flujo=-
+[5/25] 131256432E440000000013 (E44, E440000000013)
+    OK  estado=ENVIADO track=e6a072df-ca71-4dfb-a662-3e7a1d024975 rfce=- flujo=-
 
-[6/21] 131256432E410000000010 (E41, E410000000010)
-    OK  estado=ENVIADO track=9f695071-f0b4-42e1-a18d-385c8909776b rfce=- flujo=-
+[6/25] 131256432E310000000001 (E31, E310000000001)
+    OK  estado=ENVIADO track=addfc499-e8c0-4db3-9c39-51d444079024 rfce=- flujo=-
 
-[7/21] 131256432E310000000005 (E31, E310000000005)
-    OK  estado=ENVIADO track=cc5306b2-b54c-492e-a0f7-e7dc325efa20 rfce=- flujo=-
+[7/25] 131256432E310000000034 (E31, E310000000034)
+    OK  estado=ENVIADO track=c488679f-4502-45f4-b43a-730fc3165adc rfce=- flujo=-
 
-[8/21] 131256432E310000000012 (E31, E310000000012)
-    OK  estado=ENVIADO track=b1098967-2d57-414b-9511-121251f1d707 rfce=- flujo=-
+[8/25] 131256432E310000000009 (E31, E310000000009)
+    OK  estado=ENVIADO track=d0c3806b-58e0-47ac-a4c6-4cc5299f2cc4 rfce=- flujo=-
 
-[9/21] 131256432E310000000007 (E31, E310000000007)
-    OK  estado=ENVIADO track=ba36b090-a19b-4542-b262-0ceb1d1ff8da rfce=- flujo=-
+[9/25] 131256432E310000000002 (E31, E310000000002)
+    OK  estado=ENVIADO track=c15d936c-ded9-4093-ba5f-26f73ed2fdb7 rfce=- flujo=-
 
-[10/21] 131256432E320000000002 (E32, E320000000002)
-    OK  estado=ENVIADO track=b0a1eda8-f64b-4d93-a23e-277fe5388d44 rfce=- flujo=-
+[10/25] 131256432E320000000011 (E32, E320000000011)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
 
-[11/21] 131256432E410000000007 (E41, E410000000007)
-    OK  estado=ENVIADO track=ecf302b4-8b8d-4518-bd97-a34cb0385c25 rfce=- flujo=-
+[11/25] 131256432E320000000012 (E32, E320000000012)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
 
-[12/21] 131256432E430000000001 (E43, E430000000001)
-    OK  estado=ENVIADO track=7c61474f-5c5c-4726-8009-9f8d648763ce rfce=- flujo=-
+[12/25] 131256432E320000000014 (E32, E320000000014)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
 
-[13/21] 131256432E430000000009 (E43, E430000000009)
-    OK  estado=ENVIADO track=ecd148dc-d7f0-47ea-9dca-af5a3e59814c rfce=- flujo=-
+[13/25] 131256432E320000000015 (E32, E320000000015)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
 
-[14/21] 131256432E440000000007 (E44, E440000000007)
-    OK  estado=ENVIADO track=7b6ee90d-2869-430d-a399-546574bc68f4 rfce=- flujo=-
+[14/25] 131256432E320000000005 (E32, E320000000005)
+    OK  estado=ENVIADO track=c8bedbbe-d035-4fba-8eda-16bec7264987 rfce=- flujo=-
 
-[15/21] 131256432E440000000008 (E44, E440000000008)
-    OK  estado=ENVIADO track=0c1afee1-718e-49dc-8dbb-d849da1cd874 rfce=- flujo=-
+[15/25] 131256432E410000000010 (E41, E410000000010)
+    OK  estado=ENVIADO track=5c0ec0b0-86a7-4421-b0c8-df3e14d60c2e rfce=- flujo=-
 
-[16/21] 131256432E450000000009 (E45, E450000000009)
-    OK  estado=ENVIADO track=91524c7c-d0c2-41c3-abb0-81dace5e29c7 rfce=- flujo=-
+[16/25] 131256432E410000000008 (E41, E410000000008)
+    OK  estado=ENVIADO track=6adb565d-943c-43fe-8361-1ab74dcc0437 rfce=- flujo=-
 
-[17/21] 131256432E450000000011 (E45, E450000000011)
-    OK  estado=ENVIADO track=1126dc5b-2284-4cad-88b9-69ef4629fc15 rfce=- flujo=-
+[17/25] 131256432E430000000010 (E43, E430000000010)
+    OK  estado=ENVIADO track=27f11387-b59c-45dc-80e1-7dbd831cf660 rfce=- flujo=-
 
-[18/21] 131256432E460000000007 (E46, E460000000007)
-    OK  estado=ENVIADO track=9c49bafa-e686-481d-ba1a-b2363550a98c rfce=- flujo=-
+[18/25] 131256432E430000000009 (E43, E430000000009)
+    OK  estado=ENVIADO track=dc49ae6d-14fc-4624-8465-e3cf9f7889c1 rfce=- flujo=-
 
-[19/21] 131256432E460000000011 (E46, E460000000011)
-    OK  estado=ENVIADO track=c18f0bce-52a9-488c-96f8-f183076fccd0 rfce=- flujo=-
+[19/25] 131256432E440000000009 (E44, E440000000009)
+    OK  estado=ENVIADO track=37d0d71a-4cdb-4398-ba38-a58d53a23cba rfce=- flujo=-
 
-[20/21] 131256432E470000000009 (E47, E470000000009)
-    OK  estado=ENVIADO track=418d8ab9-6a91-4997-812b-61032825ce0f rfce=- flujo=-
+[20/25] 131256432E450000000001 (E45, E450000000001)
+    OK  estado=ENVIADO track=dd07f201-fc39-417f-88bd-826e9a6bfd53 rfce=- flujo=-
 
-[21/21] 131256432E470000000001 (E47, E470000000001)
-    OK  estado=ENVIADO track=47751c3d-77dc-40ee-aa84-1e6b3e710b29 rfce=- flujo=-
+[21/25] 131256432E450000000003 (E45, E450000000003)
+    OK  estado=ENVIADO track=6c38393b-247f-4174-97f7-94c89c99a4e8 rfce=- flujo=-
+
+[22/25] 131256432E460000000007 (E46, E460000000007)
+    OK  estado=ENVIADO track=17526266-8317-46bc-a812-22de3dd8526f rfce=- flujo=-
+
+[23/25] 131256432E460000000001 (E46, E460000000001)
+    OK  estado=ENVIADO track=4be8de06-332f-4711-bf1a-0f018308f5d8 rfce=- flujo=-
+
+[24/25] 131256432E470000000001 (E47, E470000000001)
+    OK  estado=ENVIADO track=e14d9fa4-2b10-43f4-a3fb-85c9953ba2aa rfce=- flujo=-
+
+[25/25] 131256432E470000000011 (E47, E470000000011)
+    OK  estado=ENVIADO track=77d57681-ee42-417d-ae62-a4d8009aac05 rfce=- flujo=-
 
 ========================================
-Resumen: 21/21 OK, 0 fallaron
+Resumen: 21/25 OK, 4 fallaron
 ========================================
-  + 131256432E330000000001 | E33 | E330000000001 | ENVIADO track=7c9d6278-335f-4591-bc56-1f2ce425439c
-  + 131256432E320000000006 | E32 | E320000000006 | ENVIADO track=04465678-c3cb-4c0b-a43e-a2e4474b7e9e
-  + 131256432E340000000016 | E34 | E340000000016 | ENVIADO track=c8debc72-7fc3-4d75-8acb-c09548a8db22
-  + 131256432E340000000002 | E34 | E340000000002 | ENVIADO track=ed9d41af-cc02-4825-885b-f134ba0fa3fa
-  + 131256432E310000000034 | E31 | E310000000034 | ENVIADO track=d6deb51a-a596-413c-a0c5-9b803d0d8ef8
-  + 131256432E410000000010 | E41 | E410000000010 | ENVIADO track=9f695071-f0b4-42e1-a18d-385c8909776b
-  + 131256432E310000000005 | E31 | E310000000005 | ENVIADO track=cc5306b2-b54c-492e-a0f7-e7dc325efa20
-  + 131256432E310000000012 | E31 | E310000000012 | ENVIADO track=b1098967-2d57-414b-9511-121251f1d707
-  + 131256432E310000000007 | E31 | E310000000007 | ENVIADO track=ba36b090-a19b-4542-b262-0ceb1d1ff8da
-  + 131256432E320000000002 | E32 | E320000000002 | ENVIADO track=b0a1eda8-f64b-4d93-a23e-277fe5388d44
-  + 131256432E410000000007 | E41 | E410000000007 | ENVIADO track=ecf302b4-8b8d-4518-bd97-a34cb0385c25
-  + 131256432E430000000001 | E43 | E430000000001 | ENVIADO track=7c61474f-5c5c-4726-8009-9f8d648763ce
-  + 131256432E430000000009 | E43 | E430000000009 | ENVIADO track=ecd148dc-d7f0-47ea-9dca-af5a3e59814c
-  + 131256432E440000000007 | E44 | E440000000007 | ENVIADO track=7b6ee90d-2869-430d-a399-546574bc68f4
-  + 131256432E440000000008 | E44 | E440000000008 | ENVIADO track=0c1afee1-718e-49dc-8dbb-d849da1cd874
-  + 131256432E450000000009 | E45 | E450000000009 | ENVIADO track=91524c7c-d0c2-41c3-abb0-81dace5e29c7
-  + 131256432E450000000011 | E45 | E450000000011 | ENVIADO track=1126dc5b-2284-4cad-88b9-69ef4629fc15
-  + 131256432E460000000007 | E46 | E460000000007 | ENVIADO track=9c49bafa-e686-481d-ba1a-b2363550a98c
-  + 131256432E460000000011 | E46 | E460000000011 | ENVIADO track=c18f0bce-52a9-488c-96f8-f183076fccd0
-  + 131256432E470000000009 | E47 | E470000000009 | ENVIADO track=418d8ab9-6a91-4997-812b-61032825ce0f
-  + 131256432E470000000001 | E47 | E470000000001 | ENVIADO track=47751c3d-77dc-40ee-aa84-1e6b3e710b29
+  + 131256432E330000000001 | E33 | E330000000001 | ENVIADO track=ad11cb8f-47fe-4610-9a11-7dfbc4f744b5
+  + 131256432E320000000006 | E32 | E320000000006 | ENVIADO track=6cda859a-b120-4e91-a945-7e62e5c41bdb
+  + 131256432E340000000001 | E34 | E340000000001 | ENVIADO track=a84d4a7d-b253-40cd-99f6-166664f0740a
+  + 131256432E340000000013 | E34 | E340000000013 | ENVIADO track=4efdde99-e666-4c06-9ba1-4465b7c81d29
+  + 131256432E440000000013 | E44 | E440000000013 | ENVIADO track=e6a072df-ca71-4dfb-a662-3e7a1d024975
+  + 131256432E310000000001 | E31 | E310000000001 | ENVIADO track=addfc499-e8c0-4db3-9c39-51d444079024
+  + 131256432E310000000034 | E31 | E310000000034 | ENVIADO track=c488679f-4502-45f4-b43a-730fc3165adc
+  + 131256432E310000000009 | E31 | E310000000009 | ENVIADO track=d0c3806b-58e0-47ac-a4c6-4cc5299f2cc4
+  + 131256432E310000000002 | E31 | E310000000002 | ENVIADO track=c15d936c-ded9-4093-ba5f-26f73ed2fdb7
+  - 131256432E320000000011 | E32 | E320000000011 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
+  - 131256432E320000000012 | E32 | E320000000012 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
+  - 131256432E320000000014 | E32 | E320000000014 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
+  - 131256432E320000000015 | E32 | E320000000015 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":null,"valor":"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi...
+  + 131256432E320000000005 | E32 | E320000000005 | ENVIADO track=c8bedbbe-d035-4fba-8eda-16bec7264987
+  + 131256432E410000000010 | E41 | E410000000010 | ENVIADO track=5c0ec0b0-86a7-4421-b0c8-df3e14d60c2e
+  + 131256432E410000000008 | E41 | E410000000008 | ENVIADO track=6adb565d-943c-43fe-8361-1ab74dcc0437
+  + 131256432E430000000010 | E43 | E430000000010 | ENVIADO track=27f11387-b59c-45dc-80e1-7dbd831cf660
+  + 131256432E430000000009 | E43 | E430000000009 | ENVIADO track=dc49ae6d-14fc-4624-8465-e3cf9f7889c1
+  + 131256432E440000000009 | E44 | E440000000009 | ENVIADO track=37d0d71a-4cdb-4398-ba38-a58d53a23cba
+  + 131256432E450000000001 | E45 | E450000000001 | ENVIADO track=dd07f201-fc39-417f-88bd-826e9a6bfd53
+  + 131256432E450000000003 | E45 | E450000000003 | ENVIADO track=6c38393b-247f-4174-97f7-94c89c99a4e8
+  + 131256432E460000000007 | E46 | E460000000007 | ENVIADO track=17526266-8317-46bc-a812-22de3dd8526f
+  + 131256432E460000000001 | E46 | E460000000001 | ENVIADO track=4be8de06-332f-4711-bf1a-0f018308f5d8
+  + 131256432E470000000001 | E47 | E470000000001 | ENVIADO track=e14d9fa4-2b10-43f4-a3fb-85c9953ba2aa
+  + 131256432E470000000011 | E47 | E470000000011 | ENVIADO track=77d57681-ee42-417d-ae62-a4d8009aac05
 
 ==> Reporte guardado en: tools\fase2_results.json

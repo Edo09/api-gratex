@@ -68,6 +68,18 @@ function main(array $argv): int
     $rows = $reader->readSheet('ECF');
     fwrite(STDOUT, "==> " . count($rows) . " casos en hoja ECF\n");
 
+    $rfceMap = [];
+    try {
+        foreach ($reader->readSheet('RFCE') as $rfceRow) {
+            if (!empty($rfceRow['ENCF'])) {
+                $rfceMap[$rfceRow['ENCF']] = $rfceRow;
+            }
+        }
+        fwrite(STDOUT, "==> " . count($rfceMap) . " casos en hoja RFCE\n");
+    } catch (Throwable $e) {
+        fwrite(STDOUT, "==> Sin hoja RFCE: " . $e->getMessage() . "\n");
+    }
+
     if ($filter) {
         $rows = array_values(array_filter($rows, fn($r) => in_array((string)($r['TipoeCF'] ?? ''), $filter, true)));
         fwrite(STDOUT, "==> Filtro tipos: " . implode(',', $filter) . " -> " . count($rows) . " casos\n");
@@ -89,7 +101,8 @@ function main(array $argv): int
         fwrite(STDOUT, sprintf("\n[%d/%d] %s (E%s, %s)\n", $idx + 1, count($rows), $caso, $tipo, $encf));
 
         try {
-            $payload = mapRowToPayload($row, $clientId, $userId);
+            $rfceRow = $rfceMap[$row['ENCF'] ?? ''] ?? null;
+            $payload = mapRowToPayload($row, $clientId, $userId, $rfceRow);
         } catch (Throwable $e) {
             fwrite(STDOUT, "    ! Error mapeando payload: " . $e->getMessage() . "\n");
             $results[] = [
@@ -176,7 +189,7 @@ function parseArgs(array $argv): array
  * que valores usar). El client_id solo se usa para satisfacer la API actual
  * que requiere un cliente existente; los datos reales vienen del row.
  */
-function mapRowToPayload(array $row, int $clientId, ?int $userId): array
+function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRow = null): array
 {
     $tipoEcf = (string) ($row['TipoeCF'] ?? '');
     if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipoEcf)) {
@@ -247,6 +260,18 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId): array
             'rnc_otro_contribuyente' => $row['RNCComprador'] ?? null,
             'fecha_ncf_modificado' => $row['FechaNCFModificado'] ?? null,
             'codigo_modificacion' => $row['CodigoModificacion'] ?? null,
+        ];
+    }
+
+    if ($rfceRow !== null) {
+        $payload['rfce_emisor'] = [
+            'rnc' => $rfceRow['RNCEmisor'] ?? null,
+            'razon_social' => $rfceRow['RazonSocialEmisor'] ?? null,
+        ];
+        $payload['rfce_comprador'] = [
+            'rnc' => $rfceRow['RNCComprador'] ?? null,
+            'identificador_extranjero' => $rfceRow['IdentificadorExtranjero'] ?? null,
+            'razon_social' => $rfceRow['RazonSocialComprador'] ?? null,
         ];
     }
 
