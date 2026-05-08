@@ -208,7 +208,15 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'fecha_emision' => $row['FechaEmision'] ?? date('d-m-Y'),
         'fecha_vencimiento_secuencia' => $row['FechaVencimientoSecuencia'] ?? null,
         'tipo_ingresos' => $row['TipoIngresos'] ?? '01',
-        'tipo_pago' => (int) ($row['TipoPago'] ?? 1),
+        'tipo_pago' => blankToNull($row['TipoPago'] ?? null),
+        'fecha_limite_pago' => blankToNull($row['FechaLimitePago'] ?? null),
+        'termino_pago' => blankToNull($row['TerminoPago'] ?? null),
+        'tipo_cuenta_pago' => blankToNull($row['TipoCuentaPago'] ?? null),
+        'numero_cuenta_pago' => blankToNull($row['NumeroCuentaPago'] ?? null),
+        'banco_pago' => blankToNull($row['BancoPago'] ?? null),
+        'fecha_desde' => blankToNull($row['FechaDesde'] ?? null),
+        'fecha_hasta' => blankToNull($row['FechaHasta'] ?? null),
+        'total_paginas' => blankToNull($row['TotalPaginas'] ?? null),
         'indicador_monto_gravado' => $row['IndicadorMontoGravado'] ?? null,
         'indicador_nota_credito' => $row['IndicadorNotaCredito'] ?? null,
         'strict_input' => true,
@@ -340,6 +348,11 @@ function extractTotales(array $row): array
         }
     }
     return $totales;
+}
+
+function blankToNull($value)
+{
+    return $value === '' ? null : $value;
 }
 
 function postFactura(string $apiBase, string $apiKey, array $payload): array

@@ -108,8 +108,54 @@ class ECFXmlBuilder
             $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
         }
 
-        $idDoc->appendChild($doc->createElement('TipoPago', (string) ($data['tipo_pago'] ?? 1)));
+        $tipoPago = $data['tipo_pago'] ?? null;
+        if ($tipoPago !== null && $tipoPago !== '' && (string) $tipoPago !== '0') {
+            $idDoc->appendChild($doc->createElement('TipoPago', (string) $tipoPago));
+        }
+        if (!empty($data['fecha_limite_pago'])) {
+            $idDoc->appendChild($doc->createElement('FechaLimitePago', $this->formatDate($data['fecha_limite_pago'])));
+        }
+        $this->appendIfNotEmpty($doc, $idDoc, 'TerminoPago', $data['termino_pago'] ?? '');
+        $this->appendFormasPago($doc, $idDoc, $data['formas_pago'] ?? []);
+        $this->appendIfNotEmpty($doc, $idDoc, 'TipoCuentaPago', $data['tipo_cuenta_pago'] ?? '');
+        $this->appendIfNotEmpty($doc, $idDoc, 'NumeroCuentaPago', $data['numero_cuenta_pago'] ?? '');
+        $this->appendIfNotEmpty($doc, $idDoc, 'BancoPago', $data['banco_pago'] ?? '');
+        if (!empty($data['fecha_desde'])) {
+            $idDoc->appendChild($doc->createElement('FechaDesde', $this->formatDate($data['fecha_desde'])));
+        }
+        if (!empty($data['fecha_hasta'])) {
+            $idDoc->appendChild($doc->createElement('FechaHasta', $this->formatDate($data['fecha_hasta'])));
+        }
+        $this->appendIfNotEmpty($doc, $idDoc, 'TotalPaginas', $data['total_paginas'] ?? '');
         return $idDoc;
+    }
+
+    private function appendFormasPago(DOMDocument $doc, DOMElement $idDoc, array $formas): void
+    {
+        if (count($formas) === 0) {
+            return;
+        }
+
+        $tabla = $doc->createElement('TablaFormasPago');
+        $count = 0;
+        foreach ($formas as $formaPago) {
+            if ($count >= 7) {
+                break;
+            }
+            if (!is_array($formaPago)) {
+                continue;
+            }
+            $forma = $doc->createElement('FormaDePago');
+            $this->appendIfNotEmpty($doc, $forma, 'FormaPago', $formaPago['forma_pago'] ?? '');
+            $this->appendMoneyIfSet($doc, $forma, 'MontoPago', $formaPago['monto_pago'] ?? null);
+            if ($forma->childNodes->length > 0) {
+                $tabla->appendChild($forma);
+                $count++;
+            }
+        }
+        if ($tabla->childNodes->length > 0) {
+            $idDoc->appendChild($tabla);
+        }
     }
 
     private function buildEmisor(DOMDocument $doc, array $emisor, string $fechaEmision): DOMElement
