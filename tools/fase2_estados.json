@@ -1,56 +1,25 @@
 [
     {
-        "caso": "131256432E330000000001",
-        "e_ncf": "E330000000001",
-        "factura_id": 781,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.La propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [614]",
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 781,
-                "e_ncf": "E330000000001",
-                "track_id": "5a7d205b-39b3-4039-85fd-bad9f5880598",
-                "estado_dgii": "RECHAZADO",
-                "consulta": {
-                    "trackId": "5a7d205b-39b3-4039-85fd-bad9f5880598",
-                    "codigo": "2",
-                    "estado": "Rechazado",
-                    "rnc": "131256432",
-                    "encf": "E330000000001",
-                    "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:08 PM",
-                    "mensajes": [
-                        {
-                            "valor": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.La propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 614
-                        }
-                    ]
-                }
-            }
-        }
-    },
-    {
         "caso": "131256432E320000000006",
         "e_ncf": "E320000000006",
-        "factura_id": 782,
+        "factura_id": 806,
         "estado_dgii": "ACEPTADO",
         "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 782,
+                "factura_id": 806,
                 "e_ncf": "E320000000006",
-                "track_id": "d79f3043-4a34-4cbb-a527-ccd94cf16f96",
+                "track_id": "f2755568-447c-4da5-adad-03728b76f34e",
                 "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "d79f3043-4a34-4cbb-a527-ccd94cf16f96",
+                    "trackId": "f2755568-447c-4da5-adad-03728b76f34e",
                     "codigo": "1",
                     "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E320000000006",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:09 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:20 PM",
                     "mensajes": [
                         {
                             "valor": "",
@@ -62,92 +31,30 @@
         }
     },
     {
-        "caso": "131256432E340000000001",
-        "e_ncf": "E340000000001",
-        "factura_id": 783,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "El eNCF modificado no ha sido emitido.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados. [614]",
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 783,
-                "e_ncf": "E340000000001",
-                "track_id": "c56d7ddb-34c8-476a-a24b-274ae904dcab",
-                "estado_dgii": "RECHAZADO",
-                "consulta": {
-                    "trackId": "c56d7ddb-34c8-476a-a24b-274ae904dcab",
-                    "codigo": "2",
-                    "estado": "Rechazado",
-                    "rnc": "131256432",
-                    "encf": "E340000000001",
-                    "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:11 PM",
-                    "mensajes": [
-                        {
-                            "valor": "El eNCF modificado no ha sido emitido.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados.",
-                            "codigo": 614
-                        }
-                    ]
-                }
-            }
-        }
-    },
-    {
-        "caso": "131256432E340000000013",
-        "e_ncf": "E340000000013",
-        "factura_id": 784,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "El eNCF modificado no ha sido emitido.La propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [614]",
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 784,
-                "e_ncf": "E340000000013",
-                "track_id": "25ec1c03-95d4-466d-9873-f4d527934d7e",
-                "estado_dgii": "RECHAZADO",
-                "consulta": {
-                    "trackId": "25ec1c03-95d4-466d-9873-f4d527934d7e",
-                    "codigo": "2",
-                    "estado": "Rechazado",
-                    "rnc": "131256432",
-                    "encf": "E340000000013",
-                    "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:12 PM",
-                    "mensajes": [
-                        {
-                            "valor": "El eNCF modificado no ha sido emitido.La propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 614
-                        }
-                    ]
-                }
-            }
-        }
-    },
-    {
         "caso": "131256432E440000000013",
         "e_ncf": "E440000000013",
-        "factura_id": 785,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 807,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 785,
+                "factura_id": 807,
                 "e_ncf": "E440000000013",
-                "track_id": "0a7c0028-4953-49ef-8de7-5eed3736aef9",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "f9d86a33-9f7e-46a8-8a1e-955500977ceb",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "0a7c0028-4953-49ef-8de7-5eed3736aef9",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "f9d86a33-9f7e-46a8-8a1e-955500977ceb",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E440000000013",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:13 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:21 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -157,28 +64,28 @@
     {
         "caso": "131256432E310000000001",
         "e_ncf": "E310000000001",
-        "factura_id": 786,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 808,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 786,
+                "factura_id": 808,
                 "e_ncf": "E310000000001",
-                "track_id": "5d769168-bd37-41d1-a03c-7e3c7a2ffe15",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "0f24a77e-f97e-4265-99b3-86a710a8b866",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "5d769168-bd37-41d1-a03c-7e3c7a2ffe15",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "0f24a77e-f97e-4265-99b3-86a710a8b866",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E310000000001",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:14 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:22 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -188,28 +95,28 @@
     {
         "caso": "131256432E310000000034",
         "e_ncf": "E310000000034",
-        "factura_id": 787,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 809,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 787,
+                "factura_id": 809,
                 "e_ncf": "E310000000034",
-                "track_id": "a522939d-3097-4c59-b919-855e83a4dbeb",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "6cdc18de-9b98-4824-ac3c-f594979927f6",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "a522939d-3097-4c59-b919-855e83a4dbeb",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "6cdc18de-9b98-4824-ac3c-f594979927f6",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E310000000034",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:15 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:23 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -219,28 +126,28 @@
     {
         "caso": "131256432E310000000009",
         "e_ncf": "E310000000009",
-        "factura_id": 788,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 810,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 788,
+                "factura_id": 810,
                 "e_ncf": "E310000000009",
-                "track_id": "37aa355b-bd64-497f-baaf-b933c693144b",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "4b3bf29f-5c13-43dc-b478-fde64c25d115",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "37aa355b-bd64-497f-baaf-b933c693144b",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "4b3bf29f-5c13-43dc-b478-fde64c25d115",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E310000000009",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:16 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:24 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoTotal no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -250,28 +157,28 @@
     {
         "caso": "131256432E310000000002",
         "e_ncf": "E310000000002",
-        "factura_id": 789,
+        "factura_id": 811,
         "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados. [11033]",
+        "detalle": "La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados. [0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 789,
+                "factura_id": 811,
                 "e_ncf": "E310000000002",
-                "track_id": "5f432c9a-0148-4167-9c27-80fc1a174706",
+                "track_id": "9a95ad2d-8913-414b-8aa3-ec3ca8761934",
                 "estado_dgii": "RECHAZADO",
                 "consulta": {
-                    "trackId": "5f432c9a-0148-4167-9c27-80fc1a174706",
+                    "trackId": "9a95ad2d-8913-414b-8aa3-ec3ca8761934",
                     "codigo": "2",
                     "estado": "Rechazado",
                     "rnc": "131256432",
                     "encf": "E310000000002",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:17 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:26 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados.",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -281,7 +188,7 @@
     {
         "caso": "131256432E320000000011",
         "e_ncf": "E320000000011",
-        "factura_id": 790,
+        "factura_id": 812,
         "estado_dgii": "?",
         "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
         "response": {
@@ -292,7 +199,7 @@
     {
         "caso": "131256432E320000000012",
         "e_ncf": "E320000000012",
-        "factura_id": 791,
+        "factura_id": 813,
         "estado_dgii": "?",
         "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
         "response": {
@@ -303,7 +210,7 @@
     {
         "caso": "131256432E320000000014",
         "e_ncf": "E320000000014",
-        "factura_id": 792,
+        "factura_id": 814,
         "estado_dgii": "?",
         "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
         "response": {
@@ -314,7 +221,7 @@
     {
         "caso": "131256432E320000000015",
         "e_ncf": "E320000000015",
-        "factura_id": 793,
+        "factura_id": 815,
         "estado_dgii": "?",
         "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
         "response": {
@@ -325,27 +232,27 @@
     {
         "caso": "131256432E320000000005",
         "e_ncf": "E320000000005",
-        "factura_id": 794,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [0]",
+        "factura_id": 816,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 794,
+                "factura_id": 816,
                 "e_ncf": "E320000000005",
-                "track_id": "dbe7c2e6-7f01-468b-93e1-6cbb03069b7a",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "88f44f55-d86d-4db9-8284-73e88108cc18",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "dbe7c2e6-7f01-468b-93e1-6cbb03069b7a",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "88f44f55-d86d-4db9-8284-73e88108cc18",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E320000000005",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:23 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:32 PM",
                     "mensajes": [
                         {
-                            "valor": "La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
+                            "valor": "",
                             "codigo": 0
                         }
                     ]
@@ -356,28 +263,28 @@
     {
         "caso": "131256432E410000000010",
         "e_ncf": "E410000000010",
-        "factura_id": 795,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 817,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 795,
+                "factura_id": 817,
                 "e_ncf": "E410000000010",
-                "track_id": "4d639e35-f2ab-4994-b401-99a2478442af",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "df0cab30-0e0e-4f65-a7ee-ee610b35b7e2",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "4d639e35-f2ab-4994-b401-99a2478442af",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "df0cab30-0e0e-4f65-a7ee-ee610b35b7e2",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E410000000010",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:25 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:33 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -387,28 +294,28 @@
     {
         "caso": "131256432E410000000008",
         "e_ncf": "E410000000008",
-        "factura_id": 796,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 818,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 796,
+                "factura_id": 818,
                 "e_ncf": "E410000000008",
-                "track_id": "08dcb5fe-971a-4a3b-be11-e2bdc28ffb49",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "46db2b88-7748-4b0d-a98b-0d8c3d44e93b",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "08dcb5fe-971a-4a3b-be11-e2bdc28ffb49",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "46db2b88-7748-4b0d-a98b-0d8c3d44e93b",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E410000000008",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:26 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:34 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -418,27 +325,27 @@
     {
         "caso": "131256432E430000000010",
         "e_ncf": "E430000000010",
-        "factura_id": 797,
+        "factura_id": 819,
         "estado_dgii": "RECHAZADO",
-        "detalle": "El formato del XML no es válido.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [1]",
+        "detalle": "El formato del XML no es válido. [1]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 797,
+                "factura_id": 819,
                 "e_ncf": "E430000000010",
-                "track_id": "2157b31d-02a4-4e10-967b-3c03a6f3562a",
+                "track_id": "18faac81-03dc-4961-a1ef-e33f30975c57",
                 "estado_dgii": "RECHAZADO",
                 "consulta": {
-                    "trackId": "2157b31d-02a4-4e10-967b-3c03a6f3562a",
+                    "trackId": "18faac81-03dc-4961-a1ef-e33f30975c57",
                     "codigo": "2",
                     "estado": "Rechazado",
                     "rnc": "131256432",
                     "encf": "E430000000010",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:27 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:36 PM",
                     "mensajes": [
                         {
-                            "valor": "El formato del XML no es válido.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
+                            "valor": "El formato del XML no es válido.",
                             "codigo": 1
                         }
                     ]
@@ -449,27 +356,27 @@
     {
         "caso": "131256432E430000000009",
         "e_ncf": "E430000000009",
-        "factura_id": 798,
+        "factura_id": 820,
         "estado_dgii": "RECHAZADO",
-        "detalle": "El formato del XML no es válido.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [1]",
+        "detalle": "El formato del XML no es válido. [1]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 798,
+                "factura_id": 820,
                 "e_ncf": "E430000000009",
-                "track_id": "e33e8e2c-0267-459e-a05c-d62efb4da7c4",
+                "track_id": "b6d2d19d-55ae-4684-bca6-f09c89322772",
                 "estado_dgii": "RECHAZADO",
                 "consulta": {
-                    "trackId": "e33e8e2c-0267-459e-a05c-d62efb4da7c4",
+                    "trackId": "b6d2d19d-55ae-4684-bca6-f09c89322772",
                     "codigo": "2",
                     "estado": "Rechazado",
                     "rnc": "131256432",
                     "encf": "E430000000009",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:28 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:37 PM",
                     "mensajes": [
                         {
-                            "valor": "El formato del XML no es válido.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
+                            "valor": "El formato del XML no es válido.",
                             "codigo": 1
                         }
                     ]
@@ -480,28 +387,28 @@
     {
         "caso": "131256432E440000000009",
         "e_ncf": "E440000000009",
-        "factura_id": 799,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 821,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 799,
+                "factura_id": 821,
                 "e_ncf": "E440000000009",
-                "track_id": "a40da964-e249-4b6f-9f53-d702e2e69c10",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "03955241-d221-49e5-92dd-ae5305ffe81a",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "a40da964-e249-4b6f-9f53-d702e2e69c10",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "03955241-d221-49e5-92dd-ae5305ffe81a",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E440000000009",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:29 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:38 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -511,28 +418,28 @@
     {
         "caso": "131256432E450000000001",
         "e_ncf": "E450000000001",
-        "factura_id": 800,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 822,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 800,
+                "factura_id": 822,
                 "e_ncf": "E450000000001",
-                "track_id": "3b5493e7-0bfa-4646-a1a7-4c0ac132fc8d",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "34db22b4-8427-4480-86a5-1c6a6c2dacac",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "3b5493e7-0bfa-4646-a1a7-4c0ac132fc8d",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "34db22b4-8427-4480-86a5-1c6a6c2dacac",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E450000000001",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:30 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:39 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -542,28 +449,28 @@
     {
         "caso": "131256432E450000000003",
         "e_ncf": "E450000000003",
-        "factura_id": 801,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [11033]",
+        "factura_id": 823,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 801,
+                "factura_id": 823,
                 "e_ncf": "E450000000003",
-                "track_id": "5ec15450-0d28-4250-be91-6339e110a7c8",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "a10d2bc5-1213-4d68-bf55-fadf06b19218",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "5ec15450-0d28-4250-be91-6339e110a7c8",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "a10d2bc5-1213-4d68-bf55-fadf06b19218",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E450000000003",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:31 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:40 PM",
                     "mensajes": [
                         {
-                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacionLa propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 11033
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -573,28 +480,28 @@
     {
         "caso": "131256432E460000000007",
         "e_ncf": "E460000000007",
-        "factura_id": 802,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 824,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 802,
+                "factura_id": 824,
                 "e_ncf": "E460000000007",
-                "track_id": "01e12a99-b535-457d-900d-f469eefb27a4",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "ffd9c33b-7311-4e9e-8d5c-d1a4ccab7787",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "01e12a99-b535-457d-900d-f469eefb27a4",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "ffd9c33b-7311-4e9e-8d5c-d1a4ccab7787",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E460000000007",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:33 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:42 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -604,28 +511,28 @@
     {
         "caso": "131256432E460000000001",
         "e_ncf": "E460000000001",
-        "factura_id": 803,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 825,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 803,
+                "factura_id": 825,
                 "e_ncf": "E460000000001",
-                "track_id": "dab333d4-dd14-4353-8451-85ad6ae66afa",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "3c6f99e8-9f9b-4e01-820c-29d2c8b515f6",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "dab333d4-dd14-4353-8451-85ad6ae66afa",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "3c6f99e8-9f9b-4e01-820c-29d2c8b515f6",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E460000000001",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:34 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:43 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La propiedad MontoGravadoI1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoGravadoI2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad MontoExento no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -635,28 +542,28 @@
     {
         "caso": "131256432E470000000001",
         "e_ncf": "E470000000001",
-        "factura_id": 804,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 826,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 804,
+                "factura_id": 826,
                 "e_ncf": "E470000000001",
-                "track_id": "c682579d-0d8c-455a-a56c-7539988e9438",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "e0129244-1614-4090-8156-a2d2744d8629",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "c682579d-0d8c-455a-a56c-7539988e9438",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "e0129244-1614-4090-8156-a2d2744d8629",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E470000000001",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:35 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:44 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
                         }
                     ]
                 }
@@ -666,28 +573,121 @@
     {
         "caso": "131256432E470000000011",
         "e_ncf": "E470000000011",
-        "factura_id": 805,
-        "estado_dgii": "RECHAZADO",
-        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados. [3]",
+        "factura_id": 827,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 805,
+                "factura_id": 827,
                 "e_ncf": "E470000000011",
-                "track_id": "b27a2e9d-0935-4585-ab87-8372d37f8035",
-                "estado_dgii": "RECHAZADO",
+                "track_id": "94ce23be-fac2-439e-bad0-67ef53b7363d",
+                "estado_dgii": "ACEPTADO",
                 "consulta": {
-                    "trackId": "b27a2e9d-0935-4585-ab87-8372d37f8035",
-                    "codigo": "2",
-                    "estado": "Rechazado",
+                    "trackId": "94ce23be-fac2-439e-bad0-67ef53b7363d",
+                    "codigo": "1",
+                    "estado": "Aceptado",
                     "rnc": "131256432",
                     "encf": "E470000000011",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 5:05:36 PM",
+                    "fechaRecepcion": "5\/8\/2026 5:08:46 PM",
                     "mensajes": [
                         {
-                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.La propiedad TotalITBIS no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS1 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS2 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.La propiedad TotalITBIS3 no es válida debido a que el valor enviado (0.00) no coincide con el valor () del conjunto de datos entregados.",
-                            "codigo": 3
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E330000000001",
+        "e_ncf": "E330000000001",
+        "factura_id": 828,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 828,
+                "e_ncf": "E330000000001",
+                "track_id": "8f664adf-4fcf-40cf-a303-f3aaa49f0984",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "8f664adf-4fcf-40cf-a303-f3aaa49f0984",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E330000000001",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 5:08:47 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E340000000001",
+        "e_ncf": "E340000000001",
+        "factura_id": 829,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 829,
+                "e_ncf": "E340000000001",
+                "track_id": "b3f0a8fb-7097-4109-9ce7-55d051481ea7",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "b3f0a8fb-7097-4109-9ce7-55d051481ea7",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000001",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 5:08:48 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E340000000013",
+        "e_ncf": "E340000000013",
+        "factura_id": 830,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 830,
+                "e_ncf": "E340000000013",
+                "track_id": "26f46f24-729f-48ef-91a4-a48f99367cd8",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "26f46f24-729f-48ef-91a4-a48f99367cd8",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000013",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 5:08:49 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
                         }
                     ]
                 }
