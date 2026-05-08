@@ -92,6 +92,7 @@ function main(array $argv): int
         $rows = array_values(array_filter($rows, fn($r) => !in_array((string)($r['ENCF'] ?? ''), $exclude, true)));
         fwrite(STDOUT, "==> Excluye: " . implode(',', $exclude) . " -> " . count($rows) . " casos\n");
     }
+    $rows = sortRowsByReference($rows);
 
     $results = [];
     foreach ($rows as $idx => $row) {
@@ -343,6 +344,25 @@ function extractItems(array $row): array
         ];
     }
     return $items;
+}
+
+function sortRowsByReference(array $rows): array
+{
+    $indexed = [];
+    foreach ($rows as $idx => $row) {
+        $indexed[] = ['idx' => $idx, 'row' => $row];
+    }
+
+    usort($indexed, function ($a, $b) {
+        $aHasRef = !empty($a['row']['NCFModificado']);
+        $bHasRef = !empty($b['row']['NCFModificado']);
+        if ($aHasRef !== $bHasRef) {
+            return $aHasRef <=> $bHasRef;
+        }
+        return $a['idx'] <=> $b['idx'];
+    });
+
+    return array_map(fn($entry) => $entry['row'], $indexed);
 }
 
 function extractNestedRows(array $row, string $group, int $line, array $fieldMap): array

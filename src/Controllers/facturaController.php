@@ -131,11 +131,14 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
+    $strictInput = !empty($input['strict_input']);
     $totales = computeTotales($items);
     $totalesOverride = is_array($input['totales'] ?? null)
         ? array_filter($input['totales'], fn($v) => $v !== null && $v !== '')
         : [];
-    if ($totalesOverride) {
+    if ($strictInput && $totalesOverride) {
+        $totales = $totalesOverride;
+    } elseif ($totalesOverride) {
         $totales = array_merge($totales, $totalesOverride);
     }
 
@@ -149,7 +152,6 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'contacto' => $client['client_name'] ?? null,
     ];
     $compradorOverride = is_array($input['comprador'] ?? null) ? $input['comprador'] : [];
-    $strictInput = !empty($input['strict_input']);
     $comprador = $strictInput
         ? $compradorOverride
         : array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
