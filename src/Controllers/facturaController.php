@@ -133,22 +133,30 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 
     $totales = computeTotales($items);
 
+    $compradorBase = [
+        'rnc' => $client['rnc'] ?? null,
+        'razon_social' => $client['razon_social'] ?? $client['company_name'] ?? $client['client_name'],
+        'direccion' => $client['direccion'] ?? null,
+        'municipio' => $client['municipio'] ?? null,
+        'provincia' => $client['provincia'] ?? null,
+        'correo' => $client['email'] ?? null,
+        'contacto' => $client['client_name'] ?? null,
+    ];
+    $compradorOverride = is_array($input['comprador'] ?? null) ? $input['comprador'] : [];
+    $comprador = array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
+
     $payload = [
         'tipo_ecf' => $tipoEcf,
         'e_ncf' => $input['e_ncf'] ?? null,
         'fecha_emision' => $input['fecha_emision'] ?? date('d-m-Y'),
+        'fecha_vencimiento_secuencia' => $input['fecha_vencimiento_secuencia'] ?? null,
         'tipo_ingresos' => $input['tipo_ingresos'] ?? '01',
         'tipo_pago' => $input['tipo_pago'] ?? 1,
+        'indicador_monto_gravado' => $input['indicador_monto_gravado'] ?? null,
+        'indicador_nota_credito' => $input['indicador_nota_credito'] ?? null,
         'ambiente' => $input['ambiente'] ?? null,
-        'comprador' => [
-            'rnc' => $client['rnc'] ?? null,
-            'razon_social' => $client['razon_social'] ?? $client['company_name'] ?? $client['client_name'],
-            'direccion' => $client['direccion'] ?? null,
-            'municipio' => $client['municipio'] ?? null,
-            'provincia' => $client['provincia'] ?? null,
-            'correo' => $client['email'] ?? null,
-            'contacto' => $client['client_name'] ?? null,
-        ],
+        'emisor_override' => is_array($input['emisor'] ?? null) ? $input['emisor'] : null,
+        'comprador' => $comprador,
         'items' => mapItemsForXml($items),
         'totales' => $totales,
         'informacion_referencia' => $input['informacion_referencia'] ?? null,

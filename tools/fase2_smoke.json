@@ -1,31 +1,31 @@
 [
     {
-        "caso": "131256432E310000000005",
+        "caso": "131256432E310000000001",
         "tipo_ecf": "31",
-        "e_ncf": "E310000000005",
+        "e_ncf": "E310000000001",
         "http_status": 200,
         "ok": true,
         "response": {
             "status": true,
             "data": {
-                "factura_id": 681,
-                "e_ncf": "E310000000005",
-                "track_id": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
+                "factura_id": 683,
+                "e_ncf": "E310000000001",
+                "track_id": "694b3587-faed-43e9-a108-9646169854d7",
                 "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "OPVIDS",
-                "total": 96282.7,
+                "codigo_seguridad": "UX4OY5",
+                "total": 7080,
                 "tipo_ecf": "31",
                 "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:11:14",
+                "fecha_emision_dgii": "2026-05-08 15:23:46",
                 "dgii_response": {
-                    "trackId": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
+                    "trackId": "694b3587-faed-43e9-a108-9646169854d7",
                     "error": null,
                     "mensaje": null
                 }
             }
         },
-        "factura_id": 681,
-        "track_id": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
+        "factura_id": 683,
+        "track_id": "694b3587-faed-43e9-a108-9646169854d7",
         "rfce_track_id": null,
         "estado_dgii": "ENVIADO",
         "flujo": null

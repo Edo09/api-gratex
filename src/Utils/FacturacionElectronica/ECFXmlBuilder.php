@@ -132,6 +132,12 @@ class ECFXmlBuilder
         $this->appendIfNotEmpty($doc, $node, 'CorreoEmisor', $emisor['correo'] ?? '');
         $this->appendIfNotEmpty($doc, $node, 'WebSite', $emisor['website'] ?? '');
         $this->appendIfNotEmpty($doc, $node, 'ActividadEconomica', $emisor['actividad_economica'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'CodigoVendedor', $emisor['codigo_vendedor'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'NumeroFacturaInterna', $emisor['numero_factura_interna'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'NumeroPedidoInterno', $emisor['numero_pedido_interno'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'ZonaVenta', $emisor['zona_venta'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'RutaVenta', $emisor['ruta_venta'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'InformacionAdicionalEmisor', $emisor['informacion_adicional'] ?? '');
 
         $node->appendChild($doc->createElement('FechaEmision', $this->formatDate($fechaEmision)));
         return $node;
@@ -154,6 +160,21 @@ class ECFXmlBuilder
         $this->appendIfNotEmpty($doc, $node, 'DireccionComprador', $comprador['direccion'] ?? '');
         $this->appendIfNotEmpty($doc, $node, 'MunicipioComprador', $comprador['municipio'] ?? '');
         $this->appendIfNotEmpty($doc, $node, 'ProvinciaComprador', $comprador['provincia'] ?? '');
+        if (!empty($comprador['fecha_entrega'])) {
+            $node->appendChild($doc->createElement('FechaEntrega', $this->formatDate($comprador['fecha_entrega'])));
+        }
+        $this->appendIfNotEmpty($doc, $node, 'ContactoEntrega', $comprador['contacto_entrega'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'DireccionEntrega', $comprador['direccion_entrega'] ?? '');
+        if (!empty($comprador['telefono_adicional'])) {
+            $node->appendChild($doc->createElement('TelefonoAdicional', $this->formatPhone($comprador['telefono_adicional'])));
+        }
+        if (!empty($comprador['fecha_orden_compra'])) {
+            $node->appendChild($doc->createElement('FechaOrdenCompra', $this->formatDate($comprador['fecha_orden_compra'])));
+        }
+        $this->appendIfNotEmpty($doc, $node, 'NumeroOrdenCompra', $comprador['numero_orden_compra'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'CodigoInternoComprador', $comprador['codigo_interno'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'ResponsablePago', $comprador['responsable_pago'] ?? '');
+        $this->appendIfNotEmpty($doc, $node, 'InformacionAdicionalComprador', $comprador['informacion_adicional'] ?? '');
         return $node;
     }
 

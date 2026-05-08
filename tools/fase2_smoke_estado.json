@@ -1,28 +1,28 @@
 [
     {
-        "caso": "131256432E310000000005",
-        "e_ncf": "E310000000005",
-        "factura_id": 681,
+        "caso": "131256432E310000000001",
+        "e_ncf": "E310000000001",
+        "factura_id": 683,
         "estado_dgii": "RECHAZADO",
-        "detalle": "La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [0]",
+        "detalle": "La propiedad Municipio no es válida debido a que el valor enviado (010100) no coincide con el valor (010101) del conjunto de datos entregados.La propiedad CodigoVendedor no es válida debido a que el valor enviado () no coincide con el valor (AA0000000100000000010000000002000000000300000000050000000006) del conjunto de datos entregados.La propiedad NumeroFacturaInterna no es válida debido a que el valor enviado () no coincide con el valor (123456789016) del conjunto de datos entregados.La propiedad NumeroPedidoInterno no es válida debido a que el valor enviado () no coincide con el valor (123456789016) del conjunto de datos entregados.La propiedad ZonaVenta no es válida debido a que el valor enviado () no coincide con el valor (NORT) del conjunto de datos entregados.La propiedad ContactoComprador no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 03) no coincide con el valor (MARCOS LATIPLOL) del conjunto de datos entregados.La propiedad Correo no es válida debido a que el valor enviado (fase2-comprador@example.com) no coincide con el valor (MARCOSLATIPLOL@KKKK.COM) del conjunto de datos entregados.La propiedad DireccionComprador no es válida debido a que el valor enviado (CALLE JACINTO DE LA CONCHA FELIZ ESQUINA 27 DE FEBRERO) no coincide con el valor (CALLE JACINTO DE LA CONCHA FELIZ ESQUINA 27 DE FEBRERO,FRENTE A DOMINO) del conjunto de datos entregados.La propiedad FechaEntrega no es válida debido a que el valor enviado () no coincide con el valor (10-10-2020) del conjunto de datos entregados.La propiedad FechaOrdenCompra no es válida debido a que el valor enviado () no coincide con el valor (10-11-2018) del conjunto de datos entregados.La propiedad NumeroOrdenCompra no es válida debido a que el valor enviado () no coincide con el valor (4500352238) del conjunto de datos entregados.La propiedad CodigoInternoComprador no es válida debido a que el valor enviado () no coincide con el valor (10633440) del conjunto de datos entregados. [0]",
         "response": {
             "status": true,
             "data": {
-                "factura_id": 681,
-                "e_ncf": "E310000000005",
-                "track_id": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
+                "factura_id": 683,
+                "e_ncf": "E310000000001",
+                "track_id": "694b3587-faed-43e9-a108-9646169854d7",
                 "estado_dgii": "RECHAZADO",
                 "consulta": {
-                    "trackId": "bc538639-7ddb-4a42-b34d-5a87e8a35cf9",
+                    "trackId": "694b3587-faed-43e9-a108-9646169854d7",
                     "codigo": "2",
                     "estado": "Rechazado",
                     "rnc": "131256432",
-                    "encf": "E310000000005",
+                    "encf": "E310000000001",
                     "secuenciaUtilizada": false,
-                    "fechaRecepcion": "5\/8\/2026 4:11:14 PM",
+                    "fechaRecepcion": "5\/8\/2026 4:23:46 PM",
                     "mensajes": [
                         {
-                            "valor": "La factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos.",
+                            "valor": "La propiedad Municipio no es válida debido a que el valor enviado (010100) no coincide con el valor (010101) del conjunto de datos entregados.La propiedad CodigoVendedor no es válida debido a que el valor enviado () no coincide con el valor (AA0000000100000000010000000002000000000300000000050000000006) del conjunto de datos entregados.La propiedad NumeroFacturaInterna no es válida debido a que el valor enviado () no coincide con el valor (123456789016) del conjunto de datos entregados.La propiedad NumeroPedidoInterno no es válida debido a que el valor enviado () no coincide con el valor (123456789016) del conjunto de datos entregados.La propiedad ZonaVenta no es válida debido a que el valor enviado () no coincide con el valor (NORT) del conjunto de datos entregados.La propiedad ContactoComprador no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 03) no coincide con el valor (MARCOS LATIPLOL) del conjunto de datos entregados.La propiedad Correo no es válida debido a que el valor enviado (fase2-comprador@example.com) no coincide con el valor (MARCOSLATIPLOL@KKKK.COM) del conjunto de datos entregados.La propiedad DireccionComprador no es válida debido a que el valor enviado (CALLE JACINTO DE LA CONCHA FELIZ ESQUINA 27 DE FEBRERO) no coincide con el valor (CALLE JACINTO DE LA CONCHA FELIZ ESQUINA 27 DE FEBRERO,FRENTE A DOMINO) del conjunto de datos entregados.La propiedad FechaEntrega no es válida debido a que el valor enviado () no coincide con el valor (10-10-2020) del conjunto de datos entregados.La propiedad FechaOrdenCompra no es válida debido a que el valor enviado () no coincide con el valor (10-11-2018) del conjunto de datos entregados.La propiedad NumeroOrdenCompra no es válida debido a que el valor enviado () no coincide con el valor (4500352238) del conjunto de datos entregados.La propiedad CodigoInternoComprador no es válida debido a que el valor enviado () no coincide con el valor (10633440) del conjunto de datos entregados.",
                             "codigo": 0
                         }
                     ]
