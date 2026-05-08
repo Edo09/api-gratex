@@ -4,6 +4,7 @@ require_once __DIR__ . '/DgiiAuthService.php';
 require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ECFXmlBuilder.php';
+require_once __DIR__ . '/RFCEXmlBuilder.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
 
@@ -18,10 +19,13 @@ require_once __DIR__ . '/../../Models/ncfModel.php';
  */
 class ECFEmissionService
 {
+    private const RFCE_THRESHOLD = 250000.00;
+
     private DgiiAuthService $auth;
     private DgiiXmlSigner $signer;
     private DgiiReceptionService $reception;
     private ECFXmlBuilder $builder;
+    private RFCEXmlBuilder $rfceBuilder;
     private EmisorConfigModel $emisorModel;
     private ncfModel $ncfModel;
 
@@ -31,6 +35,7 @@ class ECFEmissionService
         $this->signer = new DgiiXmlSigner();
         $this->reception = new DgiiReceptionService($this->auth);
         $this->builder = new ECFXmlBuilder();
+        $this->rfceBuilder = new RFCEXmlBuilder();
         $this->emisorModel = new EmisorConfigModel();
         $this->ncfModel = new ncfModel();
     }
@@ -55,9 +60,17 @@ class ECFEmissionService
             throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
         }
 
-        $eNcf = $this->ncfModel->dispenseNextECF('E' . $tipoEcf);
-        if ($eNcf === null) {
-            throw new RuntimeException('No se pudo asignar e-NCF para el tipo E' . $tipoEcf);
+        $eNcfOverride = $payload['e_ncf'] ?? null;
+        if ($eNcfOverride !== null && $eNcfOverride !== '') {
+            if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
+                throw new RuntimeException('e_ncf override invalido: debe ser E' . $tipoEcf . ' + 10 digitos. Recibido: ' . $eNcfOverride);
+            }
+            $eNcf = (string) $eNcfOverride;
+        } else {
+            $eNcf = $this->ncfModel->dispenseNextECF('E' . $tipoEcf);
+            if ($eNcf === null) {
+                throw new RuntimeException('No se pudo asignar e-NCF para el tipo E' . $tipoEcf);
+            }
         }
 
         $xmlData = [
@@ -108,6 +121,62 @@ class ECFEmissionService
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];
 
+        $montoTotal = (float) ($payload['totales']['monto_total'] ?? 0);
+        $usaRFCE = $tipoEcf === '32' && $montoTotal < self::RFCE_THRESHOLD;
+
+        if ($usaRFCE) {
+            $rfceXmlData = [
+                'tipo_ecf' => '32',
+                'e_ncf' => $eNcf,
+                'tipo_ingresos' => $xmlData['tipo_ingresos'],
+                'tipo_pago' => $xmlData['tipo_pago'],
+                'formas_pago' => $payload['formas_pago'] ?? [],
+                'emisor' => [
+                    'rnc' => $emisor['rnc'],
+                    'razon_social' => $emisor['razon_social'],
+                ],
+                'fecha_emision' => $xmlData['fecha_emision'],
+                'comprador' => [
+                    'rnc' => $payload['comprador']['rnc'] ?? null,
+                    'identificador_extranjero' => $payload['comprador']['identificador_extranjero'] ?? null,
+                    'razon_social' => $payload['comprador']['razon_social'] ?? null,
+                ],
+                'totales' => $payload['totales'] ?? [],
+                'codigo_seguridad_ecf' => $codigoSeguridad,
+            ];
+
+            $unsignedRfce = $this->rfceBuilder->build($rfceXmlData);
+            $signedRfce = $this->signer->sign($certContent, $certPassword, $unsignedRfce);
+
+            $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
+                'environment' => $ambiente,
+            ]);
+
+            $rfceEstado = $this->mapEstado($rfceReception);
+            $rfceTrackId = $this->extractTrackId($rfceReception);
+
+            return [
+                'e_ncf' => $eNcf,
+                'tipo_ecf' => $tipoEcf,
+                'signed_xml' => $signedXml,
+                'codigo_seguridad' => $codigoSeguridad,
+                'track_id' => null,
+                'estado' => 'RFCE_' . $rfceEstado,
+                'ambiente' => $ambiente,
+                'fecha_emision_dgii' => date('Y-m-d H:i:s'),
+                'dgii_response' => null,
+                'dgii_status_code' => null,
+                'flujo' => 'RFCE',
+                'monto_total' => $montoTotal,
+                'rfce_xml' => $signedRfce,
+                'rfce_track_id' => $rfceTrackId,
+                'rfce_estado' => $rfceEstado,
+                'rfce_response' => $rfceReception['data'],
+                'rfce_status_code' => $rfceReception['status_code'],
+                'aviso' => 'E32 con monto < 250,000: RFCE enviado a DGII. La factura integra debe cargarse manualmente al portal DGII.',
+            ];
+        }
+
         $reception = $this->reception->recibir($signedXml, $bearerToken, [
             'environment' => $ambiente,
         ]);
@@ -126,6 +195,7 @@ class ECFEmissionService
             'fecha_emision_dgii' => date('Y-m-d H:i:s'),
             'dgii_response' => $reception['data'],
             'dgii_status_code' => $reception['status_code'],
+            'flujo' => 'ECF',
         ];
     }
 
