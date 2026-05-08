@@ -59,14 +59,12 @@ class ECFXmlBuilder
 
     private function buildIdDoc(DOMDocument $doc, array $data): DOMElement
     {
-        $idDoc = $doc->createElement('IdDoc');
-        $idDoc->appendChild($doc->createElement('TipoeCF', (string) $data['tipo_ecf']));
-        $idDoc->appendChild($doc->createElement('eNCF', (string) $data['e_ncf']));
-        $idDoc->appendChild($doc->createElement(
-            'FechaVencimientoSecuencia',
-            $this->formatDate($data['fecha_vencimiento_secuencia'] ?? '31-12-2030')
-        ));
         $tipoEcfStr = (string) $data['tipo_ecf'];
+
+        $idDoc = $doc->createElement('IdDoc');
+        $idDoc->appendChild($doc->createElement('TipoeCF', $tipoEcfStr));
+        $idDoc->appendChild($doc->createElement('eNCF', (string) $data['e_ncf']));
+
         if ($tipoEcfStr === '34') {
             $idDoc->appendChild($doc->createElement(
                 'IndicadorNotaCredito',
