@@ -132,6 +132,12 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     }
 
     $totales = computeTotales($items);
+    $totalesOverride = is_array($input['totales'] ?? null)
+        ? array_filter($input['totales'], fn($v) => $v !== null && $v !== '')
+        : [];
+    if ($totalesOverride) {
+        $totales = array_merge($totales, $totalesOverride);
+    }
 
     $compradorBase = [
         'rnc' => $client['rnc'] ?? null,
@@ -143,7 +149,10 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'contacto' => $client['client_name'] ?? null,
     ];
     $compradorOverride = is_array($input['comprador'] ?? null) ? $input['comprador'] : [];
-    $comprador = array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
+    $strictInput = !empty($input['strict_input']);
+    $comprador = $strictInput
+        ? $compradorOverride
+        : array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
 
     $payload = [
         'tipo_ecf' => $tipoEcf,
@@ -392,13 +401,19 @@ function mapItemsForXml(array $items): array
         $mapped[] = [
             'numero_linea' => (int) ($raw['numero_linea'] ?? ($i + 1)),
             'indicador_facturacion' => $indicador,
+            'indicador_agente_retencion_percepcion' => $raw['indicador_agente_retencion_percepcion'] ?? null,
+            'monto_itbis_retenido' => $raw['monto_itbis_retenido'] ?? null,
+            'monto_isr_retenido' => $raw['monto_isr_retenido'] ?? null,
             'nombre_item' => (string) ($raw['nombre_item'] ?? $raw['description'] ?? 'Item'),
             'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 2),
             'descripcion' => (string) ($raw['descripcion'] ?? $raw['description'] ?? ''),
             'cantidad' => $cantidad,
+            'cantidad_raw' => $raw['cantidad_raw'] ?? null,
             'unidad_medida' => isset($raw['unidad_medida']) ? (string) $raw['unidad_medida'] : '',
             'precio_unitario' => $precio,
-            'monto_item' => $monto,
+            'precio_unitario_raw' => $raw['precio_unitario_raw'] ?? null,
+            'monto_item' => isset($raw['monto_item']) && $raw['monto_item'] !== '' ? (float) $raw['monto_item'] : $monto,
+            'monto_item_raw' => $raw['monto_item_raw'] ?? null,
             'itbis_amount' => $itbis,
         ];
     }

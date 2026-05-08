@@ -25,7 +25,7 @@ class ECFXmlBuilder
         $document->appendChild($root);
 
         $root->appendChild($this->buildEncabezado($document, $data));
-        $root->appendChild($this->buildDetallesItems($document, $data['items'] ?? []));
+        $root->appendChild($this->buildDetallesItems($document, $data['items'] ?? [], (string) ($data['tipo_ecf'] ?? '')));
 
         if (!empty($data['informacion_referencia'])) {
             $root->appendChild($this->buildInformacionReferencia($document, $data['informacion_referencia']));
@@ -147,9 +147,17 @@ class ECFXmlBuilder
     {
         $node = $doc->createElement('Comprador');
 
+        if ($tipoEcf === '47') {
+            $this->appendIfNotEmpty($doc, $node, 'IdentificadorExtranjero', $comprador['identificador_extranjero'] ?? '');
+            $this->appendIfNotEmpty($doc, $node, 'RazonSocialComprador', $comprador['razon_social'] ?? '');
+            return $node;
+        }
+
         $rnc = preg_replace('/\D/', '', (string) ($comprador['rnc'] ?? ''));
         if ($rnc !== '') {
             $node->appendChild($doc->createElement('RNCComprador', $rnc));
+        } elseif (!empty($comprador['identificador_extranjero'])) {
+            $node->appendChild($this->el($doc, 'IdentificadorExtranjero', (string) $comprador['identificador_extranjero']));
         } elseif ($tipoEcf === '31') {
             throw new RuntimeException('RNC del comprador es requerido para e-CF tipo 31 (Credito Fiscal).');
         }
@@ -195,6 +203,19 @@ class ECFXmlBuilder
         '45' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
         '46' => ['gravado' => true,  'exento' => false, 'rates' => [3]],
         '47' => ['gravado' => false, 'exento' => true,  'rates' => []],
+    ];
+
+    private const TOTALES_EXTRA_CONFIG = [
+        '31' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar', 'total_itbis_retenido', 'total_isr_retencion', 'total_itbis_percepcion', 'total_isr_percepcion'],
+        '32' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar'],
+        '33' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar', 'total_itbis_retenido', 'total_isr_retencion', 'total_itbis_percepcion', 'total_isr_percepcion'],
+        '34' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar', 'total_itbis_retenido', 'total_isr_retencion', 'total_itbis_percepcion', 'total_isr_percepcion'],
+        '41' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar', 'total_itbis_retenido', 'total_isr_retencion', 'total_itbis_percepcion', 'total_isr_percepcion'],
+        '43' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar'],
+        '44' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar'],
+        '45' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar'],
+        '46' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar'],
+        '47' => ['monto_periodo', 'saldo_anterior', 'monto_avance_pago', 'valor_pagar', 'total_isr_retencion'],
     ];
 
     private function buildTotales(DOMDocument $doc, array $totales, string $tipoEcf): DOMElement
@@ -251,26 +272,64 @@ class ECFXmlBuilder
         }
 
         $node->appendChild($doc->createElement('MontoTotal', $this->money($totales['monto_total'] ?? 0)));
+
+        $allowedExtras = self::TOTALES_EXTRA_CONFIG[$tipoEcf] ?? [];
+        $extraMap = [
+            'monto_periodo' => 'MontoPeriodo',
+            'saldo_anterior' => 'SaldoAnterior',
+            'monto_avance_pago' => 'MontoAvancePago',
+            'valor_pagar' => 'ValorPagar',
+            'total_itbis_retenido' => 'TotalITBISRetenido',
+            'total_isr_retencion' => 'TotalISRRetencion',
+            'total_itbis_percepcion' => 'TotalITBISPercepcion',
+            'total_isr_percepcion' => 'TotalISRPercepcion',
+        ];
+        foreach ($extraMap as $key => $name) {
+            if (in_array($key, $allowedExtras, true)) {
+                $this->appendMoneyIfSet($doc, $node, $name, $totales[$key] ?? null);
+            }
+        }
         return $node;
     }
 
-    private function buildDetallesItems(DOMDocument $doc, array $items): DOMElement
+    private function buildDetallesItems(DOMDocument $doc, array $items, string $tipoEcf): DOMElement
     {
         $detalles = $doc->createElement('DetallesItems');
         foreach ($items as $i => $item) {
             $itemEl = $doc->createElement('Item');
             $itemEl->appendChild($doc->createElement('NumeroLinea', (string) ($item['numero_linea'] ?? ($i + 1))));
             $itemEl->appendChild($doc->createElement('IndicadorFacturacion', (string) ($item['indicador_facturacion'] ?? 1)));
+            $this->appendRetencionIfNeeded($doc, $itemEl, $item, $tipoEcf);
             $itemEl->appendChild($this->el($doc, 'NombreItem', (string) ($item['nombre_item'] ?? '')));
             $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) ($item['indicador_bien_servicio'] ?? 2)));
             $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
-            $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad'] ?? 1)));
+            $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad_raw'] ?? $item['cantidad'] ?? 1)));
             $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
-            $itemEl->appendChild($doc->createElement('PrecioUnitarioItem', $this->money($item['precio_unitario'] ?? 0)));
-            $itemEl->appendChild($doc->createElement('MontoItem', $this->money($item['monto_item'] ?? 0)));
+            $itemEl->appendChild($doc->createElement('PrecioUnitarioItem', $this->price($item['precio_unitario_raw'] ?? $item['precio_unitario'] ?? 0)));
+            $itemEl->appendChild($doc->createElement('MontoItem', $this->money($item['monto_item_raw'] ?? $item['monto_item'] ?? 0)));
             $detalles->appendChild($itemEl);
         }
         return $detalles;
+    }
+
+    private function appendRetencionIfNeeded(DOMDocument $doc, DOMElement $itemEl, array $item, string $tipoEcf): void
+    {
+        $required = in_array($tipoEcf, ['41', '47'], true);
+        $indicador = $item['indicador_agente_retencion_percepcion'] ?? null;
+        $itbis = $item['monto_itbis_retenido'] ?? null;
+        $isr = $item['monto_isr_retenido'] ?? null;
+
+        if (!$required && ($indicador === null || $indicador === '') && ($itbis === null || $itbis === '') && ($isr === null || $isr === '')) {
+            return;
+        }
+
+        $retencion = $doc->createElement('Retencion');
+        if ($indicador !== null && $indicador !== '') {
+            $retencion->appendChild($doc->createElement('IndicadorAgenteRetencionoPercepcion', (string) $indicador));
+        }
+        $this->appendMoneyIfSet($doc, $retencion, 'MontoITBISRetenido', $itbis);
+        $this->appendMoneyIfSet($doc, $retencion, 'MontoISRRetenido', $isr);
+        $itemEl->appendChild($retencion);
     }
 
     private function buildInformacionReferencia(DOMDocument $doc, array $ref): DOMElement
@@ -300,6 +359,14 @@ class ECFXmlBuilder
             return;
         }
         $parent->appendChild($this->el($doc, $name, $value));
+    }
+
+    private function appendMoneyIfSet(DOMDocument $doc, DOMElement $parent, string $name, $value): void
+    {
+        if ($value === null || $value === '') {
+            return;
+        }
+        $parent->appendChild($doc->createElement($name, $this->money($value)));
     }
 
     private function el(DOMDocument $doc, string $name, string $value): DOMElement
@@ -334,6 +401,15 @@ class ECFXmlBuilder
     private function money($value): string
     {
         return number_format((float) ($value ?? 0), 2, '.', '');
+    }
+
+    private function price($value): string
+    {
+        $text = trim((string) ($value ?? ''));
+        if (preg_match('/^\d+\.\d{1,4}$/', $text)) {
+            return $text;
+        }
+        return $this->money($value);
     }
 
     private function qty($value): string
