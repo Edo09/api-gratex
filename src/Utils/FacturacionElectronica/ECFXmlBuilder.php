@@ -463,7 +463,7 @@ class ECFXmlBuilder
             if (!is_array($imp)) continue;
             $node = $doc->createElement('ImpuestoAdicional');
             $this->appendIfNotEmpty($doc, $node, 'TipoImpuesto', $imp['tipo_impuesto'] ?? '');
-            $this->appendMoneyIfSet($doc, $node, 'TasaImpuestoAdicional', $imp['tasa_impuesto_adicional'] ?? null);
+            $this->appendNumberIfSet($doc, $node, 'TasaImpuestoAdicional', $imp['tasa_impuesto_adicional'] ?? null);
             $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoSelectivoConsumoEspecifico', $imp['monto_impuesto_selectivo_consumo_especifico'] ?? null);
             $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoSelectivoConsumoAdvalorem', $imp['monto_impuesto_selectivo_consumo_advalorem'] ?? null);
             $this->appendMoneyIfSet($doc, $node, 'OtrosImpuestosAdicionales', $imp['otros_impuestos_adicionales'] ?? null);
@@ -490,7 +490,20 @@ class ECFXmlBuilder
         if (in_array($tipoEcf, ['31', '34', '41', '45', '46', '47'], true)) {
             return true;
         }
-        return !empty($data['comprador']);
+        return $this->hasAnyValue($data['comprador'] ?? []);
+    }
+
+    private function hasAnyValue($value): bool
+    {
+        if (!is_array($value)) {
+            return $value !== null && $value !== '';
+        }
+        foreach ($value as $item) {
+            if ($this->hasAnyValue($item)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function appendIfNotEmpty(DOMDocument $doc, DOMElement $parent, string $name, $value): void
@@ -568,6 +581,10 @@ class ECFXmlBuilder
 
     private function qty($value): string
     {
+        $text = trim((string) ($value ?? ''));
+        if (preg_match('/^\d+(\.\d{1,2})?$/', $text)) {
+            return $text;
+        }
         return number_format((float) ($value ?? 0), 2, '.', '');
     }
 }
