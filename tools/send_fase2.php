@@ -211,6 +211,7 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'tipo_pago' => (int) ($row['TipoPago'] ?? 1),
         'indicador_monto_gravado' => $row['IndicadorMontoGravado'] ?? null,
         'indicador_nota_credito' => $row['IndicadorNotaCredito'] ?? null,
+        'strict_input' => true,
         'emisor' => [
             'rnc' => $row['RNCEmisor'] ?? null,
             'razon_social' => $row['RazonSocialEmisor'] ?? null,
@@ -232,6 +233,7 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         ],
         'comprador' => [
             'rnc' => $row['RNCComprador'] ?? null,
+            'identificador_extranjero' => $row['IdentificadorExtranjero'] ?? null,
             'razon_social' => $row['RazonSocialComprador'] ?? null,
             'contacto' => $row['ContactoComprador'] ?? null,
             'correo' => $row['CorreoComprador'] ?? null,
@@ -249,6 +251,7 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
             'informacion_adicional' => $row['InformacionAdicionalComprador'] ?? null,
         ],
         'items' => $items,
+        'totales' => extractTotales($row),
     ];
     if ($userId !== null) {
         $payload['user_id'] = $userId;
@@ -289,15 +292,54 @@ function extractItems(array $row): array
         $items[] = [
             'numero_linea' => (int) ($row["NumeroLinea[$i]"] ?? $i),
             'indicador_facturacion' => (int) ($row["IndicadorFacturacion[$i]"] ?? 1),
+            'indicador_agente_retencion_percepcion' => $row["IndicadorAgenteRetencionoPercepcion[$i]"] ?? null,
+            'monto_itbis_retenido' => $row["MontoITBISRetenido[$i]"] ?? null,
+            'monto_isr_retenido' => $row["MontoISRRetenido[$i]"] ?? null,
             'nombre_item' => $nombre,
             'indicador_bien_servicio' => (int) ($row["IndicadorBienoServicio[$i]"] ?? 2),
             'descripcion' => $row["DescripcionItem[$i]"] ?? '',
             'cantidad' => (float) ($row["CantidadItem[$i]"] ?? 1),
+            'cantidad_raw' => $row["CantidadItem[$i]"] ?? null,
             'unidad_medida' => $row["UnidadMedida[$i]"] ?? '',
             'precio_unitario' => (float) ($row["PrecioUnitarioItem[$i]"] ?? 0),
+            'precio_unitario_raw' => $row["PrecioUnitarioItem[$i]"] ?? null,
+            'monto_item' => isset($row["MontoItem[$i]"]) && $row["MontoItem[$i]"] !== '' ? (float) $row["MontoItem[$i]"] : null,
+            'monto_item_raw' => $row["MontoItem[$i]"] ?? null,
         ];
     }
     return $items;
+}
+
+function extractTotales(array $row): array
+{
+    $map = [
+        'MontoGravadoTotal' => 'monto_gravado_total',
+        'MontoGravadoI1' => 'monto_gravado_i1',
+        'MontoGravadoI2' => 'monto_gravado_i2',
+        'MontoGravadoI3' => 'monto_gravado_i3',
+        'MontoExento' => 'monto_exento',
+        'TotalITBIS' => 'total_itbis',
+        'TotalITBIS1' => 'total_itbis1',
+        'TotalITBIS2' => 'total_itbis2',
+        'TotalITBIS3' => 'total_itbis3',
+        'MontoTotal' => 'monto_total',
+        'MontoPeriodo' => 'monto_periodo',
+        'SaldoAnterior' => 'saldo_anterior',
+        'MontoAvancePago' => 'monto_avance_pago',
+        'ValorPagar' => 'valor_pagar',
+        'TotalITBISRetenido' => 'total_itbis_retenido',
+        'TotalISRRetencion' => 'total_isr_retencion',
+        'TotalITBISPercepcion' => 'total_itbis_percepcion',
+        'TotalISRPercepcion' => 'total_isr_percepcion',
+    ];
+
+    $totales = [];
+    foreach ($map as $xlsxKey => $payloadKey) {
+        if (isset($row[$xlsxKey]) && $row[$xlsxKey] !== '') {
+            $totales[$payloadKey] = (float) $row[$xlsxKey];
+        }
+    }
+    return $totales;
 }
 
 function postFactura(string $apiBase, string $apiKey, array $payload): array

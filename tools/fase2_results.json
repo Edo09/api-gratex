@@ -1,701 +1,137 @@
 [
     {
-        "caso": "131256432E330000000001",
-        "tipo_ecf": "33",
-        "e_ncf": "E330000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 685,
-                "e_ncf": "E330000000001",
-                "track_id": "ad11cb8f-47fe-4610-9a11-7dfbc4f744b5",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "WRHSIL",
-                "total": 400000,
-                "tipo_ecf": "33",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:34:54",
-                "dgii_response": {
-                    "trackId": "ad11cb8f-47fe-4610-9a11-7dfbc4f744b5",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 685,
-        "track_id": "ad11cb8f-47fe-4610-9a11-7dfbc4f744b5",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E320000000006",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000006",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 686,
-                "e_ncf": "E320000000006",
-                "track_id": "6cda859a-b120-4e91-a945-7e62e5c41bdb",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "NRDAJQ",
-                "total": 413785.3,
-                "tipo_ecf": "32",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:34:55",
-                "dgii_response": {
-                    "trackId": "6cda859a-b120-4e91-a945-7e62e5c41bdb",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 686,
-        "track_id": "6cda859a-b120-4e91-a945-7e62e5c41bdb",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E340000000001",
-        "tipo_ecf": "34",
-        "e_ncf": "E340000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 687,
-                "e_ncf": "E340000000001",
-                "track_id": "a84d4a7d-b253-40cd-99f6-166664f0740a",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "XWZREP",
-                "total": 0,
-                "tipo_ecf": "34",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:34:56",
-                "dgii_response": {
-                    "trackId": "a84d4a7d-b253-40cd-99f6-166664f0740a",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 687,
-        "track_id": "a84d4a7d-b253-40cd-99f6-166664f0740a",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E340000000013",
-        "tipo_ecf": "34",
-        "e_ncf": "E340000000013",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 688,
-                "e_ncf": "E340000000013",
-                "track_id": "4efdde99-e666-4c06-9ba1-4465b7c81d29",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "ITJ66O",
-                "total": 917095,
-                "tipo_ecf": "34",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:34:58",
-                "dgii_response": {
-                    "trackId": "4efdde99-e666-4c06-9ba1-4465b7c81d29",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 688,
-        "track_id": "4efdde99-e666-4c06-9ba1-4465b7c81d29",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E440000000013",
-        "tipo_ecf": "44",
-        "e_ncf": "E440000000013",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 689,
-                "e_ncf": "E440000000013",
-                "track_id": "e6a072df-ca71-4dfb-a662-3e7a1d024975",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "NLFZRO",
-                "total": 917095,
-                "tipo_ecf": "44",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:34:59",
-                "dgii_response": {
-                    "trackId": "e6a072df-ca71-4dfb-a662-3e7a1d024975",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 689,
-        "track_id": "e6a072df-ca71-4dfb-a662-3e7a1d024975",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E310000000001",
-        "tipo_ecf": "31",
-        "e_ncf": "E310000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 690,
-                "e_ncf": "E310000000001",
-                "track_id": "addfc499-e8c0-4db3-9c39-51d444079024",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "KQIVW7",
-                "total": 7080,
-                "tipo_ecf": "31",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:00",
-                "dgii_response": {
-                    "trackId": "addfc499-e8c0-4db3-9c39-51d444079024",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 690,
-        "track_id": "addfc499-e8c0-4db3-9c39-51d444079024",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E310000000034",
-        "tipo_ecf": "31",
-        "e_ncf": "E310000000034",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 691,
-                "e_ncf": "E310000000034",
-                "track_id": "c488679f-4502-45f4-b43a-730fc3165adc",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "HZHXMF",
-                "total": 25000000,
-                "tipo_ecf": "31",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:01",
-                "dgii_response": {
-                    "trackId": "c488679f-4502-45f4-b43a-730fc3165adc",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 691,
-        "track_id": "c488679f-4502-45f4-b43a-730fc3165adc",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E310000000009",
-        "tipo_ecf": "31",
-        "e_ncf": "E310000000009",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 692,
-                "e_ncf": "E310000000009",
-                "track_id": "d0c3806b-58e0-47ac-a4c6-4cc5299f2cc4",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "C7CYEB",
-                "total": 41750,
-                "tipo_ecf": "31",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:02",
-                "dgii_response": {
-                    "trackId": "d0c3806b-58e0-47ac-a4c6-4cc5299f2cc4",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 692,
-        "track_id": "d0c3806b-58e0-47ac-a4c6-4cc5299f2cc4",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E310000000002",
-        "tipo_ecf": "31",
-        "e_ncf": "E310000000002",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 693,
-                "e_ncf": "E310000000002",
-                "track_id": "c15d936c-ded9-4093-ba5f-26f73ed2fdb7",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "NQC4CJ",
-                "total": 3811.4,
-                "tipo_ecf": "31",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:04",
-                "dgii_response": {
-                    "trackId": "c15d936c-ded9-4093-ba5f-26f73ed2fdb7",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 693,
-        "track_id": "c15d936c-ded9-4093-ba5f-26f73ed2fdb7",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E320000000011",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000011",
-        "http_status": 502,
-        "ok": false,
-        "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-        },
-        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-    },
-    {
-        "caso": "131256432E320000000012",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000012",
-        "http_status": 502,
-        "ok": false,
-        "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-        },
-        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-    },
-    {
-        "caso": "131256432E320000000014",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000014",
-        "http_status": 502,
-        "ok": false,
-        "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-        },
-        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-    },
-    {
-        "caso": "131256432E320000000015",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000015",
-        "http_status": 502,
-        "ok": false,
-        "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-        },
-        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {\"codigo\":2,\"estado\":\"Rechazado\",\"mensajes\":[{\"codigo\":null,\"valor\":\"La propiedad RazonSocialEmisor no es válida debido a que el valor enviado (DOCUMENTOS ELECTRONICOS DE 02) no coincide con el valor (DOCUMENTOS ELECTRONICOS PRUEBA FACTURA DE CONSUMO MENOR 250MIL) del conjunto de datos entregados.La propiedad Emisor no es válida debido a que el valor enviado { RNCEmisor = 131256432, RazonSocialEmisor = DOCUMENTOS ELECTRONICOS DE 02, FechaEmision = 01-04-2020 }no coincide con el valor ({ RNCEmi..."
-    },
-    {
-        "caso": "131256432E320000000005",
-        "tipo_ecf": "32",
-        "e_ncf": "E320000000005",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 694,
-                "e_ncf": "E320000000005",
-                "track_id": "c8bedbbe-d035-4fba-8eda-16bec7264987",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "GAJPNY",
-                "total": 2282785.36,
-                "tipo_ecf": "32",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:11",
-                "dgii_response": {
-                    "trackId": "c8bedbbe-d035-4fba-8eda-16bec7264987",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 694,
-        "track_id": "c8bedbbe-d035-4fba-8eda-16bec7264987",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E410000000010",
-        "tipo_ecf": "41",
-        "e_ncf": "E410000000010",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 695,
-                "e_ncf": "E410000000010",
-                "track_id": "5c0ec0b0-86a7-4421-b0c8-df3e14d60c2e",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "YX0JOZ",
-                "total": 18665.3,
-                "tipo_ecf": "41",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:12",
-                "dgii_response": {
-                    "trackId": "5c0ec0b0-86a7-4421-b0c8-df3e14d60c2e",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 695,
-        "track_id": "5c0ec0b0-86a7-4421-b0c8-df3e14d60c2e",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E410000000008",
-        "tipo_ecf": "41",
-        "e_ncf": "E410000000008",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 696,
-                "e_ncf": "E410000000008",
-                "track_id": "6adb565d-943c-43fe-8361-1ab74dcc0437",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "NSHPE7",
-                "total": 18767.9,
-                "tipo_ecf": "41",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:13",
-                "dgii_response": {
-                    "trackId": "6adb565d-943c-43fe-8361-1ab74dcc0437",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 696,
-        "track_id": "6adb565d-943c-43fe-8361-1ab74dcc0437",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E430000000010",
-        "tipo_ecf": "43",
-        "e_ncf": "E430000000010",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 697,
-                "e_ncf": "E430000000010",
-                "track_id": "27f11387-b59c-45dc-80e1-7dbd831cf660",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "LFUR7P",
-                "total": 3960,
-                "tipo_ecf": "43",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:14",
-                "dgii_response": {
-                    "trackId": "27f11387-b59c-45dc-80e1-7dbd831cf660",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 697,
-        "track_id": "27f11387-b59c-45dc-80e1-7dbd831cf660",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E430000000009",
-        "tipo_ecf": "43",
-        "e_ncf": "E430000000009",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 698,
-                "e_ncf": "E430000000009",
-                "track_id": "dc49ae6d-14fc-4624-8465-e3cf9f7889c1",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "L3TUAX",
-                "total": 350,
-                "tipo_ecf": "43",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:15",
-                "dgii_response": {
-                    "trackId": "dc49ae6d-14fc-4624-8465-e3cf9f7889c1",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 698,
-        "track_id": "dc49ae6d-14fc-4624-8465-e3cf9f7889c1",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E440000000009",
-        "tipo_ecf": "44",
-        "e_ncf": "E440000000009",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 699,
-                "e_ncf": "E440000000009",
-                "track_id": "37d0d71a-4cdb-4398-ba38-a58d53a23cba",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "LGR4CN",
-                "total": 432000,
-                "tipo_ecf": "44",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:17",
-                "dgii_response": {
-                    "trackId": "37d0d71a-4cdb-4398-ba38-a58d53a23cba",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 699,
-        "track_id": "37d0d71a-4cdb-4398-ba38-a58d53a23cba",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E450000000001",
-        "tipo_ecf": "45",
-        "e_ncf": "E450000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 700,
-                "e_ncf": "E450000000001",
-                "track_id": "dd07f201-fc39-417f-88bd-826e9a6bfd53",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "FUKMWC",
-                "total": 35400,
-                "tipo_ecf": "45",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:18",
-                "dgii_response": {
-                    "trackId": "dd07f201-fc39-417f-88bd-826e9a6bfd53",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 700,
-        "track_id": "dd07f201-fc39-417f-88bd-826e9a6bfd53",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E450000000003",
-        "tipo_ecf": "45",
-        "e_ncf": "E450000000003",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 701,
-                "e_ncf": "E450000000003",
-                "track_id": "6c38393b-247f-4174-97f7-94c89c99a4e8",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "SQECES",
-                "total": 564925,
-                "tipo_ecf": "45",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:19",
-                "dgii_response": {
-                    "trackId": "6c38393b-247f-4174-97f7-94c89c99a4e8",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 701,
-        "track_id": "6c38393b-247f-4174-97f7-94c89c99a4e8",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E460000000007",
-        "tipo_ecf": "46",
-        "e_ncf": "E460000000007",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 702,
-                "e_ncf": "E460000000007",
-                "track_id": "17526266-8317-46bc-a812-22de3dd8526f",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "OE7FIO",
-                "total": 117500,
-                "tipo_ecf": "46",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:20",
-                "dgii_response": {
-                    "trackId": "17526266-8317-46bc-a812-22de3dd8526f",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 702,
-        "track_id": "17526266-8317-46bc-a812-22de3dd8526f",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E460000000001",
-        "tipo_ecf": "46",
-        "e_ncf": "E460000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 703,
-                "e_ncf": "E460000000001",
-                "track_id": "4be8de06-332f-4711-bf1a-0f018308f5d8",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "HNHYKD",
-                "total": 1800000,
-                "tipo_ecf": "46",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:21",
-                "dgii_response": {
-                    "trackId": "4be8de06-332f-4711-bf1a-0f018308f5d8",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 703,
-        "track_id": "4be8de06-332f-4711-bf1a-0f018308f5d8",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
-        "caso": "131256432E470000000001",
-        "tipo_ecf": "47",
-        "e_ncf": "E470000000001",
-        "http_status": 200,
-        "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 704,
-                "e_ncf": "E470000000001",
-                "track_id": "e14d9fa4-2b10-43f4-a3fb-85c9953ba2aa",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "AJ61JA",
-                "total": 180000,
-                "tipo_ecf": "47",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:22",
-                "dgii_response": {
-                    "trackId": "e14d9fa4-2b10-43f4-a3fb-85c9953ba2aa",
-                    "error": null,
-                    "mensaje": null
-                }
-            }
-        },
-        "factura_id": 704,
-        "track_id": "e14d9fa4-2b10-43f4-a3fb-85c9953ba2aa",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
-    },
-    {
         "caso": "131256432E470000000011",
         "tipo_ecf": "47",
         "e_ncf": "E470000000011",
-        "http_status": 200,
         "ok": true,
-        "response": {
-            "status": true,
-            "data": {
-                "factura_id": 705,
-                "e_ncf": "E470000000011",
-                "track_id": "77d57681-ee42-417d-ae62-a4d8009aac05",
-                "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "BIXMS0",
-                "total": 332770,
-                "tipo_ecf": "47",
-                "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 15:35:23",
-                "dgii_response": {
-                    "trackId": "77d57681-ee42-417d-ae62-a4d8009aac05",
-                    "error": null,
-                    "mensaje": null
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "47",
+            "e_ncf": "E470000000011",
+            "client_id": 3511,
+            "fecha_emision": "01-04-2020",
+            "fecha_vencimiento_secuencia": "31-12-2028",
+            "tipo_ingresos": "",
+            "tipo_pago": 1,
+            "indicador_monto_gravado": "",
+            "indicador_nota_credito": "",
+            "strict_input": true,
+            "emisor": {
+                "rnc": "131256432",
+                "razon_social": "DOCUMENTOS ELECTRONICOS DE 02",
+                "nombre_comercial": "DOCUMENTOS ELECTRONICOS DE 02",
+                "sucursal": "",
+                "direccion": "AVE. ISABEL AGUIAR NO. 269, ZONA INDUSTRIAL DE HERRERA",
+                "municipio": "010100",
+                "provincia": "010000",
+                "telefono": "809-472-7676",
+                "correo": "DOCUMENTOSELECTRONICOSDE0612345678969789+9000000000000000000000000000001@123.COM",
+                "website": "www.facturaelectronica.com",
+                "actividad_economica": "",
+                "codigo_vendedor": "",
+                "numero_factura_interna": "123456789016",
+                "numero_pedido_interno": "123456789016",
+                "zona_venta": "",
+                "ruta_venta": "",
+                "informacion_adicional": ""
+            },
+            "comprador": {
+                "rnc": "",
+                "identificador_extranjero": "350555123",
+                "razon_social": "DOCUMENTOS ELECTRONICOS DE 03",
+                "contacto": "",
+                "correo": "",
+                "direccion": "",
+                "municipio": "",
+                "provincia": "",
+                "fecha_entrega": "",
+                "contacto_entrega": "",
+                "direccion_entrega": "",
+                "telefono_adicional": "",
+                "fecha_orden_compra": "",
+                "numero_orden_compra": "",
+                "codigo_interno": "",
+                "responsable_pago": "",
+                "informacion_adicional": ""
+            },
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "",
+                    "monto_isr_retenido": "31050.00",
+                    "nombre_item": "Asesoria contable",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "cantidad_raw": "1.00",
+                    "unidad_medida": "43",
+                    "precio_unitario": 115000,
+                    "precio_unitario_raw": "115000.0000",
+                    "monto_item": 115000,
+                    "monto_item_raw": "115000.00"
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "",
+                    "monto_isr_retenido": "42660.00",
+                    "nombre_item": "Software",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 2,
+                    "cantidad_raw": "2.00",
+                    "unidad_medida": "43",
+                    "precio_unitario": 79000,
+                    "precio_unitario_raw": "79000.0000",
+                    "monto_item": 158000,
+                    "monto_item_raw": "158000.00"
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "",
+                    "monto_isr_retenido": "6474.60",
+                    "nombre_item": "Soporte Tecnico",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "cantidad_raw": "1.00",
+                    "unidad_medida": "43",
+                    "precio_unitario": 23980,
+                    "precio_unitario_raw": "23980.0000",
+                    "monto_item": 23980,
+                    "monto_item_raw": "23980.00"
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": "",
+                    "monto_isr_retenido": "9663.30",
+                    "nombre_item": "Soporte Estrategico",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 2,
+                    "cantidad_raw": "2.00",
+                    "unidad_medida": "43",
+                    "precio_unitario": 17895,
+                    "precio_unitario_raw": "17895.0000",
+                    "monto_item": 35790,
+                    "monto_item_raw": "35790.00"
                 }
-            }
-        },
-        "factura_id": 705,
-        "track_id": "77d57681-ee42-417d-ae62-a4d8009aac05",
-        "rfce_track_id": null,
-        "estado_dgii": "ENVIADO",
-        "flujo": null
+            ],
+            "totales": {
+                "monto_exento": 332770,
+                "monto_total": 332770,
+                "monto_periodo": 332770,
+                "valor_pagar": 332770,
+                "total_isr_retencion": 89847.9
+            },
+            "user_id": 2
+        }
     }
 ]
