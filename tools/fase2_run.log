@@ -1,158 +1,105 @@
 ==> Leyendo xlsx: samples\131256432-05052026110320.xlsx
 ==> 25 casos en hoja ECF
+==> Excluye: E310000000005 -> 24 casos
 
-[1/25] 131256432E330000000001 (E33, E330000000001)
+[1/24] 131256432E330000000001 (E33, E330000000001)
+    OK  estado=ENVIADO track=5a0c14d2-5ee7-4aa1-8d2d-4b85a1d560c0 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[2/24] 131256432E320000000006 (E32, E320000000006)
+    OK  estado=ENVIADO track=5a4e0361-64c8-4002-b399-ca11e5d767ba rfce=- flujo=-
 
-[2/25] 131256432E320000000006 (E32, E320000000006)
+[3/24] 131256432E340000000016 (E34, E340000000016)
+    OK  estado=ENVIADO track=847103ed-bfd8-44d3-9665-ec2610763367 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[4/24] 131256432E340000000002 (E34, E340000000002)
+    OK  estado=ENVIADO track=8447926b-cf4e-4184-a463-efda27693fc8 rfce=- flujo=-
 
-[3/25] 131256432E340000000016 (E34, E340000000016)
+[5/24] 131256432E310000000034 (E31, E310000000034)
+    OK  estado=ENVIADO track=3b6fefb8-1553-4cd5-b3ee-73954d12bf61 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[6/24] 131256432E410000000010 (E41, E410000000010)
+    OK  estado=ENVIADO track=851e479c-04cd-43cf-9eb3-624a913e7836 rfce=- flujo=-
 
-[4/25] 131256432E340000000002 (E34, E340000000002)
+[7/24] 131256432E310000000012 (E31, E310000000012)
+    OK  estado=ENVIADO track=96b2c736-4b62-4294-a417-600e662e7b77 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[8/24] 131256432E310000000007 (E31, E310000000007)
+    OK  estado=ENVIADO track=3b35aa8f-1124-43bd-a38b-6064e4e91ae7 rfce=- flujo=-
 
-[5/25] 131256432E310000000034 (E31, E310000000034)
+[9/24] 131256432E320000000011 (E32, E320000000011)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000011, no existe en nuestra colección de datos."}],"encf":"E320000000011","secuenciaUtilizada":false}
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[10/24] 131256432E320000000012 (E32, E320000000012)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000012, no existe en nuestra colección de datos."}],"encf":"E320000000012","secuenciaUtilizada":false}
 
-[6/25] 131256432E410000000010 (E41, E410000000010)
+[11/24] 131256432E320000000013 (E32, E320000000013)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000013, no existe en nuestra colección de datos."}],"encf":"E320000000013","secuenciaUtilizada":false}
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[12/24] 131256432E320000000015 (E32, E320000000015)
+    FAIL Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000015, no existe en nuestra colección de datos."}],"encf":"E320000000015","secuenciaUtilizada":false}
 
-[7/25] 131256432E310000000005 (E31, E310000000005)
+[13/24] 131256432E320000000002 (E32, E320000000002)
+    OK  estado=ENVIADO track=cbb0c60b-60a6-42d6-978a-f0aaa1a2bbf5 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[14/24] 131256432E410000000007 (E41, E410000000007)
+    OK  estado=ENVIADO track=c968eb76-c533-47a6-ba11-e3a304cfd94b rfce=- flujo=-
 
-[8/25] 131256432E310000000012 (E31, E310000000012)
+[15/24] 131256432E430000000001 (E43, E430000000001)
+    OK  estado=ENVIADO track=e4d39d3d-86c1-403c-b678-1ee91fd367d8 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[16/24] 131256432E430000000009 (E43, E430000000009)
+    OK  estado=ENVIADO track=249cbcde-99db-4c44-aa17-e00ab7996922 rfce=- flujo=-
 
-[9/25] 131256432E310000000007 (E31, E310000000007)
+[17/24] 131256432E440000000007 (E44, E440000000007)
+    OK  estado=ENVIADO track=39862421-20fd-4166-9ede-7478ae331f67 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[18/24] 131256432E440000000008 (E44, E440000000008)
+    OK  estado=ENVIADO track=85d8d9f3-b852-487b-b937-71b1f2d945cf rfce=- flujo=-
 
-[10/25] 131256432E320000000011 (E32, E320000000011)
+[19/24] 131256432E450000000009 (E45, E450000000009)
+    OK  estado=ENVIADO track=2673d6af-55ed-4e36-816a-9ffb5bb24ef4 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[20/24] 131256432E450000000011 (E45, E450000000011)
+    OK  estado=ENVIADO track=6b412249-b2fd-467d-a0c7-386de652f457 rfce=- flujo=-
 
-[11/25] 131256432E320000000012 (E32, E320000000012)
+[21/24] 131256432E460000000007 (E46, E460000000007)
+    OK  estado=ENVIADO track=1b2a4e2c-25d6-40cf-abff-80c4e60b6ad0 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[22/24] 131256432E460000000011 (E46, E460000000011)
+    OK  estado=ENVIADO track=c2e3d1a0-cc1c-45e9-a817-7653863bf9c9 rfce=- flujo=-
 
-[12/25] 131256432E320000000013 (E32, E320000000013)
+[23/24] 131256432E470000000009 (E47, E470000000009)
+    OK  estado=ENVIADO track=ce154955-7876-496a-b4ae-aeadae3545c4 rfce=- flujo=-
 
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[13/25] 131256432E320000000015 (E32, E320000000015)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[14/25] 131256432E320000000002 (E32, E320000000002)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[15/25] 131256432E410000000007 (E41, E410000000007)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[16/25] 131256432E430000000001 (E43, E430000000001)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[17/25] 131256432E430000000009 (E43, E430000000009)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[18/25] 131256432E440000000007 (E44, E440000000007)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[19/25] 131256432E440000000008 (E44, E440000000008)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[20/25] 131256432E450000000009 (E45, E450000000009)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[21/25] 131256432E450000000011 (E45, E450000000011)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[22/25] 131256432E460000000007 (E46, E460000000007)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[23/25] 131256432E460000000011 (E46, E460000000011)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[24/25] 131256432E470000000009 (E47, E470000000009)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-
-[25/25] 131256432E470000000001 (E47, E470000000001)
-
-Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
-    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+[24/24] 131256432E470000000001 (E47, E470000000001)
+    OK  estado=ENVIADO track=b76f2737-7c36-4483-9142-484189ea7723 rfce=- flujo=-
 
 ========================================
-Resumen: 0/25 OK, 25 fallaron
+Resumen: 20/24 OK, 4 fallaron
 ========================================
-  - 131256432E330000000001 | E33 | E330000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000006 | E32 | E320000000006 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E340000000016 | E34 | E340000000016 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E340000000002 | E34 | E340000000002 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E310000000034 | E31 | E310000000034 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E410000000010 | E41 | E410000000010 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E310000000005 | E31 | E310000000005 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E310000000012 | E31 | E310000000012 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E310000000007 | E31 | E310000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000011 | E32 | E320000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000012 | E32 | E320000000012 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000013 | E32 | E320000000013 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000015 | E32 | E320000000015 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E320000000002 | E32 | E320000000002 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E410000000007 | E41 | E410000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E430000000001 | E43 | E430000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E430000000009 | E43 | E430000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E440000000007 | E44 | E440000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E440000000008 | E44 | E440000000008 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E450000000009 | E45 | E450000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E450000000011 | E45 | E450000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E460000000007 | E46 | E460000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E460000000011 | E46 | E460000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E470000000009 | E47 | E470000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
-  - 131256432E470000000001 | E47 | E470000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  + 131256432E330000000001 | E33 | E330000000001 | ENVIADO track=5a0c14d2-5ee7-4aa1-8d2d-4b85a1d560c0
+  + 131256432E320000000006 | E32 | E320000000006 | ENVIADO track=5a4e0361-64c8-4002-b399-ca11e5d767ba
+  + 131256432E340000000016 | E34 | E340000000016 | ENVIADO track=847103ed-bfd8-44d3-9665-ec2610763367
+  + 131256432E340000000002 | E34 | E340000000002 | ENVIADO track=8447926b-cf4e-4184-a463-efda27693fc8
+  + 131256432E310000000034 | E31 | E310000000034 | ENVIADO track=3b6fefb8-1553-4cd5-b3ee-73954d12bf61
+  + 131256432E410000000010 | E41 | E410000000010 | ENVIADO track=851e479c-04cd-43cf-9eb3-624a913e7836
+  + 131256432E310000000012 | E31 | E310000000012 | ENVIADO track=96b2c736-4b62-4294-a417-600e662e7b77
+  + 131256432E310000000007 | E31 | E310000000007 | ENVIADO track=3b35aa8f-1124-43bd-a38b-6064e4e91ae7
+  - 131256432E320000000011 | E32 | E320000000011 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000011, no existe en nuestra colección de datos."}],"encf":"E320000000011","secuenciaUtilizada":false}
+  - 131256432E320000000012 | E32 | E320000000012 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000012, no existe en nuestra colección de datos."}],"encf":"E320000000012","secuenciaUtilizada":false}
+  - 131256432E320000000013 | E32 | E320000000013 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000013, no existe en nuestra colección de datos."}],"encf":"E320000000013","secuenciaUtilizada":false}
+  - 131256432E320000000015 | E32 | E320000000015 | Fallo en emision DGII: DGII authenticated request failed: HTTP 400 - {"codigo":2,"estado":"Rechazado","mensajes":[{"codigo":"3243","valor":"La longitud del nombre del archivo no es válida.La factura recibida con el e-NCF E320000000015, no existe en nuestra colección de datos."}],"encf":"E320000000015","secuenciaUtilizada":false}
+  + 131256432E320000000002 | E32 | E320000000002 | ENVIADO track=cbb0c60b-60a6-42d6-978a-f0aaa1a2bbf5
+  + 131256432E410000000007 | E41 | E410000000007 | ENVIADO track=c968eb76-c533-47a6-ba11-e3a304cfd94b
+  + 131256432E430000000001 | E43 | E430000000001 | ENVIADO track=e4d39d3d-86c1-403c-b678-1ee91fd367d8
+  + 131256432E430000000009 | E43 | E430000000009 | ENVIADO track=249cbcde-99db-4c44-aa17-e00ab7996922
+  + 131256432E440000000007 | E44 | E440000000007 | ENVIADO track=39862421-20fd-4166-9ede-7478ae331f67
+  + 131256432E440000000008 | E44 | E440000000008 | ENVIADO track=85d8d9f3-b852-487b-b937-71b1f2d945cf
+  + 131256432E450000000009 | E45 | E450000000009 | ENVIADO track=2673d6af-55ed-4e36-816a-9ffb5bb24ef4
+  + 131256432E450000000011 | E45 | E450000000011 | ENVIADO track=6b412249-b2fd-467d-a0c7-386de652f457
+  + 131256432E460000000007 | E46 | E460000000007 | ENVIADO track=1b2a4e2c-25d6-40cf-abff-80c4e60b6ad0
+  + 131256432E460000000011 | E46 | E460000000011 | ENVIADO track=c2e3d1a0-cc1c-45e9-a817-7653863bf9c9
+  + 131256432E470000000009 | E47 | E470000000009 | ENVIADO track=ce154955-7876-496a-b4ae-aeadae3545c4
+  + 131256432E470000000001 | E47 | E470000000001 | ENVIADO track=b76f2737-7c36-4483-9142-484189ea7723
 
 ==> Reporte guardado en: tools\fase2_results.json

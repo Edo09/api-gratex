@@ -51,9 +51,11 @@ function main(array $argv): int
     $apiBase = rtrim($opts['api'] ?? DEFAULT_API, '/');
     $apiKey = $opts['api-key'] ?? '';
     $clientId = (int) ($opts['client-id'] ?? DEFAULT_CLIENT_ID);
+    $userId = isset($opts['user-id']) ? (int) $opts['user-id'] : null;
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
     $filter = isset($opts['filter']) ? array_map('trim', explode(',', $opts['filter'])) : [];
     $caseFilter = $opts['case'] ?? '';
+    $exclude = isset($opts['exclude']) ? array_map('trim', explode(',', $opts['exclude'])) : [];
     $dryRun = isset($opts['dry-run']);
 
     if (!$dryRun && $apiKey === '') {
@@ -74,6 +76,10 @@ function main(array $argv): int
         $rows = array_values(array_filter($rows, fn($r) => ($r['ENCF'] ?? '') === $caseFilter));
         fwrite(STDOUT, "==> Filtro caso: $caseFilter -> " . count($rows) . " casos\n");
     }
+    if ($exclude) {
+        $rows = array_values(array_filter($rows, fn($r) => !in_array((string)($r['ENCF'] ?? ''), $exclude, true)));
+        fwrite(STDOUT, "==> Excluye: " . implode(',', $exclude) . " -> " . count($rows) . " casos\n");
+    }
 
     $results = [];
     foreach ($rows as $idx => $row) {
@@ -83,7 +89,7 @@ function main(array $argv): int
         fwrite(STDOUT, sprintf("\n[%d/%d] %s (E%s, %s)\n", $idx + 1, count($rows), $caso, $tipo, $encf));
 
         try {
-            $payload = mapRowToPayload($row, $clientId);
+            $payload = mapRowToPayload($row, $clientId, $userId);
         } catch (Throwable $e) {
             fwrite(STDOUT, "    ! Error mapeando payload: " . $e->getMessage() . "\n");
             $results[] = [
@@ -170,7 +176,7 @@ function parseArgs(array $argv): array
  * que valores usar). El client_id solo se usa para satisfacer la API actual
  * que requiere un cliente existente; los datos reales vienen del row.
  */
-function mapRowToPayload(array $row, int $clientId): array
+function mapRowToPayload(array $row, int $clientId, ?int $userId): array
 {
     $tipoEcf = (string) ($row['TipoeCF'] ?? '');
     if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipoEcf)) {
@@ -191,6 +197,9 @@ function mapRowToPayload(array $row, int $clientId): array
         'tipo_pago' => (int) ($row['TipoPago'] ?? 1),
         'items' => $items,
     ];
+    if ($userId !== null) {
+        $payload['user_id'] = $userId;
+    }
 
     if (!empty($row['NCFModificado'])) {
         $payload['informacion_referencia'] = [
