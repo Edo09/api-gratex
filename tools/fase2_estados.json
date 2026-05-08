@@ -1,0 +1,653 @@
+[
+    {
+        "caso": "131256432E330000000001",
+        "e_ncf": "E330000000001",
+        "factura_id": 657,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.La factura recibida con el e-NCF E330000000001, no existe en nuestra colección de datos. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 657,
+                "e_ncf": "E330000000001",
+                "track_id": "7c9d6278-335f-4591-bc56-1f2ce425439c",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "7c9d6278-335f-4591-bc56-1f2ce425439c",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E330000000001",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:27:56 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.La factura recibida con el e-NCF E330000000001, no existe en nuestra colección de datos.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E320000000006",
+        "e_ncf": "E320000000006",
+        "factura_id": 658,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngresos'.La factura recibida con el e-NCF E320000000006, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 658,
+                "e_ncf": "E320000000006",
+                "track_id": "04465678-c3cb-4c0b-a43e-a2e4474b7e9e",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "04465678-c3cb-4c0b-a43e-a2e4474b7e9e",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E320000000006",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:27:58 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngresos'.La factura recibida con el e-NCF E320000000006, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E340000000016",
+        "e_ncf": "E340000000016",
+        "factura_id": 659,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E340000000016, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 659,
+                "e_ncf": "E340000000016",
+                "track_id": "c8debc72-7fc3-4d75-8acb-c09548a8db22",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "c8debc72-7fc3-4d75-8acb-c09548a8db22",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000016",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:27:59 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E340000000016, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E340000000002",
+        "e_ncf": "E340000000002",
+        "factura_id": 660,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorNotaCredito'.La factura recibida con el e-NCF E340000000002, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 660,
+                "e_ncf": "E340000000002",
+                "track_id": "ed9d41af-cc02-4825-885b-f134ba0fa3fa",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "ed9d41af-cc02-4825-885b-f134ba0fa3fa",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000002",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:00 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorNotaCredito'.La factura recibida con el e-NCF E340000000002, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E310000000034",
+        "e_ncf": "E310000000034",
+        "factura_id": 661,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo TotalITBIS1 del área Totales de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000034, no existe en nuestra colección de datos. [11010]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 661,
+                "e_ncf": "E310000000034",
+                "track_id": "d6deb51a-a596-413c-a0c5-9b803d0d8ef8",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "d6deb51a-a596-413c-a0c5-9b803d0d8ef8",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000034",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:01 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo TotalITBIS1 del área Totales de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000034, no existe en nuestra colección de datos.",
+                            "codigo": 11010
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E410000000010",
+        "e_ncf": "E410000000010",
+        "factura_id": 662,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E410000000010, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 662,
+                "e_ncf": "E410000000010",
+                "track_id": "9f695071-f0b4-42e1-a18d-385c8909776b",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "9f695071-f0b4-42e1-a18d-385c8909776b",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E410000000010",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:02 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E410000000010, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E310000000005",
+        "e_ncf": "E310000000005",
+        "factura_id": 663,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos. [176]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 663,
+                "e_ncf": "E310000000005",
+                "track_id": "cc5306b2-b54c-492e-a0f7-e7dc325efa20",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "cc5306b2-b54c-492e-a0f7-e7dc325efa20",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000005",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:03 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000005, no existe en nuestra colección de datos.",
+                            "codigo": 176
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E310000000012",
+        "e_ncf": "E310000000012",
+        "factura_id": 664,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000012, no existe en nuestra colección de datos. [176]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 664,
+                "e_ncf": "E310000000012",
+                "track_id": "b1098967-2d57-414b-9511-121251f1d707",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "b1098967-2d57-414b-9511-121251f1d707",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000012",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:05 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000012, no existe en nuestra colección de datos.",
+                            "codigo": 176
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E310000000007",
+        "e_ncf": "E310000000007",
+        "factura_id": 665,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000007, no existe en nuestra colección de datos. [176]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 665,
+                "e_ncf": "E310000000007",
+                "track_id": "ba36b090-a19b-4542-b262-0ceb1d1ff8da",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "ba36b090-a19b-4542-b262-0ceb1d1ff8da",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000007",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:06 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E310000000007, no existe en nuestra colección de datos.",
+                            "codigo": 176
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E320000000002",
+        "e_ncf": "E320000000002",
+        "factura_id": 666,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngresos'.La factura recibida con el e-NCF E320000000002, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 666,
+                "e_ncf": "E320000000002",
+                "track_id": "b0a1eda8-f64b-4d93-a23e-277fe5388d44",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "b0a1eda8-f64b-4d93-a23e-277fe5388d44",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E320000000002",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:07 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'IdDoc' has invalid child element 'FechaVencimientoSecuencia'. List of possible elements expected: 'IndicadorEnvioDiferido, IndicadorMontoGravado, IndicadorServicioTodoIncluido, TipoIngresos'.La factura recibida con el e-NCF E320000000002, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E410000000007",
+        "e_ncf": "E410000000007",
+        "factura_id": 667,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E410000000007, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 667,
+                "e_ncf": "E410000000007",
+                "track_id": "ecf302b4-8b8d-4518-bd97-a34cb0385c25",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "ecf302b4-8b8d-4518-bd97-a34cb0385c25",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E410000000007",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:08 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E410000000007, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E430000000001",
+        "e_ncf": "E430000000001",
+        "factura_id": 668,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E430000000001, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 668,
+                "e_ncf": "E430000000001",
+                "track_id": "7c61474f-5c5c-4726-8009-9f8d648763ce",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "7c61474f-5c5c-4726-8009-9f8d648763ce",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E430000000001",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:09 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E430000000001, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E430000000009",
+        "e_ncf": "E430000000009",
+        "factura_id": 669,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E430000000009, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 669,
+                "e_ncf": "E430000000009",
+                "track_id": "ecd148dc-d7f0-47ea-9dca-af5a3e59814c",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "ecd148dc-d7f0-47ea-9dca-af5a3e59814c",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E430000000009",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:11 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E430000000009, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E440000000007",
+        "e_ncf": "E440000000007",
+        "factura_id": 670,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida con el e-NCF E440000000007, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 670,
+                "e_ncf": "E440000000007",
+                "track_id": "7b6ee90d-2869-430d-a399-546574bc68f4",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "7b6ee90d-2869-430d-a399-546574bc68f4",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E440000000007",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:12 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida con el e-NCF E440000000007, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E440000000008",
+        "e_ncf": "E440000000008",
+        "factura_id": 671,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida con el e-NCF E440000000008, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 671,
+                "e_ncf": "E440000000008",
+                "track_id": "0c1afee1-718e-49dc-8dbb-d849da1cd874",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "0c1afee1-718e-49dc-8dbb-d849da1cd874",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E440000000008",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:13 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoTotal'. List of possible elements expected: 'MontoExento, MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.La factura recibida con el e-NCF E440000000008, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E450000000009",
+        "e_ncf": "E450000000009",
+        "factura_id": 672,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000009, no existe en nuestra colección de datos. [176]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 672,
+                "e_ncf": "E450000000009",
+                "track_id": "91524c7c-d0c2-41c3-abb0-81dace5e29c7",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "91524c7c-d0c2-41c3-abb0-81dace5e29c7",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E450000000009",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:14 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000009, no existe en nuestra colección de datos.",
+                            "codigo": 176
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E450000000011",
+        "e_ncf": "E450000000011",
+        "factura_id": 673,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000011, no existe en nuestra colección de datos. [176]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 673,
+                "e_ncf": "E450000000011",
+                "track_id": "1126dc5b-2284-4cad-88b9-69ef4629fc15",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "1126dc5b-2284-4cad-88b9-69ef4629fc15",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E450000000011",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:15 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo IndicadorMontoGravado del área IdDoc de la sección Encabezado no es válidoLa factura recibida con el e-NCF E450000000011, no existe en nuestra colección de datos.",
+                            "codigo": 176
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E460000000007",
+        "e_ncf": "E460000000007",
+        "factura_id": 674,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E460000000007, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 674,
+                "e_ncf": "E460000000007",
+                "track_id": "9c49bafa-e686-481d-ba1a-b2363550a98c",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "9c49bafa-e686-481d-ba1a-b2363550a98c",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E460000000007",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:16 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E460000000007, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E460000000011",
+        "e_ncf": "E460000000011",
+        "factura_id": 675,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E460000000011, no existe en nuestra colección de datos. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 675,
+                "e_ncf": "E460000000011",
+                "track_id": "c18f0bce-52a9-488c-96f8-f183076fccd0",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "c18f0bce-52a9-488c-96f8-f183076fccd0",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E460000000011",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:18 PM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.La factura recibida con el e-NCF E460000000011, no existe en nuestra colección de datos.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E470000000009",
+        "e_ncf": "E470000000009",
+        "factura_id": 676,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E470000000009, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 676,
+                "e_ncf": "E470000000009",
+                "track_id": "418d8ab9-6a91-4997-812b-61032825ce0f",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "418d8ab9-6a91-4997-812b-61032825ce0f",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000009",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:19 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E470000000009, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "131256432E470000000001",
+        "e_ncf": "E470000000001",
+        "factura_id": 677,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido.La factura recibida con el e-NCF E470000000001, no existe en nuestra colección de datos. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 677,
+                "e_ncf": "E470000000001",
+                "track_id": "47751c3d-77dc-40ee-aa84-1e6b3e710b29",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "47751c3d-77dc-40ee-aa84-1e6b3e710b29",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000001",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/8\/2026 3:28:20 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.La factura recibida con el e-NCF E470000000001, no existe en nuestra colección de datos.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

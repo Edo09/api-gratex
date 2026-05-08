@@ -66,6 +66,17 @@ class ECFXmlBuilder
             'FechaVencimientoSecuencia',
             $this->formatDate($data['fecha_vencimiento_secuencia'] ?? '31-12-2030')
         ));
+        $tipoEcfStr = (string) $data['tipo_ecf'];
+        if ($tipoEcfStr === '34') {
+            $idDoc->appendChild($doc->createElement(
+                'IndicadorNotaCredito',
+                (string) ($data['indicador_nota_credito'] ?? '0')
+            ));
+        }
+        $idDoc->appendChild($doc->createElement(
+            'IndicadorMontoGravado',
+            (string) ($data['indicador_monto_gravado'] ?? '0')
+        ));
         $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
         $idDoc->appendChild($doc->createElement('TipoPago', (string) ($data['tipo_pago'] ?? 1)));
         return $idDoc;
@@ -124,9 +135,10 @@ class ECFXmlBuilder
         $this->appendIfNotEmpty($doc, $node, 'MontoExento', $this->money($totales['monto_exento'] ?? null));
 
         $totalItbis = $totales['total_itbis'] ?? null;
-        if ($totalItbis !== null) {
+        if ($totalItbis !== null && (float) $totalItbis > 0) {
             $node->appendChild($doc->createElement('ITBIS1', '18'));
             $node->appendChild($doc->createElement('TotalITBIS', $this->money($totalItbis)));
+            $node->appendChild($doc->createElement('TotalITBIS1', $this->money($totalItbis)));
         }
 
         $node->appendChild($doc->createElement('MontoTotal', $this->money($totales['monto_total'] ?? 0)));
