@@ -53,29 +53,61 @@ class ECFXmlBuilder
             $encabezado->appendChild($this->buildComprador($doc, $data['comprador'] ?? [], $tipoEcf));
         }
 
-        $encabezado->appendChild($this->buildTotales($doc, $data['totales'] ?? []));
+        $encabezado->appendChild($this->buildTotales($doc, $data['totales'] ?? [], $tipoEcf));
         return $encabezado;
     }
+
+    /**
+     * Configuracion de IdDoc por tipo de e-CF, derivada de los XSDs en samples/.
+     * Cada tipo tiene una estructura distinta de IdDoc.
+     */
+    private const ID_DOC_CONFIG = [
+        '31' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => true,  'tipo_ingresos' => true],
+        '32' => ['fecha_vence' => false, 'ind_nota_credito' => false, 'ind_monto_gravado' => true,  'tipo_ingresos' => true],
+        '33' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => true,  'tipo_ingresos' => true],
+        '34' => ['fecha_vence' => false, 'ind_nota_credito' => true,  'ind_monto_gravado' => true,  'tipo_ingresos' => true],
+        '41' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => true,  'tipo_ingresos' => false],
+        '43' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => false, 'tipo_ingresos' => false],
+        '44' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => false, 'tipo_ingresos' => true],
+        '45' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => true,  'tipo_ingresos' => true],
+        '46' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => false, 'tipo_ingresos' => true],
+        '47' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => false, 'tipo_ingresos' => false],
+    ];
 
     private function buildIdDoc(DOMDocument $doc, array $data): DOMElement
     {
         $tipoEcfStr = (string) $data['tipo_ecf'];
+        $cfg = self::ID_DOC_CONFIG[$tipoEcfStr] ?? self::ID_DOC_CONFIG['31'];
 
         $idDoc = $doc->createElement('IdDoc');
         $idDoc->appendChild($doc->createElement('TipoeCF', $tipoEcfStr));
         $idDoc->appendChild($doc->createElement('eNCF', (string) $data['e_ncf']));
 
-        if ($tipoEcfStr === '34') {
+        if ($cfg['fecha_vence']) {
+            $idDoc->appendChild($doc->createElement(
+                'FechaVencimientoSecuencia',
+                $this->formatDate($data['fecha_vencimiento_secuencia'] ?? '31-12-2030')
+            ));
+        }
+
+        if ($cfg['ind_nota_credito']) {
             $idDoc->appendChild($doc->createElement(
                 'IndicadorNotaCredito',
                 (string) ($data['indicador_nota_credito'] ?? '0')
             ));
         }
-        $idDoc->appendChild($doc->createElement(
-            'IndicadorMontoGravado',
-            (string) ($data['indicador_monto_gravado'] ?? '0')
-        ));
-        $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
+
+        if ($cfg['ind_monto_gravado']) {
+            $idDoc->appendChild($doc->createElement(
+                'IndicadorMontoGravado',
+                (string) ($data['indicador_monto_gravado'] ?? '0')
+            ));
+        }
+
+        if ($cfg['tipo_ingresos']) {
+            $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
+        }
+
         $idDoc->appendChild($doc->createElement('TipoPago', (string) ($data['tipo_pago'] ?? 1)));
         return $idDoc;
     }
@@ -125,28 +157,48 @@ class ECFXmlBuilder
         return $node;
     }
 
-    private function buildTotales(DOMDocument $doc, array $totales): DOMElement
+    /**
+     * Configuracion de Totales por tipo de e-CF. Derivada de los XSDs en samples/.
+     *   - allow_gravado: emite MontoGravadoTotal + MontoGravadoIx
+     *   - allow_exento : emite MontoExento
+     *   - allowed_rates: tasas de ITBIS permitidas (1=18%, 2=16%, 3=0%)
+     */
+    private const TOTALES_CONFIG = [
+        '31' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '32' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '33' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '34' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '41' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '43' => ['gravado' => false, 'exento' => true,  'rates' => []],
+        '44' => ['gravado' => false, 'exento' => true,  'rates' => []],
+        '45' => ['gravado' => true,  'exento' => true,  'rates' => [1, 2, 3]],
+        '46' => ['gravado' => true,  'exento' => false, 'rates' => [3]],
+        '47' => ['gravado' => false, 'exento' => true,  'rates' => []],
+    ];
+
+    private function buildTotales(DOMDocument $doc, array $totales, string $tipoEcf): DOMElement
     {
+        $cfg = self::TOTALES_CONFIG[$tipoEcf] ?? self::TOTALES_CONFIG['31'];
         $node = $doc->createElement('Totales');
 
-        $i1 = (float) ($totales['monto_gravado_i1'] ?? 0);
-        $i2 = (float) ($totales['monto_gravado_i2'] ?? 0);
-        $i3 = (float) ($totales['monto_gravado_i3'] ?? 0);
-        $exento = (float) ($totales['monto_exento'] ?? 0);
-        $itbis1 = (float) ($totales['total_itbis1'] ?? 0);
-        $itbis2 = (float) ($totales['total_itbis2'] ?? 0);
-        $itbis3 = (float) ($totales['total_itbis3'] ?? 0);
+        $i1 = in_array(1, $cfg['rates'], true) ? (float) ($totales['monto_gravado_i1'] ?? 0) : 0;
+        $i2 = in_array(2, $cfg['rates'], true) ? (float) ($totales['monto_gravado_i2'] ?? 0) : 0;
+        $i3 = in_array(3, $cfg['rates'], true) ? (float) ($totales['monto_gravado_i3'] ?? 0) : 0;
+        $itbis1 = in_array(1, $cfg['rates'], true) ? (float) ($totales['total_itbis1'] ?? 0) : 0;
+        $itbis2 = in_array(2, $cfg['rates'], true) ? (float) ($totales['total_itbis2'] ?? 0) : 0;
+        $itbis3 = in_array(3, $cfg['rates'], true) ? (float) ($totales['total_itbis3'] ?? 0) : 0;
+        $exento = $cfg['exento'] ? (float) ($totales['monto_exento'] ?? 0) : 0;
 
-        if ($i1 + $i2 + $i3 > 0) {
+        if ($cfg['gravado'] && ($i1 + $i2 + $i3) > 0) {
             $node->appendChild($doc->createElement('MontoGravadoTotal', $this->money($i1 + $i2 + $i3)));
         }
-        if ($i1 > 0) {
+        if ($cfg['gravado'] && $i1 > 0) {
             $node->appendChild($doc->createElement('MontoGravadoI1', $this->money($i1)));
         }
-        if ($i2 > 0) {
+        if ($cfg['gravado'] && $i2 > 0) {
             $node->appendChild($doc->createElement('MontoGravadoI2', $this->money($i2)));
         }
-        if ($i3 > 0) {
+        if ($cfg['gravado'] && $i3 > 0) {
             $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($i3)));
         }
         if ($exento > 0) {
