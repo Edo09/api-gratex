@@ -1,14 +1,33 @@
 [
     {
-        "caso": "131256432E330000000001",
-        "tipo_ecf": "33",
-        "e_ncf": "E330000000001",
-        "http_status": 502,
-        "ok": false,
+        "caso": "131256432E310000000005",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000005",
+        "http_status": 200,
+        "ok": true,
         "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 404"
+            "status": true,
+            "data": {
+                "factura_id": 615,
+                "e_ncf": "E310000000005",
+                "track_id": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "IOVBBB",
+                "total": 96282.7,
+                "tipo_ecf": "31",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-08 11:46:54",
+                "dgii_response": {
+                    "trackId": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
         },
-        "error": "Fallo en emision DGII: DGII authenticated request failed: HTTP 404"
+        "factura_id": 615,
+        "track_id": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
     }
 ]

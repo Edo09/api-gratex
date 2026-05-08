@@ -31,8 +31,10 @@ class DgiiReceptionService
         $environment = $this->resolveEnvironment($options);
         $path = sprintf('%s/Recepcion/api/FacturasElectronicas', $environment);
 
+        $filename = $this->buildDgiiFilename($signedXml, 'ecf.xml');
+
         $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
-        $body = $this->buildMultipartBody($boundary, 'xml', 'ecf.xml', 'text/xml', $signedXml);
+        $body = $this->buildMultipartBody($boundary, 'xml', $filename, 'text/xml', $signedXml);
 
         $extraHeaders = [
             'Content-Type: multipart/form-data; boundary=' . $boundary,
@@ -67,8 +69,10 @@ class DgiiReceptionService
         $baseUrl = rtrim((string) ($options['fc_base_url'] ?? getenv('DGII_FC_BASE_URL') ?: self::DEFAULT_FC_BASE_URL), '/');
         $url = sprintf('%s/%s/RecepcionFC/api/recepcion/ecf', $baseUrl, $environment);
 
+        $filename = $this->buildDgiiFilename($signedXml, 'rfce.xml');
+
         $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
-        $body = $this->buildMultipartBody($boundary, 'xml', 'rfce.xml', 'text/xml', $signedXml);
+        $body = $this->buildMultipartBody($boundary, 'xml', $filename, 'text/xml', $signedXml);
 
         $extraHeaders = [
             'Content-Type: multipart/form-data; boundary=' . $boundary,
@@ -141,5 +145,26 @@ class DgiiReceptionService
         $body .= $content . "\r\n";
         $body .= "--{$boundary}--\r\n";
         return $body;
+    }
+
+    /**
+     * Build DGII-compatible filename "{RNCEmisor}{eNCF}.xml" extracted from
+     * the signed XML. DGII validates filename length and rejects generic ones
+     * like "rfce.xml" with code 3243.
+     */
+    private function buildDgiiFilename(string $signedXml, string $fallback): string
+    {
+        $rnc = '';
+        $eNcf = '';
+        if (preg_match('/<RNCEmisor>\s*([0-9]+)\s*<\/RNCEmisor>/i', $signedXml, $m)) {
+            $rnc = $m[1];
+        }
+        if (preg_match('/<eNCF>\s*([A-Za-z0-9]+)\s*<\/eNCF>/i', $signedXml, $m)) {
+            $eNcf = $m[1];
+        }
+        if ($rnc !== '' && $eNcf !== '') {
+            return $rnc . $eNcf . '.xml';
+        }
+        return $fallback;
     }
 }
