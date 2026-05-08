@@ -1,1 +1,21 @@
 & "C:\php\php.exe" -d "extension_dir=C:\php\ext" -d "extension=zip" -d "extension=curl" -d "extension=openssl" -d "extension=mbstring" -d "extension=fileinfo" "tools\send_fase2.php" "samples\131256432-08052026161604.xlsx" --api=https://gratex.net/api --api-key=7a775f6fb0d5ccab15cf149d2c60f15c --client-id=3511 --user-id=2 --output=tools\fase2_results.json 2>&1 | Tee-Object -FilePath tools\fase2_run.log
+
+
+
+ultimos logs:
+
+"08/05/2026 5:17:13 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-El eNCF modificado no ha sido emitido.
+08/05/2026 5:17:12 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-El eNCF modificado no ha sido emitido..
+-La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados.
+08/05/2026 5:17:11 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-El eNCF modificado no ha sido emitido..
+-El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido..
+-El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.
+08/05/2026 5:17:01 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-El formato del XML no es válido.
+08/05/2026 5:17:00 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-El formato del XML no es válido.
+08/05/2026 5:16:51 PM	Las pruebas de datos de eCF han sido reiniciadas debido a que se han rechazado comprobantes. .
+-La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados."
