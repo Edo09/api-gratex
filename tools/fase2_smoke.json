@@ -8,24 +8,24 @@
         "response": {
             "status": true,
             "data": {
-                "factura_id": 615,
+                "factura_id": 678,
                 "e_ncf": "E310000000005",
-                "track_id": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+                "track_id": "bfd6e585-5d0b-4012-8c3f-3a10db4cb26f",
                 "estado_dgii": "ENVIADO",
-                "codigo_seguridad": "IOVBBB",
+                "codigo_seguridad": "LUAWZL",
                 "total": 96282.7,
                 "tipo_ecf": "31",
                 "ambiente": "certecf",
-                "fecha_emision_dgii": "2026-05-08 11:46:54",
+                "fecha_emision_dgii": "2026-05-08 14:52:54",
                 "dgii_response": {
-                    "trackId": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+                    "trackId": "bfd6e585-5d0b-4012-8c3f-3a10db4cb26f",
                     "error": null,
                     "mensaje": null
                 }
             }
         },
-        "factura_id": 615,
-        "track_id": "9c6b4afd-234a-4cb7-875c-5092038a31a5",
+        "factura_id": 678,
+        "track_id": "bfd6e585-5d0b-4012-8c3f-3a10db4cb26f",
         "rfce_track_id": null,
         "estado_dgii": "ENVIADO",
         "flujo": null

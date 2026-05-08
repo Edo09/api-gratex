@@ -314,9 +314,13 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
 
 function computeTotales(array $items): array
 {
-    $montoGravado = 0.0;
-    $montoExento = 0.0;
-    $totalItbis = 0.0;
+    $i1 = 0.0;       // gravado al 18%
+    $i2 = 0.0;       // gravado al 16%
+    $i3 = 0.0;       // gravado al 0%
+    $exento = 0.0;   // exento (indicador 4)
+    $itbis1 = 0.0;
+    $itbis2 = 0.0;
+    $itbis3 = 0.0;
     $montoTotal = 0.0;
 
     foreach ($items as $item) {
@@ -328,25 +332,37 @@ function computeTotales(array $items): array
         $itbis = 0.0;
         if ($indicador === 1) {
             $itbis = round($base * 0.18, 2);
-            $montoGravado += $base;
+            $i1 += $base;
+            $itbis1 += $itbis;
         } elseif ($indicador === 2) {
             $itbis = round($base * 0.16, 2);
-            $montoGravado += $base;
+            $i2 += $base;
+            $itbis2 += $itbis;
+        } elseif ($indicador === 3) {
+            $i3 += $base;
         } elseif ($indicador === 4 || $indicador === 0) {
-            $montoExento += $base;
+            $exento += $base;
         } else {
-            $montoGravado += $base;
+            $i1 += $base;
+            $itbis1 += round($base * 0.18, 2);
         }
 
-        $totalItbis += $itbis;
         $montoTotal += $base + $itbis;
     }
 
+    $montoGravadoTotal = $i1 + $i2 + $i3;
+    $totalItbis = $itbis1 + $itbis2 + $itbis3;
+
     return [
-        'monto_gravado_total' => round($montoGravado, 2),
-        'monto_gravado_i1' => round($montoGravado, 2),
-        'monto_exento' => round($montoExento, 2),
+        'monto_gravado_total' => round($montoGravadoTotal, 2),
+        'monto_gravado_i1' => round($i1, 2),
+        'monto_gravado_i2' => round($i2, 2),
+        'monto_gravado_i3' => round($i3, 2),
+        'monto_exento' => round($exento, 2),
         'total_itbis' => round($totalItbis, 2),
+        'total_itbis1' => round($itbis1, 2),
+        'total_itbis2' => round($itbis2, 2),
+        'total_itbis3' => round($itbis3, 2),
         'monto_total' => round($montoTotal, 2),
     ];
 }
