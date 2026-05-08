@@ -28,7 +28,7 @@ class DgiiReceptionService
     public function recibir(string $signedXml, string $bearerToken, array $options = []): array
     {
         $environment = $this->resolveEnvironment($options);
-        $path = sprintf('%s/emisionrecepcion/api/recepcion/ecf', $environment);
+        $path = sprintf('%s/recepcion/api/recepcion/ecf', $environment);
 
         $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
         $body = $this->buildMultipartBody($boundary, 'xml', 'ecf.xml', 'text/xml', $signedXml);

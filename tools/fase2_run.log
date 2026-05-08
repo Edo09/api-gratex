@@ -1,0 +1,158 @@
+==> Leyendo xlsx: samples\131256432-05052026110320.xlsx
+==> 25 casos en hoja ECF
+
+[1/25] 131256432E330000000001 (E33, E330000000001)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[2/25] 131256432E320000000006 (E32, E320000000006)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[3/25] 131256432E340000000016 (E34, E340000000016)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[4/25] 131256432E340000000002 (E34, E340000000002)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[5/25] 131256432E310000000034 (E31, E310000000034)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[6/25] 131256432E410000000010 (E41, E410000000010)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[7/25] 131256432E310000000005 (E31, E310000000005)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[8/25] 131256432E310000000012 (E31, E310000000012)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[9/25] 131256432E310000000007 (E31, E310000000007)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[10/25] 131256432E320000000011 (E32, E320000000011)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[11/25] 131256432E320000000012 (E32, E320000000012)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[12/25] 131256432E320000000013 (E32, E320000000013)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[13/25] 131256432E320000000015 (E32, E320000000015)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[14/25] 131256432E320000000002 (E32, E320000000002)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[15/25] 131256432E410000000007 (E41, E410000000007)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[16/25] 131256432E430000000001 (E43, E430000000001)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[17/25] 131256432E430000000009 (E43, E430000000009)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[18/25] 131256432E440000000007 (E44, E440000000007)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[19/25] 131256432E440000000008 (E44, E440000000008)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[20/25] 131256432E450000000009 (E45, E450000000009)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[21/25] 131256432E450000000011 (E45, E450000000011)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[22/25] 131256432E460000000007 (E46, E460000000007)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[23/25] 131256432E460000000011 (E46, E460000000011)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[24/25] 131256432E470000000009 (E47, E470000000009)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+[25/25] 131256432E470000000001 (E47, E470000000001)
+
+Deprecated: Function curl_close() is deprecated since 8.5, as it has no effect since PHP 8.0 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase2.php on line 249
+    FAIL curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+========================================
+Resumen: 0/25 OK, 25 fallaron
+========================================
+  - 131256432E330000000001 | E33 | E330000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000006 | E32 | E320000000006 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E340000000016 | E34 | E340000000016 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E340000000002 | E34 | E340000000002 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E310000000034 | E31 | E310000000034 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E410000000010 | E41 | E410000000010 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E310000000005 | E31 | E310000000005 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E310000000012 | E31 | E310000000012 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E310000000007 | E31 | E310000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000011 | E32 | E320000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000012 | E32 | E320000000012 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000013 | E32 | E320000000013 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000015 | E32 | E320000000015 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E320000000002 | E32 | E320000000002 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E410000000007 | E41 | E410000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E430000000001 | E43 | E430000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E430000000009 | E43 | E430000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E440000000007 | E44 | E440000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E440000000008 | E44 | E440000000008 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E450000000009 | E45 | E450000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E450000000011 | E45 | E450000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E460000000007 | E46 | E460000000007 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E460000000011 | E46 | E460000000011 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E470000000009 | E47 | E470000000009 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+  - 131256432E470000000001 | E47 | E470000000001 | curl: SSL certificate OpenSSL verify result: unable to get local issuer certificate (20)
+
+==> Reporte guardado en: tools\fase2_results.json

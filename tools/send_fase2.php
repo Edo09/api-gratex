@@ -232,7 +232,7 @@ function postFactura(string $apiBase, string $apiKey, array $payload): array
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
 
     $ch = curl_init($url);
-    curl_setopt_array($ch, [
+    $opts = [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_RETURNTRANSFER => true,
@@ -242,18 +242,24 @@ function postFactura(string $apiBase, string $apiKey, array $payload): array
             'Accept: application/json',
             'X-API-KEY: ' . $apiKey,
         ],
-    ]);
+    ];
+    if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
+        $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
+    }
+    $cainfo = getenv('CURL_CA_BUNDLE');
+    if ($cainfo && is_file($cainfo)) {
+        $opts[CURLOPT_CAINFO] = $cainfo;
+    }
+    curl_setopt_array($ch, $opts);
     $raw = curl_exec($ch);
     if ($raw === false) {
         $err = curl_error($ch);
-        curl_close($ch);
         return [
             'http_status' => 0,
             'body' => ['status' => false, 'error' => 'curl: ' . $err],
         ];
     }
     $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
 
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) {
@@ -272,7 +278,7 @@ function printSummary(array $results): void
     foreach ($results as $r) {
         $marker = ($r['ok'] ?? false) ? '+' : '-';
         $detail = ($r['ok'] ?? false)
-            ? ($r['estado_dgii'] ?? '') . ' track=' . ($r['track_id'] ?? '-') . ($r['rfce_track_id'] ? ' rfce=' . $r['rfce_track_id'] : '')
+            ? ($r['estado_dgii'] ?? '') . ' track=' . ($r['track_id'] ?? '-') . (!empty($r['rfce_track_id']) ? ' rfce=' . $r['rfce_track_id'] : '')
             : ($r['error'] ?? '?');
         fwrite(STDOUT, sprintf("  %s %s | E%s | %s | %s\n", $marker, $r['caso'], $r['tipo_ecf'], $r['e_ncf'], $detail));
     }

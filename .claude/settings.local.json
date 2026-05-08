@@ -14,7 +14,9 @@
       "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAprobacionComercialController.php\")",
       "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAutenticacionController.php\")",
       "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\ecfRecibidoModel.php\")",
-      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\aprobacionComercialModel.php\")"
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\aprobacionComercialModel.php\")",
+      "Bash(ls /c/php/ext 2>&1 | head -30)",
+      "Read(//c/php/ext/**)"
     ]
   }
 }
