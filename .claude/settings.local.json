@@ -21,7 +21,8 @@
       "Bash(python -c ' *)",
       "Bash(awk '/<xs:element name=\"IdDoc\"/,/<\\\\/xs:element>.*IdDoc|^[ ]*<\\\\/xs:complexType>.*IdDoc/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
       "Bash(awk '/<xs:element name=\"Totales\"/,/<\\\\/xs:complexType>/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
-      "Bash(awk '/<xs:element name=\"Item\"/,/^[ ]*<\\\\/xs:complexType>.*Item|^[ ]+<\\\\/xs:element>$/' \"samples/e-CF 31 v.1.0.xsd\")"
+      "Bash(awk '/<xs:element name=\"Item\"/,/^[ ]*<\\\\/xs:complexType>.*Item|^[ ]+<\\\\/xs:element>$/' \"samples/e-CF 31 v.1.0.xsd\")",
+      "PowerShell(& \"C:\\\\php\\\\php.exe\" -d \"extension_dir=C:\\\\php\\\\ext\" -d \"extension=curl\" -d \"extension=openssl\" \"tools\\\\download_rfce_ecf.php\" 2>&1)"
     ]
   }
 }

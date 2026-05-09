@@ -308,7 +308,7 @@ function extractItems(array $row): array
             'nombre_item' => $nombre,
             'indicador_bien_servicio' => (int) ($row["IndicadorBienoServicio[$i]"] ?? 2),
             'descripcion' => $row["DescripcionItem[$i]"] ?? '',
-            'cantidad' => (float) ($row["CantidadItem[$i]"] ?? 1),
+            'cantidad' => intIfWhole($row["CantidadItem[$i]"] ?? 1),
             'cantidad_raw' => $row["CantidadItem[$i]"] ?? null,
             'unidad_medida' => $row["UnidadMedida[$i]"] ?? '',
             'cantidad_referencia' => blankToNull($row["CantidadReferencia[$i]"] ?? null),
@@ -434,7 +434,7 @@ function extractTotales(array $row): array
         }
         $impuestosAdicionales[] = [
             'tipo_impuesto' => $tipo,
-            'tasa_impuesto_adicional' => blankToNull($row["TasaImpuestoAdicional[$i]"] ?? null),
+            'tasa_impuesto_adicional' => intIfWhole($row["TasaImpuestoAdicional[$i]"] ?? null),
             'monto_impuesto_selectivo_consumo_especifico' => blankToNull($row["MontoImpuestoSelectivoConsumoEspecifico[$i]"] ?? null),
             'monto_impuesto_selectivo_consumo_advalorem' => blankToNull($row["MontoImpuestoSelectivoConsumoAdvalorem[$i]"] ?? null),
             'otros_impuestos_adicionales' => blankToNull($row["OtrosImpuestosAdicionales[$i]"] ?? null),
@@ -449,6 +449,15 @@ function extractTotales(array $row): array
 function blankToNull($value)
 {
     return $value === '' ? null : $value;
+}
+
+function intIfWhole($value)
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    $f = (float) $value;
+    return (floor($f) == $f) ? (int) $f : $f;
 }
 
 function postFactura(string $apiBase, string $apiKey, array $payload): array
