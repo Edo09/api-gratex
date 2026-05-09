@@ -1,0 +1,277 @@
+{
+  "info": {
+    "name": "Gratex API - Facturación Electrónica",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://gratex.net/api" },
+    { "key": "api_key",  "value": "TU_API_KEY_AQUI" },
+    { "key": "factura_id", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.token) {",
+                  "  pm.collectionVariables.set('api_key', json.data.token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": "{{base_url}}/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"emailOrUsername\": \"tu@email.com\",\n  \"password\": \"tu_password\"\n}"
+            }
+          }
+        },
+        {
+          "name": "Logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" }
+            ],
+            "url": "{{base_url}}/auth/signout"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Facturas - Emisión",
+      "item": [
+        {
+          "name": "E31 - Crédito Fiscal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "var json = pm.response.json();",
+                  "if (json.data && json.data.factura_id) {",
+                  "  pm.collectionVariables.set('factura_id', json.data.factura_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"31\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"items\": [\n    {\n      \"nombre_item\": \"Laptop Dell XPS\",\n      \"descripcion\": \"Laptop 15 pulgadas i7\",\n      \"cantidad\": 1,\n      \"precio_unitario\": 50000.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 1,\n      \"unidad_medida\": \"23\"\n    },\n    {\n      \"nombre_item\": \"Soporte técnico\",\n      \"descripcion\": \"Instalación y configuración\",\n      \"cantidad\": 2,\n      \"precio_unitario\": 5000.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 2,\n      \"unidad_medida\": \"99\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "E32 - Consumidor Final (< 250k, va por RFCE)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"32\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"items\": [\n    {\n      \"nombre_item\": \"Camiseta\",\n      \"descripcion\": \"Camiseta talla M\",\n      \"cantidad\": 3,\n      \"precio_unitario\": 1500.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 1,\n      \"unidad_medida\": \"23\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "E32 - Consumidor Final (>= 250k, va por ECF integro)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"32\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"items\": [\n    {\n      \"nombre_item\": \"Vehículo Toyota\",\n      \"descripcion\": \"Toyota Corolla 2024\",\n      \"cantidad\": 1,\n      \"precio_unitario\": 1500000.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 1,\n      \"unidad_medida\": \"23\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "E33 - Nota de Débito",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"33\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"informacion_referencia\": {\n    \"ncf_modificado\": \"E310000000001\",\n    \"fecha_ncf_modificado\": \"01-05-2026\",\n    \"codigo_modificacion\": \"1\"\n  },\n  \"items\": [\n    {\n      \"nombre_item\": \"Cargo adicional por flete\",\n      \"descripcion\": \"Costo de envío no incluido en factura original\",\n      \"cantidad\": 1,\n      \"precio_unitario\": 3000.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 2,\n      \"unidad_medida\": \"99\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "E34 - Nota de Crédito",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },\n              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"34\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"indicador_nota_credito\": 1,\n  \"informacion_referencia\": {\n    \"ncf_modificado\": \"E310000000001\",\n    \"fecha_ncf_modificado\": \"01-05-2026\",\n    \"codigo_modificacion\": \"1\"\n  },\n  \"items\": [\n    {\n      \"nombre_item\": \"Devolución parcial Laptop Dell\",\n      \"descripcion\": \"Devolución por producto defectuoso\",\n      \"cantidad\": 1,\n      \"precio_unitario\": 50000.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 1,\n      \"unidad_medida\": \"23\"\n    }\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "E41 - Compras",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/facturas",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tipo_ecf\": \"41\",\n  \"client_id\": 1,\n  \"fecha_emision\": \"09-05-2026\",\n  \"tipo_ingresos\": \"01\",\n  \"tipo_pago\": 1,\n  \"items\": [\n    {\n      \"nombre_item\": \"Suministros de oficina\",\n      \"descripcion\": \"Papel, bolígrafos, carpetas\",\n      \"cantidad\": 10,\n      \"precio_unitario\": 500.00,\n      \"indicador_facturacion\": 1,\n      \"indicador_bien_servicio\": 1,\n      \"unidad_medida\": \"23\"\n    }\n  ]\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Facturas - Consultas",
+      "item": [
+        {
+          "name": "Consultar estado DGII",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": "{{base_url}}/facturas/{{factura_id}}/estado"
+          }
+        },
+        {
+          "name": "Descargar XML (ECF)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": "{{base_url}}/facturas/{{factura_id}}/xml"
+          }
+        },
+        {
+          "name": "Descargar XML (RFCE - solo E32 < 250k)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": {
+              "raw": "{{base_url}}/facturas/{{factura_id}}/xml?type=rfce",
+              "query": [{ "key": "type", "value": "rfce" }]
+            }
+          }
+        },
+        {
+          "name": "Descargar PDF",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": "{{base_url}}/facturas/{{factura_id}}/pdf"
+          }
+        },
+        {
+          "name": "Listar facturas (paginado)",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": {
+              "raw": "{{base_url}}/facturas?page=1&pageSize=20",
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "pageSize", "value": "20" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ver una factura por ID",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": {
+              "raw": "{{base_url}}/facturas?id={{factura_id}}",
+              "query": [{ "key": "id", "value": "{{factura_id}}" }]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Clientes",
+      "item": [
+        {
+          "name": "Listar clientes",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": "{{base_url}}/clients"
+          }
+        },
+        {
+          "name": "Crear cliente",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-API-KEY", "value": "{{api_key}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{base_url}}/clients",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"client_name\": \"Juan Pérez\",\n  \"company_name\": \"Empresa ABC SRL\",\n  \"email\": \"juan@empresa.com\",\n  \"phone_number\": \"809-555-0000\",\n  \"rnc\": \"101234567\",\n  \"razon_social\": \"EMPRESA ABC SRL\",\n  \"direccion\": \"Av. Winston Churchill No. 1\",\n  \"municipio\": \"010101\",\n  \"provincia\": \"010000\"\n}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Secuencias NCF",
+      "item": [
+        {
+          "name": "Ver secuencias actuales",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": "{{base_url}}/ncf/sequences"
+          }
+        },
+        {
+          "name": "Próximo eNCF disponible",
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "X-API-KEY", "value": "{{api_key}}" }],
+            "url": {
+              "raw": "{{base_url}}/ncf/next?type=E31",
+              "query": [{ "key": "type", "value": "E31" }]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
