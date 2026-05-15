@@ -1,0 +1,1515 @@
+[
+    {
+        "caso": "131256432E330000000001",
+        "tipo_ecf": "33",
+        "e_ncf": "E330000000001",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "33",
+            "e_ncf": "E330000000001",
+            "client_id": 1,
+            "fecha_emision": "02-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LECHE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 10000,
+                    "unidad_medida": "47",
+                    "precio_unitario": 40
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E320000000006",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "01-04-2020",
+                "codigo_modificacion": "3"
+            }
+        }
+    },
+    {
+        "caso": "131256432E320000000006",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000006",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000006",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "LAPICES",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 23,
+                    "unidad_medida": "43",
+                    "precio_unitario": 35
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "GALLETAS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 547,
+                    "unidad_medida": "6",
+                    "precio_unitario": 145
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "PAN",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 14,
+                    "unidad_medida": "31",
+                    "precio_unitario": 55
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LECHE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 25,
+                    "unidad_medida": "47",
+                    "precio_unitario": 65
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "SALSA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 35,
+                    "unidad_medida": "47",
+                    "precio_unitario": 25
+                },
+                {
+                    "numero_linea": 6,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "TV LG 57\"",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 57000
+                },
+                {
+                    "numero_linea": 7,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "LAVADORA-SECADORA  WESTINGHOUSE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 75000
+                },
+                {
+                    "numero_linea": 8,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ESTUFA MABE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 45000
+                },
+                {
+                    "numero_linea": 9,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "LAPICES",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 35000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E340000000016",
+        "tipo_ecf": "34",
+        "e_ncf": "E340000000016",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "34",
+            "e_ncf": "E340000000016",
+            "client_id": 1,
+            "fecha_emision": "01-12-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 0,
+                    "nombre_item": "Servicio Profesional Legislativo Actualizado",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "",
+                    "precio_unitario": 1
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E410000000010",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "01-04-2020",
+                "codigo_modificacion": "2"
+            }
+        }
+    },
+    {
+        "caso": "131256432E340000000002",
+        "tipo_ecf": "34",
+        "e_ncf": "E340000000002",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "34",
+            "e_ncf": "E340000000002",
+            "client_id": 1,
+            "fecha_emision": "02-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "BLOCK",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "23",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "VARILLAS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 300,
+                    "unidad_medida": "23",
+                    "precio_unitario": 350
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CINZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 200,
+                    "unidad_medida": "23",
+                    "precio_unitario": 425
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CLAVOS DE MEDIA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "23",
+                    "precio_unitario": 550
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CLAVOS DE CUARTA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "23",
+                    "precio_unitario": 325
+                },
+                {
+                    "numero_linea": 6,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ALAMBRE DULCE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 7,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CEMENTO BLANCO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 250,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 8,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CEMENTO GRIS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 400,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 9,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "COLORANTE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 30,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 10,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "TINER",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000034",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "01-04-2020",
+                "codigo_modificacion": "3"
+            }
+        }
+    },
+    {
+        "caso": "131256432E310000000034",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000034",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "31",
+            "e_ncf": "E310000000034",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Carnes paq 2lb",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "31",
+                    "precio_unitario": 1000000
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Carnes paq 2lb",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "31",
+                    "precio_unitario": 1000000
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Carnes paq 2lb",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "31",
+                    "precio_unitario": 1000000
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Carnes paq 2lb",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "31",
+                    "precio_unitario": 1000000
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Carnes paq 2lb",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "31",
+                    "precio_unitario": 1000000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E410000000010",
+        "tipo_ecf": "41",
+        "e_ncf": "E410000000010",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "41",
+            "e_ncf": "E410000000010",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio Profesional Legislativo",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 15,
+                    "unidad_medida": "23",
+                    "precio_unitario": 385
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Asesoria Legal",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 550
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Gestiones Legales",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 9,
+                    "unidad_medida": "13",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "Legalizacion de documentos",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 23,
+                    "unidad_medida": "15",
+                    "precio_unitario": 185
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "Servicios ambulatorio",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 7,
+                    "unidad_medida": "23",
+                    "precio_unitario": 125
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E310000000005",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000005",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "31",
+            "e_ncf": "E310000000005",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "LAPICES",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 21,
+                    "unidad_medida": "43",
+                    "precio_unitario": 35
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "GALLETAS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 547,
+                    "unidad_medida": "6",
+                    "precio_unitario": 145
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "PAN",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 14,
+                    "unidad_medida": "31",
+                    "precio_unitario": 55
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LECHE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 25,
+                    "unidad_medida": "47",
+                    "precio_unitario": 65
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "SALSA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 35,
+                    "unidad_medida": "47",
+                    "precio_unitario": 25
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E310000000012",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000012",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "31",
+            "e_ncf": "E310000000012",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio domiciliario",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 2000
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio presencial",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E310000000007",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000007",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "31",
+            "e_ncf": "E310000000007",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "ARROZ LA GARZA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 20,
+                    "unidad_medida": "46",
+                    "precio_unitario": 1500
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "AZUCAR CREMA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 40,
+                    "unidad_medida": "46",
+                    "precio_unitario": 1300
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ESPAGUETIS MILANO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "14",
+                    "precio_unitario": 900
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LECHE MILEX",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 25,
+                    "unidad_medida": "47",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "SALSA LA FAMOSA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 35,
+                    "unidad_medida": "47",
+                    "precio_unitario": 200
+                },
+                {
+                    "numero_linea": 6,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "GALLETAS SALADAS GUARINA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 55,
+                    "unidad_medida": "14",
+                    "precio_unitario": 95
+                },
+                {
+                    "numero_linea": 7,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "SALAMI INDUVECA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "14",
+                    "precio_unitario": 115
+                },
+                {
+                    "numero_linea": 8,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "JUGO DE NARANJA RICA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 65,
+                    "unidad_medida": "15",
+                    "precio_unitario": 100
+                },
+                {
+                    "numero_linea": 9,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ACEITE CRISOL",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 25,
+                    "unidad_medida": "47",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 10,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "HUEVOS CASCARON",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 55,
+                    "unidad_medida": "20",
+                    "precio_unitario": 300
+                },
+                {
+                    "numero_linea": 11,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "MAIZ EL MAIZAL",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 20,
+                    "unidad_medida": "46",
+                    "precio_unitario": 350
+                },
+                {
+                    "numero_linea": 12,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "CAF¿ SANTO DOMINGO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 30,
+                    "unidad_medida": "46",
+                    "precio_unitario": 400
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E320000000011",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000011",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000011",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Cargador",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "55",
+                    "precio_unitario": 5000
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "FREEZER",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "23",
+                    "precio_unitario": 29000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E320000000012",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000012",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000012",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Estufa",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "55",
+                    "precio_unitario": 40000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E320000000013",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000013",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000013",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Nevera",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "55",
+                    "precio_unitario": 95000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E320000000015",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000015",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000015",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Celular",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "55",
+                    "precio_unitario": 50000
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Cargador",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "23",
+                    "precio_unitario": 5000
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E320000000002",
+        "tipo_ecf": "32",
+        "e_ncf": "E320000000002",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "32",
+            "e_ncf": "E320000000002",
+            "client_id": 1,
+            "fecha_emision": "02-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LECHE MILEX",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 120,
+                    "unidad_medida": "47",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "SALSA LA FAMOSA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 80,
+                    "unidad_medida": "47",
+                    "precio_unitario": 200
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ACEITE CRISOL",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "47",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "ARROZ LA GARZA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "46",
+                    "precio_unitario": 1500
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "AZUCAR CREMA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 80,
+                    "unidad_medida": "46",
+                    "precio_unitario": 1300
+                },
+                {
+                    "numero_linea": 6,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "MAIZ EL MAIZAL",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 20,
+                    "unidad_medida": "46",
+                    "precio_unitario": 350
+                },
+                {
+                    "numero_linea": 7,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "CAFÉ SANTO DOMINGO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 30,
+                    "unidad_medida": "46",
+                    "precio_unitario": 400
+                },
+                {
+                    "numero_linea": 8,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "ESPAGUETIS MILANO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "14",
+                    "precio_unitario": 900
+                },
+                {
+                    "numero_linea": 9,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "GALLETAS SALADAS GUARINA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "14",
+                    "precio_unitario": 95
+                },
+                {
+                    "numero_linea": 10,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "HUEVOS CASCARON",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 55,
+                    "unidad_medida": "20",
+                    "precio_unitario": 300
+                },
+                {
+                    "numero_linea": 11,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "SALAMI INDUVECA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "14",
+                    "precio_unitario": 115
+                },
+                {
+                    "numero_linea": 12,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "JUGO DE NARANJA RICA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "15",
+                    "precio_unitario": 100
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E410000000007",
+        "tipo_ecf": "41",
+        "e_ncf": "E410000000007",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "41",
+            "e_ncf": "E410000000007",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio Profesional Legislativo",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 15,
+                    "unidad_medida": "23",
+                    "precio_unitario": 385
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Asesoria Legal",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 550
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Gestiones Legales",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 9,
+                    "unidad_medida": "13",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Legalizacion de documentos",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 23,
+                    "unidad_medida": "15",
+                    "precio_unitario": 185
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicios ambulatorio",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 7,
+                    "unidad_medida": "23",
+                    "precio_unitario": 125
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E430000000001",
+        "tipo_ecf": "43",
+        "e_ncf": "E430000000001",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "43",
+            "e_ncf": "E430000000001",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 0,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Peajes viaje semana I",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 7,
+                    "unidad_medida": "43",
+                    "precio_unitario": 100
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E430000000009",
+        "tipo_ecf": "43",
+        "e_ncf": "E430000000009",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "43",
+            "e_ncf": "E430000000009",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 0,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Arreglo neumaticos",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 350
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E440000000007",
+        "tipo_ecf": "44",
+        "e_ncf": "E440000000007",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "44",
+            "e_ncf": "E440000000007",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 24\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 20,
+                    "unidad_medida": "18",
+                    "precio_unitario": 900
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 48\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 180,
+                    "unidad_medida": "34",
+                    "precio_unitario": 1800
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 48\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "34",
+                    "precio_unitario": 1800
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E440000000008",
+        "tipo_ecf": "44",
+        "e_ncf": "E440000000008",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "44",
+            "e_ncf": "E440000000008",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 24\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 20,
+                    "unidad_medida": "18",
+                    "precio_unitario": 900
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 48\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 180,
+                    "unidad_medida": "34",
+                    "precio_unitario": 1800
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "PTE. CJ 48\/12OZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "34",
+                    "precio_unitario": 1800
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E450000000009",
+        "tipo_ecf": "45",
+        "e_ncf": "E450000000009",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "45",
+            "e_ncf": "E450000000009",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "BLOCK",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "23",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "VARILLAS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 300,
+                    "unidad_medida": "23",
+                    "precio_unitario": 350
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CINZ",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 200,
+                    "unidad_medida": "23",
+                    "precio_unitario": 425
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CLAVOS DE MEDIA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "23",
+                    "precio_unitario": 550
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "CLAVOS DE CUARTA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 50,
+                    "unidad_medida": "23",
+                    "precio_unitario": 325
+                },
+                {
+                    "numero_linea": 6,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "ALAMBRE DULCE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 7,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "CEMENTO BLANCO",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 250,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 8,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "CEMENTO GRIS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 400,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 9,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "COLORANTE",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 30,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                },
+                {
+                    "numero_linea": 10,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "TINER",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "23",
+                    "precio_unitario": 250
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E450000000011",
+        "tipo_ecf": "45",
+        "e_ncf": "E450000000011",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "45",
+            "e_ncf": "E450000000011",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "LAPICES",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 23,
+                    "unidad_medida": "43",
+                    "precio_unitario": 35
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "GALLETAS",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 547,
+                    "unidad_medida": "6",
+                    "precio_unitario": 145
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "PAN",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 14,
+                    "unidad_medida": "31",
+                    "precio_unitario": 55
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "SANDWICH",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 25,
+                    "unidad_medida": "24",
+                    "precio_unitario": 65
+                },
+                {
+                    "numero_linea": 5,
+                    "indicador_facturacion": 2,
+                    "nombre_item": "SALSA",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 35,
+                    "unidad_medida": "47",
+                    "precio_unitario": 25
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E460000000007",
+        "tipo_ecf": "46",
+        "e_ncf": "E460000000007",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "46",
+            "e_ncf": "E460000000007",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Silla",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 150,
+                    "unidad_medida": "6",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Mesa",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "43",
+                    "precio_unitario": 200
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Manteles",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 120,
+                    "unidad_medida": "43",
+                    "precio_unitario": 250
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E460000000011",
+        "tipo_ecf": "46",
+        "e_ncf": "E460000000011",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "46",
+            "e_ncf": "E460000000011",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Gouda Import",
+                    "indicador_bien_servicio": 1,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "23",
+                    "precio_unitario": 179
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Gouda Impor Lonja",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 2,
+                    "unidad_medida": "23",
+                    "precio_unitario": 179
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Bon Helado",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 239
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Butterball pavo",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 155
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E470000000009",
+        "tipo_ecf": "47",
+        "e_ncf": "E470000000009",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "47",
+            "e_ncf": "E470000000009",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Asesoria Legal P\/H",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 60,
+                    "unidad_medida": "19",
+                    "precio_unitario": 450
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Asesoria Legal P\/H",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 70,
+                    "unidad_medida": "19",
+                    "precio_unitario": 200
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Asesoria Legal P\/H",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 100,
+                    "unidad_medida": "19",
+                    "precio_unitario": 250
+                }
+            ]
+        }
+    },
+    {
+        "caso": "131256432E470000000001",
+        "tipo_ecf": "47",
+        "e_ncf": "E470000000001",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "tipo_ecf": "47",
+            "e_ncf": "E470000000001",
+            "client_id": 1,
+            "fecha_emision": "01-04-2020",
+            "tipo_ingresos": "",
+            "tipo_pago": 0,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "LICENCIA WYI",
+                    "indicador_bien_servicio": 2,
+                    "descripcion": "",
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 180000
+                }
+            ]
+        }
+    }
+]

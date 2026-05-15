@@ -1,0 +1,33 @@
+[
+    {
+        "caso": "131256432E310000000001",
+        "tipo_ecf": "31",
+        "e_ncf": "E310000000001",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 684,
+                "e_ncf": "E310000000001",
+                "track_id": "ca319526-c3a8-4e56-88ec-2761ea067714",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "MHC5ZP",
+                "total": 7080,
+                "tipo_ecf": "31",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-08 15:33:04",
+                "dgii_response": {
+                    "trackId": "ca319526-c3a8-4e56-88ec-2761ea067714",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 684,
+        "track_id": "ca319526-c3a8-4e56-88ec-2761ea067714",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    }
+]

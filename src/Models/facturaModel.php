@@ -125,7 +125,7 @@ class facturaModel
                 // Generate PDF and save
                 $pdfPath = __DIR__ . '/../../facturas/';
                 if (!is_dir($pdfPath)) {
-                    mkdir($pdfPath, 0777, true);
+                    mkdir($pdfPath, 0755, true);
                 }
                 $pdfFile = $pdfPath . 'Factura_' . $no_factura . '.pdf';
                 $pdfContent = generateFacturaPdf($facturaForPdf, null, 'S');
@@ -284,6 +284,135 @@ class facturaModel
             $stmt->execute([':id' => $factura_id]);
             $result = $stmt->fetch();
             return $result ? $result : null;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Save a factura together with its e-CF emission result.
+     * @param array $factura {date, client_id, client_name, total, items[], user_id?, tipo_ecf}
+     * @param array $ecf {e_ncf, track_id, estado, codigo_seguridad, fecha_emision_dgii, ambiente, signed_xml, dgii_response}
+     * @return array ['success'|'error', payload]
+     */
+    public function saveFacturaConECF(array $factura, array $ecf): array
+    {
+        try {
+            $this->conexion->beginTransaction();
+
+            $sql = 'INSERT INTO facturas
+                (no_factura, date, client_id, client_name, total, NCF, user_id,
+                 tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
+                 fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
+                 rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta)
+                VALUES
+                (:no_factura, :date, :client_id, :client_name, :total, NULL, :user_id,
+                 :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
+                 :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
+                 :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta)';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':no_factura' => $factura['no_factura'] ?? $ecf['e_ncf'],
+                ':date' => $factura['date'],
+                ':client_id' => $factura['client_id'],
+                ':client_name' => $factura['client_name'],
+                ':total' => $factura['total'],
+                ':user_id' => $factura['user_id'] ?? null,
+                ':tipo_ecf' => $ecf['tipo_ecf'],
+                ':e_ncf' => $ecf['e_ncf'],
+                ':track_id' => $ecf['track_id'] ?? null,
+                ':estado_dgii' => $ecf['estado'] ?? 'PENDIENTE',
+                ':codigo_seguridad' => $ecf['codigo_seguridad'] ?? null,
+                ':fecha_emision_dgii' => $ecf['fecha_emision_dgii'] ?? null,
+                ':ambiente_dgii' => $ecf['ambiente'] ?? null,
+                ':xml_firmado' => $ecf['signed_xml'] ?? null,
+                ':respuesta_dgii' => isset($ecf['dgii_response']) ? json_encode($ecf['dgii_response']) : null,
+                ':rfce_xml' => $ecf['rfce_xml'] ?? null,
+                ':rfce_track_id' => $ecf['rfce_track_id'] ?? null,
+                ':rfce_estado' => $ecf['rfce_estado'] ?? null,
+                ':rfce_respuesta' => isset($ecf['rfce_response']) ? json_encode($ecf['rfce_response']) : null,
+            ]);
+            $facturaId = (int) $this->conexion->lastInsertId();
+
+            $itemSql = 'INSERT INTO factura_items
+                (factura_id, description, amount, quantity, subtotal,
+                 indicador_facturacion, indicador_bien_servicio, itbis_amount)
+                VALUES
+                (:factura_id, :description, :amount, :quantity, :subtotal,
+                 :indicador_facturacion, :indicador_bien_servicio, :itbis_amount)';
+            $itemStmt = $this->conexion->prepare($itemSql);
+            foreach ($factura['items'] as $item) {
+                $amount = (float) ($item['amount'] ?? 0);
+                $quantity = (float) ($item['quantity'] ?? 1);
+                $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : $amount * $quantity;
+                $itemStmt->execute([
+                    ':factura_id' => $facturaId,
+                    ':description' => $item['description'] ?? '',
+                    ':amount' => $amount,
+                    ':quantity' => $quantity,
+                    ':subtotal' => $subtotal,
+                    ':indicador_facturacion' => (int) ($item['indicador_facturacion'] ?? 1),
+                    ':indicador_bien_servicio' => (int) ($item['indicador_bien_servicio'] ?? 2),
+                    ':itbis_amount' => (float) ($item['itbis_amount'] ?? 0),
+                ]);
+            }
+
+            $this->conexion->commit();
+            return ['success', [
+                'factura_id' => $facturaId,
+                'e_ncf' => $ecf['e_ncf'],
+                'track_id' => $ecf['track_id'] ?? null,
+                'estado_dgii' => $ecf['estado'] ?? 'PENDIENTE',
+                'codigo_seguridad' => $ecf['codigo_seguridad'] ?? null,
+                'total' => $factura['total'],
+            ]];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            return ['error', 'Failed to save factura with e-CF: ' . $e->getMessage()];
+        }
+    }
+
+    public function updateECFEstado(int $facturaId, string $estado, ?array $dgiiResponse = null): bool
+    {
+        try {
+            $sql = 'UPDATE facturas SET estado_dgii = :estado, respuesta_dgii = :resp WHERE id = :id';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':estado' => $estado,
+                ':resp' => $dgiiResponse !== null ? json_encode($dgiiResponse) : null,
+                ':id' => $facturaId,
+            ]);
+            return $stmt->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
+
+    public function getXmlFirmado(int $facturaId, string $type = 'ecf'): ?array
+    {
+        $column = $type === 'rfce' ? 'rfce_xml' : 'xml_firmado';
+        $sql = "SELECT e_ncf, tipo_ecf, {$column} AS xml FROM facturas WHERE id = :id";
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute([':id' => $facturaId]);
+        $row = $stmt->fetch();
+        if (!$row || empty($row['xml'])) {
+            return null;
+        }
+        return $row;
+    }
+
+    public function getECFData(int $facturaId): ?array
+    {
+        try {
+            $sql = 'SELECT id, no_factura, tipo_ecf, e_ncf, track_id, estado_dgii,
+                           codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii
+                    FROM facturas WHERE id = :id';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':id' => $facturaId]);
+            $row = $stmt->fetch();
+            return $row ?: null;
         } catch (PDOException $e) {
             return null;
         }

@@ -1,0 +1,33 @@
+[
+    {
+        "caso": "131256432E310000000001",
+        "e_ncf": "E310000000001",
+        "factura_id": 684,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 684,
+                "e_ncf": "E310000000001",
+                "track_id": "ca319526-c3a8-4e56-88ec-2761ea067714",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "ca319526-c3a8-4e56-88ec-2761ea067714",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000001",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/8\/2026 4:33:04 PM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

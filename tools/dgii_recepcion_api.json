@@ -1,0 +1,97 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "Recepción de e-CF",
+    "description": "Servicio web responsable de recibir un e‐CF tentativo (XML firmado digitalmente) y un token asociado a una sesión válida y en respuesta retornar un objeto que contiene un string denominado TrackId a modo de acuse de recibo, con el cual, el contribuyente podrá consultar el estado de su validación.",
+    "version": "v1"
+  },
+  "servers": [
+    {
+      "url": "/certecf/Recepcion"
+    }
+  ],
+  "paths": {
+    "/api/FacturasElectronicas": {
+      "post": {
+        "tags": [
+          "FacturasElectronicas"
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "required": [
+                  "xml"
+                ],
+                "type": "object",
+                "properties": {
+                  "xml": {
+                    "type": "string",
+                    "format": "binary"
+                  }
+                }
+              },
+              "encoding": {
+                "xml": {
+                  "style": "form"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaRecepcion"
+                }
+              },
+              "application/xml": {
+                "schema": {
+                  "$ref": "#/components/schemas/RespuestaRecepcion"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "RespuestaRecepcion": {
+        "type": "object",
+        "properties": {
+          "trackId": {
+            "type": "string",
+            "nullable": true
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "mensaje": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "securitySchemes": {
+      "Bearer": {
+        "type": "apiKey",
+        "description": "JWT Authorization header usando el esquema Bearer. Ejemplo: \"Authorization: Bearer {token}\"",
+        "name": "Authorization",
+        "in": "header"
+      }
+    }
+  },
+  "security": [
+    {
+      "Bearer": [ ]
+    }
+  ]
+}

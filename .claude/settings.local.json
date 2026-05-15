@@ -1,0 +1,30 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Out-String)",
+      "Bash(export OPENSSL_MODULES=\"C:\\\\Program Files\\\\OpenSSL-Win64\\\\bin\")",
+      "Bash(openssl pkcs12 *)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(php -S localhost:8000 -t .)",
+      "Bash(curl -s -X POST -H \"Content-Type: application/json\" -H \"X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c\" -d '{}' http://localhost:8000/api/facturacion-electronica/autenticacion/token)",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfRecepcionController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAprobacionComercialController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Controllers\\\\ecfAutenticacionController.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\ecfRecibidoModel.php\")",
+      "Bash(C:\\\\php\\\\php.exe -l \"c:\\\\Users\\\\edgarcia\\\\Documents\\\\grat\\\\api-gratex\\\\src\\\\Models\\\\aprobacionComercialModel.php\")",
+      "Bash(ls /c/php/ext 2>&1 | head -30)",
+      "Read(//c/php/ext/**)",
+      "Bash(curl -s \"https://ecf.dgii.gov.do/certecf/Recepcion/help\" -o tools/dgii_help.html)",
+      "Bash(python -c ' *)",
+      "Bash(awk '/<xs:element name=\"IdDoc\"/,/<\\\\/xs:element>.*IdDoc|^[ ]*<\\\\/xs:complexType>.*IdDoc/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
+      "Bash(awk '/<xs:element name=\"Totales\"/,/<\\\\/xs:complexType>/' 'samples/e-CF __TRACKED_VAR__ v.1.0.xsd')",
+      "Bash(awk '/<xs:element name=\"Item\"/,/^[ ]*<\\\\/xs:complexType>.*Item|^[ ]+<\\\\/xs:element>$/' \"samples/e-CF 31 v.1.0.xsd\")",
+      "PowerShell(& \"C:\\\\php\\\\php.exe\" -d \"extension_dir=C:\\\\php\\\\ext\" -d \"extension=curl\" -d \"extension=openssl\" \"tools\\\\download_rfce_ecf.php\" 2>&1)",
+      "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\omare\\\\Documents\\\\gratex\\\\api-gratex\" -Directory)",
+      "Bash(Select-Object Name)"
+    ]
+  }
+}

@@ -1,0 +1,56 @@
+[1] 131256432E320000000006 (E320000000006) ... estado=ACEPTADO :: [0]
+[2] 131256432E440000000013 (E440000000013) ... estado=ACEPTADO :: [0]
+[3] 131256432E310000000001 (E310000000001) ... estado=ACEPTADO :: [0]
+[4] 131256432E310000000034 (E310000000034) ... estado=ACEPTADO :: [0]
+[5] 131256432E310000000009 (E310000000009) ... estado=ACEPTADO :: [0]
+[6] 131256432E310000000002 (E310000000002) ... estado=RECHAZADO :: La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados. [0]
+[7] 131256432E320000000011 (E320000000011) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[8] 131256432E320000000012 (E320000000012) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[9] 131256432E320000000014 (E320000000014) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[10] 131256432E320000000015 (E320000000015) ... estado=? :: Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+[11] 131256432E320000000005 (E320000000005) ... estado=ACEPTADO :: [0]
+[12] 131256432E410000000010 (E410000000010) ... estado=ACEPTADO :: [0]
+[13] 131256432E410000000008 (E410000000008) ... estado=ACEPTADO :: [0]
+[14] 131256432E430000000010 (E430000000010) ... estado=RECHAZADO :: El formato del XML no es válido. [1]
+[15] 131256432E430000000009 (E430000000009) ... estado=RECHAZADO :: El formato del XML no es válido. [1]
+[16] 131256432E440000000009 (E440000000009) ... estado=ACEPTADO :: [0]
+[17] 131256432E450000000001 (E450000000001) ... estado=ACEPTADO :: [0]
+[18] 131256432E450000000003 (E450000000003) ... estado=ACEPTADO :: [0]
+[19] 131256432E460000000007 (E460000000007) ... estado=ACEPTADO :: [0]
+[20] 131256432E460000000001 (E460000000001) ... estado=ACEPTADO :: [0]
+[21] 131256432E470000000001 (E470000000001) ... estado=ACEPTADO :: [0]
+[22] 131256432E470000000011 (E470000000011) ... estado=ACEPTADO :: [0]
+[23] 131256432E330000000001 (E330000000001) ... estado=RECHAZADO :: El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es válido.El eNCF: E320000000006 especificado en el ca
+[24] 131256432E340000000001 (E340000000001) ... estado=RECHAZADO :: El eNCF modificado no ha sido emitido.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del conjunto de datos entregados. [614]
+[25] 131256432E340000000013 (E340000000013) ... estado=RECHAZADO :: El eNCF modificado no ha sido emitido. [614]
+
+========================================
+Resumen: 15/25 ACEPTADOS
+========================================
+  + | E320000000006 | ACEPTADO | [0]
+  + | E440000000013 | ACEPTADO | [0]
+  + | E310000000001 | ACEPTADO | [0]
+  + | E310000000034 | ACEPTADO | [0]
+  + | E310000000009 | ACEPTADO | [0]
+  - | E310000000002 | RECHAZADO | La propiedad TasaImpuestoAdicional no es válida debido a que el valor enviado (10.00) no coincide con el valor (10) del conjunto de datos entregados.
+  - | E320000000011 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000012 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000014 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  - | E320000000015 | ? | Factura no tiene track_id o e_ncf (no fue emitida a DGII)
+  + | E320000000005 | ACEPTADO | [0]
+  + | E410000000010 | ACEPTADO | [0]
+  + | E410000000008 | ACEPTADO | [0]
+  - | E430000000010 | RECHAZADO | El formato del XML no es válido. [1]
+  - | E430000000009 | RECHAZADO | El formato del XML no es válido. [1]
+  + | E440000000009 | ACEPTADO | [0]
+  + | E450000000001 | ACEPTADO | [0]
+  + | E450000000003 | ACEPTADO | [0]
+  + | E460000000007 | ACEPTADO | [0]
+  + | E460000000001 | ACEPTADO | [0]
+  + | E470000000001 | ACEPTADO | [0]
+  + | E470000000011 | ACEPTADO | [0]
+  - | E330000000001 | RECHAZADO | El eNCF modificado no ha sido emitido.El eNCF: E320000000006 especificado en el campo NCFModificado de la sección información de referencia no es v�
+  - | E340000000001 | RECHAZADO | El eNCF modificado no ha sido emitido.La propiedad CantidadItem no es válida debido a que el valor enviado (15.00) no coincide con el valor (15) del 
+  - | E340000000013 | RECHAZADO | El eNCF modificado no ha sido emitido. [614]
+
+==> Detalle completo en: tools\fase2_estados.json

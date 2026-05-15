@@ -75,23 +75,44 @@ switch ($route) {
         require_once 'src/Controllers/ncfController.php';
         break;
 
+    case 'facturacion-electronica':
+        // DGII electronic billing endpoints - token required
+        require_once 'src/Controllers/facturacionElectronicaController.php';
+        break;
+
+    case 'ecf':
+        // Public e-CF receiver endpoints registered with DGII:
+        //   /api/ecf/recepcion             -> incoming e-CFs from emisores
+        //   /api/ecf/aprobacion-comercial  -> commercial approvals/rejections
+        //   /api/ecf/autenticacion         -> seed/validate flow (own auth)
+        $sub = strtolower($route_segments[1] ?? '');
+        if ($sub === 'recepcion') {
+            require_once 'src/Controllers/ecfRecepcionController.php';
+        } elseif ($sub === 'aprobacion-comercial' || $sub === 'aprobacioncomercial') {
+            require_once 'src/Controllers/ecfAprobacionComercialController.php';
+        } elseif ($sub === 'autenticacion') {
+            require_once 'src/Controllers/ecfAutenticacionController.php';
+        } else {
+            http_response_code(404);
+            echo json_encode([
+                'status' => false,
+                'error' => 'Sub-ruta no encontrada bajo /api/ecf. Use recepcion, aprobacion-comercial o autenticacion.',
+            ]);
+        }
+        break;
+
     case 'landing':
         // Landing page configuration endpoints
         require_once 'src/Controllers/landingController.php';
         break;
     
-    case 'print-jobs':
-        // Print job management endpoints
-        require_once 'src/Controllers/printJobController.php';
-        break;
-
     default:
         // Handle default and 404 cases
         if ($is_root) {
             require_once 'src/Controllers/userController.php';
         } else {
             header('content-type: application/json; charset=utf-8');
-            echo json_encode(['error', 'Endpoint not found']);
+            echo json_encode(['status' => false, 'error' => 'Endpoint not found']);
             http_response_code(404);
         }
 }
