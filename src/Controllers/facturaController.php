@@ -22,9 +22,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 
 // Check if this is a PDF request
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$isPdfRequest = preg_match('/\/api\/facturas\/(\d+)\/pdf/', $endpoint, $pdfMatches);
+$isPdfRequest = preg_match('/\/api2\/facturas\/(\d+)\/pdf/', $endpoint, $pdfMatches);
 // Preview PDF endpoint
-$isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
+$isPreviewRequest = preg_match('/\/api2\/facturas\/preview$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':

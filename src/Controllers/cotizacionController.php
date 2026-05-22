@@ -20,9 +20,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 
 // Check if this is a PDF request
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$isPdfRequest = preg_match('/\/api\/cotizaciones\/(\d+)\/pdf/', $endpoint, $pdfMatches);
+$isPdfRequest = preg_match('/\/api2\/cotizaciones\/(\d+)\/pdf/', $endpoint, $pdfMatches);
 // Preview PDF endpoint
-$isPreviewRequest = preg_match('/\/api\/cotizaciones\/preview$/', $endpoint);
+$isPreviewRequest = preg_match('/\/api2\/cotizaciones\/preview$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':

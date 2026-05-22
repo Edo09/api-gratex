@@ -26,8 +26,8 @@ $uri = $_SERVER['REQUEST_URI'];
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
-        // /api/ncf/sequence -> Get stats
-        if (strpos($uri, '/api/ncf/sequence') !== false) {
+        // /api2/ncf/sequence -> Get stats
+        if (strpos($uri, '/api2/ncf/sequence') !== false) {
             $data = $ncfModel->getCurrentSequence('B01');
             echo json_encode([
                 'status' => true,
@@ -36,8 +36,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             break;
         }
 
-        // /api/ncf/next -> Get next NCF
-        if (strpos($uri, '/api/ncf/next') !== false) {
+        // /api2/ncf/next -> Get next NCF
+        if (strpos($uri, '/api2/ncf/next') !== false) {
             $next = $ncfModel->getNextNCF('B01');
             echo json_encode([
                 'status' => true,
@@ -74,7 +74,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'PUT':
         // Update NCF Sequence
-        if (strpos($uri, '/api/ncf/sequence') !== false) {
+        if (strpos($uri, '/api2/ncf/sequence') !== false) {
             $_PUT = json_decode(file_get_contents('php://input', true));
             if (isset($_PUT->current_value)) {
                 $result = $ncfModel->setSequence('B01', $_PUT->current_value);

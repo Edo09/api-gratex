@@ -37,9 +37,9 @@ if ($is_root || str_ends_with($endpoint, '/docs') || str_ends_with($endpoint, '/
     exit;
 }
 
-// Extract the first part of the route after the last '/api/' segment
-// This handles: /api/auth, /api/api/auth, and /api/index.php/api/auth
-$parts = explode('/api/', $endpoint);
+// Extract the first part of the route after the last '/api2/' segment
+// This handles: /api2/auth, /api2/api2/auth, and /api2/index.php/api2/auth
+$parts = explode('/api2/', $endpoint);
 $route_part = end($parts);
 $route_segments = explode('/', ltrim($route_part, '/'));
 $route = $route_segments[0] ?? 'default';
