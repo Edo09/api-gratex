@@ -55,15 +55,13 @@ class ACECFEmissionService
             throw new RuntimeException('emisor_config no configurado.');
         }
 
-        $rncComprador = (string) ($payload['rnc_comprador'] ?? $emisor['rnc']);
-
         $xmlData = [
-            'rnc_emisor' => (string) ($payload['rnc_emisor'] ?? ''),
-            'e_ncf' => (string) ($payload['e_ncf'] ?? ''),
+            'rnc_emisor' => $payload['rnc_emisor'] ?? '',
+            'e_ncf' => $payload['e_ncf'] ?? '',
             'fecha_emision' => $payload['fecha_emision'] ?? date('d-m-Y'),
             'monto_total' => $payload['monto_total'] ?? 0,
-            'rnc_comprador' => $rncComprador,
-            'estado' => (string) ($payload['estado'] ?? '1'),
+            'rnc_comprador' => $payload['rnc_comprador'] ?? $emisor['rnc'],
+            'estado' => $payload['estado'] ?? '1',
             'detalle_motivo' => $payload['detalle_motivo'] ?? null,
             'fecha_hora' => $payload['fecha_hora'] ?? date('d-m-Y H:i:s'),
         ];
@@ -73,9 +71,9 @@ class ACECFEmissionService
         $certPath = $this->resolveCertPath();
         $certContent = file_get_contents($certPath);
         if ($certContent === false) {
-            throw new RuntimeException('No se puede leer el certificado: ' . $certPath);
+            throw new RuntimeException("No se puede leer el certificado: $certPath");
         }
-        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
+        $certPassword = getenv('DGII_ECF_CERT_PASSWORD') ?: '';
         if ($certPassword === '') {
             throw new RuntimeException('DGII_ECF_CERT_PASSWORD no configurado.');
         }
@@ -109,7 +107,7 @@ class ACECFEmissionService
 
     private function resolveCertPath(): string
     {
-        $configured = (string) (getenv('DGII_ECF_CERT_PATH') ?: '');
+        $configured = getenv('DGII_ECF_CERT_PATH') ?: '';
         if ($configured === '') {
             throw new RuntimeException('DGII_ECF_CERT_PATH no configurado.');
         }
@@ -131,13 +129,12 @@ class ACECFEmissionService
 
     private function extractTrackId(array $reception): ?string
     {
-        $data = $reception['data'];
-        if (!is_array($data)) {
+        if (!is_array($reception['data'])) {
             return null;
         }
         foreach (['trackId', 'TrackId', 'trackid'] as $key) {
-            if (isset($data[$key])) {
-                return (string) $data[$key];
+            if (isset($reception['data'][$key])) {
+                return (string) $reception['data'][$key];
             }
         }
         return null;
@@ -149,14 +146,16 @@ class ACECFEmissionService
         $data = is_array($reception['data']) ? $reception['data'] : [];
         $estadoCodigo = $data['codigo'] ?? $data['estado'] ?? null;
 
-        if ($code >= 200 && $code < 300) {
-            if (is_numeric($estadoCodigo)) {
-                $estadoCodigo = (int) $estadoCodigo;
-                if ($estadoCodigo === 1) return 'ACEPTADO';
-                if ($estadoCodigo === 2) return 'RECHAZADO';
-            }
-            return 'ENVIADO';
+        if ($code < 200 || $code >= 300) {
+            return 'ERROR';
         }
-        return 'ERROR';
+        if (is_numeric($estadoCodigo)) {
+            return match ((int) $estadoCodigo) {
+                1 => 'ACEPTADO',
+                2 => 'RECHAZADO',
+                default => 'ENVIADO',
+            };
+        }
+        return 'ENVIADO';
     }
 }
