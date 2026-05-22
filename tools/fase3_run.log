@@ -1,0 +1,54 @@
+==> Leyendo xlsx: samples\131256432-22052026165246.xlsx
+
+Deprecated: Method ReflectionProperty::setAccessible() is deprecated since 8.5, as it has no effect since PHP 8.1 in C:\Users\edgarcia\Documents\grat\api-gratex\tools\send_fase3.php on line 130
+==> 11 ACECF en hoja ACEECF_Generadas
+
+[1/11] row2
+    OK estado=ACEPTADO track=-
+
+[2/11] row3
+    OK estado=ACEPTADO track=-
+
+[3/11] row4
+    OK estado=ACEPTADO track=-
+
+[4/11] row5
+    OK estado=ACEPTADO track=-
+
+[5/11] row6
+    OK estado=ACEPTADO track=-
+
+[6/11] row7
+    OK estado=ACEPTADO track=-
+
+[7/11] row8
+    OK estado=ACEPTADO track=-
+
+[8/11] row9
+    OK estado=ACEPTADO track=-
+
+[9/11] row10
+    OK estado=ACEPTADO track=-
+
+[10/11] row11
+    OK estado=ACEPTADO track=-
+
+[11/11] row12
+    OK estado=ACEPTADO track=-
+
+========================================
+Resumen: 11/11 ENVIADAS
+========================================
+  + E310000000001 | ACEPTADO track=-
+  + E310000000002 | ACEPTADO track=-
+  + E310000000009 | ACEPTADO track=-
+  + E310000000034 | ACEPTADO track=-
+  + E330000000001 | ACEPTADO track=-
+  + E340000000001 | ACEPTADO track=-
+  + E340000000013 | ACEPTADO track=-
+  + E440000000009 | ACEPTADO track=-
+  + E440000000013 | ACEPTADO track=-
+  + E450000000001 | ACEPTADO track=-
+  + E450000000003 | ACEPTADO track=-
+
+==> Reporte guardado en: tools\fase3_results.json
