@@ -16,7 +16,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         
         // Handle register endpoint
         $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        if (preg_match('/\/api\/auth\/register/', $endpoint)) {
+        if (preg_match('/\/api2\/auth\/register/', $endpoint)) {
             // Validate required fields
             if (!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email))) {
                 $respuesta = ['error', 'Email is required'];
@@ -52,7 +52,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             echo json_encode($respuesta);
         }
         // Handle login endpoint
-        else if (preg_match('/\/api\/auth\/login/', $endpoint)) {
+        else if (preg_match('/\/api2\/auth\/login/', $endpoint)) {
             if (!isset($_POST->emailOrUsername) || is_null($_POST->emailOrUsername) || empty(trim($_POST->emailOrUsername))) {
                 $respuesta = ['error', 'Email or username is required'];
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
@@ -76,7 +76,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             echo json_encode($respuesta);
         }
         // Handle signout endpoint
-        else if (preg_match('/\/api\/auth\/signout/', $endpoint)) {
+        else if (preg_match('/\/api2\/auth\/signout/', $endpoint)) {
             // Validate token
             $validation = $auth->validateRequest();
             if (!$validation['valid']) {
