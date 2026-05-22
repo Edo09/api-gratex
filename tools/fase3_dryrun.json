@@ -1,0 +1,17 @@
+[
+    {
+        "e_ncf": "E310000000001",
+        "ok": true,
+        "dry_run": true,
+        "payload": {
+            "rnc_emisor": "131880681",
+            "e_ncf": "E310000000001",
+            "fecha_emision": "01-04-2020",
+            "monto_total": 7080,
+            "rnc_comprador": "131256432",
+            "estado": "1",
+            "detalle_motivo": "",
+            "fecha_hora": "09-05-2026 01:51:42"
+        }
+    }
+]

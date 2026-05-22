@@ -80,6 +80,12 @@ switch ($route) {
         require_once 'src/Controllers/facturacionElectronicaController.php';
         break;
 
+    case 'aprobaciones-comerciales':
+        // POST /api/aprobaciones-comerciales -> sends ACECF to DGII
+        // (our role as buyer approving an e-CF that another emisor issued to us)
+        require_once 'src/Controllers/aprobacionComercialOutgoingController.php';
+        break;
+
     case 'ecf':
         // Public e-CF receiver endpoints registered with DGII:
         //   /api/ecf/recepcion             -> incoming e-CFs from emisores
