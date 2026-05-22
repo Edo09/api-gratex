@@ -97,6 +97,43 @@ class DgiiReceptionService
     }
 
     /**
+     * Sends a signed ACECF (Aprobacion Comercial e-CF) to DGII at
+     *   {base_url}/{ambiente}/AprobacionComercial/api/AprobacionComercial
+     * Used in Fase 3 of certification (our role: buyer approving e-CFs issued to us).
+     */
+    public function enviarAprobacionComercial(string $signedXml, string $bearerToken, array $options = []): array
+    {
+        $environment = $this->resolveEnvironment($options);
+        $path = sprintf('%s/AprobacionComercial/api/AprobacionComercial', $environment);
+
+        $filename = $this->buildDgiiFilename($signedXml, 'acecf.xml');
+
+        $boundary = '----GratexDgiiBoundary' . bin2hex(random_bytes(16));
+        $body = $this->buildMultipartBody($boundary, 'xml', $filename, 'text/xml', $signedXml);
+
+        $extraHeaders = [
+            'Content-Type: multipart/form-data; boundary=' . $boundary,
+            'Content-Length: ' . strlen($body),
+        ];
+
+        $response = $this->auth->consultarEndpointAutenticado(
+            'POST',
+            $path,
+            $bearerToken,
+            $body,
+            $options,
+            $extraHeaders
+        );
+
+        return [
+            'status_code' => $response['status_code'],
+            'data' => $response['data'],
+            'raw_body' => $response['body'],
+            'endpoint' => $response['endpoint'],
+        ];
+    }
+
+    /**
      * Query DGII for the current status of a previously sent e-CF.
      */
     public function consultarEstado(string $trackId, string $rnc, string $eNcf, string $bearerToken, array $options = []): array
