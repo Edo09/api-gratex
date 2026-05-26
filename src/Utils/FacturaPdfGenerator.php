@@ -301,7 +301,7 @@ class FacturaPdfGenerator extends FPDF
             return;
         }
 
-        $qrX = 170;
+        $qrX = 95;
         $qrY = 10;
         $qrSize = 30;
         $this->Image($tmpPath, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
@@ -380,7 +380,6 @@ class FacturaPdfGenerator extends FPDF
         if (!$companyName) $companyName = $this->factura['company_name'] ?? '';
 
         $noFactura = $this->factura['no_factura'] ?? '';
-        $ncf = $this->factura['NCF'] ?? $this->factura['ncf'] ?? '';
         $facturaDate = $this->factura['date'] ?? date('Y-m-d');
         $fechaEspanol = $this->fechaCastellano($facturaDate);
 
@@ -388,14 +387,13 @@ class FacturaPdfGenerator extends FPDF
         $this->Cell(70, 3.8, 'Factura No.: ' . $noFactura, 0, 1, 'L');
         $this->Cell(70, 3.8, 'Fecha: ' . $this->convertEncoding($fechaEspanol), 0, 1, 'L');
 
-        // Right side: Factura Crédito Fiscal, NCF, RNC, Razón Social, Contact, Vencimiento
-        // If QR was rendered, start lower so the right block doesn't overlap it.
+        // Right side: Factura Crédito Fiscal, NCF, RNC, Razón Social, Contact, Vencimiento.
+        // QR is now in the middle column so right block goes back to y=10 for e-CF
+        // (or 30 if no QR — original behavior).
         $hasQR = !empty($this->factura['e_ncf']) && !empty($this->factura['codigo_seguridad']);
-        $this->SetY($hasQR ? 50 : 30);
+        $this->SetY($hasQR ? 10 : 30);
         $this->SetX(-73);
         $this->Cell(70, 3.8, $this->convertEncoding('Factura Crédito Fiscal'), 0, 1, 'L');
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, 'NCF: ' . $ncf, 0, 1, 'L');
         $this->SetX(-73);
         $this->Cell(70, 3.8, 'RNC: ' . $rnc, 0, 1, 'L');
         $this->SetX(-73);
@@ -409,6 +407,12 @@ class FacturaPdfGenerator extends FPDF
         $this->SetX(-73);
         $this->Cell(70, 3.8, 'Fecha Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
         $this->Ln(1.6);
+
+        // Force cursor below header block so table header doesn't overlap
+        // the left "Factura No / Fecha" column when right block starts at y=10.
+        if ($hasQR && $this->GetY() < 56) {
+            $this->SetY(56);
+        }
 
         // Table header
         $this->SetFont('Arial', '', 10);
