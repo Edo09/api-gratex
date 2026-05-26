@@ -1,0 +1,107 @@
+==> 25 casos planificados
+
+[1/25] E31 #1 (E31)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E310000000001' for key 'facturas.uk_e_ncf'
+
+[2/25] E31 #2 (E31)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E310000000002' for key 'facturas.uk_e_ncf'
+
+[3/25] E31 #3 (E31)
+    OK e_ncf=E310000000003 estado=ENVIADO track=9e0a7a99-ee72-429e-b1c9-ee10b7909d2c
+
+[4/25] E31 #4 (E31)
+    OK e_ncf=E310000000004 estado=ENVIADO track=394fcdd1-2ca9-44c9-8732-70529086b64f
+
+[5/25] E33 #1 (E33)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E330000000001' for key 'facturas.uk_e_ncf'
+
+[6/25] E34 #1 (E34)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E340000000001' for key 'facturas.uk_e_ncf'
+
+[7/25] E34 #2 (E34)
+    SKIP: no hay e-NCF previo E31 para referenciar
+
+[8/25] E32 >=250k #1 (E32)
+    OK e_ncf=E320000000001 estado=ENVIADO track=da9b71d2-c32e-4902-b664-185c6d071f90
+
+[9/25] E32 >=250k #2 (E32)
+    OK e_ncf=E320000000002 estado=ENVIADO track=2797768e-315e-4158-931e-97a350593f98
+
+[10/25] E32 <250k RFCE #1 (E32)
+    OK e_ncf=E320000000003 estado=RFCE_ACEPTADO track=-
+
+[11/25] E32 <250k RFCE #2 (E32)
+    OK e_ncf=E320000000004 estado=RFCE_ACEPTADO track=-
+
+[12/25] E32 <250k RFCE #3 (E32)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E320000000005' for key 'facturas.uk_e_ncf'
+
+[13/25] E32 <250k RFCE #4 (E32)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E320000000006' for key 'facturas.uk_e_ncf'
+
+[14/25] E41 #1 (E41)
+    OK e_ncf=E410000000001 estado=ENVIADO track=4a8078ef-2ba0-4f7d-bcbb-327b513d071d
+
+[15/25] E41 #2 (E41)
+    OK e_ncf=E410000000002 estado=ENVIADO track=119c00e3-f39f-4f5a-8b77-870f4fd0455b
+
+[16/25] E43 #1 (E43)
+    OK e_ncf=E430000000001 estado=ENVIADO track=6583ad91-ca78-48f8-b662-0e592a5d3b18
+
+[17/25] E43 #2 (E43)
+    OK e_ncf=E430000000002 estado=ENVIADO track=d75e5e0c-d9ca-4267-9cc7-d55d248bb3b2
+
+[18/25] E44 #1 (E44)
+    OK e_ncf=E440000000001 estado=ENVIADO track=caa24245-f0de-4a07-8c67-665b343f1753
+
+[19/25] E44 #2 (E44)
+    OK e_ncf=E440000000002 estado=ENVIADO track=90a50be1-b8ed-4aa2-9afd-6ccb6ddd3b4f
+
+[20/25] E45 #1 (E45)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E450000000001' for key 'facturas.uk_e_ncf'
+
+[21/25] E45 #2 (E45)
+    OK e_ncf=E450000000002 estado=ENVIADO track=cfdb64bf-cbad-4fa6-ab51-3ae79a90fc46
+
+[22/25] E46 #1 (E46)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E460000000001' for key 'facturas.uk_e_ncf'
+
+[23/25] E46 #2 (E46)
+    OK e_ncf=E460000000002 estado=ENVIADO track=82873a85-697c-4ce2-b8e1-4c7a03142c8d
+
+[24/25] E47 #1 (E47)
+    FAIL Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E470000000001' for key 'facturas.uk_e_ncf'
+
+[25/25] E47 #2 (E47)
+    OK e_ncf=E470000000002 estado=ENVIADO track=2ed85fbb-3e9c-44f1-b5a6-84e7f51ce456
+
+========================================
+Resumen: 15/25 OK
+========================================
+  - E31 #1 | E31 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E310000000001' for key 'facturas.uk_e_ncf'
+  - E31 #2 | E31 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E310000000002' for key 'facturas.uk_e_ncf'
+  + E31 #3 | E31 | E310000000003 track=9e0a7a99-ee72-429e-b1c9-ee10b7909d2c
+  + E31 #4 | E31 | E310000000004 track=394fcdd1-2ca9-44c9-8732-70529086b64f
+  - E33 #1 | E33 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E330000000001' for key 'facturas.uk_e_ncf'
+  - E34 #1 | E34 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E340000000001' for key 'facturas.uk_e_ncf'
+  - E34 #2 | E34 | sin e-NCF previo para referenciar
+  + E32 >=250k #1 | E32 | E320000000001 track=da9b71d2-c32e-4902-b664-185c6d071f90
+  + E32 >=250k #2 | E32 | E320000000002 track=2797768e-315e-4158-931e-97a350593f98
+  + E32 <250k RFCE #1 | E32 | E320000000003 track=-
+  + E32 <250k RFCE #2 | E32 | E320000000004 track=-
+  - E32 <250k RFCE #3 | E32 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E320000000005' for key 'facturas.uk_e_ncf'
+  - E32 <250k RFCE #4 | E32 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E320000000006' for key 'facturas.uk_e_ncf'
+  + E41 #1 | E41 | E410000000001 track=4a8078ef-2ba0-4f7d-bcbb-327b513d071d
+  + E41 #2 | E41 | E410000000002 track=119c00e3-f39f-4f5a-8b77-870f4fd0455b
+  + E43 #1 | E43 | E430000000001 track=6583ad91-ca78-48f8-b662-0e592a5d3b18
+  + E43 #2 | E43 | E430000000002 track=d75e5e0c-d9ca-4267-9cc7-d55d248bb3b2
+  + E44 #1 | E44 | E440000000001 track=caa24245-f0de-4a07-8c67-665b343f1753
+  + E44 #2 | E44 | E440000000002 track=90a50be1-b8ed-4aa2-9afd-6ccb6ddd3b4f
+  - E45 #1 | E45 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E450000000001' for key 'facturas.uk_e_ncf'
+  + E45 #2 | E45 | E450000000002 track=cfdb64bf-cbad-4fa6-ab51-3ae79a90fc46
+  - E46 #1 | E46 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E460000000001' for key 'facturas.uk_e_ncf'
+  + E46 #2 | E46 | E460000000002 track=82873a85-697c-4ce2-b8e1-4c7a03142c8d
+  - E47 #1 | E47 | Failed to save factura with e-CF: SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'E470000000001' for key 'facturas.uk_e_ncf'
+  + E47 #2 | E47 | E470000000002 track=2ed85fbb-3e9c-44f1-b5a6-84e7f51ce456
+
+==> Reporte en: tools\fase4_results.json

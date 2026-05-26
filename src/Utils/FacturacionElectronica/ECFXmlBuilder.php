@@ -97,10 +97,14 @@ class ECFXmlBuilder
             ));
         }
 
-        if ($cfg['ind_monto_gravado'] && isset($data['indicador_monto_gravado']) && $data['indicador_monto_gravado'] !== '') {
+        if ($cfg['ind_monto_gravado']) {
+            $indicadorMontoGravado = $data['indicador_monto_gravado'] ?? '0';
+            if ($indicadorMontoGravado === null || $indicadorMontoGravado === '') {
+                $indicadorMontoGravado = '0';
+            }
             $idDoc->appendChild($doc->createElement(
                 'IndicadorMontoGravado',
-                (string) $data['indicador_monto_gravado']
+                (string) $indicadorMontoGravado
             ));
         }
 
