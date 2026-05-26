@@ -1,0 +1,126 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E310000000305",
+        "factura_id": 975,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion [11033]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 975,
+                "e_ncf": "E310000000305",
+                "track_id": "fab71e28-cb86-44b6-82ae-2fac6598affb",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "fab71e28-cb86-44b6-82ae-2fac6598affb",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/26\/2026 5:16:26 PM",
+                    "mensajes": [
+                        {
+                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion",
+                            "codigo": 11033
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000306",
+        "factura_id": 976,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion [11033]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 976,
+                "e_ncf": "E310000000306",
+                "track_id": "8819bba3-8805-4457-b2f6-ca9ab2eb4d1c",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "8819bba3-8805-4457-b2f6-ca9ab2eb4d1c",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/26\/2026 5:16:27 PM",
+                    "mensajes": [
+                        {
+                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion",
+                            "codigo": 11033
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000307",
+        "factura_id": 977,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion [11033]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 977,
+                "e_ncf": "E310000000307",
+                "track_id": "e255400b-c6a6-4cca-a9e3-413c6c93f9a7",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "e255400b-c6a6-4cca-a9e3-413c6c93f9a7",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000307",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/26\/2026 5:16:28 PM",
+                    "mensajes": [
+                        {
+                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion",
+                            "codigo": 11033
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000308",
+        "factura_id": 978,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion [11033]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 978,
+                "e_ncf": "E310000000308",
+                "track_id": "2a33fc92-6c4d-4dc1-97c2-00e440f4bbed",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "2a33fc92-6c4d-4dc1-97c2-00e440f4bbed",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E310000000308",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/26\/2026 5:16:29 PM",
+                    "mensajes": [
+                        {
+                            "valor": "No se tiene MontoGravado3 o ITBISTasa3, para hacer esta operacion",
+                            "codigo": 11033
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

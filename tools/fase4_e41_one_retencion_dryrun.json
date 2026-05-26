@@ -1,0 +1,49 @@
+[
+    {
+        "etiqueta": "E41 #1",
+        "tipo_ecf": "41",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "41",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Insumo",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1870.04,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": 1346.43,
+                    "monto_isr_retenido": 0
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 4671.51,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_itbis_retenido": 8408.72,
+                    "monto_isr_retenido": 0
+                }
+            ],
+            "indicador_monto_gravado": "0",
+            "totales": {
+                "itbis1": "18",
+                "itbis2": "16",
+                "itbis3": "0",
+                "total_itbis_retenido": 9755.15,
+                "total_isr_retencion": 0
+            }
+        },
+        "ok": true
+    }
+]

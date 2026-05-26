@@ -299,13 +299,13 @@ class ECFXmlBuilder
             $node->appendChild($doc->createElement('MontoExento', $this->money($exento)));
         }
 
-        if ($this->hasTotal($totales, 'itbis1') || $i1 > 0) {
+        if (in_array(1, $cfg['rates'], true) && ($this->hasTotal($totales, 'itbis1') || $this->hasTotal($totales, 'monto_gravado_i1') || $this->hasTotal($totales, 'total_itbis1') || $i1 > 0)) {
             $node->appendChild($doc->createElement('ITBIS1', (string) ($totales['itbis1'] ?? '18')));
         }
-        if ($this->hasTotal($totales, 'itbis2') || $i2 > 0) {
+        if (in_array(2, $cfg['rates'], true) && ($this->hasTotal($totales, 'itbis2') || $this->hasTotal($totales, 'monto_gravado_i2') || $this->hasTotal($totales, 'total_itbis2') || $i2 > 0)) {
             $node->appendChild($doc->createElement('ITBIS2', (string) ($totales['itbis2'] ?? '16')));
         }
-        if ($this->hasTotal($totales, 'itbis3') || $i3 > 0) {
+        if (in_array(3, $cfg['rates'], true) && ($this->hasTotal($totales, 'itbis3') || $this->hasTotal($totales, 'monto_gravado_i3') || $this->hasTotal($totales, 'total_itbis3') || $i3 > 0)) {
             $node->appendChild($doc->createElement('ITBIS3', (string) ($totales['itbis3'] ?? '0')));
         }
 
