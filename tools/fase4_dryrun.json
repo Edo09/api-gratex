@@ -1,0 +1,812 @@
+[
+    {
+        "etiqueta": "E31 #1",
+        "tipo_ecf": "31",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "31",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Consultoria",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 9,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1200.28
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 133.88
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Consultoria",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1143.85
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E31 #2",
+        "tipo_ecf": "31",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "31",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Licencia",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 9,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1672.31
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Licencia",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3013.35
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Licencia",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 2871.64
+                },
+                {
+                    "numero_linea": 4,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1995.36
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E31 #3",
+        "tipo_ecf": "31",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "31",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 7,
+                    "unidad_medida": "43",
+                    "precio_unitario": 2232.77
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E31 #4",
+        "tipo_ecf": "31",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "31",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 4336.8
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Mantenimiento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 4175.34
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Insumo",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3976.72
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E33 #1",
+        "tipo_ecf": "33",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "33",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Mantenimiento",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 533.79
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000000",
+                "rnc_otro_contribuyente": null,
+                "fecha_ncf_modificado": "26-05-2026",
+                "codigo_modificacion": "2"
+            }
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E34 #1",
+        "tipo_ecf": "34",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "34",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "indicador_nota_credito": "0",
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Consultoria",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 998.14
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000001",
+                "rnc_otro_contribuyente": null,
+                "fecha_ncf_modificado": "26-05-2026",
+                "codigo_modificacion": "1"
+            }
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E34 #2",
+        "tipo_ecf": "34",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "34",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "indicador_nota_credito": "0",
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 9,
+                    "unidad_medida": "43",
+                    "precio_unitario": 657.43
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000002",
+                "rnc_otro_contribuyente": null,
+                "fecha_ncf_modificado": "26-05-2026",
+                "codigo_modificacion": "1"
+            }
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 >=250k #1",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 94628.22
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 110114.3
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 >=250k #2",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 119456.84
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 105491
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 <250k RFCE #1",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 5191.74
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 <250k RFCE #2",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3831.92
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 <250k RFCE #3",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3419.54
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E32 <250k RFCE #4",
+        "tipo_ecf": "32",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "32",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 5913.48
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E41 #1",
+        "tipo_ecf": "41",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "41",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 667.16
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Insumo",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 7,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3381.46
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E41 #2",
+        "tipo_ecf": "41",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "41",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 6,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3343.58
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Insumo",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 956.99
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E43 #1",
+        "tipo_ecf": "43",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "43",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Servicio exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 7,
+                    "unidad_medida": "43",
+                    "precio_unitario": 190.84
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E43 #2",
+        "tipo_ecf": "43",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "43",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Servicio exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 192.98
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E44 #1",
+        "tipo_ecf": "44",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "44",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Insumo exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 9,
+                    "unidad_medida": "43",
+                    "precio_unitario": 3415.33
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Producto basico",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 6,
+                    "unidad_medida": "43",
+                    "precio_unitario": 8262.14
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Producto basico",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 2223.6
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E44 #2",
+        "tipo_ecf": "44",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "44",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Servicio exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 7,
+                    "unidad_medida": "43",
+                    "precio_unitario": 6624.54
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Producto basico",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1083.69
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E45 #1",
+        "tipo_ecf": "45",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "45",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Consultoria",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 5009.81
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 5380.24
+                },
+                {
+                    "numero_linea": 3,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Servicio profesional",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 2,
+                    "unidad_medida": "43",
+                    "precio_unitario": 7543.81
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E45 #2",
+        "tipo_ecf": "45",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "45",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 6688.7
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Mantenimiento",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1103.62
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E46 #1",
+        "tipo_ecf": "46",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "46",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Articulo exportado",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 14547.92
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Mercaderia",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 6629.01
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E46 #2",
+        "tipo_ecf": "46",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "46",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 3,
+                    "nombre_item": "Articulo exportado",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 2672.64
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E47 #1",
+        "tipo_ecf": "47",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "47",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Servicio exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 19607.87
+                }
+            ]
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E47 #2",
+        "tipo_ecf": "47",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "47",
+            "fecha_emision": "26-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Producto basico",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 8,
+                    "unidad_medida": "43",
+                    "precio_unitario": 11809.3
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Insumo exento",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 9,
+                    "unidad_medida": "43",
+                    "precio_unitario": 17003.09
+                }
+            ]
+        },
+        "ok": true
+    }
+]

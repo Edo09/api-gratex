@@ -1,0 +1,37 @@
+[
+    {
+        "etiqueta": "E31 #1",
+        "tipo_ecf": "31",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "31",
+            "fecha_emision": "26-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 3,
+                    "unidad_medida": "43",
+                    "precio_unitario": 1379.06
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto A",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 10,
+                    "unidad_medida": "43",
+                    "precio_unitario": 4275.4
+                }
+            ],
+            "indicador_monto_gravado": "0"
+        },
+        "ok": true
+    }
+]

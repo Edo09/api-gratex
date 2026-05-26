@@ -1,0 +1,47 @@
+==> 10 casos planificados
+
+[1/10] E31 #1 (E31)
+    OK e_ncf=E310000000101 estado=ENVIADO track=a4a100b9-5e1f-483f-ac62-7f08894b39d1
+
+[2/10] E31 #2 (E31)
+    OK e_ncf=E310000000102 estado=ENVIADO track=eaeaa4a0-2ad6-4701-b309-7f313045e569
+
+[3/10] E33 #1 (E33)
+    OK e_ncf=E330000000101 estado=ENVIADO track=851e748e-b3f3-4b2b-90e5-dd382facdb70
+
+[4/10] E34 #1 (E34)
+    OK e_ncf=E340000000101 estado=ENVIADO track=4c3719c5-66fd-4211-b6db-184e503f2a37
+
+[5/10] E34 #2 (E34)
+    SKIP: no hay e-NCF previo E31 para referenciar
+
+[6/10] E32 <250k RFCE #1 (E32)
+    OK e_ncf=E320000000101 estado=RFCE_ACEPTADO track=-
+
+[7/10] E32 <250k RFCE #2 (E32)
+    OK e_ncf=E320000000102 estado=RFCE_ACEPTADO track=-
+
+[8/10] E45 #1 (E45)
+    OK e_ncf=E450000000101 estado=ENVIADO track=430a1da5-978f-4e10-b886-47707373de50
+
+[9/10] E46 #1 (E46)
+    OK e_ncf=E460000000101 estado=ENVIADO track=b6d7275c-3af0-4ab7-8418-4d3f22e6a980
+
+[10/10] E47 #1 (E47)
+    OK e_ncf=E470000000101 estado=ENVIADO track=8416d49c-90ca-425b-ba9d-970a52351619
+
+========================================
+Resumen: 9/10 OK
+========================================
+  + E31 #1 | E31 | E310000000101 track=a4a100b9-5e1f-483f-ac62-7f08894b39d1
+  + E31 #2 | E31 | E310000000102 track=eaeaa4a0-2ad6-4701-b309-7f313045e569
+  + E33 #1 | E33 | E330000000101 track=851e748e-b3f3-4b2b-90e5-dd382facdb70
+  + E34 #1 | E34 | E340000000101 track=4c3719c5-66fd-4211-b6db-184e503f2a37
+  - E34 #2 | E34 | sin e-NCF previo para referenciar
+  + E32 <250k RFCE #1 | E32 | E320000000101 track=-
+  + E32 <250k RFCE #2 | E32 | E320000000102 track=-
+  + E45 #1 | E45 | E450000000101 track=430a1da5-978f-4e10-b886-47707373de50
+  + E46 #1 | E46 | E460000000101 track=b6d7275c-3af0-4ab7-8418-4d3f22e6a980
+  + E47 #1 | E47 | E470000000101 track=8416d49c-90ca-425b-ba9d-970a52351619
+
+==> Reporte en: tools\fase4_remaining.json
