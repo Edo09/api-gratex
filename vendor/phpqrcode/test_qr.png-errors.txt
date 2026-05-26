@@ -1,0 +1,34 @@
+2026-05-26 18:56:48: 
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\frame_1.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrspec.php on line 568
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_0\mask_21_0.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_1\mask_21_1.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_2\mask_21_2.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_3\mask_21_3.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_4\mask_21_4.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_5\mask_21_5.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_6\mask_21_6.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155
+
+Warning: mkdir(): No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 154
+
+Warning: file_put_contents(C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\cache\mask_7\mask_21_7.dat): Failed to open stream: No such file or directory in C:\Users\edgarcia\Documents\grat\api-gratex\vendor\phpqrcode\qrmask.php on line 155

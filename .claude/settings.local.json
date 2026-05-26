@@ -24,7 +24,18 @@
       "Bash(awk '/<xs:element name=\"Item\"/,/^[ ]*<\\\\/xs:complexType>.*Item|^[ ]+<\\\\/xs:element>$/' \"samples/e-CF 31 v.1.0.xsd\")",
       "PowerShell(& \"C:\\\\php\\\\php.exe\" -d \"extension_dir=C:\\\\php\\\\ext\" -d \"extension=curl\" -d \"extension=openssl\" \"tools\\\\download_rfce_ecf.php\" 2>&1)",
       "Bash(Get-ChildItem -Path \"c:\\\\Users\\\\omare\\\\Documents\\\\gratex\\\\api-gratex\" -Directory)",
-      "Bash(Select-Object Name)"
+      "Bash(Select-Object Name)",
+      "Bash(curl -sL https://raw.githubusercontent.com/aldoblack/phpqrcode/master/qrlib.php -o vendor/phpqrcode/qrlib.php)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/t0k4rt/phpqrcode/master/phpqrcode/qrlib.php\" -o vendor/phpqrcode/qrlib.php)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/abouhamza/phpqrcode/master/phpqrcode/qrlib.php\" -o vendor/phpqrcode/qrlib.php)",
+      "Bash(curl -sIL \"https://github.com/t0k4rt/phpqrcode\")",
+      "Bash(curl -sL \"https://api.github.com/repos/t0k4rt/phpqrcode/contents\")",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/t0k4rt/phpqrcode/master/qrlib.php\" -o vendor/phpqrcode/qrlib.php)",
+      "Bash(curl -sL \"https://raw.githubusercontent.com/t0k4rt/phpqrcode/master/qrvect.php\" -o vendor/phpqrcode/qrvect.php)",
+      "Read(//c/tmp/**)",
+      "Bash(curl -sS https://getcomposer.org/installer)",
+      "Bash(\"/c/php/php.exe\" -d \"extension_dir=C:\\\\php\\\\ext\" -d \"extension=openssl\" -d \"extension=mbstring\" -d \"extension=phar\" -d \"extension=zip\" -- --quiet --install-dir=/c/Users/edgarcia/bin --filename=composer)",
+      "Read(//c/Users/edgarcia/**)"
     ]
   }
 }
