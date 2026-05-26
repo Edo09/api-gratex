@@ -13,6 +13,13 @@ if (file_exists($composerPath)) {
     die('FPDF library not found. Please install via composer (composer require setasign/fpdf) or download from http://www.fpdf.org/');
 }
 
+$qrLibPath = __DIR__ . '/../../vendor/phpqrcode/qrlib.php';
+if (file_exists($qrLibPath)) {
+    require_once($qrLibPath);
+}
+
+require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+
 /**
  * PDF Generator for Facturas
  * Extends FPDF to create invoice PDFs with custom layout
@@ -238,6 +245,93 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Render DGII timbre QR + codigo de seguridad at top-right.
+     * Only renders if factura has e_ncf and codigo_seguridad (e-CF emitted).
+     */
+    private function addQRTimbre(): void
+    {
+        $eNcf = $this->factura['e_ncf'] ?? '';
+        $codigoSeguridad = $this->factura['codigo_seguridad'] ?? '';
+        if ($eNcf === '' || $codigoSeguridad === '') {
+            return;
+        }
+        if (!class_exists('QRcode')) {
+            return;
+        }
+
+        $emisor = [];
+        try {
+            $emisor = (new EmisorConfigModel())->get() ?: [];
+        } catch (\Throwable $e) {
+            $emisor = [];
+        }
+        $rncEmisor = $emisor['rnc'] ?? '';
+        if ($rncEmisor === '') {
+            return;
+        }
+
+        $ambiente = $this->factura['ambiente_dgii'] ?? ($emisor['environment'] ?? 'CerteCF');
+        $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
+        $monto = number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
+        $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
+
+        $isFc = ($this->factura['tipo_ecf'] ?? '') === '32'
+            && (float) ($this->factura['total'] ?? 0) < 250000;
+        $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
+
+        $url = sprintf(
+            'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+            rawurlencode($ambiente),
+            $endpoint,
+            rawurlencode($rncEmisor),
+            rawurlencode($eNcf),
+            rawurlencode($fechaEmision),
+            rawurlencode($monto),
+            rawurlencode($fechaFirma),
+            rawurlencode($codigoSeguridad)
+        );
+
+        $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qr_' . bin2hex(random_bytes(8)) . '.png';
+        try {
+            @QRcode::png($url, $tmpPath, QR_ECLEVEL_M, 4, 1);
+        } catch (\Throwable $e) {
+            return;
+        }
+        if (!file_exists($tmpPath) || filesize($tmpPath) === 0) {
+            return;
+        }
+
+        $qrX = 170;
+        $qrY = 10;
+        $qrSize = 30;
+        $this->Image($tmpPath, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
+        @unlink($tmpPath);
+
+        $this->SetXY($qrX, $qrY + $qrSize);
+        $this->SetFont('Arial', 'B', 7);
+        $this->Cell($qrSize, 3.2, 'Cod. Seguridad', 0, 1, 'C');
+        $this->SetX($qrX);
+        $this->SetFont('Arial', '', 8);
+        $this->Cell($qrSize, 3.6, $codigoSeguridad, 0, 1, 'C');
+
+        $this->SetXY($this->lMargin, 10);
+    }
+
+    private function formatFechaQr(string $value): string
+    {
+        if ($value === '') return '';
+        $ts = strtotime($value);
+        return $ts ? date('d-m-Y', $ts) : '';
+    }
+
+    private function formatFechaHoraQr(string $value): string
+    {
+        if ($value === '') return '';
+        $ts = strtotime($value);
+        return $ts ? date('d-m-Y H:i:s', $ts) : '';
+    }
+
+    /**
      * Generate the PDF content
      * @return string PDF content as string
      */
@@ -246,6 +340,7 @@ class FacturaPdfGenerator extends FPDF
         $this->AliasNbPages();
         $this->SetMargins(8, 10, 8);
         $this->AddPage();
+        $this->addQRTimbre();
 
         // Fetch client data from DB if not already set
         $clientName = '';
