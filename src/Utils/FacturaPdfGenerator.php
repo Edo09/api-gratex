@@ -307,6 +307,7 @@ class FacturaPdfGenerator extends FPDF
         $this->Image($tmpPath, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
         @unlink($tmpPath);
 
+        $savedY = $this->GetY();
         $this->SetXY($qrX, $qrY + $qrSize);
         $this->SetFont('Arial', 'B', 7);
         $this->Cell($qrSize, 3.2, 'Cod. Seguridad', 0, 1, 'C');
@@ -314,7 +315,8 @@ class FacturaPdfGenerator extends FPDF
         $this->SetFont('Arial', '', 8);
         $this->Cell($qrSize, 3.6, $codigoSeguridad, 0, 1, 'C');
 
-        $this->SetXY($this->lMargin, 10);
+        // Restore cursor to where Header() left it so left column flows normal
+        $this->SetXY($this->lMargin, $savedY);
     }
 
     private function formatFechaQr(string $value): string
@@ -387,7 +389,9 @@ class FacturaPdfGenerator extends FPDF
         $this->Cell(70, 3.8, 'Fecha: ' . $this->convertEncoding($fechaEspanol), 0, 1, 'L');
 
         // Right side: Factura Crédito Fiscal, NCF, RNC, Razón Social, Contact, Vencimiento
-        $this->SetY(30);
+        // If QR was rendered, start lower so the right block doesn't overlap it.
+        $hasQR = !empty($this->factura['e_ncf']) && !empty($this->factura['codigo_seguridad']);
+        $this->SetY($hasQR ? 50 : 30);
         $this->SetX(-73);
         $this->Cell(70, 3.8, $this->convertEncoding('Factura Crédito Fiscal'), 0, 1, 'L');
         $this->SetX(-73);
