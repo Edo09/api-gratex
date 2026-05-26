@@ -1,0 +1,33 @@
+[
+    {
+        "etiqueta": "E32 >=250k #1",
+        "tipo_ecf": "32",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 984,
+                "e_ncf": "E320000000302",
+                "track_id": "ce52c5d9-b37e-4501-89f0-522cf91f0df2",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "fWRLcU",
+                "total": 763028.84,
+                "tipo_ecf": "32",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-26 16:26:53",
+                "dgii_response": {
+                    "trackId": "ce52c5d9-b37e-4501-89f0-522cf91f0df2",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 984,
+        "e_ncf": "E320000000302",
+        "track_id": "ce52c5d9-b37e-4501-89f0-522cf91f0df2",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    }
+]

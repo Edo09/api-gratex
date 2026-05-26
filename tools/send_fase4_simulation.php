@@ -89,6 +89,8 @@ function main(array $argv): int
             $case['payload']
         );
         $payload = withDefaultIndicadorMontoGravado($payload);
+        $payload = withE41Retencion($payload);
+        $payload = withDefaultItbisRates($payload);
 
         if ($dryRun) {
             fwrite(STDOUT, "    DRY-RUN " . json_encode($payload, JSON_UNESCAPED_UNICODE) . "\n");
@@ -393,6 +395,71 @@ function withDefaultIndicadorMontoGravado(array $payload): array
     if ($supportsIndicador && $needsDefault) {
         $payload['indicador_monto_gravado'] = '0';
     }
+    return $payload;
+}
+
+function withE41Retencion(array $payload): array
+{
+    if ((string) ($payload['tipo_ecf'] ?? '') !== '41' || !is_array($payload['items'] ?? null)) {
+        return $payload;
+    }
+
+    $totalItbisRetenido = 0.0;
+    $totalIsrRetencion = 0.0;
+    foreach ($payload['items'] as &$item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        if (($item['indicador_agente_retencion_percepcion'] ?? null) === null || $item['indicador_agente_retencion_percepcion'] === '') {
+            $item['indicador_agente_retencion_percepcion'] = '1';
+        }
+
+        $cantidad = (float) ($item['cantidad'] ?? 1);
+        $precio = (float) ($item['precio_unitario'] ?? 0);
+        $base = round($cantidad * $precio, 2);
+        $indicadorFacturacion = (int) ($item['indicador_facturacion'] ?? 1);
+        $itbisRate = $indicadorFacturacion === 2 ? 0.16 : ($indicadorFacturacion === 1 ? 0.18 : 0.0);
+        $itbisRetenido = round($base * $itbisRate, 2);
+
+        if (($item['monto_itbis_retenido'] ?? null) === null || $item['monto_itbis_retenido'] === '') {
+            $item['monto_itbis_retenido'] = $itbisRetenido;
+        }
+        if (($item['monto_isr_retenido'] ?? null) === null || $item['monto_isr_retenido'] === '') {
+            $item['monto_isr_retenido'] = 0.0;
+        }
+
+        $totalItbisRetenido += (float) $item['monto_itbis_retenido'];
+        $totalIsrRetencion += (float) $item['monto_isr_retenido'];
+    }
+    unset($item);
+
+    $totales = is_array($payload['totales'] ?? null) ? $payload['totales'] : [];
+    $totales += [
+        'total_itbis_retenido' => round($totalItbisRetenido, 2),
+        'total_isr_retencion' => round($totalIsrRetencion, 2),
+    ];
+    $payload['totales'] = $totales;
+
+    return $payload;
+}
+
+function withDefaultItbisRates(array $payload): array
+{
+    $tipoEcf = (string) ($payload['tipo_ecf'] ?? '');
+    $rateDefaults = [
+        '31' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '32' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '33' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '34' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '41' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '45' => ['itbis1' => '18', 'itbis2' => '16', 'itbis3' => '0'],
+        '46' => ['itbis3' => '0'],
+    ];
+    if (!isset($rateDefaults[$tipoEcf])) {
+        return $payload;
+    }
+    $totales = is_array($payload['totales'] ?? null) ? $payload['totales'] : [];
+    $payload['totales'] = array_merge($rateDefaults[$tipoEcf], $totales);
     return $payload;
 }
 

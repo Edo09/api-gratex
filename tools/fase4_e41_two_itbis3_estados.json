@@ -1,0 +1,64 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E410000000301",
+        "factura_id": 985,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 985,
+                "e_ncf": "E410000000301",
+                "track_id": "bf99395f-3d14-4734-985c-13a9cfe0899c",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "bf99395f-3d14-4734-985c-13a9cfe0899c",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E410000000301",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/26\/2026 5:27:31 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E410000000302",
+        "factura_id": 986,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 986,
+                "e_ncf": "E410000000302",
+                "track_id": "710b4726-60a4-4b25-9282-cd573c7dddcc",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "710b4726-60a4-4b25-9282-cd573c7dddcc",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E410000000302",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/26\/2026 5:27:33 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]
