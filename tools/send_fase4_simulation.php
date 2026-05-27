@@ -100,6 +100,7 @@ function main(array $argv): int
         );
         $payload = withDefaultIndicadorMontoGravado($payload);
         $payload = withE41Retencion($payload);
+        $payload = withE47Retencion($payload);
         $payload = withDefaultItbisRates($payload);
 
         if ($dryRun) {
@@ -275,7 +276,7 @@ function buildPlan(array $countsOverride = []): array
                 'tipo_ecf' => '47',
                 'fecha_emision' => $today,
                 'tipo_pago' => 1,
-                'items' => itemsExentos(rand(1, 2), 5000, 20000),
+                'items' => itemsExentos(rand(1, 2), 5000, 20000, 2),
             ],
         ];
     }
@@ -366,7 +367,7 @@ function itemsGravados18(int $count, float $minPrice, float $maxPrice): array
     return $items;
 }
 
-function itemsExentos(int $count, float $minPrice, float $maxPrice): array
+function itemsExentos(int $count, float $minPrice, float $maxPrice, int $bienServicio = 1): array
 {
     $items = [];
     $nombres = ['Servicio exento', 'Producto basico', 'Insumo exento', 'Articulo'];
@@ -375,7 +376,7 @@ function itemsExentos(int $count, float $minPrice, float $maxPrice): array
             'numero_linea' => $i + 1,
             'indicador_facturacion' => 4,
             'nombre_item' => $nombres[array_rand($nombres)],
-            'indicador_bien_servicio' => 1,
+            'indicador_bien_servicio' => $bienServicio,
             'cantidad' => rand(1, 10),
             'unidad_medida' => '43',
             'precio_unitario' => round(rand((int) ($minPrice * 100), (int) ($maxPrice * 100)) / 100, 2),
@@ -455,6 +456,40 @@ function withE41Retencion(array $payload): array
         'total_itbis_retenido' => round($totalItbisRetenido, 2),
         'total_isr_retencion' => round($totalIsrRetencion, 2),
     ];
+    $payload['totales'] = $totales;
+
+    return $payload;
+}
+
+function withE47Retencion(array $payload): array
+{
+    if ((string) ($payload['tipo_ecf'] ?? '') !== '47' || !is_array($payload['items'] ?? null)) {
+        return $payload;
+    }
+
+    $totalIsrRetencion = 0.0;
+    foreach ($payload['items'] as &$item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $item['indicador_bien_servicio'] = 2;
+        if (($item['indicador_agente_retencion_percepcion'] ?? null) === null || $item['indicador_agente_retencion_percepcion'] === '') {
+            $item['indicador_agente_retencion_percepcion'] = '1';
+        }
+
+        $cantidad = (float) ($item['cantidad'] ?? 1);
+        $precio = (float) ($item['precio_unitario'] ?? 0);
+        $base = round($cantidad * $precio, 2);
+        if (($item['monto_isr_retenido'] ?? null) === null || $item['monto_isr_retenido'] === '') {
+            $item['monto_isr_retenido'] = round($base * 0.27, 2);
+        }
+        unset($item['monto_itbis_retenido']);
+        $totalIsrRetencion += (float) $item['monto_isr_retenido'];
+    }
+    unset($item);
+
+    $totales = is_array($payload['totales'] ?? null) ? $payload['totales'] : [];
+    $totales['total_isr_retencion'] = round($totalIsrRetencion, 2);
     $payload['totales'] = $totales;
 
     return $payload;

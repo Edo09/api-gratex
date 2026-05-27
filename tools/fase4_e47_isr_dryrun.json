@@ -1,0 +1,42 @@
+[
+    {
+        "etiqueta": "E47 #1",
+        "tipo_ecf": "47",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "47",
+            "fecha_emision": "27-05-2026",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Articulo",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 19006.39,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_isr_retenido": 25658.63
+                },
+                {
+                    "numero_linea": 2,
+                    "indicador_facturacion": 4,
+                    "nombre_item": "Servicio exento",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 5,
+                    "unidad_medida": "43",
+                    "precio_unitario": 9944.61,
+                    "indicador_agente_retencion_percepcion": "1",
+                    "monto_isr_retenido": 13425.22
+                }
+            ],
+            "totales": {
+                "total_isr_retencion": 39083.85
+            }
+        },
+        "ok": true
+    }
+]
