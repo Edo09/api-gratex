@@ -50,16 +50,26 @@ function main(array $argv): int
             $countsOverride[$k] = (int) $v;
         }
     }
+    $notaDelay = isset($opts['nota-delay']) ? (int) $opts['nota-delay'] : 0;
+
     $cases = buildPlan($countsOverride);
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
 
     $results = [];
     $eNcfsByType = [];
+    $notaDelayApplied = false;
     foreach ($cases as $i => $case) {
         $label = "[" . ($i + 1) . "/" . count($cases) . "] {$case['etiqueta']} (E{$case['tipo_ecf']})";
         fwrite(STDOUT, "\n$label\n");
 
         // E33/E34 need an existing e-NCF reference
+        if (in_array($case['tipo_ecf'], ['33', '34'], true) && !$notaDelayApplied) {
+            $notaDelayApplied = true;
+            if ($notaDelay > 0 && !$dryRun) {
+                fwrite(STDOUT, "\n==> Esperando {$notaDelay}s para que DGII indexe los E31 antes de notas...\n");
+                sleep($notaDelay);
+            }
+        }
         if (in_array($case['tipo_ecf'], ['33', '34'], true)) {
             $candidate = null;
             if (!empty($eNcfsByType['31'])) {
@@ -100,7 +110,7 @@ function main(array $argv): int
                 $eNcfsByType['31'][] = [
                     'e_ncf' => 'E31000000000' . count($eNcfsByType['31'] ?? []),
                     'fecha' => $payload['fecha_emision'] ?? date('d-m-Y'),
-                    'rnc_comprador' => null,
+                    'rnc_comprador' => $payload['comprador']['rnc'] ?? null,
                 ];
             }
             continue;
@@ -169,7 +179,8 @@ function buildPlan(array $countsOverride = []): array
                 'fecha_emision' => $today,
                 'tipo_ingresos' => '01',
                 'tipo_pago' => 1,
-                'items' => itemsGravados18(rand(1, 4), 100, 5000),
+                'comprador' => ['rnc' => '131880681', 'nombre' => 'CLIENTE COMPROBANTE TEST SRL'],
+                'items' => itemsGravados18(rand(1, 4), 1000, 5000),
             ],
         ];
     }
