@@ -123,7 +123,7 @@ function main(array $argv): int
             }
             $case['payload']['informacion_referencia'] = [
                 'ncf_modificado' => $candidate['e_ncf'],
-                'rnc_otro_contribuyente' => $candidate['rnc_comprador'] ?? null,
+                'rnc_otro_contribuyente' => null,
                 'fecha_ncf_modificado' => $candidate['fecha'] ?? date('d-m-Y'),
                 'codigo_modificacion' => '3',
                 'razon_modificacion' => $case['tipo_ecf'] === '34'

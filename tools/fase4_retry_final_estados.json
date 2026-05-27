@@ -1,0 +1,374 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E310000000321",
+        "factura_id": 1037,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1037,
+                "e_ncf": "E310000000321",
+                "track_id": "bae8dabb-e4e5-4fdc-bf7c-a966ca1733d9",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "bae8dabb-e4e5-4fdc-bf7c-a966ca1733d9",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000321",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:45 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000322",
+        "factura_id": 1038,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1038,
+                "e_ncf": "E310000000322",
+                "track_id": "698d5f64-4cef-4151-a43e-d3326c2ac78a",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "698d5f64-4cef-4151-a43e-d3326c2ac78a",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000322",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:47 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E430000000305",
+        "factura_id": 1039,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1039,
+                "e_ncf": "E430000000305",
+                "track_id": "b179e665-4508-45cd-8e74-18e175104115",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "b179e665-4508-45cd-8e74-18e175104115",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E430000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:48 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E430000000306",
+        "factura_id": 1040,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1040,
+                "e_ncf": "E430000000306",
+                "track_id": "9ee32564-5d25-4514-817d-323d8c461229",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "9ee32564-5d25-4514-817d-323d8c461229",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E430000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:50 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E440000000305",
+        "factura_id": 1041,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1041,
+                "e_ncf": "E440000000305",
+                "track_id": "0b2b0f8d-2715-4976-bab6-e5ddde0f7491",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "0b2b0f8d-2715-4976-bab6-e5ddde0f7491",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E440000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:51 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E440000000306",
+        "factura_id": 1042,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1042,
+                "e_ncf": "E440000000306",
+                "track_id": "dbad0840-1889-4d91-8056-10ad6dd72f11",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "dbad0840-1889-4d91-8056-10ad6dd72f11",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E440000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:52 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'TotalITBIS'. List of possible elements expected: 'MontoImpuestoAdicional, ImpuestosAdicionales, MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E460000000305",
+        "factura_id": 1043,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1043,
+                "e_ncf": "E460000000305",
+                "track_id": "f72814d3-76fd-42ca-9cfe-4514ad634f3d",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "f72814d3-76fd-42ca-9cfe-4514ad634f3d",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E460000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:53 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E460000000306",
+        "factura_id": 1044,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'. [3]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1044,
+                "e_ncf": "E460000000306",
+                "track_id": "0f22ac13-86a8-4a74-9599-b4cd660d7f2d",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "0f22ac13-86a8-4a74-9599-b4cd660d7f2d",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E460000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:55 AM",
+                    "mensajes": [
+                        {
+                            "valor": "\n-The element 'Totales' has invalid child element 'MontoGravadoI1'. List of possible elements expected: 'MontoGravadoI3, ITBIS3, TotalITBIS, TotalITBIS3, MontoTotal'.",
+                            "codigo": 3
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000305",
+        "factura_id": 1045,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1045,
+                "e_ncf": "E470000000305",
+                "track_id": "d1073c50-aa4b-4349-bbfe-38021e783d71",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "d1073c50-aa4b-4349-bbfe-38021e783d71",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000305",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/27\/2026 9:47:56 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000306",
+        "factura_id": 1046,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El formato del XML no es válido. [1]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1046,
+                "e_ncf": "E470000000306",
+                "track_id": "92e6ed94-7529-4c5f-b9c2-aac701b86548",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "92e6ed94-7529-4c5f-b9c2-aac701b86548",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000306",
+                    "secuenciaUtilizada": false,
+                    "fechaRecepcion": "5\/27\/2026 9:47:57 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El formato del XML no es válido.",
+                            "codigo": 1
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000305",
+        "factura_id": 1047,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1047,
+                "e_ncf": "E340000000305",
+                "track_id": "dd8c96d0-16de-4f93-a474-a326c5b65802",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "dd8c96d0-16de-4f93-a474-a326c5b65802",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:58 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000306",
+        "factura_id": 1048,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1048,
+                "e_ncf": "E340000000306",
+                "track_id": "84246f69-e21f-40de-8d05-d6935e785069",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "84246f69-e21f-40de-8d05-d6935e785069",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 9:47:59 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

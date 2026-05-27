@@ -35,7 +35,8 @@
       "Read(//c/tmp/**)",
       "Bash(curl -sS https://getcomposer.org/installer)",
       "Bash(\"/c/php/php.exe\" -d \"extension_dir=C:\\\\php\\\\ext\" -d \"extension=openssl\" -d \"extension=mbstring\" -d \"extension=phar\" -d \"extension=zip\" -- --quiet --install-dir=/c/Users/edgarcia/bin --filename=composer)",
-      "Read(//c/Users/edgarcia/**)"
+      "Read(//c/Users/edgarcia/**)",
+      "Bash(curl -s -H 'X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c' --ssl-no-revoke https://gratex.net/api/facturas/__TRACKED_VAR__/xml -o tools/E32_RFCE_factura___TRACKED_VAR__.xml)"
     ]
   }
 }

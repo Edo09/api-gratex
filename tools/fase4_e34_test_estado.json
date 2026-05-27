@@ -1,0 +1,33 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E340000000319",
+        "factura_id": 1133,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1133,
+                "e_ncf": "E340000000319",
+                "track_id": "3fca809a-8e7a-4736-bbea-178495662b93",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "3fca809a-8e7a-4736-bbea-178495662b93",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E340000000319",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 3:31:10 PM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

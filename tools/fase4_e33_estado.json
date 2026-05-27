@@ -1,0 +1,33 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E330000000305",
+        "factura_id": 1135,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1135,
+                "e_ncf": "E330000000305",
+                "track_id": "ebb534c6-1bb7-461e-9ae5-c2e7056ef17e",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "ebb534c6-1bb7-461e-9ae5-c2e7056ef17e",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E330000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 3:35:57 PM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]
