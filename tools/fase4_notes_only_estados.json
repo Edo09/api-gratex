@@ -1,0 +1,95 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E330000000304",
+        "factura_id": 1122,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1122,
+                "e_ncf": "E330000000304",
+                "track_id": "514b88a1-2d47-4aa0-91cf-cf83158759d2",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "514b88a1-2d47-4aa0-91cf-cf83158759d2",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E330000000304",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 12:30:35 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000313",
+        "factura_id": 1123,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1123,
+                "e_ncf": "E340000000313",
+                "track_id": "29b9aaa3-8da0-4337-b267-16a74bda11e7",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "29b9aaa3-8da0-4337-b267-16a74bda11e7",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000313",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 12:30:37 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000314",
+        "factura_id": 1124,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1124,
+                "e_ncf": "E340000000314",
+                "track_id": "d9b326e8-a0a4-417e-9eda-5f687cdf9625",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "d9b326e8-a0a4-417e-9eda-5f687cdf9625",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000314",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 12:30:46 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

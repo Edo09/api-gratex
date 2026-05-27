@@ -25,6 +25,9 @@
  * Los E32 <250k se manejan en dos pasos:
  *   1) se envia el RFCE a DGII;
  *   2) se devuelve la URL para descargar el XML integro: GET /facturas/{id}/xml.
+ *
+ * Para reenviar solo E33/E34 contra E31 ya aceptados:
+ *   --refs-e31-file=tools/fase4_no_notes_estados.json --refs-date=27-05-2026
  */
 
 const DEFAULT_API = 'https://gratex.net/api';
@@ -62,12 +65,19 @@ function main(array $argv): int
     $notaDelay = isset($opts['nota-delay']) ? (int) $opts['nota-delay'] : 0;
     $notaWaitAccepted = isset($opts['nota-wait-accepted']) ? max(0, (int) $opts['nota-wait-accepted']) : 0;
     $notaPoll = isset($opts['nota-poll']) ? max(1, (int) $opts['nota-poll']) : 10;
+    $preloadedE31Refs = loadPreloadedE31References($opts);
 
     $cases = buildPlan($countsOverride);
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
+    if ($preloadedE31Refs !== []) {
+        fwrite(STDOUT, "==> " . count($preloadedE31Refs) . " referencias E31 precargadas\n");
+    }
 
     $results = [];
     $eNcfsByType = [];
+    if ($preloadedE31Refs !== []) {
+        $eNcfsByType['31'] = $preloadedE31Refs;
+    }
     $notaDelayApplied = false;
     $notaPrereqOk = true;
     foreach ($cases as $i => $case) {
@@ -560,6 +570,108 @@ function withDefaultItbisRates(array $payload): array
     $totales = is_array($payload['totales'] ?? null) ? $payload['totales'] : [];
     $payload['totales'] = array_merge($rateDefaults[$tipoEcf], $totales);
     return $payload;
+}
+
+function loadPreloadedE31References(array $opts): array
+{
+    $refs = [];
+
+    if (!empty($opts['refs-e31'])) {
+        foreach (preg_split('/[\s,;]+/', trim((string) $opts['refs-e31'])) ?: [] as $eNcf) {
+            if ($eNcf !== '') {
+                $refs[] = makeE31Reference($eNcf, null, $opts);
+            }
+        }
+    }
+
+    $refsFile = $opts['refs-e31-file'] ?? null;
+    if ($refsFile !== null && $refsFile !== '') {
+        $refs = array_merge($refs, readAcceptedE31ReferencesFile((string) $refsFile, $opts));
+    }
+
+    $deduped = [];
+    $seen = [];
+    foreach ($refs as $ref) {
+        $key = (string) ($ref['e_ncf'] ?? '');
+        if ($key === '' || isset($seen[$key])) {
+            continue;
+        }
+        $seen[$key] = true;
+        $deduped[] = $ref;
+    }
+    return $deduped;
+}
+
+function readAcceptedE31ReferencesFile(string $path, array $opts): array
+{
+    if (!is_file($path)) {
+        fwrite(STDERR, "WARN: archivo de referencias no encontrado: {$path}\n");
+        return [];
+    }
+
+    $decoded = json_decode((string) file_get_contents($path), true);
+    if (!is_array($decoded)) {
+        fwrite(STDERR, "WARN: archivo de referencias no es JSON valido: {$path}\n");
+        return [];
+    }
+
+    $refs = [];
+    foreach ($decoded as $entry) {
+        if (!is_array($entry)) {
+            continue;
+        }
+
+        $eNcf = $entry['e_ncf'] ?? $entry['response']['data']['e_ncf'] ?? null;
+        if (!is_string($eNcf) || !str_starts_with($eNcf, 'E31')) {
+            continue;
+        }
+
+        $estado = strtoupper(trim((string) (
+            $entry['estado_dgii']
+            ?? $entry['response']['data']['estado_dgii']
+            ?? $entry['response']['data']['consulta']['estado']
+            ?? ''
+        )));
+        if ($estado !== 'ACEPTADO' && $estado !== 'ACEPTADO CONDICIONAL') {
+            continue;
+        }
+
+        $facturaId = $entry['factura_id'] ?? $entry['response']['data']['factura_id'] ?? null;
+        $refs[] = makeE31Reference($eNcf, $facturaId ? (int) $facturaId : null, $opts);
+    }
+
+    if ($refs === []) {
+        fwrite(STDERR, "WARN: no se encontraron E31 aceptados en {$path}\n");
+    }
+
+    return $refs;
+}
+
+function makeE31Reference(string $eNcf, ?int $facturaId, array $opts): array
+{
+    $ref = [
+        'e_ncf' => trim($eNcf),
+        'fecha' => normalizeReferenceDate((string) ($opts['refs-date'] ?? date('d-m-Y'))),
+        'rnc_comprador' => trim((string) ($opts['refs-rnc'] ?? '131880681')),
+        'nombre_comprador' => trim((string) ($opts['refs-name'] ?? 'CLIENTE COMPROBANTE TEST SRL')),
+    ];
+    if ($facturaId !== null) {
+        $ref['factura_id'] = $facturaId;
+    }
+    return $ref;
+}
+
+function normalizeReferenceDate(string $date): string
+{
+    $date = trim($date);
+    if ($date === '') {
+        return date('d-m-Y');
+    }
+    if (preg_match('/^\d{2}-\d{2}-\d{4}$/', $date)) {
+        return $date;
+    }
+    $ts = strtotime($date);
+    return $ts === false ? $date : date('d-m-Y', $ts);
 }
 
 function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds): bool

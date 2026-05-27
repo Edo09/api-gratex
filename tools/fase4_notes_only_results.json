@@ -1,0 +1,95 @@
+[
+    {
+        "etiqueta": "E33 #1",
+        "tipo_ecf": "33",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1122,
+                "e_ncf": "E330000000304",
+                "track_id": "514b88a1-2d47-4aa0-91cf-cf83158759d2",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "hfKDNo",
+                "total": 11618.14,
+                "tipo_ecf": "33",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 11:30:35",
+                "dgii_response": {
+                    "trackId": "514b88a1-2d47-4aa0-91cf-cf83158759d2",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1122,
+        "e_ncf": "E330000000304",
+        "track_id": "514b88a1-2d47-4aa0-91cf-cf83158759d2",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    },
+    {
+        "etiqueta": "E34 #1",
+        "tipo_ecf": "34",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1123,
+                "e_ncf": "E340000000313",
+                "track_id": "29b9aaa3-8da0-4337-b267-16a74bda11e7",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "lr8uzR",
+                "total": 63.76,
+                "tipo_ecf": "34",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 11:30:37",
+                "dgii_response": {
+                    "trackId": "29b9aaa3-8da0-4337-b267-16a74bda11e7",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1123,
+        "e_ncf": "E340000000313",
+        "track_id": "29b9aaa3-8da0-4337-b267-16a74bda11e7",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    },
+    {
+        "etiqueta": "E34 #2",
+        "tipo_ecf": "34",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1124,
+                "e_ncf": "E340000000314",
+                "track_id": "d9b326e8-a0a4-417e-9eda-5f687cdf9625",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "JWNLnC",
+                "total": 111.24,
+                "tipo_ecf": "34",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 11:30:46",
+                "dgii_response": {
+                    "trackId": "d9b326e8-a0a4-417e-9eda-5f687cdf9625",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1124,
+        "e_ncf": "E340000000314",
+        "track_id": "d9b326e8-a0a4-417e-9eda-5f687cdf9625",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    }
+]
