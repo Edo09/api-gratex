@@ -250,14 +250,13 @@ class FacturaPdfGenerator extends FPDF
      */
     private function addQRTimbre(): void
     {
-        $eNcf = $this->factura['e_ncf'] ?? '';
-        $codigoSeguridad = $this->factura['codigo_seguridad'] ?? '';
-        if ($eNcf === '' || $codigoSeguridad === '') {
-            return;
-        }
         if (!class_exists('QRcode')) {
             return;
         }
+
+        $eNcf = $this->factura['e_ncf'] ?? '';
+        $codigoSeguridad = $this->factura['codigo_seguridad'] ?? '';
+        $isPreview = ($eNcf === '' || $codigoSeguridad === '');
 
         $emisor = [];
         try {
@@ -266,30 +265,35 @@ class FacturaPdfGenerator extends FPDF
             $emisor = [];
         }
         $rncEmisor = $emisor['rnc'] ?? '';
-        if ($rncEmisor === '') {
-            return;
+
+        if ($isPreview) {
+            $url = 'PREVIEW - Sin validez fiscal';
+            $codigoSeguridad = 'PREVIEW';
+        } else {
+            if ($rncEmisor === '') {
+                return;
+            }
+            $ambiente = $this->factura['ambiente_dgii'] ?? ($emisor['environment'] ?? 'CerteCF');
+            $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
+            $monto = number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
+            $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
+
+            $isFc = ($this->factura['tipo_ecf'] ?? '') === '32'
+                && (float) ($this->factura['total'] ?? 0) < 250000;
+            $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
+
+            $url = sprintf(
+                'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+                rawurlencode($ambiente),
+                $endpoint,
+                rawurlencode($rncEmisor),
+                rawurlencode($eNcf),
+                rawurlencode($fechaEmision),
+                rawurlencode($monto),
+                rawurlencode($fechaFirma),
+                rawurlencode($codigoSeguridad)
+            );
         }
-
-        $ambiente = $this->factura['ambiente_dgii'] ?? ($emisor['environment'] ?? 'CerteCF');
-        $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
-        $monto = number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
-        $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
-
-        $isFc = ($this->factura['tipo_ecf'] ?? '') === '32'
-            && (float) ($this->factura['total'] ?? 0) < 250000;
-        $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
-
-        $url = sprintf(
-            'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
-            rawurlencode($ambiente),
-            $endpoint,
-            rawurlencode($rncEmisor),
-            rawurlencode($eNcf),
-            rawurlencode($fechaEmision),
-            rawurlencode($monto),
-            rawurlencode($fechaFirma),
-            rawurlencode($codigoSeguridad)
-        );
 
         $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qr_' . bin2hex(random_bytes(8)) . '.png';
         try {
@@ -315,7 +319,6 @@ class FacturaPdfGenerator extends FPDF
         $this->SetFont('Arial', '', 8);
         $this->Cell($qrSize, 3.6, $codigoSeguridad, 0, 1, 'C');
 
-        // Restore cursor to where Header() left it so left column flows normal
         $this->SetXY($this->lMargin, $savedY);
     }
 
@@ -390,7 +393,7 @@ class FacturaPdfGenerator extends FPDF
         // Right side: Factura Crédito Fiscal, NCF, RNC, Razón Social, Contact, Vencimiento.
         // QR is now in the middle column so right block goes back to y=10 for e-CF
         // (or 30 if no QR — original behavior).
-        $hasQR = !empty($this->factura['e_ncf']) && !empty($this->factura['codigo_seguridad']);
+        $hasQR = class_exists('QRcode');
         $this->SetY($hasQR ? 10 : 30);
         $this->SetX(-73);
         $this->Cell(70, 3.8, $this->convertEncoding('Factura Crédito Fiscal'), 0, 1, 'L');
@@ -435,12 +438,12 @@ class FacturaPdfGenerator extends FPDF
         $subtotal = 0;
         if (isset($this->factura['items']) && is_array($this->factura['items'])) {
             foreach ($this->factura['items'] as $item) {
-                $cantidad = $item['quantity'] ?? 1;
-                $descripcion = $item['description'] ?? '';
-                $unitario = $item['amount'] ?? 0;
-                $itbis = $unitario * 0.18;
-                $lineSubtotal = $cantidad * $unitario;
-                $subtotal += $lineSubtotal;
+                $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
+                $descripcion = $item['description'] ?? $item['nombre_item'] ?? $item['descripcion'] ?? '';
+                $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
+                $itbis = $item['itbis_amount'] ?? ($unitario * 0.18);
+                $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
+                $subtotal += (float) $lineSubtotal;
 
                 $this->Row([
                     $cantidad,
