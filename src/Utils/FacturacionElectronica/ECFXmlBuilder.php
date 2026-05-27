@@ -491,7 +491,13 @@ class ECFXmlBuilder
 
     private function requiereComprador(string $tipoEcf, array $data): bool
     {
-        if (in_array($tipoEcf, ['31', '34', '41', '45', '46', '47'], true)) {
+        if ($tipoEcf === '43') {
+            return false;
+        }
+        if ($tipoEcf === '47') {
+            return !empty($data['comprador']['identificador_extranjero'] ?? '');
+        }
+        if (in_array($tipoEcf, ['31', '34', '41', '45', '46'], true)) {
             return true;
         }
         return $this->hasAnyValue($data['comprador'] ?? []);

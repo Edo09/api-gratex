@@ -158,6 +158,8 @@ function buildPlan(array $countsOverride = []): array
         'E44' => 2, 'E45' => 2, 'E46' => 2, 'E47' => 2,
     ], $countsOverride);
 
+    // === PRIMERO: E31, E32>=250k, E41, E43, E44, E45, E46, E47 ===
+
     for ($i = 1; $i <= $counts['E31']; $i++) {
         $cases[] = [
             'etiqueta' => "E31 #$i",
@@ -172,35 +174,6 @@ function buildPlan(array $countsOverride = []): array
         ];
     }
 
-    for ($i = 1; $i <= $counts['E33']; $i++) {
-        $cases[] = [
-            'etiqueta' => "E33 #$i",
-            'tipo_ecf' => '33',
-            'payload' => [
-                'tipo_ecf' => '33',
-                'fecha_emision' => $today,
-                'tipo_ingresos' => '01',
-                'tipo_pago' => 1,
-                'items' => itemsGravados18(1, 500, 2000),
-            ],
-        ];
-    }
-
-    for ($i = 1; $i <= $counts['E34']; $i++) {
-        $cases[] = [
-            'etiqueta' => "E34 #$i",
-            'tipo_ecf' => '34',
-            'payload' => [
-                'tipo_ecf' => '34',
-                'fecha_emision' => $today,
-                'tipo_ingresos' => '01',
-                'tipo_pago' => 1,
-                'indicador_nota_credito' => '0',
-                'items' => itemsGravados18(1, 200, 1000),
-            ],
-        ];
-    }
-
     for ($i = 1; $i <= $counts['E32_gte_250k']; $i++) {
         $cases[] = [
             'etiqueta' => "E32 >=250k #$i",
@@ -211,20 +184,6 @@ function buildPlan(array $countsOverride = []): array
                 'tipo_ingresos' => '01',
                 'tipo_pago' => 1,
                 'items' => itemsGravados18Fijo(2, 3, 80000, 150000),
-            ],
-        ];
-    }
-
-    for ($i = 1; $i <= $counts['E32_lt_250k']; $i++) {
-        $cases[] = [
-            'etiqueta' => "E32 <250k RFCE #$i",
-            'tipo_ecf' => '32',
-            'payload' => [
-                'tipo_ecf' => '32',
-                'fecha_emision' => $today,
-                'tipo_ingresos' => '01',
-                'tipo_pago' => 1,
-                'items' => itemsGravados18Fijo(1, 2, 1000, 10000), // 1 linea × qty 2 × 1k-10k = 2k-20k
             ],
         ];
     }
@@ -306,6 +265,53 @@ function buildPlan(array $countsOverride = []): array
                 'fecha_emision' => $today,
                 'tipo_pago' => 1,
                 'items' => itemsExentos(rand(1, 2), 5000, 20000),
+            ],
+        ];
+    }
+
+    // === SEGUNDO: E33 (Nota Debito) + E34 (Nota Credito) — referencian E31 ===
+
+    for ($i = 1; $i <= $counts['E33']; $i++) {
+        $cases[] = [
+            'etiqueta' => "E33 #$i",
+            'tipo_ecf' => '33',
+            'payload' => [
+                'tipo_ecf' => '33',
+                'fecha_emision' => $today,
+                'tipo_ingresos' => '01',
+                'tipo_pago' => 1,
+                'items' => itemsGravados18(1, 500, 2000),
+            ],
+        ];
+    }
+
+    for ($i = 1; $i <= $counts['E34']; $i++) {
+        $cases[] = [
+            'etiqueta' => "E34 #$i",
+            'tipo_ecf' => '34',
+            'payload' => [
+                'tipo_ecf' => '34',
+                'fecha_emision' => $today,
+                'tipo_ingresos' => '01',
+                'tipo_pago' => 1,
+                'indicador_nota_credito' => '0',
+                'items' => itemsGravados18Fijo(1, 1, 50, 100),
+            ],
+        ];
+    }
+
+    // === TERCERO: E32 <250k RFCE ===
+
+    for ($i = 1; $i <= $counts['E32_lt_250k']; $i++) {
+        $cases[] = [
+            'etiqueta' => "E32 <250k RFCE #$i",
+            'tipo_ecf' => '32',
+            'payload' => [
+                'tipo_ecf' => '32',
+                'fecha_emision' => $today,
+                'tipo_ingresos' => '01',
+                'tipo_pago' => 1,
+                'items' => itemsGravados18Fijo(1, 2, 1000, 10000),
             ],
         ];
     }
