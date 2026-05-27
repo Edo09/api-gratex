@@ -115,7 +115,10 @@ function main(array $argv): int
                 'ncf_modificado' => $candidate['e_ncf'],
                 'rnc_otro_contribuyente' => $candidate['rnc_comprador'] ?? null,
                 'fecha_ncf_modificado' => $candidate['fecha'] ?? date('d-m-Y'),
-                'codigo_modificacion' => $case['tipo_ecf'] === '34' ? '1' : '2',
+                'codigo_modificacion' => '3',
+                'razon_modificacion' => $case['tipo_ecf'] === '34'
+                    ? 'Nota de credito por ajuste de monto'
+                    : 'Nota de debito por ajuste de monto',
             ];
             if (!isset($case['payload']['comprador']) && !empty($candidate['rnc_comprador'])) {
                 $case['payload']['comprador'] = [
