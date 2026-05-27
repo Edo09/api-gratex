@@ -18,6 +18,7 @@ class ECFXmlBuilder
     public function build(array $data): string
     {
         $data = $this->normalizeE47Data($data);
+        $data = $this->normalizeNotaReferenceData($data);
 
         $document = new DOMDocument('1.0', 'UTF-8');
         $document->preserveWhiteSpace = false;
@@ -72,6 +73,30 @@ class ECFXmlBuilder
         if ($totalIsr > 0 && (empty($data['totales']['total_isr_retencion']) || (float) $data['totales']['total_isr_retencion'] <= 0)) {
             $data['totales']['total_isr_retencion'] = round($totalIsr, 2);
         }
+
+        return $data;
+    }
+
+    private function normalizeNotaReferenceData(array $data): array
+    {
+        $tipoEcf = (string) ($data['tipo_ecf'] ?? '');
+        if (!in_array($tipoEcf, ['33', '34'], true)) {
+            return $data;
+        }
+
+        $ref = is_array($data['informacion_referencia'] ?? null) ? $data['informacion_referencia'] : [];
+        foreach (['ncf_modificado', 'fecha_ncf_modificado', 'codigo_modificacion'] as $key) {
+            if (($ref[$key] ?? '') === '') {
+                throw new RuntimeException('InformacionReferencia.' . $key . ' es requerido para e-CF tipo ' . $tipoEcf . '.');
+            }
+        }
+
+        if (($ref['razon_modificacion'] ?? '') === '') {
+            $ref['razon_modificacion'] = $tipoEcf === '34'
+                ? 'Nota de credito por ajuste de monto'
+                : 'Nota de debito por ajuste de monto';
+        }
+        $data['informacion_referencia'] = $ref;
 
         return $data;
     }

@@ -1,0 +1,697 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E310000000327",
+        "factura_id": 1075,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1075,
+                "e_ncf": "E310000000327",
+                "track_id": "210e4b9c-13c6-4981-9920-a122a9802bce",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "210e4b9c-13c6-4981-9920-a122a9802bce",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000327",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:10 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000328",
+        "factura_id": 1076,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1076,
+                "e_ncf": "E310000000328",
+                "track_id": "7e98b171-9d96-411f-a914-db5ddcfcaf05",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "7e98b171-9d96-411f-a914-db5ddcfcaf05",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000328",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:11 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000329",
+        "factura_id": 1077,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1077,
+                "e_ncf": "E310000000329",
+                "track_id": "78639eb3-1f75-49e1-bdd5-5405a292ba23",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "78639eb3-1f75-49e1-bdd5-5405a292ba23",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000329",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:12 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000330",
+        "factura_id": 1078,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1078,
+                "e_ncf": "E310000000330",
+                "track_id": "4c8478f0-d45c-4cb8-8653-0a48866ae82b",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "4c8478f0-d45c-4cb8-8653-0a48866ae82b",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000330",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:14 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000315",
+        "factura_id": 1079,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1079,
+                "e_ncf": "E320000000315",
+                "track_id": "9e4fcd19-7fb4-44e5-9e1e-75d6c4c84b55",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "9e4fcd19-7fb4-44e5-9e1e-75d6c4c84b55",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E320000000315",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:15 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000316",
+        "factura_id": 1080,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1080,
+                "e_ncf": "E320000000316",
+                "track_id": "4d197d44-5650-4eb9-bf86-53a8db95b3cf",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "4d197d44-5650-4eb9-bf86-53a8db95b3cf",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E320000000316",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:16 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E410000000307",
+        "factura_id": 1081,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1081,
+                "e_ncf": "E410000000307",
+                "track_id": "e28ed6cd-3df3-4d11-b693-1d63adf015e4",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "e28ed6cd-3df3-4d11-b693-1d63adf015e4",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E410000000307",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:17 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E410000000308",
+        "factura_id": 1082,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1082,
+                "e_ncf": "E410000000308",
+                "track_id": "6b9c38d8-0880-4f01-a0d6-930d8af20e53",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "6b9c38d8-0880-4f01-a0d6-930d8af20e53",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E410000000308",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:18 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E430000000309",
+        "factura_id": 1083,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1083,
+                "e_ncf": "E430000000309",
+                "track_id": "72b0aab6-f623-437f-9762-9ed7ef7dfec4",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "72b0aab6-f623-437f-9762-9ed7ef7dfec4",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E430000000309",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:19 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E430000000310",
+        "factura_id": 1084,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1084,
+                "e_ncf": "E430000000310",
+                "track_id": "d0f89bdd-9845-4db6-8bac-fc3b9ac8cbf1",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "d0f89bdd-9845-4db6-8bac-fc3b9ac8cbf1",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E430000000310",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:20 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E440000000309",
+        "factura_id": 1085,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1085,
+                "e_ncf": "E440000000309",
+                "track_id": "887a99ac-0d04-426d-9955-bf8cbb8cc3a6",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "887a99ac-0d04-426d-9955-bf8cbb8cc3a6",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E440000000309",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:21 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E440000000310",
+        "factura_id": 1086,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1086,
+                "e_ncf": "E440000000310",
+                "track_id": "ff646151-5b1c-4772-8443-e475984bbaca",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "ff646151-5b1c-4772-8443-e475984bbaca",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E440000000310",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:22 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E450000000305",
+        "factura_id": 1087,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1087,
+                "e_ncf": "E450000000305",
+                "track_id": "55e3ce8a-1b24-4783-82f8-7cec8256fd9c",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "55e3ce8a-1b24-4783-82f8-7cec8256fd9c",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E450000000305",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:24 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E450000000306",
+        "factura_id": 1088,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1088,
+                "e_ncf": "E450000000306",
+                "track_id": "e1a0de92-05bb-48b9-a9d0-bacb7e16edc1",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "e1a0de92-05bb-48b9-a9d0-bacb7e16edc1",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E450000000306",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:25 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E460000000311",
+        "factura_id": 1089,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1089,
+                "e_ncf": "E460000000311",
+                "track_id": "6abdd28b-de08-4b43-96cc-c044aef77691",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "6abdd28b-de08-4b43-96cc-c044aef77691",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E460000000311",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:26 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E460000000312",
+        "factura_id": 1090,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1090,
+                "e_ncf": "E460000000312",
+                "track_id": "eb3c667c-a7cb-450b-b05c-20beb321965a",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "eb3c667c-a7cb-450b-b05c-20beb321965a",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E460000000312",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:27 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000313",
+        "factura_id": 1091,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1091,
+                "e_ncf": "E470000000313",
+                "track_id": "b907c2b8-6270-4032-b31b-412cf6d555a0",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "b907c2b8-6270-4032-b31b-412cf6d555a0",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E470000000313",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:28 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000314",
+        "factura_id": 1092,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1092,
+                "e_ncf": "E470000000314",
+                "track_id": "2b8717a0-5446-4645-bc19-250e43a38a05",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "2b8717a0-5446-4645-bc19-250e43a38a05",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E470000000314",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:53:29 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E330000000303",
+        "factura_id": 1093,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1093,
+                "e_ncf": "E330000000303",
+                "track_id": "46951d38-231c-45e0-a81b-8cb2cf58309d",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "46951d38-231c-45e0-a81b-8cb2cf58309d",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E330000000303",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:58:35 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000311",
+        "factura_id": 1094,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1094,
+                "e_ncf": "E340000000311",
+                "track_id": "690d002b-93a5-45e9-9115-7f9f78861dd9",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "690d002b-93a5-45e9-9115-7f9f78861dd9",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000311",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:58:36 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000312",
+        "factura_id": 1095,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1095,
+                "e_ncf": "E340000000312",
+                "track_id": "c7aee38a-0910-43d6-875f-75c80ea8cc51",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "c7aee38a-0910-43d6-875f-75c80ea8cc51",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000312",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:58:37 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000317",
+        "factura_id": 1096,
+        "estado_dgii": "?",
+        "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
+        "response": {
+            "status": false,
+            "error": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)"
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000318",
+        "factura_id": 1097,
+        "estado_dgii": "?",
+        "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
+        "response": {
+            "status": false,
+            "error": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)"
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000319",
+        "factura_id": 1098,
+        "estado_dgii": "?",
+        "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
+        "response": {
+            "status": false,
+            "error": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)"
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E320000000320",
+        "factura_id": 1099,
+        "estado_dgii": "?",
+        "detalle": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)",
+        "response": {
+            "status": false,
+            "error": "Factura no tiene track_id o e_ncf (no fue emitida a DGII)"
+        }
+    }
+]
