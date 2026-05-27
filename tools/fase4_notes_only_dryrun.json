@@ -1,0 +1,130 @@
+[
+    {
+        "etiqueta": "E33 #1",
+        "tipo_ecf": "33",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "33",
+            "fecha_emision": "27-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Licencia",
+                    "indicador_bien_servicio": 2,
+                    "cantidad": 4,
+                    "unidad_medida": "43",
+                    "precio_unitario": 728.23
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000331",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "27-05-2026",
+                "codigo_modificacion": "3",
+                "razon_modificacion": "Nota de debito por ajuste de monto"
+            },
+            "comprador": {
+                "rnc": "131880681",
+                "razon_social": "CLIENTE COMPROBANTE TEST SRL"
+            },
+            "indicador_monto_gravado": "0",
+            "totales": {
+                "itbis1": "18",
+                "itbis2": "16",
+                "itbis3": "0"
+            }
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E34 #1",
+        "tipo_ecf": "34",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "34",
+            "fecha_emision": "27-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "indicador_nota_credito": "0",
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 60.82
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000332",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "27-05-2026",
+                "codigo_modificacion": "3",
+                "razon_modificacion": "Nota de credito por ajuste de monto"
+            },
+            "comprador": {
+                "rnc": "131880681",
+                "razon_social": "CLIENTE COMPROBANTE TEST SRL"
+            },
+            "indicador_monto_gravado": "0",
+            "totales": {
+                "itbis1": "18",
+                "itbis2": "16",
+                "itbis3": "0"
+            }
+        },
+        "ok": true
+    },
+    {
+        "etiqueta": "E34 #2",
+        "tipo_ecf": "34",
+        "dry_run": true,
+        "payload": {
+            "client_id": 3511,
+            "user_id": 2,
+            "tipo_ecf": "34",
+            "fecha_emision": "27-05-2026",
+            "tipo_ingresos": "01",
+            "tipo_pago": 1,
+            "indicador_nota_credito": "0",
+            "items": [
+                {
+                    "numero_linea": 1,
+                    "indicador_facturacion": 1,
+                    "nombre_item": "Producto B",
+                    "indicador_bien_servicio": 1,
+                    "cantidad": 1,
+                    "unidad_medida": "43",
+                    "precio_unitario": 82.59
+                }
+            ],
+            "informacion_referencia": {
+                "ncf_modificado": "E310000000333",
+                "rnc_otro_contribuyente": "131880681",
+                "fecha_ncf_modificado": "27-05-2026",
+                "codigo_modificacion": "3",
+                "razon_modificacion": "Nota de credito por ajuste de monto"
+            },
+            "comprador": {
+                "rnc": "131880681",
+                "razon_social": "CLIENTE COMPROBANTE TEST SRL"
+            },
+            "indicador_monto_gravado": "0",
+            "totales": {
+                "itbis1": "18",
+                "itbis2": "16",
+                "itbis3": "0"
+            }
+        },
+        "ok": true
+    }
+]
