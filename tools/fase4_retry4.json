@@ -1,0 +1,64 @@
+[
+    {
+        "etiqueta": "E34 #1",
+        "tipo_ecf": "34",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1131,
+                "e_ncf": "E340000000317",
+                "track_id": "b01c62b9-97bd-40fd-90f9-5fde9ac2cff6",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "I5XQ7L",
+                "total": 102.81,
+                "tipo_ecf": "34",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 14:28:50",
+                "dgii_response": {
+                    "trackId": "b01c62b9-97bd-40fd-90f9-5fde9ac2cff6",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1131,
+        "e_ncf": "E340000000317",
+        "track_id": "b01c62b9-97bd-40fd-90f9-5fde9ac2cff6",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    },
+    {
+        "etiqueta": "E34 #2",
+        "tipo_ecf": "34",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1132,
+                "e_ncf": "E340000000318",
+                "track_id": "2ab42416-b9b9-4d05-acfe-4c5f2a08d059",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "WRGC2l",
+                "total": 105.42,
+                "tipo_ecf": "34",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 14:28:51",
+                "dgii_response": {
+                    "trackId": "2ab42416-b9b9-4d05-acfe-4c5f2a08d059",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1132,
+        "e_ncf": "E340000000318",
+        "track_id": "2ab42416-b9b9-4d05-acfe-4c5f2a08d059",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    }
+]

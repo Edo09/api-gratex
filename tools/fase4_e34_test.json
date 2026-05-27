@@ -1,0 +1,33 @@
+[
+    {
+        "etiqueta": "E34 #1",
+        "tipo_ecf": "34",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1133,
+                "e_ncf": "E340000000319",
+                "track_id": "3fca809a-8e7a-4736-bbea-178495662b93",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "VMvZy4",
+                "total": 80.41,
+                "tipo_ecf": "34",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-27 14:31:10",
+                "dgii_response": {
+                    "trackId": "3fca809a-8e7a-4736-bbea-178495662b93",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
+        },
+        "factura_id": 1133,
+        "e_ncf": "E340000000319",
+        "track_id": "3fca809a-8e7a-4736-bbea-178495662b93",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
+    }
+]

@@ -1,0 +1,64 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E340000000317",
+        "factura_id": 1131,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1131,
+                "e_ncf": "E340000000317",
+                "track_id": "b01c62b9-97bd-40fd-90f9-5fde9ac2cff6",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "b01c62b9-97bd-40fd-90f9-5fde9ac2cff6",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000317",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 3:28:50 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000318",
+        "factura_id": 1132,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1132,
+                "e_ncf": "E340000000318",
+                "track_id": "2ab42416-b9b9-4d05-acfe-4c5f2a08d059",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "2ab42416-b9b9-4d05-acfe-4c5f2a08d059",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000318",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 3:28:51 PM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]
