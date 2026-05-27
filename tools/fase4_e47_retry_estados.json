@@ -1,0 +1,64 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E470000000309",
+        "factura_id": 1067,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo TotalISRRetencion del área Totales de la sección Encabezado no es válido [11170]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1067,
+                "e_ncf": "E470000000309",
+                "track_id": "fbc47c86-be70-4c0d-b449-137f5ebfb124",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "fbc47c86-be70-4c0d-b449-137f5ebfb124",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000309",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 10:36:47 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo TotalISRRetencion del área Totales de la sección Encabezado no es válido",
+                            "codigo": 11170
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000310",
+        "factura_id": 1068,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El campo TotalISRRetencion del área Totales de la sección Encabezado no es válido [11170]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1068,
+                "e_ncf": "E470000000310",
+                "track_id": "dfb29196-0a60-4cbc-a166-0e9afd8d0fef",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "dfb29196-0a60-4cbc-a166-0e9afd8d0fef",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E470000000310",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 10:36:49 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El campo TotalISRRetencion del área Totales de la sección Encabezado no es válido",
+                            "codigo": 11170
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]

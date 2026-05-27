@@ -17,6 +17,8 @@ class ECFXmlBuilder
 
     public function build(array $data): string
     {
+        $data = $this->normalizeE47Data($data);
+
         $document = new DOMDocument('1.0', 'UTF-8');
         $document->preserveWhiteSpace = false;
         $document->formatOutput = false;
@@ -39,6 +41,39 @@ class ECFXmlBuilder
             throw new RuntimeException('Unable to serialize e-CF XML.');
         }
         return $xml;
+    }
+
+    private function normalizeE47Data(array $data): array
+    {
+        if ((string) ($data['tipo_ecf'] ?? '') !== '47' || !is_array($data['items'] ?? null)) {
+            return $data;
+        }
+
+        $totalIsr = 0.0;
+        foreach ($data['items'] as &$item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $item['indicador_bien_servicio'] = 2;
+            if (($item['indicador_agente_retencion_percepcion'] ?? null) === null || $item['indicador_agente_retencion_percepcion'] === '') {
+                $item['indicador_agente_retencion_percepcion'] = '1';
+            }
+            if (($item['monto_isr_retenido'] ?? null) === null || $item['monto_isr_retenido'] === '') {
+                $base = isset($item['monto_item'])
+                    ? (float) $item['monto_item']
+                    : round((float) ($item['cantidad'] ?? 1) * (float) ($item['precio_unitario'] ?? 0), 2);
+                $item['monto_isr_retenido'] = round($base * 0.27, 2);
+            }
+            $totalIsr += (float) $item['monto_isr_retenido'];
+        }
+        unset($item);
+
+        $data['totales'] = is_array($data['totales'] ?? null) ? $data['totales'] : [];
+        if ($totalIsr > 0 && (empty($data['totales']['total_isr_retencion']) || (float) $data['totales']['total_isr_retencion'] <= 0)) {
+            $data['totales']['total_isr_retencion'] = round($totalIsr, 2);
+        }
+
+        return $data;
     }
 
     private function buildEncabezado(DOMDocument $doc, array $data): DOMElement
@@ -295,7 +330,7 @@ class ECFXmlBuilder
         if ($cfg['gravado'] && in_array(3, $cfg['rates'], true) && ($this->hasTotal($totales, 'monto_gravado_i3') || $i3 > 0)) {
             $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($totales['monto_gravado_i3'] ?? $i3)));
         }
-        if ($this->hasTotal($totales, 'monto_exento') || $exento > 0) {
+        if ($cfg['exento'] && ($this->hasTotal($totales, 'monto_exento') || $exento > 0)) {
             $node->appendChild($doc->createElement('MontoExento', $this->money($exento)));
         }
 
@@ -355,7 +390,8 @@ class ECFXmlBuilder
             $itemEl->appendChild($doc->createElement('IndicadorFacturacion', (string) ($item['indicador_facturacion'] ?? 1)));
             $this->appendRetencionIfNeeded($doc, $itemEl, $item, $tipoEcf);
             $itemEl->appendChild($this->el($doc, 'NombreItem', (string) ($item['nombre_item'] ?? '')));
-            $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) ($item['indicador_bien_servicio'] ?? 2)));
+            $indicadorBienServicio = $tipoEcf === '47' ? 2 : ($item['indicador_bien_servicio'] ?? 2);
+            $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) $indicadorBienServicio));
             $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
             $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad_raw'] ?? $item['cantidad'] ?? 1)));
             $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
@@ -402,7 +438,9 @@ class ECFXmlBuilder
         if ($indicador !== null && $indicador !== '') {
             $retencion->appendChild($doc->createElement('IndicadorAgenteRetencionoPercepcion', (string) $indicador));
         }
-        $this->appendMoneyIfSet($doc, $retencion, 'MontoITBISRetenido', $itbis);
+        if ($tipoEcf !== '47') {
+            $this->appendMoneyIfSet($doc, $retencion, 'MontoITBISRetenido', $itbis);
+        }
         $this->appendMoneyIfSet($doc, $retencion, 'MontoISRRetenido', $isr);
         $itemEl->appendChild($retencion);
     }

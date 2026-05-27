@@ -1,0 +1,64 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E470000000311",
+        "factura_id": 1069,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1069,
+                "e_ncf": "E470000000311",
+                "track_id": "5563a1df-c87f-40e7-95e3-e6682b257299",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "5563a1df-c87f-40e7-95e3-e6682b257299",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E470000000311",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 10:44:43 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E470000000312",
+        "factura_id": 1070,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1070,
+                "e_ncf": "E470000000312",
+                "track_id": "fbe93a1a-7b48-4612-820c-3ba753769020",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "fbe93a1a-7b48-4612-820c-3ba753769020",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E470000000312",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 10:44:44 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]
