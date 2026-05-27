@@ -16,6 +16,15 @@
  *       --api-key=7a775f6fb0d5ccab15cf149d2c60f15c \
  *       --client-id=3511 --user-id=2 \
  *       [--dry-run] [--output=tools/fase4_results.json]
+ *
+ *   # Enviar E34 creando los E31 en la misma corrida:
+ *   php tools/send_fase4_simulation.php ... \
+ *       --counts=E31:2,E32_gte_250k:0,E32_lt_250k:0,E33:0,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0 \
+ *       --nota-wait-accepted=240 --nota-poll=15
+ *
+ * Los E32 <250k se manejan en dos pasos:
+ *   1) se envia el RFCE a DGII;
+ *   2) se devuelve la URL para descargar el XML integro: GET /facturas/{id}/xml.
  */
 
 const DEFAULT_API = 'https://gratex.net/api';
@@ -51,6 +60,8 @@ function main(array $argv): int
         }
     }
     $notaDelay = isset($opts['nota-delay']) ? (int) $opts['nota-delay'] : 0;
+    $notaWaitAccepted = isset($opts['nota-wait-accepted']) ? max(0, (int) $opts['nota-wait-accepted']) : 0;
+    $notaPoll = isset($opts['nota-poll']) ? max(1, (int) $opts['nota-poll']) : 10;
 
     $cases = buildPlan($countsOverride);
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
@@ -58,6 +69,7 @@ function main(array $argv): int
     $results = [];
     $eNcfsByType = [];
     $notaDelayApplied = false;
+    $notaPrereqOk = true;
     foreach ($cases as $i => $case) {
         $label = "[" . ($i + 1) . "/" . count($cases) . "] {$case['etiqueta']} (E{$case['tipo_ecf']})";
         fwrite(STDOUT, "\n$label\n");
@@ -69,8 +81,24 @@ function main(array $argv): int
                 fwrite(STDOUT, "\n==> Esperando {$notaDelay}s para que DGII indexe los E31 antes de notas...\n");
                 sleep($notaDelay);
             }
+            if ($notaWaitAccepted > 0 && !$dryRun) {
+                $notaPrereqOk = waitForAcceptedReferences($apiBase, $apiKey, $eNcfsByType['31'] ?? [], $notaWaitAccepted, $notaPoll);
+                if (!$notaPrereqOk) {
+                    fwrite(STDOUT, "==> Se omiten las notas para no consumir secuencias mientras los E31 no esten aceptados.\n");
+                }
+            }
         }
         if (in_array($case['tipo_ecf'], ['33', '34'], true)) {
+            if (!$notaPrereqOk) {
+                $results[] = [
+                    'etiqueta' => $case['etiqueta'],
+                    'tipo_ecf' => $case['tipo_ecf'],
+                    'ok' => false,
+                    'error' => 'E31 de referencia no aceptado antes de enviar nota',
+                ];
+                fwrite(STDOUT, "    SKIP: E31 de referencia no aceptado\n");
+                continue;
+            }
             $candidate = null;
             if (!empty($eNcfsByType['31'])) {
                 $candidate = array_shift($eNcfsByType['31']);
@@ -89,6 +117,12 @@ function main(array $argv): int
                 'fecha_ncf_modificado' => $candidate['fecha'] ?? date('d-m-Y'),
                 'codigo_modificacion' => $case['tipo_ecf'] === '34' ? '1' : '2',
             ];
+            if (!isset($case['payload']['comprador']) && !empty($candidate['rnc_comprador'])) {
+                $case['payload']['comprador'] = [
+                    'rnc' => $candidate['rnc_comprador'],
+                    'razon_social' => $candidate['nombre_comprador'] ?? 'CLIENTE COMPROBANTE TEST SRL',
+                ];
+            }
         }
 
         $payload = array_merge(
@@ -112,6 +146,7 @@ function main(array $argv): int
                     'e_ncf' => 'E31000000000' . count($eNcfsByType['31'] ?? []),
                     'fecha' => $payload['fecha_emision'] ?? date('d-m-Y'),
                     'rnc_comprador' => $payload['comprador']['rnc'] ?? null,
+                    'nombre_comprador' => $payload['comprador']['razon_social'] ?? $payload['comprador']['nombre'] ?? null,
                 ];
             }
             continue;
@@ -133,12 +168,17 @@ function main(array $argv): int
             $entry['rfce_track_id'] = $data['rfce_track_id'] ?? null;
             $entry['estado_dgii'] = $data['estado_dgii'] ?? $data['estado'] ?? null;
             $entry['flujo'] = $data['flujo'] ?? null;
+            if (!empty($case['full_xml_url']) && $entry['factura_id']) {
+                $entry['xml_url'] = buildFacturaXmlUrl($apiBase, (int) $entry['factura_id']);
+            }
 
             if ($entry['e_ncf']) {
                 $eNcfsByType[$case['tipo_ecf']][] = [
                     'e_ncf' => $entry['e_ncf'],
+                    'factura_id' => $entry['factura_id'],
                     'fecha' => $payload['fecha_emision'] ?? date('d-m-Y'),
                     'rnc_comprador' => $payload['comprador']['rnc'] ?? null,
+                    'nombre_comprador' => $payload['comprador']['razon_social'] ?? $payload['comprador']['nombre'] ?? null,
                 ];
             }
             fwrite(STDOUT, sprintf("    OK e_ncf=%s estado=%s track=%s\n",
@@ -146,6 +186,9 @@ function main(array $argv): int
                 $entry['estado_dgii'] ?? '?',
                 $entry['track_id'] ?? '-'
             ));
+            if (!empty($entry['xml_url'])) {
+                fwrite(STDOUT, "    XML " . $entry['xml_url'] . "\n");
+            }
         } else {
             $entry['error'] = $resp['body']['error'] ?? ('HTTP ' . $resp['http_status']);
             fwrite(STDOUT, "    FAIL " . substr($entry['error'], 0, 200) . "\n");
@@ -318,6 +361,7 @@ function buildPlan(array $countsOverride = []): array
         $cases[] = [
             'etiqueta' => "E32 <250k RFCE #$i",
             'tipo_ecf' => '32',
+            'full_xml_url' => true,
             'payload' => [
                 'tipo_ecf' => '32',
                 'fecha_emision' => $today,
@@ -513,6 +557,126 @@ function withDefaultItbisRates(array $payload): array
     $totales = is_array($payload['totales'] ?? null) ? $payload['totales'] : [];
     $payload['totales'] = array_merge($rateDefaults[$tipoEcf], $totales);
     return $payload;
+}
+
+function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds): bool
+{
+    $tracked = [];
+    foreach ($refs as $ref) {
+        if (!is_array($ref) || empty($ref['factura_id'])) {
+            continue;
+        }
+        $tracked[(int) $ref['factura_id']] = $ref;
+    }
+
+    if ($tracked === []) {
+        fwrite(STDOUT, "==> No hay E31 con factura_id para consultar antes de notas.\n");
+        return true;
+    }
+
+    $deadline = time() + $timeoutSeconds;
+    $pending = $tracked;
+    fwrite(STDOUT, "==> Consultando E31 hasta ACEPTADO antes de enviar notas (timeout {$timeoutSeconds}s)...\n");
+
+    while ($pending !== []) {
+        $nextPending = [];
+        foreach ($pending as $facturaId => $ref) {
+            $resp = consultarEstadoFactura($apiBase, $apiKey, (int) $facturaId);
+            $estado = extractEstadoDgii($resp);
+            $detalle = extractEstadoDetalle($resp);
+            fwrite(STDOUT, sprintf(
+                "    E31 %s factura_id=%d estado=%s%s\n",
+                $ref['e_ncf'] ?? '?',
+                $facturaId,
+                $estado !== '' ? $estado : '?',
+                $detalle !== '' ? ' :: ' . substr($detalle, 0, 120) : ''
+            ));
+
+            if ($estado === 'ACEPTADO' || $estado === 'ACEPTADO CONDICIONAL') {
+                continue;
+            }
+            if ($estado === 'RECHAZADO') {
+                return false;
+            }
+            $nextPending[$facturaId] = $ref;
+        }
+
+        if ($nextPending === []) {
+            return true;
+        }
+        if (time() >= $deadline) {
+            return false;
+        }
+
+        $sleep = min($pollSeconds, max(1, $deadline - time()));
+        sleep($sleep);
+        $pending = $nextPending;
+    }
+
+    return true;
+}
+
+function consultarEstadoFactura(string $apiBase, string $apiKey, int $facturaId): array
+{
+    $url = $apiBase . '/facturas/' . $facturaId . '/estado';
+    $ch = curl_init($url);
+    $opts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
+        CURLOPT_HTTPHEADER => [
+            'Accept: application/json',
+            'X-API-KEY: ' . $apiKey,
+        ],
+    ];
+    if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
+        $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
+    }
+    curl_setopt_array($ch, $opts);
+    $raw = curl_exec($ch);
+    if ($raw === false) {
+        return ['http_status' => 0, 'body' => ['status' => false, 'error' => 'curl: ' . curl_error($ch)]];
+    }
+    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $decoded = json_decode($raw, true);
+    return [
+        'http_status' => $status,
+        'body' => is_array($decoded) ? $decoded : ['status' => false, 'error' => 'no-json: ' . substr($raw, 0, 300)],
+    ];
+}
+
+function extractEstadoDgii(array $resp): string
+{
+    if (($resp['http_status'] ?? 0) !== 200 || !(bool) ($resp['body']['status'] ?? false)) {
+        return '';
+    }
+
+    $data = $resp['body']['data'] ?? [];
+    if (!is_array($data)) {
+        return '';
+    }
+    $consulta = is_array($data['consulta'] ?? null) ? $data['consulta'] : [];
+    return strtoupper(trim((string) ($data['estado_dgii'] ?? $consulta['estado'] ?? '')));
+}
+
+function extractEstadoDetalle(array $resp): string
+{
+    if (($resp['http_status'] ?? 0) !== 200 || !(bool) ($resp['body']['status'] ?? false)) {
+        return (string) ($resp['body']['error'] ?? ('HTTP ' . ($resp['http_status'] ?? 0)));
+    }
+
+    $data = $resp['body']['data'] ?? [];
+    $consulta = is_array($data['consulta'] ?? null) ? $data['consulta'] : [];
+    $mensajes = is_array($consulta['mensajes'] ?? null) ? $consulta['mensajes'] : [];
+    if ($mensajes === []) {
+        return '';
+    }
+
+    return trim((string) ($mensajes[0]['valor'] ?? '') . ' [' . (string) ($mensajes[0]['codigo'] ?? '') . ']');
+}
+
+function buildFacturaXmlUrl(string $apiBase, int $facturaId): string
+{
+    return rtrim($apiBase, '/') . '/facturas/' . $facturaId . '/xml';
 }
 
 function parseArgs(array $argv): array

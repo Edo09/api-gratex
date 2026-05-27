@@ -1,0 +1,126 @@
+[
+    {
+        "caso": "?",
+        "e_ncf": "E310000000325",
+        "factura_id": 1071,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1071,
+                "e_ncf": "E310000000325",
+                "track_id": "95d96964-3b5c-4db4-8932-8d01116a908d",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "95d96964-3b5c-4db4-8932-8d01116a908d",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000325",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:28:15 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E310000000326",
+        "factura_id": 1072,
+        "estado_dgii": "ACEPTADO",
+        "detalle": "[0]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1072,
+                "e_ncf": "E310000000326",
+                "track_id": "63768c01-1254-4345-b8b2-b59e7c4301e7",
+                "estado_dgii": "ACEPTADO",
+                "consulta": {
+                    "trackId": "63768c01-1254-4345-b8b2-b59e7c4301e7",
+                    "codigo": "1",
+                    "estado": "Aceptado",
+                    "rnc": "131256432",
+                    "encf": "E310000000326",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:28:17 AM",
+                    "mensajes": [
+                        {
+                            "valor": "",
+                            "codigo": 0
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000309",
+        "factura_id": 1073,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1073,
+                "e_ncf": "E340000000309",
+                "track_id": "ed5760bd-8445-48e4-8abf-9f970dcb9bf6",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "ed5760bd-8445-48e4-8abf-9f970dcb9bf6",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000309",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:28:20 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    },
+    {
+        "caso": "?",
+        "e_ncf": "E340000000310",
+        "factura_id": 1074,
+        "estado_dgii": "RECHAZADO",
+        "detalle": "El eNCF modificado no ha sido emitido. [614]",
+        "response": {
+            "status": true,
+            "data": {
+                "factura_id": 1074,
+                "e_ncf": "E340000000310",
+                "track_id": "81cbd77d-11d1-49f4-84a9-32a98ae7bf07",
+                "estado_dgii": "RECHAZADO",
+                "consulta": {
+                    "trackId": "81cbd77d-11d1-49f4-84a9-32a98ae7bf07",
+                    "codigo": "2",
+                    "estado": "Rechazado",
+                    "rnc": "131256432",
+                    "encf": "E340000000310",
+                    "secuenciaUtilizada": true,
+                    "fechaRecepcion": "5\/27\/2026 11:28:21 AM",
+                    "mensajes": [
+                        {
+                            "valor": "El eNCF modificado no ha sido emitido.",
+                            "codigo": 614
+                        }
+                    ]
+                }
+            }
+        }
+    }
+]
