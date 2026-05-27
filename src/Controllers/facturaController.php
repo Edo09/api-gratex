@@ -270,7 +270,73 @@ function handleReenviar(int $facturaId, facturaModel $facturaModel): void
 
 function handlePreview(clientModel $clientModel): void
 {
-    respond(false, 'Preview no implementado en el flujo e-CF.', 501);
+    $input = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($input)) {
+        respond(false, 'JSON body invalido', 400);
+        return;
+    }
+
+    $clientId = $input['client_id'] ?? null;
+    $items    = $input['items'] ?? null;
+
+    if (!$clientId) {
+        respond(false, 'client_id requerido', 422);
+        return;
+    }
+    if (!is_array($items) || count($items) === 0) {
+        respond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+        return;
+    }
+
+    $clients = $clientModel->getClients($clientId);
+    if (empty($clients)) {
+        respond(false, 'Cliente no encontrado', 404);
+        return;
+    }
+    $client = $clients[0];
+
+    $totales = computeTotales($items);
+
+    $factura = [
+        'no_factura'         => $input['ncf'] ?? 'PREVIEW',
+        'e_ncf'              => null,
+        'codigo_seguridad'   => null,
+        'ambiente_dgii'      => null,
+        'date'               => $input['date'] ?? date('Y-m-d'),
+        'fecha_emision_dgii' => null,
+        'total'              => $totales['monto_total'],
+        'tipo_ecf'           => $input['tipo_ecf'] ?? null,
+        'client_id'          => $clientId,
+        'client_name'        => $client['client_name'] ?? '',
+        'company_name'       => $client['company_name'] ?? null,
+        'items'              => mapItemsForXml($items),
+    ];
+
+    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
+    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+    $pdf->setFactura($factura);
+    $pdf->setClientData($client);
+    $pdfContent = $pdf->generatePdf();
+
+    $filenameBase = $input['ncf'] ?? 'preview';
+    $format = $_GET['format'] ?? $input['format'] ?? 'base64';
+
+    if ($format === 'download') {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="Preview_' . $filenameBase . '.pdf"');
+        header('Content-Length: ' . strlen($pdfContent));
+        echo $pdfContent;
+        return;
+    }
+
+    echo json_encode([
+        'status' => true,
+        'data'   => [
+            'filename'  => 'Preview_' . $filenameBase . '.pdf',
+            'content'   => base64_encode($pdfContent),
+            'mime_type' => 'application/pdf',
+        ],
+    ]);
 }
 
 function handleFacturaXml(int $facturaId, facturaModel $facturaModel): void

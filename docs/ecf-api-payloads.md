@@ -1,7 +1,94 @@
-# e-CF API — Referencia de Payloads por Tipo
+# e-CF API — Referencia de Endpoints y Payloads
 
-Endpoint: `POST /api/facturas`  
-Headers: `Content-Type: application/json`, `X-API-KEY: <key>`
+Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
+
+---
+
+## Endpoints disponibles
+
+### Facturas — `/api/facturas`
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| `POST` | `/api/facturas` | Crear y emitir nueva factura e-CF |
+| `GET` | `/api/facturas` | Listar facturas (paginado) |
+| `GET` | `/api/facturas?id={id}` | Obtener factura por ID |
+| `GET` | `/api/facturas/{id}/estado` | Consultar estado DGII actualizado |
+| `GET` | `/api/facturas/{id}/pdf` | Descargar PDF de factura |
+| `GET` | `/api/facturas/{id}/xml` | Descargar XML firmado (ECF) |
+| `GET` | `/api/facturas/{id}/xml?type=rfce` | Descargar XML RFCE (solo E32 < 250k) |
+
+#### Parámetros de listado (`GET /api/facturas`)
+
+| Param | Default | Descripción |
+|-------|---------|-------------|
+| `page` | `1` | Página |
+| `pageSize` | `20` | Resultados por página |
+| `query` | — | Filtro por e-NCF, nombre, etc. |
+
+#### Parámetro `?format=base64`
+
+Aplica a `/pdf` y `/xml`. En lugar de descarga directa, retorna JSON:
+
+```json
+{
+  "status": true,
+  "data": {
+    "filename": "E310000000335.xml",
+    "content": "<base64>",
+    "mime_type": "application/xml"
+  }
+}
+```
+
+---
+
+### Estado DGII — respuesta de `/api/facturas/{id}/estado`
+
+```json
+{
+  "status": true,
+  "data": {
+    "factura_id": 1154,
+    "e_ncf": "E310000000335",
+    "track_id": "fb2e8a7e-...",
+    "estado_dgii": "ACEPTADO",
+    "consulta": {
+      "trackId": "fb2e8a7e-...",
+      "codigo": "1",
+      "estado": "Aceptado",
+      "rnc": "131256432",
+      "encf": "E310000000335",
+      "fechaRecepcion": "5/27/2026 3:00:00 PM",
+      "mensajes": [{ "valor": "", "codigo": 0 }]
+    }
+  }
+}
+```
+
+Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO CONDICIONAL` · `RECHAZADO` · `RFCE_ACEPTADO`
+
+---
+
+### Otros controladores
+
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| `POST` | `/api/auth/...` | Autenticación / tokens |
+| `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes |
+| `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
+| `GET/POST` | `/api/cotizaciones` | Cotizaciones |
+| `GET/POST` | `/api/ncf` | Gestión de secuencias NCF |
+| `POST` | `/api/aprobaciones-comerciales` | Enviar ACECF a DGII (aprobación comercial saliente) |
+| `POST` | `/api/ecf/recepcion` | Recibir e-CFs entrantes de otros emisores |
+| `POST` | `/api/ecf/aprobacion-comercial` | Aprobación comercial entrante |
+| `GET/POST` | `/api/ecf/autenticacion` | Flujo seed/validación DGII |
+
+---
+
+## Crear factura — `POST /api/facturas`
+
+`Content-Type: application/json`
 
 ---
 

@@ -14,7 +14,7 @@ class cotizacionModel
     {
         try {
             if ($id == null) {
-                $sql = "SELECT c.*, cl.client_name,cl.company_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id";
+                $sql = "SELECT c.*, cl.client_name,cl.company_name,cl.rnc FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute();
                 $cotizaciones = $stmt->fetchAll();
