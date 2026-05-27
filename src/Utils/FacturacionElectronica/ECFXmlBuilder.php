@@ -286,13 +286,13 @@ class ECFXmlBuilder
         } elseif ($cfg['gravado'] && ($i1 + $i2 + $i3) > 0) {
             $node->appendChild($doc->createElement('MontoGravadoTotal', $this->money($i1 + $i2 + $i3)));
         }
-        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i1') || $i1 > 0)) {
+        if ($cfg['gravado'] && in_array(1, $cfg['rates'], true) && ($this->hasTotal($totales, 'monto_gravado_i1') || $i1 > 0)) {
             $node->appendChild($doc->createElement('MontoGravadoI1', $this->money($totales['monto_gravado_i1'] ?? $i1)));
         }
-        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i2') || $i2 > 0)) {
+        if ($cfg['gravado'] && in_array(2, $cfg['rates'], true) && ($this->hasTotal($totales, 'monto_gravado_i2') || $i2 > 0)) {
             $node->appendChild($doc->createElement('MontoGravadoI2', $this->money($totales['monto_gravado_i2'] ?? $i2)));
         }
-        if ($cfg['gravado'] && ($this->hasTotal($totales, 'monto_gravado_i3') || $i3 > 0)) {
+        if ($cfg['gravado'] && in_array(3, $cfg['rates'], true) && ($this->hasTotal($totales, 'monto_gravado_i3') || $i3 > 0)) {
             $node->appendChild($doc->createElement('MontoGravadoI3', $this->money($totales['monto_gravado_i3'] ?? $i3)));
         }
         if ($this->hasTotal($totales, 'monto_exento') || $exento > 0) {
@@ -310,16 +310,16 @@ class ECFXmlBuilder
         }
 
         $totalItbis = $itbis1 + $itbis2 + $itbis3;
-        if ($this->hasTotal($totales, 'total_itbis') || $totalItbis > 0) {
+        if (!empty($cfg['rates']) && ($this->hasTotal($totales, 'total_itbis') || $totalItbis > 0)) {
             $node->appendChild($doc->createElement('TotalITBIS', $this->money($totales['total_itbis'] ?? $totalItbis)));
         }
-        if ($this->hasTotal($totales, 'total_itbis1') || $i1 > 0) {
+        if (in_array(1, $cfg['rates'], true) && ($this->hasTotal($totales, 'total_itbis1') || $i1 > 0)) {
             $node->appendChild($doc->createElement('TotalITBIS1', $this->money($totales['total_itbis1'] ?? $itbis1)));
         }
-        if ($this->hasTotal($totales, 'total_itbis2') || $i2 > 0) {
+        if (in_array(2, $cfg['rates'], true) && ($this->hasTotal($totales, 'total_itbis2') || $i2 > 0)) {
             $node->appendChild($doc->createElement('TotalITBIS2', $this->money($totales['total_itbis2'] ?? $itbis2)));
         }
-        if ($this->hasTotal($totales, 'total_itbis3') || $i3 > 0) {
+        if (in_array(3, $cfg['rates'], true) && ($this->hasTotal($totales, 'total_itbis3') || $i3 > 0)) {
             $node->appendChild($doc->createElement('TotalITBIS3', $this->money($totales['total_itbis3'] ?? $itbis3)));
         }
         $this->appendMoneyIfSet($doc, $node, 'MontoImpuestoAdicional', $totales['monto_impuesto_adicional'] ?? null);
@@ -391,6 +391,11 @@ class ECFXmlBuilder
 
         if (!$required && ($indicador === null || $indicador === '') && ($itbis === null || $itbis === '') && ($isr === null || $isr === '')) {
             return;
+        }
+
+        if ($required) {
+            $indicador = $indicador ?? '1';
+            $isr = $isr ?? 0;
         }
 
         $retencion = $doc->createElement('Retencion');
