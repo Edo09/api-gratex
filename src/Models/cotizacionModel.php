@@ -56,7 +56,7 @@ class cotizacionModel
             if ($query) {
                 $whereClause = "WHERE (c.code LIKE :query OR cl.client_name LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
             }
-            $sql = "SELECT c.*, cl.client_name,cl.company_name FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause} ORDER BY c.date DESC LIMIT :limit OFFSET :offset";
+            $sql = "SELECT c.*, cl.client_name,cl.company_name,cl.rnc FROM cotizaciones c LEFT JOIN clients cl ON c.client_id = cl.id {$whereClause} ORDER BY c.date DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);
             if ($query) {
                 $stmt->bindValue(':query', "%{$query}%", \PDO::PARAM_STR);
