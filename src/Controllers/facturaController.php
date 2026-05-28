@@ -27,9 +27,14 @@ $isEstadoRequest = preg_match('/\/api\/facturas\/(\d+)\/estado/', $endpoint, $es
 $isReenviarRequest = preg_match('/\/api\/facturas\/(\d+)\/reenviar/', $endpoint, $reenviarMatches);
 $isXmlRequest = preg_match('/\/api\/facturas\/(\d+)\/xml/', $endpoint, $xmlMatches);
 $isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
+$isStatsRequest = preg_match('/\/api\/facturas\/stats/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
+        if ($isStatsRequest) {
+            handleECFStats($facturaModel);
+            break;
+        }
         if ($isPdfRequest) {
             handleFacturaPdf((int) $pdfMatches[1], $facturaModel, $clientModel);
             break;
@@ -550,6 +555,62 @@ function mapEstadoFromConsulta(array $consulta): ?string
         return $map[(int) $estado] ?? null;
     }
     return null;
+}
+
+function handleECFStats(facturaModel $facturaModel): void
+{
+    $stats = $facturaModel->getECFStats();
+
+    $labels = [
+        '31' => 'Factura de Crédito Fiscal',
+        '32' => 'Factura de Consumo',
+        '33' => 'Nota de Débito',
+        '34' => 'Nota de Crédito',
+        '41' => 'Comprobante de Compras',
+        '43' => 'Gastos Menores',
+        '44' => 'Regímenes Especiales',
+        '45' => 'Gubernamental',
+        '46' => 'Comprobante de Exportaciones',
+        '47' => 'Comprobante para Pagos al Exterior',
+    ];
+
+    foreach ($stats['por_tipo'] as &$tipo) {
+        $tipo['nombre'] = $labels[$tipo['tipo_ecf']] ?? 'Desconocido';
+        $tipo['total'] = (int) $tipo['total'];
+        $tipo['aceptados'] = (int) $tipo['aceptados'];
+        $tipo['rfce'] = (int) $tipo['rfce'];
+        $tipo['rechazados'] = (int) $tipo['rechazados'];
+        $tipo['enviados'] = (int) $tipo['enviados'];
+        $tipo['monto_total'] = (float) $tipo['monto_total'];
+    }
+    unset($tipo);
+
+    foreach ($stats['por_estado'] as &$estado) {
+        $estado['total'] = (int) $estado['total'];
+        $estado['monto_total'] = (float) $estado['monto_total'];
+    }
+    unset($estado);
+
+    foreach ($stats['por_mes'] as &$mes) {
+        $mes['total'] = (int) $mes['total'];
+        $mes['monto_total'] = (float) $mes['monto_total'];
+    }
+    unset($mes);
+
+    foreach ($stats['secuencias'] as &$seq) {
+        $seq['secuencia_actual'] = (int) $seq['secuencia_actual'];
+        $seq['total_emitidos'] = (int) $seq['total_emitidos'];
+        $seq['nombre'] = $labels[ltrim($seq['type'], 'E')] ?? 'Desconocido';
+    }
+    unset($seq);
+
+    if ($stats['resumen']) {
+        $stats['resumen']['total_ecf'] = (int) $stats['resumen']['total_ecf'];
+        $stats['resumen']['monto_total'] = (float) $stats['resumen']['monto_total'];
+        $stats['resumen']['tipos_distintos'] = (int) $stats['resumen']['tipos_distintos'];
+    }
+
+    echo json_encode(['status' => true, 'data' => $stats]);
 }
 
 function respond(bool $status, string $message, int $code = 200): void
