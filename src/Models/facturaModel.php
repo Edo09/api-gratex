@@ -416,17 +416,26 @@ class facturaModel
         return $row;
     }
 
+    public function getActiveAmbiente(): ?string
+    {
+        return $this->resolveActiveAmbiente();
+    }
+
     private function resolveActiveAmbiente(): ?string
     {
-        $val = getenv('DGII_ECF_ENVIRONMENT');
-        if ($val === false || $val === '') {
+        $val = getenv('DGII_ECF_ENVIRONMENT') ?: ($_ENV['DGII_ECF_ENVIRONMENT'] ?? null);
+        if (!$val) {
             $envFile = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env';
             if (is_file($envFile)) {
                 $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
                 foreach ($lines as $line) {
                     $line = trim($line);
-                    if (str_starts_with($line, 'DGII_ECF_ENVIRONMENT=')) {
-                        $val = trim(substr($line, strlen('DGII_ECF_ENVIRONMENT=')), " '\"");
+                    if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+                        continue;
+                    }
+                    [$key, $value] = explode('=', $line, 2);
+                    if (trim($key) === 'DGII_ECF_ENVIRONMENT') {
+                        $val = trim($value, " '\"");
                         break;
                     }
                 }
