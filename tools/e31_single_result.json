@@ -1,0 +1,13 @@
+[
+    {
+        "etiqueta": "E31 #1",
+        "tipo_ecf": "31",
+        "http_status": 502,
+        "ok": false,
+        "response": {
+            "status": false,
+            "error": "Fallo en emision DGII: No se puede leer el certificado: \/home1\/mtldtmte\/public_html\/api\/certificados\/20260501-2020077-KQBYARLQB.p12"
+        },
+        "error": "Fallo en emision DGII: No se puede leer el certificado: \/home1\/mtldtmte\/public_html\/api\/certificados\/20260501-2020077-KQBYARLQB.p12"
+    }
+]
