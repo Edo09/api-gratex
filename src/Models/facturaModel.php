@@ -487,6 +487,7 @@ class facturaModel
                  GROUP BY mes ORDER BY mes DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 
+            $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
             $secuencias = $this->conexion->query(
                 "SELECT ns.type, ns.current_value as secuencia_actual,
                         COALESCE(f.total_emitidos, 0) as total_emitidos
@@ -495,7 +496,7 @@ class facturaModel
                      SELECT CONCAT('E', tipo_ecf) as type, COUNT(*) as total_emitidos
                      FROM facturas WHERE tipo_ecf IS NOT NULL {$ambFilter} GROUP BY tipo_ecf
                  ) f ON ns.type = f.type
-                 WHERE ns.type LIKE 'E%'
+                 WHERE ns.type LIKE 'E%' {$ambSeqFilter}
                  ORDER BY ns.type"
             )->fetchAll(PDO::FETCH_ASSOC);
 
