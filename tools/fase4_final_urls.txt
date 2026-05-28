@@ -1,0 +1,100 @@
+=== Fase 4 - Run final (IDs 1259-1283) ===
+Generado: 2026-05-28 13:01:31
+
+--- ID 1259 | E310000000357 | E31 ---
+PDF: https://gratex.net/api/facturas/1259/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E310000000357&FechaEmision=28-05-2026&MontoTotal=10000.00&FechaFirma=28-05-2026%2011%3A48%3A35&CodigoSeguridad=jMOj3Y
+
+--- ID 1260 | E310000000358 | E31 ---
+PDF: https://gratex.net/api/facturas/1260/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E310000000358&FechaEmision=28-05-2026&MontoTotal=65927.66&FechaFirma=28-05-2026%2011%3A58%3A21&CodigoSeguridad=h4DaRC
+
+--- ID 1261 | E310000000359 | E31 ---
+PDF: https://gratex.net/api/facturas/1261/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E310000000359&FechaEmision=28-05-2026&MontoTotal=32743.31&FechaFirma=28-05-2026%2011%3A58%3A22&CodigoSeguridad=o96UkB
+
+--- ID 1262 | E310000000360 | E31 ---
+PDF: https://gratex.net/api/facturas/1262/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E310000000360&FechaEmision=28-05-2026&MontoTotal=8666.42&FechaFirma=28-05-2026%2011%3A58%3A23&CodigoSeguridad=I8VRlB
+
+--- ID 1263 | E320000000357 | E32 ---
+PDF: https://gratex.net/api/facturas/1263/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E320000000357&FechaEmision=28-05-2026&MontoTotal=802392.40&FechaFirma=28-05-2026%2011%3A58%3A24&CodigoSeguridad=tmMkju
+
+--- ID 1264 | E320000000358 | E32 ---
+PDF: https://gratex.net/api/facturas/1264/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E320000000358&FechaEmision=28-05-2026&MontoTotal=818439.47&FechaFirma=28-05-2026%2011%3A58%3A25&CodigoSeguridad=TkpmV5
+
+--- ID 1265 | E410000000321 | E41 ---
+PDF: https://gratex.net/api/facturas/1265/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E410000000321&FechaEmision=28-05-2026&MontoTotal=30156.13&FechaFirma=28-05-2026%2011%3A58%3A27&CodigoSeguridad=t7QS4F
+
+--- ID 1266 | E410000000322 | E41 ---
+PDF: https://gratex.net/api/facturas/1266/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E410000000322&FechaEmision=28-05-2026&MontoTotal=39249.98&FechaFirma=28-05-2026%2011%3A58%3A28&CodigoSeguridad=rNcEP6
+
+--- ID 1267 | E430000000323 | E43 ---
+PDF: https://gratex.net/api/facturas/1267/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E430000000323&FechaEmision=28-05-2026&MontoTotal=4626.10&FechaFirma=28-05-2026%2011%3A58%3A29&CodigoSeguridad=tRPePG
+
+--- ID 1268 | E430000000324 | E43 ---
+PDF: https://gratex.net/api/facturas/1268/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E430000000324&FechaEmision=28-05-2026&MontoTotal=3262.84&FechaFirma=28-05-2026%2011%3A58%3A30&CodigoSeguridad=coyPHT
+
+--- ID 1269 | E440000000323 | E44 ---
+PDF: https://gratex.net/api/facturas/1269/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E440000000323&FechaEmision=28-05-2026&MontoTotal=105801.51&FechaFirma=28-05-2026%2011%3A58%3A31&CodigoSeguridad=HSg3ox
+
+--- ID 1270 | E440000000324 | E44 ---
+PDF: https://gratex.net/api/facturas/1270/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E440000000324&FechaEmision=28-05-2026&MontoTotal=9229.00&FechaFirma=28-05-2026%2011%3A58%3A32&CodigoSeguridad=MejkZV
+
+--- ID 1271 | E450000000319 | E45 ---
+PDF: https://gratex.net/api/facturas/1271/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E450000000319&FechaEmision=28-05-2026&MontoTotal=90120.78&FechaFirma=28-05-2026%2011%3A58%3A33&CodigoSeguridad=SbT5oi
+
+--- ID 1272 | E450000000320 | E45 ---
+PDF: https://gratex.net/api/facturas/1272/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E450000000320&FechaEmision=28-05-2026&MontoTotal=81382.71&FechaFirma=28-05-2026%2011%3A58%3A34&CodigoSeguridad=lSbkxa
+
+--- ID 1273 | E460000000327 | E46 ---
+PDF: https://gratex.net/api/facturas/1273/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E460000000327&FechaEmision=28-05-2026&MontoTotal=50124.99&FechaFirma=28-05-2026%2011%3A58%3A35&CodigoSeguridad=dlKRAu
+
+--- ID 1274 | E460000000328 | E46 ---
+PDF: https://gratex.net/api/facturas/1274/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E460000000328&FechaEmision=28-05-2026&MontoTotal=52778.15&FechaFirma=28-05-2026%2011%3A58%3A36&CodigoSeguridad=LEE6Zw
+
+--- ID 1275 | E470000000329 | E47 ---
+PDF: https://gratex.net/api/facturas/1275/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E470000000329&FechaEmision=28-05-2026&MontoTotal=89986.59&FechaFirma=28-05-2026%2011%3A58%3A37&CodigoSeguridad=Jbyc7e
+
+--- ID 1276 | E470000000330 | E47 ---
+PDF: https://gratex.net/api/facturas/1276/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E470000000330&FechaEmision=28-05-2026&MontoTotal=212508.72&FechaFirma=28-05-2026%2011%3A58%3A38&CodigoSeguridad=cXYZl1
+
+--- ID 1277 | E330000000310 | E33 ---
+PDF: https://gratex.net/api/facturas/1277/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E330000000310&FechaEmision=28-05-2026&MontoTotal=1046.88&FechaFirma=28-05-2026%2011%3A58%3A43&CodigoSeguridad=hXyHET
+
+--- ID 1278 | E340000000329 | E34 ---
+PDF: https://gratex.net/api/facturas/1278/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E340000000329&FechaEmision=28-05-2026&MontoTotal=66.28&FechaFirma=28-05-2026%2011%3A58%3A44&CodigoSeguridad=tvIoV5
+
+--- ID 1279 | E340000000330 | E34 ---
+PDF: https://gratex.net/api/facturas/1279/pdf
+QR:  https://ecf.dgii.gov.do/CerteCF/ConsultaTimbre?RncEmisor=131256432&RncComprador=131880681&ENCF=E340000000330&FechaEmision=28-05-2026&MontoTotal=59.66&FechaFirma=28-05-2026%2011%3A58%3A45&CodigoSeguridad=GoNfv9
+
+=== RFCE XMLs (subir manual al portal) ===
+ID 1280 | E320000000359
+XML: https://gratex.net/api/facturas/1280/xml
+
+ID 1281 | E320000000360
+XML: https://gratex.net/api/facturas/1281/xml
+
+ID 1282 | E320000000361
+XML: https://gratex.net/api/facturas/1282/xml
+
+ID 1283 | E320000000362
+XML: https://gratex.net/api/facturas/1283/xml
+
