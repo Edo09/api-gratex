@@ -274,6 +274,12 @@ class FacturaPdfGenerator extends FPDF
                 return;
             }
             $ambiente = $this->factura['ambiente_dgii'] ?? ($emisor['environment'] ?? 'CerteCF');
+            $ambiente = match(strtolower((string) $ambiente)) {
+                'certecf'  => 'CerteCF',
+                'testecf'  => 'TesteCF',
+                'ecf'      => 'ecf',
+                default    => $ambiente,
+            };
             $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
             $monto = number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
             $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');

@@ -121,10 +121,10 @@ class ACECFEmissionService
     private function extractCodigoSeguridad(string $signedXml): string
     {
         if (preg_match('/<SignatureValue>([^<]+)<\/SignatureValue>/i', $signedXml, $m)) {
-            $clean = preg_replace('/[^A-Za-z0-9]/', '', $m[1]);
-            return strtoupper(substr($clean, 0, 6));
+            $clean = preg_replace('/\s+/', '', $m[1]);
+            return substr($clean, 0, 6);
         }
-        return strtoupper(substr(sha1($signedXml), 0, 6));
+        return substr(sha1($signedXml), 0, 6);
     }
 
     private function extractTrackId(array $reception): ?string
