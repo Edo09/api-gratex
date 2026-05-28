@@ -60,6 +60,8 @@ class ECFEmissionService
             throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
         }
 
+        $ambienteEarly = $this->ncfModel->resolveActiveAmbiente() ?? 'certecf';
+
         $eNcfOverride = $payload['e_ncf'] ?? null;
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
@@ -67,7 +69,7 @@ class ECFEmissionService
             }
             $eNcf = (string) $eNcfOverride;
         } else {
-            $eNcf = $this->ncfModel->dispenseNextECF('E' . $tipoEcf);
+            $eNcf = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
             if ($eNcf === null) {
                 throw new RuntimeException('No se pudo asignar e-NCF para el tipo E' . $tipoEcf);
             }
