@@ -406,7 +406,7 @@ class facturaModel
     public function getECFData(int $facturaId): ?array
     {
         try {
-            $sql = 'SELECT id, no_factura, tipo_ecf, e_ncf, track_id, estado_dgii,
+            $sql = 'SELECT id, no_factura, tipo_ecf, e_ncf, track_id, rfce_track_id, estado_dgii,
                            codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii
                     FROM facturas WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
