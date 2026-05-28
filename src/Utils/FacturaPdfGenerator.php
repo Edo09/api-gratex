@@ -288,11 +288,15 @@ class FacturaPdfGenerator extends FPDF
                 && (float) ($this->factura['total'] ?? 0) < 250000;
             $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
 
+            $rncComprador = $this->clientData['rnc'] ?? '';
+            $rncCompradorParam = $rncComprador !== '' ? '&RncComprador=' . rawurlencode($rncComprador) : '';
+
             $url = sprintf(
-                'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+                'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
                 rawurlencode($ambiente),
                 $endpoint,
                 rawurlencode($rncEmisor),
+                $rncCompradorParam,
                 rawurlencode($eNcf),
                 rawurlencode($fechaEmision),
                 rawurlencode($monto),

@@ -1,0 +1,21 @@
+=== URLs ConsultaTimbre que funcionan (tipos con ITBIS incluido) ===
+Nota: RFCE siempre funciona por diseño (ConsultaTimbreFC). Esto lista solo los casos notables.
+
+ID 1192 | E430000000317 | tipo=43 | E43 - run anterior
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000317&FechaEmision=28-05-2026&MontoTotal=1599.04&FechaFirma=28-05-2026%2010%3A35%3A00&CodigoSeguridad=kvkMxJ
+
+ID 1193 | E430000000318 | tipo=43 | E43 - run anterior
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000318&FechaEmision=28-05-2026&MontoTotal=1182.47&FechaFirma=28-05-2026%2010%3A35%3A01&CodigoSeguridad=pGotq1
+
+ID 1200 | E470000000323 | tipo=47 | E47 - run anterior
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000323&FechaEmision=28-05-2026&MontoTotal=14843.35&FechaFirma=28-05-2026%2010%3A35%3A10&CodigoSeguridad=V2ZxFb
+
+ID 1201 | E470000000324 | tipo=47 | E47 - run anterior
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000324&FechaEmision=28-05-2026&MontoTotal=120151.62&FechaFirma=28-05-2026%2010%3A35%3A11&CodigoSeguridad=Ydmm4a
+
+ID 1243 | E430000000322 | tipo=43 | E43 - run actual
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000322&FechaEmision=28-05-2026&MontoTotal=5883.10&FechaFirma=28-05-2026%2011%3A20%3A48&CodigoSeguridad=Zl7axZ
+
+ID 1250 | E470000000327 | tipo=47 | E47 - run actual
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000327&FechaEmision=28-05-2026&MontoTotal=41122.79&FechaFirma=28-05-2026%2011%3A20%3A56&CodigoSeguridad=L0vrBl
+

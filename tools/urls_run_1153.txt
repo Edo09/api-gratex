@@ -1,0 +1,69 @@
+=== Run con factura 1153 (IDs 1136-1157) ===
+Nota: FechaFirma extraida del XML (fix no estaba desplegado en ese run)
+
+ID 1136 | E310000000335 | tipo=31 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000335&FechaEmision=27-05-2026&MontoTotal=61753.89&FechaFirma=27-05-2026%2014%3A39%3A08&CodigoSeguridad=d8nT8r
+
+ID 1137 | E310000000336 | tipo=31 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000336&FechaEmision=27-05-2026&MontoTotal=101471.22&FechaFirma=27-05-2026%2014%3A39%3A10&CodigoSeguridad=FL9cUt
+
+ID 1138 | E310000000337 | tipo=31 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000337&FechaEmision=27-05-2026&MontoTotal=64429.56&FechaFirma=27-05-2026%2014%3A39%3A11&CodigoSeguridad=vcgGyq
+
+ID 1139 | E310000000338 | tipo=31 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000338&FechaEmision=27-05-2026&MontoTotal=23741.35&FechaFirma=27-05-2026%2014%3A39%3A12&CodigoSeguridad=chzjjZ
+
+ID 1140 | E320000000327 | tipo=32 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E320000000327&FechaEmision=27-05-2026&MontoTotal=882853.38&FechaFirma=27-05-2026%2014%3A39%3A13&CodigoSeguridad=jzsfoN
+
+ID 1141 | E320000000328 | tipo=32 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E320000000328&FechaEmision=27-05-2026&MontoTotal=982450.81&FechaFirma=27-05-2026%2014%3A39%3A14&CodigoSeguridad=oK6d86
+
+ID 1142 | E410000000311 | tipo=41 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E410000000311&FechaEmision=27-05-2026&MontoTotal=56150.37&FechaFirma=27-05-2026%2014%3A39%3A15&CodigoSeguridad=SMWSgh
+
+ID 1143 | E410000000312 | tipo=41 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E410000000312&FechaEmision=27-05-2026&MontoTotal=10207.83&FechaFirma=27-05-2026%2014%3A39%3A17&CodigoSeguridad=CvhXWC
+
+ID 1144 | E430000000313 | tipo=43 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000313&FechaEmision=27-05-2026&MontoTotal=3986.65&FechaFirma=27-05-2026%2014%3A39%3A18&CodigoSeguridad=CIZHHg
+
+ID 1145 | E430000000314 | tipo=43 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000314&FechaEmision=27-05-2026&MontoTotal=6679.29&FechaFirma=27-05-2026%2014%3A39%3A19&CodigoSeguridad=q94xDh
+
+ID 1146 | E440000000313 | tipo=44 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E440000000313&FechaEmision=27-05-2026&MontoTotal=11559.00&FechaFirma=27-05-2026%2014%3A39%3A20&CodigoSeguridad=kYCTcA
+
+ID 1147 | E440000000314 | tipo=44 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E440000000314&FechaEmision=27-05-2026&MontoTotal=51653.60&FechaFirma=27-05-2026%2014%3A39%3A21&CodigoSeguridad=XjNp5Y
+
+ID 1148 | E450000000309 | tipo=45 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E450000000309&FechaEmision=27-05-2026&MontoTotal=13826.23&FechaFirma=27-05-2026%2014%3A39%3A22&CodigoSeguridad=u3dKgD
+
+ID 1149 | E450000000310 | tipo=45 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E450000000310&FechaEmision=27-05-2026&MontoTotal=32426.99&FechaFirma=27-05-2026%2014%3A39%3A23&CodigoSeguridad=PeDChu
+
+ID 1150 | E460000000317 | tipo=46 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E460000000317&FechaEmision=27-05-2026&MontoTotal=50393.47&FechaFirma=27-05-2026%2014%3A39%3A24&CodigoSeguridad=GfHzgI
+
+ID 1151 | E460000000318 | tipo=46 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E460000000318&FechaEmision=27-05-2026&MontoTotal=16482.90&FechaFirma=27-05-2026%2014%3A39%3A25&CodigoSeguridad=B/9IKN
+
+ID 1152 | E470000000319 | tipo=47 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000319&FechaEmision=27-05-2026&MontoTotal=194750.86&FechaFirma=27-05-2026%2014%3A39%3A27&CodigoSeguridad=SN3kJv
+
+ID 1153 | E470000000320 | tipo=47 | estado=ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000320&FechaEmision=27-05-2026&MontoTotal=206693.39&FechaFirma=27-05-2026%2014%3A39%3A28&CodigoSeguridad=Gb1vJV
+
+ID 1154 | E320000000329 | tipo=32 | estado=RFCE_ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbreFC?RncEmisor=131256432&ENCF=E320000000329&FechaEmision=27-05-2026&MontoTotal=22084.71&FechaFirma=27-05-2026%2014%3A39%3A29&CodigoSeguridad=ZyVl66
+
+ID 1155 | E320000000330 | tipo=32 | estado=RFCE_ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbreFC?RncEmisor=131256432&ENCF=E320000000330&FechaEmision=27-05-2026&MontoTotal=19533.32&FechaFirma=27-05-2026%2014%3A39%3A30&CodigoSeguridad=rqq8Va
+
+ID 1156 | E320000000331 | tipo=32 | estado=RFCE_ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbreFC?RncEmisor=131256432&ENCF=E320000000331&FechaEmision=27-05-2026&MontoTotal=5970.78&FechaFirma=27-05-2026%2014%3A39%3A31&CodigoSeguridad=nULysv
+
+ID 1157 | E320000000332 | tipo=32 | estado=RFCE_ACEPTADO
+https://ecf.dgii.gov.do/certecf/ConsultaTimbreFC?RncEmisor=131256432&ENCF=E320000000332&FechaEmision=27-05-2026&MontoTotal=2935.51&FechaFirma=27-05-2026%2014%3A39%3A32&CodigoSeguridad=Gc5qX9
+
