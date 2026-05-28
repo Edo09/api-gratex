@@ -263,12 +263,12 @@ class DgiiAuthService
 
         $resolvedPath = $this->resolvePath($certificatePath);
         if (!is_file($resolvedPath) || !is_readable($resolvedPath)) {
-            throw new RuntimeException('Certificate file was not found or is not readable: ' . $certificatePath);
+            throw new RuntimeException('Certificate file was not found or is not readable');
         }
 
         $content = file_get_contents($resolvedPath);
         if ($content === false) {
-            throw new RuntimeException('Unable to read certificate file: ' . $certificatePath);
+            throw new RuntimeException('Unable to read certificate file');
         }
 
         return $content;
