@@ -2,12 +2,32 @@
     {
         "etiqueta": "E31 #1",
         "tipo_ecf": "31",
-        "http_status": 502,
-        "ok": false,
+        "http_status": 200,
+        "ok": true,
         "response": {
-            "status": false,
-            "error": "Fallo en emision DGII: No se puede leer el certificado: \/home1\/mtldtmte\/public_html\/api\/certificados\/20260501-2020077-KQBYARLQB.p12"
+            "status": true,
+            "data": {
+                "factura_id": 1158,
+                "e_ncf": "E310000000340",
+                "track_id": "996dd96e-9f8d-4a27-beaa-bf94f4929318",
+                "estado_dgii": "ENVIADO",
+                "codigo_seguridad": "MuBKpJ",
+                "total": 55083.57,
+                "tipo_ecf": "31",
+                "ambiente": "certecf",
+                "fecha_emision_dgii": "2026-05-28 09:40:09",
+                "dgii_response": {
+                    "trackId": "996dd96e-9f8d-4a27-beaa-bf94f4929318",
+                    "error": null,
+                    "mensaje": null
+                }
+            }
         },
-        "error": "Fallo en emision DGII: No se puede leer el certificado: \/home1\/mtldtmte\/public_html\/api\/certificados\/20260501-2020077-KQBYARLQB.p12"
+        "factura_id": 1158,
+        "e_ncf": "E310000000340",
+        "track_id": "996dd96e-9f8d-4a27-beaa-bf94f4929318",
+        "rfce_track_id": null,
+        "estado_dgii": "ENVIADO",
+        "flujo": null
     }
 ]
