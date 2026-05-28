@@ -610,6 +610,7 @@ function handleECFStats(facturaModel $facturaModel): void
         $stats['resumen']['tipos_distintos'] = (int) $stats['resumen']['tipos_distintos'];
     }
 
+    $stats['ambiente_activo'] = $facturaModel->getActiveAmbiente();
     echo json_encode(['status' => true, 'data' => $stats]);
 }
 
