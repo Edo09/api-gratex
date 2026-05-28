@@ -1,0 +1,65 @@
+ID 1235 | E310000000353 | tipo=31
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000353&FechaEmision=28-05-2026&MontoTotal=17446.28&FechaFirma=28-05-2026%2011%3A20%3A39&CodigoSeguridad=E3awot
+
+ID 1236 | E310000000354 | tipo=31
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000354&FechaEmision=28-05-2026&MontoTotal=36988.88&FechaFirma=28-05-2026%2011%3A20%3A40&CodigoSeguridad=lDkkYK
+
+ID 1237 | E310000000355 | tipo=31
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000355&FechaEmision=28-05-2026&MontoTotal=54622.53&FechaFirma=28-05-2026%2011%3A20%3A41&CodigoSeguridad=QWZasa
+
+ID 1238 | E310000000356 | tipo=31
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E310000000356&FechaEmision=28-05-2026&MontoTotal=53704.04&FechaFirma=28-05-2026%2011%3A20%3A42&CodigoSeguridad=l5JJ9U
+
+ID 1239 | E320000000351 | tipo=32
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E320000000351&FechaEmision=28-05-2026&MontoTotal=943922.52&FechaFirma=28-05-2026%2011%3A20%3A43&CodigoSeguridad=UFaG0h
+
+ID 1240 | E320000000352 | tipo=32
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E320000000352&FechaEmision=28-05-2026&MontoTotal=581976.04&FechaFirma=28-05-2026%2011%3A20%3A44&CodigoSeguridad=GbShv/
+
+ID 1241 | E410000000319 | tipo=41
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E410000000319&FechaEmision=28-05-2026&MontoTotal=38187.31&FechaFirma=28-05-2026%2011%3A20%3A46&CodigoSeguridad=XORi2i
+
+ID 1242 | E410000000320 | tipo=41
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E410000000320&FechaEmision=28-05-2026&MontoTotal=59516.61&FechaFirma=28-05-2026%2011%3A20%3A47&CodigoSeguridad=JNAPD3
+
+ID 1243 | E430000000322 | tipo=43
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E430000000322&FechaEmision=28-05-2026&MontoTotal=5883.10&FechaFirma=28-05-2026%2011%3A20%3A48&CodigoSeguridad=Zl7axZ
+
+ID 1244 | E440000000321 | tipo=44
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E440000000321&FechaEmision=28-05-2026&MontoTotal=64730.88&FechaFirma=28-05-2026%2011%3A20%3A49&CodigoSeguridad=dOIbUP
+
+ID 1245 | E440000000322 | tipo=44
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E440000000322&FechaEmision=28-05-2026&MontoTotal=42335.46&FechaFirma=28-05-2026%2011%3A20%3A50&CodigoSeguridad=O2VeGA
+
+ID 1246 | E450000000317 | tipo=45
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E450000000317&FechaEmision=28-05-2026&MontoTotal=142974.03&FechaFirma=28-05-2026%2011%3A20%3A51&CodigoSeguridad=jROXpr
+
+ID 1247 | E450000000318 | tipo=45
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E450000000318&FechaEmision=28-05-2026&MontoTotal=30847.74&FechaFirma=28-05-2026%2011%3A20%3A53&CodigoSeguridad=LGL+4w
+
+ID 1248 | E460000000325 | tipo=46
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E460000000325&FechaEmision=28-05-2026&MontoTotal=48907.12&FechaFirma=28-05-2026%2011%3A20%3A54&CodigoSeguridad=cGjCEy
+
+ID 1249 | E460000000326 | tipo=46
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E460000000326&FechaEmision=28-05-2026&MontoTotal=17213.73&FechaFirma=28-05-2026%2011%3A20%3A55&CodigoSeguridad=ZyvJR3
+
+ID 1250 | E470000000327 | tipo=47
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000327&FechaEmision=28-05-2026&MontoTotal=41122.79&FechaFirma=28-05-2026%2011%3A20%3A56&CodigoSeguridad=L0vrBl
+
+ID 1251 | E470000000328 | tipo=47
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E470000000328&FechaEmision=28-05-2026&MontoTotal=50952.39&FechaFirma=28-05-2026%2011%3A20%3A57&CodigoSeguridad=MJ7d6n
+
+ID 1252 | E330000000309 | tipo=33
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E330000000309&FechaEmision=28-05-2026&MontoTotal=5940.36&FechaFirma=28-05-2026%2011%3A21%3A03&CodigoSeguridad=oIeuMe
+
+ID 1253 | E340000000327 | tipo=34
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E340000000327&FechaEmision=28-05-2026&MontoTotal=84.17&FechaFirma=28-05-2026%2011%3A21%3A04&CodigoSeguridad=UCLQvE
+
+ID 1254 | E340000000328 | tipo=34
+https://ecf.dgii.gov.do/certecf/ConsultaTimbre?RncEmisor=131256432&ENCF=E340000000328&FechaEmision=28-05-2026&MontoTotal=69.69&FechaFirma=28-05-2026%2011%3A21%3A05&CodigoSeguridad=EdmFa1
+
+=== RFCE XMLs ===
+https://gratex.net/api/facturas/1255/xml  (E320000000353)
+https://gratex.net/api/facturas/1256/xml  (E320000000354)
+https://gratex.net/api/facturas/1257/xml  (E320000000355)
+https://gratex.net/api/facturas/1258/xml  (E320000000356)
