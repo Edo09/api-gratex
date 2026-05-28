@@ -403,6 +403,79 @@ class facturaModel
         return $row;
     }
 
+    public function getECFStats(): array
+    {
+        try {
+            $resumen = $this->conexion->query(
+                'SELECT COUNT(*) as total_ecf,
+                        COALESCE(SUM(total), 0) as monto_total,
+                        COUNT(DISTINCT tipo_ecf) as tipos_distintos,
+                        MIN(fecha_emision_dgii) as primer_ecf,
+                        MAX(fecha_emision_dgii) as ultimo_ecf
+                 FROM facturas WHERE tipo_ecf IS NOT NULL'
+            )->fetch(PDO::FETCH_ASSOC);
+
+            $porTipo = $this->conexion->query(
+                'SELECT tipo_ecf,
+                        COUNT(*) as total,
+                        COALESCE(SUM(total), 0) as monto_total,
+                        SUM(CASE WHEN estado_dgii = \'ACEPTADO\' THEN 1 ELSE 0 END) as aceptados,
+                        SUM(CASE WHEN estado_dgii LIKE \'RFCE_%\' THEN 1 ELSE 0 END) as rfce,
+                        SUM(CASE WHEN estado_dgii = \'RECHAZADO\' THEN 1 ELSE 0 END) as rechazados,
+                        SUM(CASE WHEN estado_dgii = \'ENVIADO\' THEN 1 ELSE 0 END) as enviados,
+                        MAX(fecha_emision_dgii) as ultimo_emitido
+                 FROM facturas WHERE tipo_ecf IS NOT NULL
+                 GROUP BY tipo_ecf ORDER BY tipo_ecf'
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            $porEstado = $this->conexion->query(
+                'SELECT COALESCE(estado_dgii, \'PENDIENTE\') as estado,
+                        COUNT(*) as total,
+                        COALESCE(SUM(total), 0) as monto_total
+                 FROM facturas WHERE tipo_ecf IS NOT NULL
+                 GROUP BY estado_dgii ORDER BY total DESC'
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            $porMes = $this->conexion->query(
+                'SELECT DATE_FORMAT(fecha_emision_dgii, \'%Y-%m\') as mes,
+                        COUNT(*) as total,
+                        COALESCE(SUM(total), 0) as monto_total
+                 FROM facturas
+                 WHERE tipo_ecf IS NOT NULL
+                   AND fecha_emision_dgii >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                 GROUP BY mes ORDER BY mes DESC'
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            $secuencias = $this->conexion->query(
+                'SELECT ns.type, ns.current_value as secuencia_actual,
+                        COALESCE(f.total_emitidos, 0) as total_emitidos
+                 FROM ncf_sequences ns
+                 LEFT JOIN (
+                     SELECT CONCAT(\'E\', tipo_ecf) as type, COUNT(*) as total_emitidos
+                     FROM facturas WHERE tipo_ecf IS NOT NULL GROUP BY tipo_ecf
+                 ) f ON ns.type = f.type
+                 WHERE ns.type LIKE \'E%\'
+                 ORDER BY ns.type'
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            return [
+                'resumen' => $resumen,
+                'por_tipo' => $porTipo,
+                'por_estado' => $porEstado,
+                'por_mes' => $porMes,
+                'secuencias' => $secuencias,
+            ];
+        } catch (PDOException $e) {
+            return [
+                'resumen' => null,
+                'por_tipo' => [],
+                'por_estado' => [],
+                'por_mes' => [],
+                'secuencias' => [],
+            ];
+        }
+    }
+
     public function getECFData(int $facturaId): ?array
     {
         try {

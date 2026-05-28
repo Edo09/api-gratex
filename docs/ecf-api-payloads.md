@@ -13,6 +13,7 @@ Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
 | `POST` | `/api/facturas` | Crear y emitir nueva factura e-CF |
 | `GET` | `/api/facturas` | Listar facturas (paginado) |
 | `GET` | `/api/facturas?id={id}` | Obtener factura por ID |
+| `GET` | `/api/facturas/stats` | Estadísticas de e-CFs emitidos |
 | `GET` | `/api/facturas/{id}/estado` | Consultar estado DGII actualizado |
 | `GET` | `/api/facturas/{id}/pdf` | Descargar PDF de factura |
 | `GET` | `/api/facturas/{id}/xml` | Descargar XML firmado (ECF) |
@@ -67,6 +68,78 @@ Aplica a `/pdf` y `/xml`. En lugar de descarga directa, retorna JSON:
 ```
 
 Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO CONDICIONAL` · `RECHAZADO` · `RFCE_ACEPTADO`
+
+---
+
+### Estadísticas e-CF — `GET /api/facturas/stats`
+
+Retorna un resumen de todos los e-CFs emitidos: totales por tipo, por estado DGII, evolución mensual y estado de las secuencias NCF.
+
+```
+GET /api/facturas/stats
+X-API-KEY: <key>
+```
+
+#### Respuesta
+
+```json
+{
+  "status": true,
+  "data": {
+    "resumen": {
+      "total_ecf": 45,
+      "monto_total": 1250000.00,
+      "tipos_distintos": 8,
+      "primer_ecf": "2026-05-01 09:00:00",
+      "ultimo_ecf": "2026-05-28 14:30:00"
+    },
+    "por_tipo": [
+      {
+        "tipo_ecf": "31",
+        "nombre": "Factura de Crédito Fiscal",
+        "total": 12,
+        "monto_total": 750000.00,
+        "aceptados": 11,
+        "rfce": 0,
+        "rechazados": 0,
+        "enviados": 1,
+        "ultimo_emitido": "2026-05-28 14:30:00"
+      }
+    ],
+    "por_estado": [
+      { "estado": "ACEPTADO", "total": 38, "monto_total": 1100000.00 },
+      { "estado": "RFCE_ACEPTADO", "total": 4, "monto_total": 80000.00 },
+      { "estado": "ENVIADO", "total": 2, "monto_total": 50000.00 },
+      { "estado": "RECHAZADO", "total": 1, "monto_total": 20000.00 }
+    ],
+    "por_mes": [
+      { "mes": "2026-05", "total": 45, "monto_total": 1250000.00 },
+      { "mes": "2026-04", "total": 30, "monto_total": 800000.00 }
+    ],
+    "secuencias": [
+      { "type": "E31", "nombre": "Factura de Crédito Fiscal", "secuencia_actual": 12, "total_emitidos": 12 },
+      { "type": "E32", "nombre": "Factura de Consumo",         "secuencia_actual": 8,  "total_emitidos": 8  }
+    ]
+  }
+}
+```
+
+#### Campos
+
+| Campo | Descripción |
+|-------|-------------|
+| `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos) |
+| `resumen.monto_total` | Suma de todos los montos emitidos (RD$) |
+| `resumen.tipos_distintos` | Cantidad de tipos e-CF distintos utilizados |
+| `por_tipo[].tipo_ecf` | Código del tipo (31, 32, 33, …) |
+| `por_tipo[].nombre` | Nombre del tipo |
+| `por_tipo[].total` | Total emitido de este tipo |
+| `por_tipo[].aceptados` | Cuántos tienen `estado_dgii = ACEPTADO` |
+| `por_tipo[].rfce` | Cuántos pasaron por flujo RFCE (E32 < 250k) |
+| `por_tipo[].rechazados` | Cuántos fueron rechazados por DGII |
+| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses |
+| `secuencias[].secuencia_actual` | Último número de secuencia asignado |
+| `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo |
 
 ---
 
