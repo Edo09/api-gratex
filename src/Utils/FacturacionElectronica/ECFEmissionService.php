@@ -119,6 +119,8 @@ class ECFEmissionService
             'fecha_hora_firma' => $payload['fecha_hora_firma'] ?? date('d-m-Y H:i:s'),
         ];
 
+        $fechaEmisionDgii = DateTime::createFromFormat('d-m-Y H:i:s', $xmlData['fecha_hora_firma'])->format('Y-m-d H:i:s');
+
         $unsignedXml = $this->builder->build($xmlData);
 
         $certPath = $this->resolveCertPath();
@@ -194,7 +196,7 @@ class ECFEmissionService
                 'track_id' => null,
                 'estado' => 'RFCE_' . $rfceEstado,
                 'ambiente' => $ambiente,
-                'fecha_emision_dgii' => date('Y-m-d H:i:s'),
+                'fecha_emision_dgii' => $fechaEmisionDgii,
                 'dgii_response' => null,
                 'dgii_status_code' => null,
                 'flujo' => 'RFCE',
