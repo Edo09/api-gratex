@@ -225,7 +225,7 @@ class ECFEmissionService
             'track_id' => $trackId,
             'estado' => $estado,
             'ambiente' => $ambiente,
-            'fecha_emision_dgii' => date('Y-m-d H:i:s'),
+            'fecha_emision_dgii' => $fechaEmisionDgii,
             'dgii_response' => $reception['data'],
             'dgii_status_code' => $reception['status_code'],
             'flujo' => 'ECF',
