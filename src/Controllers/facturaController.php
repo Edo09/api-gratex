@@ -236,6 +236,23 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         respond(false, 'Factura no encontrada', 404);
         return;
     }
+
+    // E32 RFCE (< 250k): no track_id, has rfce_track_id — return stored info directly
+    if (empty($ecf['track_id']) && !empty($ecf['rfce_track_id'])) {
+        echo json_encode([
+            'status' => true,
+            'data' => [
+                'factura_id' => $facturaId,
+                'e_ncf' => $ecf['e_ncf'],
+                'tipo_ecf' => $ecf['tipo_ecf'],
+                'rfce_track_id' => $ecf['rfce_track_id'],
+                'estado_dgii' => $ecf['estado_dgii'],
+                'nota' => 'E32 < 250k procesado via RFCE. Estado consultado al momento de emision.',
+            ],
+        ]);
+        return;
+    }
+
     if (empty($ecf['track_id']) || empty($ecf['e_ncf'])) {
         respond(false, 'Factura no tiene track_id o e_ncf (no fue emitida a DGII)', 422);
         return;
