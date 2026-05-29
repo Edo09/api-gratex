@@ -1,0 +1,288 @@
+[
+    {
+        "e_ncf": "E310000000001",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E310000000001",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "X83ADY",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:03",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E310000000002",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E310000000002",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "C583GQ",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:04",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E310000000009",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E310000000009",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "IPBOO4",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:05",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E310000000034",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E310000000034",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "AMTWKQ",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:06",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E330000000001",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E330000000001",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "S8U5XG",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:08",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E340000000001",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E340000000001",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "RW4BDE",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:09",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E340000000013",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E340000000013",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "DU1LL2",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:10",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E440000000009",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E440000000009",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "XZUZXO",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:11",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E440000000013",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E440000000013",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "ZHJ4W7",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:12",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E450000000001",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E450000000001",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "WBATS4",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:13",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    },
+    {
+        "e_ncf": "E450000000003",
+        "rnc_emisor": "131880681",
+        "http_status": 200,
+        "ok": true,
+        "response": {
+            "status": true,
+            "data": {
+                "rnc_emisor": "131880681",
+                "e_ncf": "E450000000003",
+                "estado_aprobacion": "1",
+                "track_id": null,
+                "estado_dgii": "ACEPTADO",
+                "codigo_seguridad": "ZN35IN",
+                "ambiente": "certecf",
+                "fecha_envio": "2026-05-22 16:22:15",
+                "dgii_response": {
+                    "codigo": "01",
+                    "estado": "Aprobacion Comercial Aprobada.",
+                    "mensaje": []
+                }
+            }
+        },
+        "track_id": null,
+        "estado_dgii": "ACEPTADO"
+    }
+]

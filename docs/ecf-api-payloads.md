@@ -55,12 +55,14 @@ Aplica a `/pdf` y `/xml`. En lugar de descarga directa, retorna JSON:
     "e_ncf": "E310000000335",
     "track_id": "fb2e8a7e-...",
     "estado_dgii": "ACEPTADO",
+    "secuencia_utilizada": true,
     "consulta": {
       "trackId": "fb2e8a7e-...",
       "codigo": "1",
       "estado": "Aceptado",
       "rnc": "131256432",
       "encf": "E310000000335",
+      "secuenciaUtilizada": true,
       "fechaRecepcion": "5/27/2026 3:00:00 PM",
       "mensajes": [{ "valor": "", "codigo": 0 }]
     }
@@ -68,7 +70,19 @@ Aplica a `/pdf` y `/xml`. En lugar de descarga directa, retorna JSON:
 }
 ```
 
-Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO CONDICIONAL` · `RECHAZADO` · `RFCE_ACEPTADO`
+Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `EN_PROCESO` · `RECHAZADO` · `NO_ENCONTRADO` · y variantes RFCE `RFCE_ACEPTADO` / `RFCE_RECHAZADO` / `RFCE_NO_ENCONTRADO`.
+
+#### Manejo de RECHAZADO (importante)
+
+`secuencia_utilizada` (bool|null) indica si el e-NCF puede reusarse cuando DGII rechaza:
+
+- `false` → **reutilizable** (rechazo por firma/certificado o estructura XML inválida). Reemitir con el **mismo** `e_ncf`: `POST /api/facturas` incluyendo `"e_ncf": "<el mismo>"`.
+- `true` → secuencia **consumida**. Reemitir **sin** `e_ncf` (toma una nueva).
+- `null` → aún no consultado / no aplica.
+
+El motivo del rechazo viene en `consulta.mensajes[].valor` (+ `codigo`). Muéstralo al usuario.
+
+> RFCE (E32 <250k): se consulta por RNC + e-NCF + código de seguridad (no usa `track_id`). La respuesta trae los mismos campos.
 
 ---
 
@@ -722,4 +736,4 @@ GET /api/facturas/{factura_id}/estado
 X-API-KEY: <key>
 ```
 
-`estado_dgii` posibles valores: `ENVIADO`, `ACEPTADO`, `ACEPTADO CONDICIONAL`, `RECHAZADO`, `RFCE_ACEPTADO`
+`estado_dgii` posibles valores: `ENVIADO`, `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO`, `NO_ENCONTRADO`, `RFCE_ACEPTADO`, `RFCE_RECHAZADO`, `RFCE_NO_ENCONTRADO`. La respuesta incluye `secuencia_utilizada` (ver "Manejo de RECHAZADO" arriba).
