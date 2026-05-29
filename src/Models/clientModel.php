@@ -28,19 +28,21 @@ class clientModel
         }
     }
 
-    public function saveClient($email, $client_name, $company_name, $phone_number)
+    public function saveClient($email, $client_name, $company_name, $phone_number, $rnc = null)
     {
         try {
             $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
             $resultado = ['error', 'This client already exists'];
             if (count($valida) == 0) {
-                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number) VALUES(:email, :client_name, :company_name, :phone_number)";
+                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc, razon_social) VALUES(:email, :client_name, :company_name, :phone_number, :rnc, :razon_social)";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([
                     ':email' => $email,
                     ':client_name' => $client_name,
                     ':company_name' => $company_name,
-                    ':phone_number' => $phone_number
+                    ':phone_number' => $phone_number,
+                    ':rnc' => $this->normalizeRnc($rnc),
+                    ':razon_social' => $company_name
                 ]);
                 $resultado = ['success', 'Client saved', (int) $this->conexion->lastInsertId()];
             }
@@ -50,7 +52,7 @@ class clientModel
         }
     }
 
-    public function updateClient($id, $email, $client_name, $company_name, $phone_number)
+    public function updateClient($id, $email, $client_name, $company_name, $phone_number, $rnc = null)
     {
         try {
             $existe = $this->getClients($id);
@@ -59,14 +61,16 @@ class clientModel
                 $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
                 $resultado = ['error', 'This client already exists'];
                 if (count($valida) == 0) {
-                    $sql = "UPDATE clients SET email = :email, client_name = :client_name, company_name = :company_name, phone_number = :phone_number WHERE id = :id";
+                    $sql = "UPDATE clients SET email = :email, client_name = :client_name, company_name = :company_name, phone_number = :phone_number, rnc = :rnc, razon_social = :razon_social WHERE id = :id";
                     $stmt = $this->conexion->prepare($sql);
                     $stmt->execute([
                         ':id' => $id,
                         ':email' => $email,
                         ':client_name' => $client_name,
                         ':company_name' => $company_name,
-                        ':phone_number' => $phone_number
+                        ':phone_number' => $phone_number,
+                        ':rnc' => $this->normalizeRnc($rnc),
+                        ':razon_social' => $company_name
                     ]);
                     $resultado = ['success', 'Client updated'];
                 }
@@ -92,6 +96,15 @@ class clientModel
         } catch (PDOException $e) {
             return ['error', 'Failed to delete client'];
         }
+    }
+
+    private function normalizeRnc($rnc): ?string
+    {
+        if ($rnc === null) {
+            return null;
+        }
+        $digits = preg_replace('/\D/', '', (string) $rnc);
+        return $digits === '' ? null : $digits;
     }
 
     public function validateClients($email, $client_name, $company_name, $phone_number)
