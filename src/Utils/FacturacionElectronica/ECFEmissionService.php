@@ -250,6 +250,27 @@ class ECFEmissionService
         );
     }
 
+    /**
+     * Consulta el estado fiscal de un RFCE (E32 < 250,000) por RNC Emisor +
+     * e-NCF + codigo de seguridad. Usa el servicio RecepcionFC (fc.dgii.gov.do)
+     * en lugar de ConsultaResultado, porque los RFCE no generan trackId.
+     */
+    public function consultarEstadoRFCE(string $eNcf, string $codigoSeguridad, ?string $ambiente = null): array
+    {
+        $emisor = $this->emisorModel->get();
+        if (!$emisor) {
+            throw new RuntimeException('emisor_config no configurado.');
+        }
+        $tokenInfo = $this->auth->autenticar(['environment' => $ambiente]);
+        return $this->reception->consultarResumenRFCE(
+            $emisor['rnc'],
+            $eNcf,
+            $codigoSeguridad,
+            $tokenInfo['token'],
+            ['environment' => $tokenInfo['ambiente']]
+        );
+    }
+
     private function resolveCertPath(): string
     {
         $configured = (string) (getenv('DGII_ECF_CERT_PATH') ?: '');
