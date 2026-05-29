@@ -79,7 +79,7 @@ switch($_SERVER['REQUEST_METHOD']){
             $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
         }
         else{
-            $result = $clientModel->saveClient($_POST->email,$_POST->client_name,$_POST->company_name,$_POST->phone_number);
+            $result = $clientModel->saveClient($_POST->email,$_POST->client_name,$_POST->company_name,$_POST->phone_number,$_POST->rnc ?? null);
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
 
@@ -121,7 +121,7 @@ switch($_SERVER['REQUEST_METHOD']){
             $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
         }
         else{
-            $result = $clientModel->updateClient($_PUT->id,$_PUT->email,$_PUT->client_name,$_PUT->company_name,$_PUT->phone_number);
+            $result = $clientModel->updateClient($_PUT->id,$_PUT->email,$_PUT->client_name,$_PUT->company_name,$_PUT->phone_number,$_PUT->rnc ?? null);
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
             } else {
