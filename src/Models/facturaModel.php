@@ -390,11 +390,19 @@ class facturaModel
     public function updateECFEstado(int $facturaId, string $estado, ?array $dgiiResponse = null): bool
     {
         try {
-            $sql = 'UPDATE facturas SET estado_dgii = :estado, respuesta_dgii = :resp WHERE id = :id';
+            // DGII devuelve `secuenciaUtilizada` (bool) en la consulta de estado.
+            // false => el e-NCF puede reutilizarse en un nuevo envio. NULL si no viene.
+            $secuenciaUtilizada = null;
+            if (is_array($dgiiResponse) && array_key_exists('secuenciaUtilizada', $dgiiResponse)) {
+                $secuenciaUtilizada = (int) filter_var($dgiiResponse['secuenciaUtilizada'], FILTER_VALIDATE_BOOLEAN);
+            }
+            $sql = 'UPDATE facturas SET estado_dgii = :estado, respuesta_dgii = :resp,
+                           secuencia_utilizada = :secuencia WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':estado' => $estado,
                 ':resp' => $dgiiResponse !== null ? json_encode($dgiiResponse) : null,
+                ':secuencia' => $secuenciaUtilizada,
                 ':id' => $facturaId,
             ]);
             return $stmt->rowCount() > 0;
@@ -531,7 +539,7 @@ class facturaModel
     {
         try {
             $sql = 'SELECT id, no_factura, tipo_ecf, e_ncf, track_id, rfce_track_id, estado_dgii,
-                           codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii
+                           secuencia_utilizada, codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii
                     FROM facturas WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':id' => $facturaId]);

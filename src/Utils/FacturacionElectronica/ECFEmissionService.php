@@ -294,11 +294,14 @@ class ECFEmissionService
 
         if ($code >= 200 && $code < 300) {
             if (is_numeric($estadoCodigo)) {
+                // Codigos DGII: 0=No encontrado, 1=Aceptado, 2=Rechazado,
+                // 3=En Proceso, 4=Aceptado Condicional.
                 $estadoCodigo = (int) $estadoCodigo;
+                if ($estadoCodigo === 0) return 'NO_ENCONTRADO';
                 if ($estadoCodigo === 1) return 'ACEPTADO';
-                if ($estadoCodigo === 2) return 'ACEPTADO_CONDICIONAL';
+                if ($estadoCodigo === 2) return 'RECHAZADO';
                 if ($estadoCodigo === 3) return 'EN_PROCESO';
-                if ($estadoCodigo === 4) return 'RECHAZADO';
+                if ($estadoCodigo === 4) return 'ACEPTADO_CONDICIONAL';
             }
             return 'ENVIADO';
         }

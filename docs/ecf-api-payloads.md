@@ -11,6 +11,7 @@ Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
 | `POST` | `/api/facturas` | Crear y emitir nueva factura e-CF |
+| `POST` | `/api/facturas/preview` | Generar PDF de prueba sin emitir (no consume NCF) |
 | `GET` | `/api/facturas` | Listar facturas (paginado) |
 | `GET` | `/api/facturas?id={id}` | Obtener factura por ID |
 | `GET` | `/api/facturas/stats` | Estadísticas de e-CFs emitidos |
@@ -24,7 +25,7 @@ Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
 | Param | Default | Descripción |
 |-------|---------|-------------|
 | `page` | `1` | Página |
-| `pageSize` | `20` | Resultados por página |
+| `pageSize` | `10` | Resultados por página |
 | `query` | — | Filtro por e-NCF, nombre, etc. |
 
 #### Parámetro `?format=base64`
@@ -162,18 +163,79 @@ X-API-KEY: <key>
 ## Crear factura — `POST /api/facturas`
 
 `Content-Type: application/json`
+`X-API-KEY: <key>`
+
+### Payload mínimo (lo que el front DEBE enviar)
+
+El backend calcula totales e ITBIS, y rellena los datos del comprador desde el cliente. El front solo necesita enviar **identidad + items**:
+
+```json
+{
+  "client_id": 3511,
+  "user_id": 2,
+  "tipo_ecf": "31",
+  "items": [
+    {
+      "nombre_item": "Servicio profesional",
+      "indicador_facturacion": 1,
+      "indicador_bien_servicio": 2,
+      "cantidad": 5,
+      "unidad_medida": "43",
+      "precio_unitario": 1500.00
+    }
+  ]
+}
+```
+
+Todo lo demás (`fecha_emision`, `tipo_pago`, `tipo_ingresos`, `totales`, `comprador`, `e_ncf`) es opcional y tiene defaults. Ver "Lo que el backend rellena solo" abajo.
 
 ---
 
 ## Campos comunes (todos los tipos)
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `client_id` | int | ID del cliente emisor |
-| `user_id` | int | ID del usuario |
-| `tipo_ecf` | string | Tipo de comprobante (ver tabla abajo) |
-| `fecha_emision` | string | Fecha en formato `DD-MM-YYYY` |
-| `tipo_pago` | int | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros |
+| Campo | Req | Tipo | Default | Descripción |
+|-------|-----|------|---------|-------------|
+| `client_id` | **sí** | int | — | ID del cliente emisor (de él se toman RNC, razón social, dirección) |
+| `tipo_ecf` | **sí** | string | — | Tipo de comprobante (ver tabla abajo) |
+| `items` | **sí** | array | — | Al menos 1 item |
+| `user_id` | no | int | `null` | ID del usuario que emite |
+| `fecha_emision` | no | string | hoy | Formato `DD-MM-YYYY` |
+| `tipo_pago` | no | int | `1` | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros |
+| `tipo_ingresos` | no | string | `"01"` | `"01"` Operaciones (no aplica a E43/E47) |
+| `indicador_monto_gravado` | no | string | `"0"` | `"0"`=precio incluye ITBIS, `"1"`=lo excluye (E31/32/33/34/41/45) |
+| `comprador` | no | object | del cliente | Sobrescribe datos del comprador (ver abajo) |
+| `totales` | no | object | calculado | Sobrescribe tasas/totales (ver abajo) |
+| `e_ncf` | no | string | autodispensado | Forzar un e-NCF específico (normalmente NO enviar) |
+| `date` | no | string | ahora | Fecha de registro en DB (`YYYY-MM-DD H:i:s`) |
+| `strict_input` | no | bool | `false` | Si `true`, usa `totales`/`comprador` tal cual se envían, sin mezclar |
+
+#### Campos de pago opcionales (crédito)
+
+`fecha_limite_pago`, `termino_pago`, `tipo_cuenta_pago`, `numero_cuenta_pago`, `banco_pago`, `fecha_desde`, `fecha_hasta`, `total_paginas`.
+
+---
+
+## Lo que el backend rellena solo
+
+El front NO necesita calcular nada de esto:
+
+- **`totales`** — Se calcula desde los items: monto gravado por tasa, ITBIS (18% si `indicador_facturacion=1`, 16% si `=2`, 0% si `=3`, exento si `=4`), monto exento y monto total. Solo envía `totales` si quieres forzar tasas distintas a las default (`itbis1:18, itbis2:16, itbis3:0`).
+- **`comprador`** — Se toma del registro del cliente (`client_id`): `rnc`, `razon_social`, `direccion`, `municipio`, `provincia`, `correo`, `contacto`. Solo envía `comprador` para sobrescribir un campo puntual (ej. otro RNC).
+- **Retención E41/E47** — Si no envías `monto_itbis_retenido`/`monto_isr_retenido`, el API los calcula (E41: ITBIS por tasa; E47: 27% ISR).
+- **`e_ncf`** — La secuencia NCF se asigna sola según `tipo_ecf` y ambiente activo.
+
+> **Importante E31:** el cliente (`client_id`) debe tener RNC en su registro. Si no, devuelve 422. Puedes suplirlo con `comprador.rnc`.
+
+### Objeto `comprador` (override)
+
+Campo de nombre es **`razon_social`** (no `nombre`). Campos aceptados:
+
+| Campo | Descripción |
+|-------|-------------|
+| `rnc` | RNC del comprador (11 u 9 dígitos) |
+| `razon_social` | Nombre/razón social |
+| `identificador_extranjero` | Para comprador no residente (E46/E47), en vez de `rnc` |
+| `direccion`, `municipio`, `provincia`, `correo`, `contacto` | Datos adicionales |
 
 ## Tabla de tipos e-CF
 
@@ -223,7 +285,7 @@ B2B. Requiere RNC del comprador.
   "indicador_monto_gravado": "0",
   "comprador": {
     "rnc": "131880681",
-    "nombre": "EMPRESA COMPRADORA SRL"
+    "razon_social": "EMPRESA COMPRADORA SRL"
   },
   "items": [
     {
@@ -245,10 +307,10 @@ B2B. Requiere RNC del comprador.
 ```
 
 **Notas:**
-- `tipo_ingresos`: `"01"` (Ingresos por operaciones)
-- `indicador_monto_gravado`: `"0"` (Monto gravado incluye ITBIS), `"1"` (excluye)
-- `comprador.rnc` es requerido para que DGII pueda vincular notas de crédito/débito futuras
-- Mezcla de `indicador_facturacion` 1, 2, 3, 4 permitida en mismo comprobante
+- `comprador` es **opcional**: si el cliente (`client_id`) ya tiene RNC y razón social en su registro, se toman de ahí. Envía `comprador` solo para sobrescribir.
+- El RNC del comprador es necesario para que DGII pueda vincular notas de crédito/débito futuras (viene del cliente o de `comprador.rnc`).
+- `totales` es opcional (calculado). El ejemplo lo muestra solo para ilustrar las tasas.
+- Mezcla de `indicador_facturacion` 1, 2, 3, 4 permitida en mismo comprobante.
 
 ---
 
@@ -597,7 +659,9 @@ Para pagos a personas o empresas no residentes. ISR retenido obligatorio por ite
 
 ---
 
-## Respuesta exitosa
+## Respuesta exitosa — `POST /api/facturas`
+
+HTTP `200` con `status: true`. El front debe guardar `factura_id` (para PDF/XML/estado) y mostrar `e_ncf`.
 
 ```json
 {
@@ -610,12 +674,46 @@ Para pagos a personas o empresas no residentes. ISR retenido obligatorio por ite
     "codigo_seguridad": "nAOIob",
     "total": 8850.00,
     "tipo_ecf": "31",
-    "ambiente": "certecf"
+    "ambiente": "certecf",
+    "fecha_emision_dgii": "27-05-2026",
+    "dgii_response": { }
   }
 }
 ```
 
-Para E32 RFCE (<250k), el campo relevante es `rfce_track_id` y `estado_dgii` = `"RFCE_ACEPTADO"`. El XML firmado se obtiene en `GET /api/facturas/{factura_id}/xml`.
+| Campo | Descripción |
+|-------|-------------|
+| `factura_id` | ID interno — úsalo en `/pdf`, `/xml`, `/estado` |
+| `e_ncf` | e-NCF asignado (ej. `E310000000335`) |
+| `track_id` | ID de seguimiento DGII (null en E32 RFCE) |
+| `estado_dgii` | `ENVIADO` recién emitido; consultar `/estado` para el final |
+| `codigo_seguridad` | Código de seguridad del comprobante (va en el QR/PDF) |
+| `total` | Monto total con ITBIS |
+| `ambiente` | `certecf` (cert) o producción |
+| `dgii_response` | Respuesta cruda de DGII (debug) |
+
+Para **E32 RFCE (<250k)** el campo relevante es `rfce_track_id` y `estado_dgii` = `"RFCE_ACEPTADO"` (sin `track_id`). El XML firmado se obtiene en `GET /api/facturas/{factura_id}/xml`.
+
+### Respuesta de error
+
+HTTP `4xx`/`5xx` con `status: false` y un mensaje en `error`:
+
+```json
+{ "status": false, "error": "El cliente no tiene RNC y es requerido para e-CF tipo 31 (Credito Fiscal)" }
+```
+
+Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, RNC faltante) · `404` cliente no encontrado · `502` fallo en emisión DGII.
+
+---
+
+## Flujo recomendado para el front
+
+1. `POST /api/facturas` con el payload mínimo → recibe `factura_id`, `e_ncf`, `estado_dgii`.
+2. (Opcional) Polling a `GET /api/facturas/{factura_id}/estado` hasta `ACEPTADO`/`RECHAZADO`.
+3. Mostrar/descargar PDF: `GET /api/facturas/{factura_id}/pdf` (o `?format=base64` para incrustar).
+4. E32 RFCE: descargar XML firmado en `GET /api/facturas/{factura_id}/xml` y subirlo al portal DGII.
+
+> Para previsualizar el PDF **antes** de emitir (sin consumir secuencia NCF), usa `POST /api/facturas/preview` con `client_id` + `items` (+ `tipo_ecf`, `ncf` opcionales). Devuelve el PDF en base64.
 
 ## Consultar estado DGII
 
