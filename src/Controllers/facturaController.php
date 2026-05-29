@@ -251,6 +251,7 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
                 'e_ncf' => $ecf['e_ncf'],
                 'tipo_ecf' => $ecf['tipo_ecf'],
                 'estado_dgii' => $ecf['estado_dgii'],
+                'secuencia_utilizada' => normalizeSecuenciaUtilizada($ecf['secuencia_utilizada'] ?? null),
                 'rfce_estado' => $ecf['rfce_estado'] ?? null,
                 'nota' => 'E32 < 250k procesado via RFCE. DGII no emite track_id para este flujo.',
             ],
@@ -277,6 +278,7 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
                 'e_ncf' => $ecf['e_ncf'],
                 'track_id' => $ecf['track_id'],
                 'estado_dgii' => $ecf['estado_dgii'],
+                'secuencia_utilizada' => normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null),
                 'consulta' => $consulta['data'],
             ],
         ]);
@@ -551,10 +553,30 @@ function mapEstadoFromConsulta(array $consulta): ?string
         }
     }
     if (is_numeric($estado)) {
-        $map = [1 => 'ACEPTADO', 2 => 'ACEPTADO_CONDICIONAL', 3 => 'EN_PROCESO', 4 => 'RECHAZADO'];
+        // Codigos DGII (consulta resultado): 0=No encontrado, 1=Aceptado,
+        // 2=Rechazado, 3=En Proceso, 4=Aceptado Condicional.
+        $map = [
+            0 => 'NO_ENCONTRADO',
+            1 => 'ACEPTADO',
+            2 => 'RECHAZADO',
+            3 => 'EN_PROCESO',
+            4 => 'ACEPTADO_CONDICIONAL',
+        ];
         return $map[(int) $estado] ?? null;
     }
     return null;
+}
+
+/**
+ * Normaliza el flag `secuenciaUtilizada` de DGII a bool|null.
+ * false => el e-NCF puede reutilizarse en un nuevo envio; true => consumido.
+ */
+function normalizeSecuenciaUtilizada($value): ?bool
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    return (bool) filter_var($value, FILTER_VALIDATE_BOOLEAN);
 }
 
 function handleECFStats(facturaModel $facturaModel): void
