@@ -288,8 +288,16 @@ class FacturaPdfGenerator extends FPDF
                 && (float) ($this->factura['total'] ?? 0) < 250000;
             $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
 
+            // RncComprador en el QR debe coincidir con el XML: DGII valida el timbre
+            // contra el e-CF emitido. E43 nunca lleva nodo Comprador y E47 solo lleva
+            // IdentificadorExtranjero (jamas RNCComprador). Incluirlo en esos tipos
+            // hace que ConsultaTimbre devuelva "no encontrado". Ver ECFXmlBuilder::
+            // requiereComprador() y buildComprador().
+            $tiposSinRncComprador = ['43', '47'];
             $rncComprador = $this->clientData['rnc'] ?? '';
-            $rncCompradorParam = $rncComprador !== '' ? '&RncComprador=' . rawurlencode($rncComprador) : '';
+            $incluyeRncComprador = $rncComprador !== ''
+                && !in_array((string) ($this->factura['tipo_ecf'] ?? ''), $tiposSinRncComprador, true);
+            $rncCompradorParam = $incluyeRncComprador ? '&RncComprador=' . rawurlencode($rncComprador) : '';
 
             $url = sprintf(
                 'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
