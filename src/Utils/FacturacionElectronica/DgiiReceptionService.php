@@ -162,6 +162,44 @@ class DgiiReceptionService
         ];
     }
 
+    /**
+     * Consulta el estado fiscal de un RFCE (E32 < 250,000 DOP) en el servicio
+     * RecepcionFC de https://fc.dgii.gov.do. A diferencia de ConsultaResultado
+     * (que usa trackId), este se identifica por RNC Emisor + e-NCF + codigo de
+     * seguridad, por lo que sirve para RFCE que no generan trackId.
+     *
+     *   GET {fc_base_url}/{ambiente}/consultarfce/api/Consultas/Consulta
+     *       ?RNC_Emisor=...&ENCF=...&Cod_Seguridad_eCF=...
+     *
+     * Estados: 0=No encontrado, 1=Aceptado, 2=Rechazado.
+     */
+    public function consultarResumenRFCE(string $rnc, string $eNcf, string $codigoSeguridad, string $bearerToken, array $options = []): array
+    {
+        $environment = $this->resolveEnvironment($options);
+        $baseUrl = rtrim((string) ($options['fc_base_url'] ?? getenv('DGII_FC_BASE_URL') ?: self::DEFAULT_FC_BASE_URL), '/');
+        $query = http_build_query([
+            'RNC_Emisor' => $rnc,
+            'ENCF' => $eNcf,
+            'Cod_Seguridad_eCF' => $codigoSeguridad,
+        ]);
+        $url = sprintf('%s/%s/consultarfce/api/Consultas/Consulta?%s', $baseUrl, $environment, $query);
+
+        $response = $this->auth->consultarEndpointAutenticado(
+            'GET',
+            $url,
+            $bearerToken,
+            null,
+            $options
+        );
+
+        return [
+            'status_code' => $response['status_code'],
+            'data' => $response['data'],
+            'raw_body' => $response['body'],
+            'endpoint' => $response['endpoint'],
+        ];
+    }
+
     private function resolveEnvironment(array $options): string
     {
         $env = $options['environment'] ?? $options['ambiente'] ?? getenv('DGII_ECF_ENVIRONMENT') ?: 'testecf';

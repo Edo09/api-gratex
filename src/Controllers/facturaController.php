@@ -242,20 +242,10 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         return;
     }
 
-    // E32 RFCE (< 250k): no track_id, estado starts with RFCE_ — return stored info directly
+    // E32 RFCE (< 250k): no genera trackId. Se consulta por RNC + e-NCF + codigo
+    // de seguridad en el servicio RecepcionFC (ConsultaRFCE), no por ConsultaResultado.
     if (empty($ecf['track_id']) && str_starts_with((string) ($ecf['estado_dgii'] ?? ''), 'RFCE_')) {
-        echo json_encode([
-            'status' => true,
-            'data' => [
-                'factura_id' => $facturaId,
-                'e_ncf' => $ecf['e_ncf'],
-                'tipo_ecf' => $ecf['tipo_ecf'],
-                'estado_dgii' => $ecf['estado_dgii'],
-                'secuencia_utilizada' => normalizeSecuenciaUtilizada($ecf['secuencia_utilizada'] ?? null),
-                'rfce_estado' => $ecf['rfce_estado'] ?? null,
-                'nota' => 'E32 < 250k procesado via RFCE. DGII no emite track_id para este flujo.',
-            ],
-        ]);
+        handleConsultarEstadoRFCE($facturaId, $ecf, $facturaModel);
         return;
     }
 
@@ -284,6 +274,57 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         ]);
     } catch (Throwable $e) {
         respond(false, 'Fallo consultando DGII: ' . $e->getMessage(), 502);
+    }
+}
+
+/**
+ * Consulta el estado fiscal de un RFCE (E32 < 250k) en DGII por RNC + e-NCF +
+ * codigo de seguridad. Si falta el codigo de seguridad o falla la consulta,
+ * devuelve la informacion almacenada como respaldo.
+ */
+function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $facturaModel): void
+{
+    $codigoSeguridad = (string) ($ecf['codigo_seguridad'] ?? '');
+    $respuestaGuardada = [
+        'factura_id' => $facturaId,
+        'e_ncf' => $ecf['e_ncf'],
+        'tipo_ecf' => $ecf['tipo_ecf'],
+        'estado_dgii' => $ecf['estado_dgii'],
+        'secuencia_utilizada' => normalizeSecuenciaUtilizada($ecf['secuencia_utilizada'] ?? null),
+        'rfce_estado' => $ecf['rfce_estado'] ?? null,
+        'flujo' => 'RFCE',
+    ];
+
+    if ($codigoSeguridad === '' || empty($ecf['e_ncf'])) {
+        $respuestaGuardada['nota'] = 'RFCE sin codigo de seguridad o e-NCF; no se puede consultar a DGII. Se devuelve estado almacenado.';
+        echo json_encode(['status' => true, 'data' => $respuestaGuardada]);
+        return;
+    }
+
+    try {
+        $service = new ECFEmissionService();
+        $consulta = $service->consultarEstadoRFCE($ecf['e_ncf'], $codigoSeguridad, $ecf['ambiente_dgii'] ?? null);
+        $estadoBase = mapEstadoFromConsulta($consulta);
+        $estadoNuevo = $estadoBase !== null ? 'RFCE_' . $estadoBase : null;
+        if ($estadoNuevo !== null) {
+            $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
+            $ecf['estado_dgii'] = $estadoNuevo;
+        }
+        echo json_encode([
+            'status' => true,
+            'data' => [
+                'factura_id' => $facturaId,
+                'e_ncf' => $ecf['e_ncf'],
+                'tipo_ecf' => $ecf['tipo_ecf'],
+                'estado_dgii' => $ecf['estado_dgii'],
+                'secuencia_utilizada' => normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null),
+                'flujo' => 'RFCE',
+                'consulta' => $consulta['data'],
+            ],
+        ]);
+    } catch (Throwable $e) {
+        $respuestaGuardada['nota'] = 'Fallo consultando RFCE a DGII (' . $e->getMessage() . '). Se devuelve estado almacenado.';
+        echo json_encode(['status' => true, 'data' => $respuestaGuardada]);
     }
 }
 
@@ -548,7 +589,7 @@ function mapEstadoFromConsulta(array $consulta): ?string
     }
     if (is_string($estado)) {
         $upper = strtoupper(trim($estado));
-        if (in_array($upper, ['ACEPTADO', 'RECHAZADO', 'EN PROCESO', 'ACEPTADO CONDICIONAL'], true)) {
+        if (in_array($upper, ['ACEPTADO', 'RECHAZADO', 'EN PROCESO', 'ACEPTADO CONDICIONAL', 'NO ENCONTRADO'], true)) {
             return str_replace(' ', '_', $upper);
         }
     }
