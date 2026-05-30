@@ -472,10 +472,15 @@ class FacturaPdfGenerator extends FPDF
         }
 
         // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
-        // NCF Modificado y el Motivo. Estos datos se persisten al emitir la nota
-        // (ver facturaModel::saveFacturaConECF y la migracion 006).
+        // NCF Modificado y el Motivo. Se persisten al emitir la nota (ver
+        // facturaModel::saveFacturaConECF y la migracion 006). El NCF Modificado
+        // va aqui en el encabezado; el Motivo se muestra como descripcion de la
+        // linea en la tabla (mas abajo).
         $tipoEcf = (string) ($this->factura['tipo_ecf'] ?? '');
         $ncfModificado = $this->factura['ncf_modificado'] ?? '';
+        $razonNota = in_array($tipoEcf, ['33', '34'], true)
+            ? trim((string) ($this->factura['razon_modificacion'] ?? ''))
+            : '';
         if (in_array($tipoEcf, ['33', '34'], true) && $ncfModificado !== '') {
             $this->SetXY($this->lMargin, 48);
             $this->SetFont('Arial', 'B', 9);
@@ -485,12 +490,6 @@ class FacturaPdfGenerator extends FPDF
                 $lineNcf .= '  (' . $fechaMod . ')';
             }
             $this->Cell(125, 3.8, $lineNcf, 0, 1, 'L');
-            $razon = $this->factura['razon_modificacion'] ?? '';
-            if ($razon !== '') {
-                $this->SetX($this->lMargin);
-                $this->SetFont('Arial', '', 9);
-                $this->MultiCell(125, 3.8, $this->convertEncoding('Motivo: ' . $razon), 0, 'L');
-            }
         }
 
         // Force cursor below the header block so the table header doesn't overlap
@@ -519,11 +518,30 @@ class FacturaPdfGenerator extends FPDF
         $this->SetLineHeight(4);
         $this->SetWidths(array(25, 110, 20, 20, 25));
 
+        // En Notas E33/E34 el Motivo (razon de modificacion) se muestra como
+        // descripcion: si las lineas no traen descripcion propia, llena la columna
+        // Descripcion de la linea; si los items ya tienen su propia descripcion,
+        // el Motivo va en su propia fila al final (norma DGII).
+        $anyDescripcion = false;
+        if (isset($this->factura['items']) && is_array($this->factura['items'])) {
+            foreach ($this->factura['items'] as $it) {
+                $d = $it['description'] ?? $it['nombre_item'] ?? $it['descripcion'] ?? '';
+                if (trim((string) $d) !== '') { $anyDescripcion = true; break; }
+            }
+        }
+        $motivoPendiente = $razonNota;
+
         $subtotal = 0;
         if (isset($this->factura['items']) && is_array($this->factura['items'])) {
             foreach ($this->factura['items'] as $item) {
                 $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
                 $descripcion = $item['description'] ?? $item['nombre_item'] ?? $item['descripcion'] ?? '';
+                // Linea sin descripcion propia (y ningun item la trae): el Motivo
+                // ocupa la columna Descripcion de esta linea (una sola vez).
+                if (trim((string) $descripcion) === '' && !$anyDescripcion && $motivoPendiente !== '') {
+                    $descripcion = $motivoPendiente;
+                    $motivoPendiente = '';
+                }
                 $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
                 $itbis = $item['itbis_amount'] ?? ($unitario * 0.18);
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
@@ -537,6 +555,12 @@ class FacturaPdfGenerator extends FPDF
                     number_format($lineSubtotal, 2)
                 ]);
             }
+        }
+
+        // Si el Motivo no se uso como descripcion de una linea (porque los items
+        // ya traen su propia descripcion), se muestra en su propia fila.
+        if ($motivoPendiente !== '') {
+            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoPendiente), '', '', '']);
         }
 
         $itbistotal = $subtotal * 0.18;
