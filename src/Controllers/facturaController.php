@@ -204,6 +204,9 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'client_name' => $client['client_name'] ?? '',
         'total' => $totales['monto_total'],
         'user_id' => $input['user_id'] ?? null,
+        // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
+        // en la Representacion Impresa (norma DGII).
+        'informacion_referencia' => $payload['informacion_referencia'],
         'items' => array_map(function ($item) {
             return [
                 'description' => $item['descripcion'] ?? $item['nombre_item'] ?? '',

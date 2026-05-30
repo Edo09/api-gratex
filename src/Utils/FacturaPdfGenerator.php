@@ -245,8 +245,9 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
-     * Render DGII timbre QR + codigo de seguridad at top-right.
-     * Only renders if factura has e_ncf and codigo_seguridad (e-CF emitted).
+     * Render DGII timbre QR + Codigo de Seguridad + Fecha Firma en el pie de
+     * factura (seccion de validacion fiscal, segun norma DGII de Representacion
+     * Impresa). Solo renderiza si la factura tiene e_ncf y codigo_seguridad.
      */
     private function addQRTimbre(): void
     {
@@ -323,19 +324,31 @@ class FacturaPdfGenerator extends FPDF
             return;
         }
 
-        $qrX = 95;
-        $qrY = 10;
+        // QR del timbre + datos de firma electronica en el pie de factura.
+        // Para reubicar el bloque cambia estas coordenadas (mm). Pagina Letter:
+        // 215.9 mm de ancho x 279.4 mm de alto.
+        $qrX = 8;
+        $qrY = 205;
         $qrSize = 30;
         $this->Image($tmpPath, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
         @unlink($tmpPath);
 
+        // Codigo de Seguridad y Fecha Firma a la derecha del QR (norma DGII).
+        $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
+        $infoX = $qrX + $qrSize + 4;
         $savedY = $this->GetY();
-        $this->SetXY($qrX, $qrY + $qrSize);
-        $this->SetFont('Arial', 'B', 7);
-        $this->Cell($qrSize, 3.2, 'Cod. Seguridad', 0, 1, 'C');
-        $this->SetX($qrX);
-        $this->SetFont('Arial', '', 8);
-        $this->Cell($qrSize, 3.6, $codigoSeguridad, 0, 1, 'C');
+        $this->SetXY($infoX, $qrY + 4);
+        $this->SetFont('Arial', 'B', 8);
+        $this->Cell(70, 4, $this->convertEncoding('Código de Seguridad:'), 0, 1, 'L');
+        $this->SetX($infoX);
+        $this->SetFont('Arial', '', 9);
+        $this->Cell(70, 4, $codigoSeguridad, 0, 1, 'L');
+        $this->SetX($infoX);
+        $this->SetFont('Arial', 'B', 8);
+        $this->Cell(70, 4, 'Fecha Firma:', 0, 1, 'L');
+        $this->SetX($infoX);
+        $this->SetFont('Arial', '', 9);
+        $this->Cell(70, 4, $fechaFirma !== '' ? $fechaFirma : 'N/D', 0, 1, 'L');
 
         $this->SetXY($this->lMargin, $savedY);
     }
@@ -355,6 +368,27 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Titulo dinamico del documento segun el tipo de e-CF (norma DGII).
+     */
+    private function tituloDocumento(): string
+    {
+        $tipo = (string) ($this->factura['tipo_ecf'] ?? '');
+        $titulos = [
+            '31' => 'Factura de Crédito Fiscal Electrónica',
+            '32' => 'Factura de Consumo Electrónica',
+            '33' => 'Nota de Débito Electrónica',
+            '34' => 'Nota de Crédito Electrónica',
+            '41' => 'Comprobante Electrónico de Compras',
+            '43' => 'Comprobante Electrónico para Gastos Menores',
+            '44' => 'Comprobante Electrónico para Regímenes Especiales',
+            '45' => 'Comprobante Electrónico Gubernamental',
+            '46' => 'Comprobante Electrónico para Exportaciones',
+            '47' => 'Comprobante Electrónico para Pagos al Exterior',
+        ];
+        return $titulos[$tipo] ?? 'Comprobante Fiscal Electrónico';
+    }
+
+    /**
      * Generate the PDF content
      * @return string PDF content as string
      */
@@ -363,7 +397,6 @@ class FacturaPdfGenerator extends FPDF
         $this->AliasNbPages();
         $this->SetMargins(8, 10, 8);
         $this->AddPage();
-        $this->addQRTimbre();
 
         // Fetch client data from DB if not already set
         $clientName = '';
@@ -404,34 +437,65 @@ class FacturaPdfGenerator extends FPDF
         $facturaDate = $this->factura['date'] ?? date('Y-m-d');
         $fechaEspanol = $this->fechaCastellano($facturaDate);
 
-        // Left side: Factura No. and Fecha
-        $this->Cell(70, 3.8, 'Factura No.: ' . $noFactura, 0, 1, 'L');
-        $this->Cell(70, 3.8, 'Fecha: ' . $this->convertEncoding($fechaEspanol), 0, 1, 'L');
+        // La identificacion del documento (e-NCF y fechas) va en la columna
+        // derecha, junto al titulo dinamico. La norma DGII prohibe usar la
+        // etiqueta "Factura No.": debe usarse exclusivamente "e-NCF".
 
-        // Right side: Factura Crédito Fiscal, NCF, RNC, Razón Social, Contact, Vencimiento.
-        // QR is now in the middle column so right block goes back to y=10 for e-CF
-        // (or 30 if no QR — original behavior).
+        // Right side: titulo dinamico del documento + identificacion del e-CF
+        // (e-NCF, fechas) + datos del receptor. Empieza arriba (y=10) junto al logo.
         $hasQR = class_exists('QRcode');
+        $eNcfLabel = $this->factura['e_ncf'] ?? $noFactura;
         $this->SetY($hasQR ? 10 : 30);
         $this->SetX(-73);
-        $this->Cell(70, 3.8, $this->convertEncoding('Factura Crédito Fiscal'), 0, 1, 'L');
+        $this->SetFont('Arial', 'B', 11);
+        $this->MultiCell(70, 5, $this->convertEncoding($this->tituloDocumento()), 0, 'L');
+        $this->Ln(1);
+        $this->SetFont('Arial', '', 9);
         $this->SetX(-73);
-        $this->Cell(70, 3.8, 'RNC: ' . $rnc, 0, 1, 'L');
+        $this->Cell(70, 3.8, 'e-NCF: ' . $eNcfLabel, 0, 1, 'L');
         $this->SetX(-73);
-        $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social/Nombre: ' . $companyName), 0, 'L');
+        $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
         $this->SetX(-73);
+        $this->Cell(70, 3.8, 'Fecha de Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
+        $this->Ln(1);
+        $this->SetX(-73);
+        $this->Cell(70, 3.8, 'RNC Cliente: ' . $rnc, 0, 1, 'L');
+        $this->SetX(-73);
+        $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $companyName), 0, 'L');
         $phoneContact = trim($phone);
         if ($clientName) {
-            $phoneContact .= ', Att. ' . $clientName;
+            $phoneContact .= ($phoneContact !== '' ? ', ' : '') . 'Att. ' . $clientName;
         }
-        $this->Cell(70, 3.8, $this->convertEncoding($phoneContact), 0, 1, 'L');
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, 'Fecha Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
-        $this->Ln(1.6);
+        if ($phoneContact !== '') {
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, $this->convertEncoding($phoneContact), 0, 1, 'L');
+        }
 
-        // Force cursor below header block so table header doesn't overlap
-        // the left "Factura No / Fecha" column when right block starts at y=10.
-        if ($hasQR && $this->GetY() < 56) {
+        // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
+        // NCF Modificado y el Motivo. Estos datos se persisten al emitir la nota
+        // (ver facturaModel::saveFacturaConECF y la migracion 006).
+        $tipoEcf = (string) ($this->factura['tipo_ecf'] ?? '');
+        $ncfModificado = $this->factura['ncf_modificado'] ?? '';
+        if (in_array($tipoEcf, ['33', '34'], true) && $ncfModificado !== '') {
+            $this->SetXY($this->lMargin, 48);
+            $this->SetFont('Arial', 'B', 9);
+            $fechaMod = $this->formatFechaQr($this->factura['fecha_ncf_modificado'] ?? '');
+            $lineNcf = 'NCF Modificado: ' . $ncfModificado;
+            if ($fechaMod !== '') {
+                $lineNcf .= '  (' . $fechaMod . ')';
+            }
+            $this->Cell(125, 3.8, $lineNcf, 0, 1, 'L');
+            $razon = $this->factura['razon_modificacion'] ?? '';
+            if ($razon !== '') {
+                $this->SetX($this->lMargin);
+                $this->SetFont('Arial', '', 9);
+                $this->MultiCell(125, 3.8, $this->convertEncoding('Motivo: ' . $razon), 0, 'L');
+            }
+        }
+
+        // Force cursor below the header block so the table header doesn't overlap
+        // the emisor / receptor columns.
+        if ($this->GetY() < 56) {
             $this->SetY(56);
         }
 
@@ -439,11 +503,13 @@ class FacturaPdfGenerator extends FPDF
         $this->SetFont('Arial', '', 10);
         $this->SetFillColor(0, 0, 0);
         $this->SetTextColor(255, 255, 255);
+        // Columnas exactas y en el orden exigido por la norma DGII:
+        // Cantidad | Descripción | Precio | ITBIS | Valor (Precio x Cantidad sin imp.)
         $this->Cell(25, 6, 'Cantidad', 0, 0, 'C', 1);
         $this->Cell(110, 6, $this->convertEncoding('Descripción'), 0, 0, 'C', 1);
-        $this->Cell(20, 6, 'Precio Unit.', 0, 0, 'C', 1);
+        $this->Cell(20, 6, 'Precio', 0, 0, 'C', 1);
         $this->Cell(20, 6, 'ITBIS', 0, 0, 'C', 1);
-        $this->Cell(25, 6, 'Sub Total', 0, 0, 'C', 1);
+        $this->Cell(25, 6, 'Valor', 0, 0, 'C', 1);
         $this->Ln(8);
 
         // Table rows
@@ -475,34 +541,33 @@ class FacturaPdfGenerator extends FPDF
 
         $itbistotal = $subtotal * 0.18;
 
-        // Totals section (bottom right)
+        // Totals section (bottom right) — etiquetas exactas exigidas por la DGII:
+        // Subtotal Gravado, Total ITBIS, Total.
         $this->SetMargins(10, 0, 10);
         $this->SetFillColor(240, 240, 240);
+        $this->SetFont('Arial', '', 9);
 
-        // Subtotal
-        $this->SetY(-55);
-        $this->SetX(-58);
-        $this->SetFont('Arial', '', 10.5);
-        $this->Cell(25, 5, 'Sub Total', 1, 0, 'R', 1);
-        $this->Cell(23, 5, number_format($subtotal, 2), 1, 1, 'R', 1);
-
-        // Descuento
+        // Subtotal Gravado
         $this->SetY(-50);
         $this->SetX(-58);
-        $this->Cell(25, 5, 'Descuento', 1, 0, 'R', 1);
-        $this->Cell(23, 5, '0.00', 1, 1, 'R', 1);
+        $this->Cell(28, 5, $this->convertEncoding('Subtotal Gravado'), 1, 0, 'R', 1);
+        $this->Cell(20, 5, number_format($subtotal, 2), 1, 1, 'R', 1);
 
-        // ITBIS
+        // Total ITBIS
         $this->SetY(-45);
         $this->SetX(-58);
-        $this->Cell(25, 5, 'ITBIS', 1, 0, 'R', 1);
-        $this->Cell(23, 5, number_format($itbistotal, 2), 1, 1, 'R', 1);
+        $this->Cell(28, 5, 'Total ITBIS', 1, 0, 'R', 1);
+        $this->Cell(20, 5, number_format($itbistotal, 2), 1, 1, 'R', 1);
 
         // Total
         $this->SetY(-40);
         $this->SetX(-58);
-        $this->Cell(25, 5, 'Total RD$', 1, 0, 'R', 1);
-        $this->Cell(23, 5, number_format($subtotal + $itbistotal, 2), 1, 1, 'R', 1);
+        $this->SetFont('Arial', 'B', 9.5);
+        $this->Cell(28, 5, 'Total', 1, 0, 'R', 1);
+        $this->Cell(20, 5, number_format($subtotal + $itbistotal, 2), 1, 1, 'R', 1);
+
+        // QR del timbre al final, en la pagina actual (ultima), junto a las firmas.
+        $this->addQRTimbre();
 
         return $this->Output('S');
     }

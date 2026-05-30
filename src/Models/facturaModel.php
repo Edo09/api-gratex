@@ -313,16 +313,41 @@ class facturaModel
         try {
             $this->conexion->beginTransaction();
 
+            // InformacionReferencia (Notas E33/E34): se persiste para mostrar el
+            // NCF Modificado y el Motivo en la Representacion Impresa (norma DGII).
+            // La razon se completa con un default si viene vacia, igual que
+            // ECFXmlBuilder::normalizeNotaReferenceData(), para que el PDF y el
+            // XML firmado muestren el mismo texto.
+            $infoRef = is_array($factura['informacion_referencia'] ?? null) ? $factura['informacion_referencia'] : [];
+            $tipoEcfNota = (string) ($ecf['tipo_ecf'] ?? '');
+            $ncfModificado = ($infoRef['ncf_modificado'] ?? '') !== '' ? (string) $infoRef['ncf_modificado'] : null;
+            $codigoModificacion = ($infoRef['codigo_modificacion'] ?? '') !== '' ? (string) $infoRef['codigo_modificacion'] : null;
+            $razonModificacion = (string) ($infoRef['razon_modificacion'] ?? '');
+            if (in_array($tipoEcfNota, ['33', '34'], true) && $razonModificacion === '') {
+                $razonModificacion = $tipoEcfNota === '34'
+                    ? 'Nota de credito por ajuste de monto'
+                    : 'Nota de debito por ajuste de monto';
+            }
+            $razonModificacion = $razonModificacion !== '' ? $razonModificacion : null;
+            // El payload trae la fecha en formato d-m-Y; la columna es DATE (Y-m-d).
+            $fechaNcfModificado = null;
+            if (($infoRef['fecha_ncf_modificado'] ?? '') !== '') {
+                $dt = DateTime::createFromFormat('d-m-Y', (string) $infoRef['fecha_ncf_modificado']);
+                $fechaNcfModificado = $dt ? $dt->format('Y-m-d') : null;
+            }
+
             $sql = 'INSERT INTO facturas
                 (no_factura, date, client_id, client_name, total, NCF, user_id,
                  tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
                  fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
-                 rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta)
+                 rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta,
+                 ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion)
                 VALUES
                 (:no_factura, :date, :client_id, :client_name, :total, NULL, :user_id,
                  :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
                  :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
-                 :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta)';
+                 :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta,
+                 :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion)';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $factura['no_factura'] ?? $ecf['e_ncf'],
@@ -344,6 +369,10 @@ class facturaModel
                 ':rfce_track_id' => $ecf['rfce_track_id'] ?? null,
                 ':rfce_estado' => $ecf['rfce_estado'] ?? null,
                 ':rfce_respuesta' => isset($ecf['rfce_response']) ? json_encode($ecf['rfce_response']) : null,
+                ':ncf_modificado' => $ncfModificado,
+                ':fecha_ncf_modificado' => $fechaNcfModificado,
+                ':codigo_modificacion' => $codigoModificacion,
+                ':razon_modificacion' => $razonModificacion,
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
 
