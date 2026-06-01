@@ -511,17 +511,28 @@ class FacturaPdfGenerator extends FPDF
         $this->SetX(-73);
         $this->Cell(70, 3.8, 'Fecha de Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
         $this->Ln(1);
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, 'RNC Cliente: ' . $rnc, 0, 1, 'L');
-        $this->SetX(-73);
-        $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $companyName), 0, 'L');
-        $phoneContact = trim($phone);
-        if ($clientName) {
-            $phoneContact .= ($phoneContact !== '' ? ', ' : '') . 'Att. ' . $clientName;
-        }
-        if ($phoneContact !== '') {
+        // El bloque receptor debe reflejar el e-CF emitido (ver ECFXmlBuilder::
+        // requiereComprador/buildComprador):
+        //  - E43 (Gastos Menores): el e-CF no lleva Comprador -> no se imprime receptor.
+        //  - E47 (Pagos al Exterior): comprador extranjero, sin RNC dominicano; el XML
+        //    escribe IdentificadorExtranjero -> se etiqueta "Identificación Tributaria".
+        $tipoEcfReceptor = (string) ($this->factura['tipo_ecf'] ?? '');
+        if ($tipoEcfReceptor !== '43') {
+            $labelId = $tipoEcfReceptor === '47' ? 'Identificación Tributaria: ' : 'RNC Cliente: ';
+            if ($tipoEcfReceptor !== '47' || $rnc !== '') {
+                $this->SetX(-73);
+                $this->Cell(70, 3.8, $this->convertEncoding($labelId . $rnc), 0, 1, 'L');
+            }
             $this->SetX(-73);
-            $this->Cell(70, 3.8, $this->convertEncoding($phoneContact), 0, 1, 'L');
+            $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $companyName), 0, 'L');
+            $phoneContact = trim($phone);
+            if ($clientName) {
+                $phoneContact .= ($phoneContact !== '' ? ', ' : '') . 'Att. ' . $clientName;
+            }
+            if ($phoneContact !== '') {
+                $this->SetX(-73);
+                $this->Cell(70, 3.8, $this->convertEncoding($phoneContact), 0, 1, 'L');
+            }
         }
 
         // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
