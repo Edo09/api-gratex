@@ -47,7 +47,9 @@
       "Bash(php -l src/Controllers/facturaController.php)",
       "Bash(echo '=== __TRACKED_VAR__ ===')",
       "Bash(python3 -c ' *)",
-      "Bash(curl -sv \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/semilla\")"
+      "Bash(curl -sv \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/semilla\")",
+      "Bash(curl -s \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/semilla\")",
+      "Bash(curl -s -X POST \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/ValidacionCertificado\")"
     ]
   }
 }
