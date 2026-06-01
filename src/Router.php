@@ -118,6 +118,7 @@ switch ($route) {
         if ($is_root) {
             require_once 'src/Controllers/userController.php';
         } else {
+            error_log('[Router] 404 default hit. endpoint=' . $endpoint . ' route=' . $route . ' route_part=' . $route_part);
             header('content-type: application/json; charset=utf-8');
             echo json_encode(['status' => false, 'error' => 'Endpoint not found']);
             http_response_code(404);
