@@ -97,7 +97,17 @@ function handleRecepcionEcf(): void
 
     $model = new ecfRecibidoModel();
     if ($model->exists($rncEmisor, $eNcf)) {
-        respondRecepcion(false, 'Este e-NCF ya fue recibido previamente del mismo emisor.', 409);
+        $existing = $model->getByENCF($rncEmisor, $eNcf);
+        http_response_code(200);
+        echo json_encode([
+            'trackId'        => $existing['track_id'] ?? '',
+            'codigo'         => $existing['codigo_resultado'] ?? 1,
+            'estado'         => $existing['estado'] ?? 'ACEPTADO',
+            'mensaje'        => 'e-NCF ya recibido previamente.',
+            'rncEmisor'      => $rncEmisor,
+            'eNCF'           => $eNcf,
+            'fechaRecepcion' => $existing['fecha_recepcion'] ?? date('d-m-Y H:i:s'),
+        ]);
         return;
     }
 
