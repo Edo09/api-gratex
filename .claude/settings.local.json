@@ -51,7 +51,8 @@
       "Bash(curl -s \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/semilla\")",
       "Bash(curl -s -X POST \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/ValidacionCertificado\")",
       "Bash(curl -s -X POST \"https://gratex.net/api/ecf/autenticacion/fe/autenticacion/api/ValidacionCertificado\" -H \"Content-Type: application/xml\" -d '<?xml version=\"1.0\" encoding=\"UTF-8\"?><SemillaModel><valor>TEST</valor></SemillaModel>')",
-      "Bash(php -l \"c:/Users/edgarcia/Documents/grat/api-gratex/src/Controllers/ecfAutenticacionController.php\")"
+      "Bash(php -l \"c:/Users/edgarcia/Documents/grat/api-gratex/src/Controllers/ecfAutenticacionController.php\")",
+      "Bash(curl -s -X POST \"https://gratex.net/api/ecf/recepcion/fe/recepcion/api/ecf\" -H \"Content-Type: application/xml\" -H \"Authorization: Bearer faketoken\" -d '<?xml version=\"1.0\"?><ECF><test/></ECF>')"
     ]
   }
 }
