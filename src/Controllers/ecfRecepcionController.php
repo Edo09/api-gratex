@@ -15,7 +15,13 @@ $isTrackIdRequest = preg_match('#/recepcion(?:/ecf)?/([A-Za-z0-9_-]+)$#', $endpo
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
-        handleRecepcionEcf();
+        try {
+            handleRecepcionEcf();
+        } catch (Throwable $e) {
+            error_log('[ecfRecepcion] fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+            http_response_code(500);
+            echo json_encode(['status' => false, 'error' => 'Error interno: ' . $e->getMessage()]);
+        }
         break;
 
     case 'GET':
