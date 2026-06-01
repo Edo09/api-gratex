@@ -47,6 +47,16 @@ class ecfRecibidoModel
         return (int) $this->conexion->lastInsertId();
     }
 
+    public function getByENCF(string $rncEmisor, string $eNcf): ?array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT * FROM ecf_recibidos WHERE rnc_emisor = ? AND e_ncf = ? LIMIT 1'
+        );
+        $stmt->execute([$rncEmisor, $eNcf]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
     public function getByTrackId(string $trackId): ?array
     {
         $stmt = $this->conexion->prepare('SELECT * FROM ecf_recibidos WHERE track_id = ? LIMIT 1');
