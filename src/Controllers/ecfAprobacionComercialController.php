@@ -9,6 +9,7 @@ require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/DgiiXmlSigner.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
@@ -93,15 +94,8 @@ function handleAprobacionComercial(): void
     ]);
 
     http_response_code(200);
-    echo json_encode([
-        'status' => true,
-        'mensaje' => 'Aprobacion comercial registrada.',
-        'id' => $id,
-        'eNCF' => $eNcf,
-        'estado' => $estadoNormalizado,
-        'factura_id' => $facturaId,
-        'firma' => $validation['firma'],
-    ]);
+    header('Content-Type: text/xml; charset=utf-8');
+    echo buildSignedARCF($rncEmisor, $emisor['rnc'], $eNcf);
 }
 
 function aprobacionMapEstado(string $estado): ?string
@@ -153,4 +147,36 @@ function respondAprobacion(bool $status, string $message, int $code = 200): void
         'status' => $status,
         $status ? 'mensaje' : 'error' => $message,
     ]);
+}
+
+function buildSignedARCF(string $rncEmisor, string $rncComprador, string $eNcf): string
+{
+    $fecha = (new DateTime())->format('d-m-Y H:i:s');
+    $unsigned = '<?xml version="1.0" encoding="UTF-8"?>' .
+        '<ARECF>' .
+            '<DetalleAcusedeRecibo>' .
+                '<Version>1.0</Version>' .
+                '<RNCEmisor>' . htmlspecialchars($rncEmisor) . '</RNCEmisor>' .
+                '<RNCComprador>' . htmlspecialchars($rncComprador) . '</RNCComprador>' .
+                '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
+                '<Estado>0</Estado>' .
+                '<FechaHoraAcuseRecibo>' . htmlspecialchars($fecha) . '</FechaHoraAcuseRecibo>' .
+            '</DetalleAcusedeRecibo>' .
+        '</ARECF>';
+
+    try {
+        $certPath = getenv('DGII_ECF_CERT_PATH') ?: '';
+        if ($certPath && !preg_match('/^[A-Za-z]:[\\\\\/]/', $certPath) && !str_starts_with($certPath, '/')) {
+            $certPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $certPath);
+        }
+        $certContent = $certPath ? file_get_contents($certPath) : false;
+        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
+        if ($certContent !== false && $certPassword !== '') {
+            return (new DgiiXmlSigner())->sign($certContent, $certPassword, $unsigned);
+        }
+    } catch (Throwable $e) {
+        error_log('[ecfAprobacion] ARCF sign error: ' . $e->getMessage());
+    }
+
+    return $unsigned;
 }
