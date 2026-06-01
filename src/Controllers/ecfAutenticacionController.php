@@ -8,8 +8,8 @@ require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.ph
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
 
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$isSemillaRequest = preg_match('#/autenticacion/semilla/?$#', $endpoint);
-$isValidarRequest = preg_match('#/autenticacion/validarsemilla/?$#', $endpoint);
+$isSemillaRequest = preg_match('#/autenticacion/semilla/?$#i', $endpoint);
+$isValidarRequest = preg_match('#/autenticacion/(validarsemilla|ValidacionCertificado)/?$#i', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
