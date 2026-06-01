@@ -125,15 +125,13 @@ class IncomingXmlValidator
             return ['ok' => false, 'detalle' => 'La firma de SignedInfo no coincide con la llave publica.'];
         }
 
-        $rootClone = $document->documentElement->cloneNode(true);
-        $tempDoc = new DOMDocument('1.0', 'UTF-8');
-        $tempDoc->preserveWhiteSpace = false;
-        $tempDoc->appendChild($tempDoc->importNode($rootClone, true));
-        $sigInClone = $tempDoc->getElementsByTagName('Signature');
-        if ($sigInClone->length > 0) {
-            $sigInClone->item(0)->parentNode->removeChild($sigInClone->item(0));
-        }
-        $payloadCanonical = $tempDoc->documentElement->C14N();
+        // Remove Signature from original document, C14N root, then restore.
+        // Must use original doc (not a clone) — importNode changes namespace
+        // context and breaks C14N output vs what the signer computed.
+        $sigParent = $signature->parentNode;
+        $sigParent->removeChild($signature);
+        $payloadCanonical = $document->documentElement->C14N();
+        $sigParent->appendChild($signature);
         $expectedDigest = base64_encode(hash('sha256', $payloadCanonical, true));
 
         if (!hash_equals($expectedDigest, $digestValueB64)) {
