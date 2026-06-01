@@ -61,6 +61,17 @@ function handleSemilla(): void
 
 function handleValidarSemilla(): void
 {
+    try {
+        handleValidarSemillaInternal();
+    } catch (Throwable $e) {
+        error_log('[ecfAutenticacion] ValidarSemilla fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        http_response_code(500);
+        echo json_encode(['status' => false, 'error' => 'Error interno: ' . $e->getMessage()]);
+    }
+}
+
+function handleValidarSemillaInternal(): void
+{
     $extractor = new IncomingXmlExtractor();
     $xml = $extractor->extract();
     if ($xml === null) {
