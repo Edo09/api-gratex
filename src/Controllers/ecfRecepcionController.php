@@ -98,16 +98,22 @@ function handleRecepcionEcf(): void
     $model = new ecfRecibidoModel();
     if ($model->exists($rncEmisor, $eNcf)) {
         $existing = $model->getByENCF($rncEmisor, $eNcf);
+        $trackIdEx = $existing['track_id'] ?? '';
+        $codigoEx  = $existing['codigo_resultado'] ?? 1;
+        $estadoEx  = $existing['estado'] ?? 'ACEPTADO';
+        $fechaEx   = $existing['fecha_recepcion'] ?? date('d-m-Y H:i:s');
         http_response_code(200);
-        echo json_encode([
-            'trackId'        => $existing['track_id'] ?? '',
-            'codigo'         => $existing['codigo_resultado'] ?? 1,
-            'estado'         => $existing['estado'] ?? 'ACEPTADO',
-            'mensaje'        => 'e-NCF ya recibido previamente.',
-            'rncEmisor'      => $rncEmisor,
-            'eNCF'           => $eNcf,
-            'fechaRecepcion' => $existing['fecha_recepcion'] ?? date('d-m-Y H:i:s'),
-        ]);
+        header('Content-Type: text/xml; charset=utf-8');
+        echo '<?xml version="1.0" encoding="UTF-8"?>' .
+            '<AcuseDeRecibo>' .
+                '<trackId>' . htmlspecialchars($trackIdEx) . '</trackId>' .
+                '<codigo>' . $codigoEx . '</codigo>' .
+                '<estado>' . htmlspecialchars($estadoEx) . '</estado>' .
+                '<mensaje>e-NCF ya recibido previamente.</mensaje>' .
+                '<rncEmisor>' . htmlspecialchars($rncEmisor) . '</rncEmisor>' .
+                '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
+                '<fechaRecepcion>' . htmlspecialchars($fechaEx) . '</fechaRecepcion>' .
+            '</AcuseDeRecibo>';
         return;
     }
 
@@ -135,16 +141,17 @@ function handleRecepcionEcf(): void
     ]);
 
     http_response_code(200);
-    echo json_encode([
-        'trackId' => $trackId,
-        'codigo' => $codigoResultado,
-        'estado' => $estado,
-        'mensaje' => $mensaje,
-        'rncEmisor' => $rncEmisor,
-        'eNCF' => $eNcf,
-        'fechaRecepcion' => date('d-m-Y H:i:s'),
-        'id' => $id,
-    ]);
+    header('Content-Type: text/xml; charset=utf-8');
+    echo '<?xml version="1.0" encoding="UTF-8"?>' .
+        '<AcuseDeRecibo>' .
+            '<trackId>' . htmlspecialchars($trackId) . '</trackId>' .
+            '<codigo>' . $codigoResultado . '</codigo>' .
+            '<estado>' . htmlspecialchars($estado) . '</estado>' .
+            '<mensaje>' . htmlspecialchars($mensaje) . '</mensaje>' .
+            '<rncEmisor>' . htmlspecialchars($rncEmisor) . '</rncEmisor>' .
+            '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
+            '<fechaRecepcion>' . htmlspecialchars(date('d-m-Y H:i:s')) . '</fechaRecepcion>' .
+        '</AcuseDeRecibo>';
 }
 
 function handleConsultarRecibido(string $trackId): void
