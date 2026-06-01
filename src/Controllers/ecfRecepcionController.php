@@ -9,6 +9,7 @@ require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/DgiiXmlSigner.php';
 
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isTrackIdRequest = preg_match('#/recepcion(?:/ecf)?/([A-Za-z0-9_-]+)$#', $endpoint, $trackMatches);
@@ -102,18 +103,10 @@ function handleRecepcionEcf(): void
         $codigoEx  = $existing['codigo_resultado'] ?? 1;
         $estadoEx  = $existing['estado'] ?? 'ACEPTADO';
         $fechaEx   = $existing['fecha_recepcion'] ?? date('d-m-Y H:i:s');
+        $emisorRnc = (new EmisorConfigModel())->get()['rnc'] ?? '';
         http_response_code(200);
         header('Content-Type: text/xml; charset=utf-8');
-        echo '<?xml version="1.0" encoding="UTF-8"?>' .
-            '<AcuseDeRecibo>' .
-                '<trackId>' . htmlspecialchars($trackIdEx) . '</trackId>' .
-                '<codigo>' . $codigoEx . '</codigo>' .
-                '<estado>' . htmlspecialchars($estadoEx) . '</estado>' .
-                '<mensaje>e-NCF ya recibido previamente.</mensaje>' .
-                '<rncEmisor>' . htmlspecialchars($rncEmisor) . '</rncEmisor>' .
-                '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
-                '<fechaRecepcion>' . htmlspecialchars($fechaEx) . '</fechaRecepcion>' .
-            '</AcuseDeRecibo>';
+        echo buildSignedAECF($rncEmisor, $emisorRnc, $eNcf, 0, null);
         return;
     }
 
@@ -140,18 +133,12 @@ function handleRecepcionEcf(): void
         'validacion_firma' => $validation['firma'],
     ]);
 
+    $nuestroRnc = $emisor['rnc'] ?? '';
+    $estadoAecf = $validation['firma'] === 'OK' ? 0 : 1;
+    $motivoAecf = $estadoAecf === 1 ? 2 : null; // 2 = Error de Firma Digital
     http_response_code(200);
     header('Content-Type: text/xml; charset=utf-8');
-    echo '<?xml version="1.0" encoding="UTF-8"?>' .
-        '<AcuseDeRecibo>' .
-            '<trackId>' . htmlspecialchars($trackId) . '</trackId>' .
-            '<codigo>' . $codigoResultado . '</codigo>' .
-            '<estado>' . htmlspecialchars($estado) . '</estado>' .
-            '<mensaje>' . htmlspecialchars($mensaje) . '</mensaje>' .
-            '<rncEmisor>' . htmlspecialchars($rncEmisor) . '</rncEmisor>' .
-            '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
-            '<fechaRecepcion>' . htmlspecialchars(date('d-m-Y H:i:s')) . '</fechaRecepcion>' .
-        '</AcuseDeRecibo>';
+    echo buildSignedAECF($rncEmisor, $nuestroRnc, $eNcf, $estadoAecf, $motivoAecf);
 }
 
 function handleConsultarRecibido(string $trackId): void
@@ -222,6 +209,44 @@ function ecfRecepcionRequireBearer(): array
         return ['ok' => false];
     }
     return ['ok' => true, 'rnc' => $valid['rnc_consumidor']];
+}
+
+function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, int $estado, ?int $motivo): string
+{
+    $fecha = (new DateTime())->format('d-m-Y H:i:s');
+    $motivoXml = ($estado === 1 && $motivo !== null)
+        ? '<CodigoMotivoNoRecibido>' . $motivo . '</CodigoMotivoNoRecibido>'
+        : '';
+
+    $unsigned = '<?xml version="1.0" encoding="UTF-8"?>' .
+        '<AECF>' .
+            '<DetalleAcuseDeRecibo>' .
+                '<Version>1.0</Version>' .
+                '<RNCEmisor>' . htmlspecialchars($rncEmisor) . '</RNCEmisor>' .
+                '<RNCComprador>' . htmlspecialchars($rncComprador) . '</RNCComprador>' .
+                '<eNCF>' . htmlspecialchars($eNcf) . '</eNCF>' .
+                '<Estado>' . $estado . '</Estado>' .
+                $motivoXml .
+                '<FechaHoraAcuseRecibo>' . htmlspecialchars($fecha) . '</FechaHoraAcuseRecibo>' .
+            '</DetalleAcuseDeRecibo>' .
+        '</AECF>';
+
+    try {
+        $certPath = getenv('DGII_ECF_CERT_PATH') ?: '';
+        if ($certPath && !preg_match('/^[A-Za-z]:[\\\\\/]/', $certPath) && !str_starts_with($certPath, '/')) {
+            $certPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $certPath);
+        }
+        $certContent = $certPath ? file_get_contents($certPath) : false;
+        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
+        if ($certContent !== false && $certPassword !== '') {
+            $signer = new DgiiXmlSigner();
+            return $signer->sign($certContent, $certPassword, $unsigned);
+        }
+    } catch (Throwable $e) {
+        error_log('[ecfRecepcion] AECF sign error: ' . $e->getMessage());
+    }
+
+    return $unsigned;
 }
 
 function ecfRecepcionGenerarTrackId(): string
