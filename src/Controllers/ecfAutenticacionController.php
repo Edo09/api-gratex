@@ -128,14 +128,11 @@ function handleValidarSemillaInternal(): void
     $seedModel->markConsumed((int) $seed['id'], $rnc, $token);
     $seedModel->saveToken($token, $rnc, 3600);
 
+    // Flat format — DGII expects token at root level, same as their own auth endpoint
     echo json_encode([
-        'status' => true,
-        'data' => [
-            'token' => $token,
-            'expedido' => $expedido,
-            'expira' => $expira,
-            'rnc' => $rnc,
-        ],
+        'token'    => $token,
+        'expira'   => $expira,
+        'expedido' => $expedido,
     ]);
 }
 
