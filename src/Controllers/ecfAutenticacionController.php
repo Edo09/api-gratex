@@ -82,13 +82,16 @@ function handleValidarSemillaInternal(): void
     $validator = new IncomingXmlValidator();
     $validation = $validator->loadAndValidate($xml);
     if (!$validation['ok']) {
-        autenticacionResponderError($validation['firma_detalle'] ?? 'XML invalido o firma no verificable.', 401);
+        $det = $validation['firma_detalle'] ?? 'XML invalido o firma no verificable.';
+        error_log('[ecfAutenticacion] ValidarSemilla 401 firma: ' . $det);
+        autenticacionResponderError($det, 401);
         return;
     }
 
     $document = $validation['document'];
     $valor = $validator->getText($document, 'valor') ?? $validator->getText($document, 'Valor');
     if ($valor === null) {
+        error_log('[ecfAutenticacion] ValidarSemilla 422: no valor en XML');
         autenticacionResponderError('No se pudo extraer el valor de la semilla del XML.', 422);
         return;
     }
@@ -96,20 +99,24 @@ function handleValidarSemillaInternal(): void
     $seedModel = new authSeedModel();
     $seed = $seedModel->getBySeedValue($valor);
     if (!$seed) {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: semilla no reconocida, valor=' . $valor);
         autenticacionResponderError('Semilla no reconocida.', 401);
         return;
     }
     if ($seed['consumida_at'] !== null) {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: semilla ya consumida, id=' . $seed['id']);
         autenticacionResponderError('La semilla ya fue consumida.', 401);
         return;
     }
     if (strtotime($seed['expira_at']) < time()) {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: semilla expirada, id=' . $seed['id']);
         autenticacionResponderError('La semilla expiro.', 401);
         return;
     }
 
     $rnc = $validation['firma_rnc'] ?? '';
     if ($rnc === '') {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: RNC vacio, subject=' . json_encode($validation['firma_subject'] ?? []));
         autenticacionResponderError('No se pudo extraer RNC del certificado firmante.', 401);
         return;
     }
