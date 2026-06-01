@@ -187,12 +187,14 @@ function ecfRecepcionRequireBearer(): array
         $auth = (string) $_SERVER['HTTP_AUTHORIZATION'];
     }
     if (!preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
+        error_log('[ecfRecepcion] 401: no Bearer token. auth_header=' . substr($auth, 0, 80));
         respondRecepcion(false, 'Bearer token requerido en Authorization.', 401);
         return ['ok' => false];
     }
     $token = trim($m[1]);
     $valid = (new authSeedModel())->findValidToken($token);
     if (!$valid) {
+        error_log('[ecfRecepcion] 401: token invalido o expirado. token_prefix=' . substr($token, 0, 40));
         respondRecepcion(false, 'Bearer token invalido o expirado.', 401);
         return ['ok' => false];
     }
