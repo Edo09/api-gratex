@@ -245,6 +245,22 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * MontoTotal para el QR del timbre. La DGII valida el timbre contra el
+     * <MontoTotal> del e-CF firmado, por lo que se extrae del XML emitido
+     * (xml_firmado) en vez del campo `total`, que puede no incluir el ITBIS
+     * (p.ej. filas sembradas con el monto gravado). Cae al campo `total` solo
+     * cuando no hay XML (preview/legacy).
+     */
+    private function montoTotalParaTimbre(): string
+    {
+        $xml = $this->factura['xml_firmado'] ?? '';
+        if ($xml !== '' && preg_match('/<MontoTotal>\s*([0-9.]+)\s*<\/MontoTotal>/i', $xml, $m)) {
+            return number_format((float) $m[1], 2, '.', '');
+        }
+        return number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
+    }
+
+    /**
      * Render DGII timbre QR + Codigo de Seguridad + Fecha Firma en el pie de
      * factura (seccion de validacion fiscal, segun norma DGII de Representacion
      * Impresa). Solo renderiza si la factura tiene e_ncf y codigo_seguridad.
@@ -282,7 +298,7 @@ class FacturaPdfGenerator extends FPDF
                 default    => $ambiente,
             };
             $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
-            $monto = number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
+            $monto = $this->montoTotalParaTimbre();
             $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
 
             $isFc = ($this->factura['tipo_ecf'] ?? '') === '32'
