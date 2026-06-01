@@ -1,13 +1,6 @@
 # Disable automatic directory slash redirect that breaks CORS preflight
 DirectorySlash Off
 
-# Disable ModSecurity for DGII e-CF callback endpoints (signed XML payloads)
-<IfModule mod_security2.c>
-    <If "%{REQUEST_URI} =~ m|^/api/ecf/|">
-        SecRuleEngine Off
-    </If>
-</IfModule>
-
 RewriteEngine On
 
 # Allow direct access to existing files (uploads, assets, etc.)
