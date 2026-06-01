@@ -37,10 +37,11 @@ if ($is_root || str_ends_with($endpoint, '/docs') || str_ends_with($endpoint, '/
     exit;
 }
 
-// Extract the first part of the route after the last '/api/' segment
-// This handles: /api/auth, /api/api/auth, and /api/index.php/api/auth
-$parts = explode('/api/', $endpoint);
-$route_part = end($parts);
+// Extract route using the FIRST /api/ occurrence so paths like
+// /api/ecf/autenticacion/fe/autenticacion/api/semilla (DGII callbacks)
+// don't get mis-routed by the second /api/ segment.
+$apiPos = strpos($endpoint, '/api/');
+$route_part = $apiPos !== false ? substr($endpoint, $apiPos + 5) : ltrim($endpoint, '/');
 $route_segments = explode('/', ltrim($route_part, '/'));
 $route = $route_segments[0] ?? 'default';
 
