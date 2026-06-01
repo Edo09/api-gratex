@@ -44,7 +44,9 @@
       "Bash(curl -s \"https://gratex.net/api/facturas/1280/pdf\" -w \"\\\\nHTTP %{http_code} bytes=%{size_download}\\\\n\" -o /tmp/1280.pdf)",
       "Bash(curl -s \"https://gratex.net/api/facturas/1280/xml\" -H \"X-API-KEY: b02ee2c2d04fe124d127867a84a5601d\" -o /tmp/1280.xml -w \"XML HTTP %{http_code} bytes=%{size_download}\\\\n\")",
       "Bash(curl -s \"https://gratex.net/api/facturas?id=1283\" -H \"X-API-KEY: b02ee2c2d04fe124d127867a84a5601d\")",
-      "Bash(php -l src/Controllers/facturaController.php)"
+      "Bash(php -l src/Controllers/facturaController.php)",
+      "Bash(echo '=== __TRACKED_VAR__ ===')",
+      "Bash(python3 -c ' *)"
     ]
   }
 }

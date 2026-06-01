@@ -8,8 +8,8 @@ require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.ph
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
 
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$isSemillaRequest = preg_match('#/autenticacion/semilla/?$#i', $endpoint);
-$isValidarRequest = preg_match('#/autenticacion/(validarsemilla|ValidacionCertificado)/?$#i', $endpoint);
+$isSemillaRequest = preg_match('#/semilla/?$#i', $endpoint);
+$isValidarRequest = preg_match('#/(validarsemilla|ValidacionCertificado)/?$#i', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
@@ -45,8 +45,17 @@ function handleSemilla(): void
     $fecha = (new DateTime())->format('Y-m-d\TH:i:s');
     $xml = autenticacionConstruirXmlSemilla($seedValue, $fecha);
 
-    (new authSeedModel())->create($seedValue, $xml, 300);
+    try {
+        (new authSeedModel())->create($seedValue, $xml, 300);
+    } catch (Throwable $e) {
+        error_log('[ecfAutenticacion] Semilla DB error: ' . $e->getMessage());
+    }
 
+    // Discard any accidental output (PHP warnings, notices) before sending XML
+    if (ob_get_level() > 0) {
+        ob_clean();
+    }
+    header('Content-Type: text/xml; charset=utf-8');
     echo $xml;
 }
 
