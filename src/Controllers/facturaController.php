@@ -48,7 +48,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             break;
         }
         if (isset($_GET['id'])) {
-            $facturas = $facturaModel->getFacturas($_GET['id']);
+            $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturas($_GET['id']));
             echo json_encode(['status' => true, 'data' => $facturas]);
             break;
         }
@@ -56,7 +56,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
         $query = $_GET['query'] ?? null;
         $offset = ($page - 1) * $pageSize;
-        $facturas = $facturaModel->getFacturasPaginated($offset, $pageSize, $query);
+        $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturasPaginated($offset, $pageSize, $query));
         $total = $facturaModel->getFacturasCount($query);
         echo json_encode([
             'status' => true,
@@ -485,6 +485,27 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
     header('Content-Disposition: attachment; filename="Factura_' . $filenameBase . '.pdf"');
     header('Content-Length: ' . strlen($pdfContent));
     echo $pdfContent;
+}
+
+/**
+ * Agrega totales derivados (no son columnas) a la respuesta de factura,
+ * tomados del e-CF firmado: monto_gravado, monto_exento, total_itbis. El campo
+ * `total` YA incluye el ITBIS (es el MontoTotal del e-CF). Sin XML (facturas
+ * legacy/preview) los derivados quedan en null.
+ */
+function enrichFacturaTotales(array $factura): array
+{
+    $xml = $factura['xml_firmado'] ?? '';
+    $get = static function (string $tag) use ($xml): ?string {
+        if ($xml !== '' && preg_match('/<' . $tag . '>\s*([0-9.]+)\s*<\/' . $tag . '>/i', $xml, $m)) {
+            return number_format((float) $m[1], 2, '.', '');
+        }
+        return null;
+    };
+    $factura['monto_gravado'] = $get('MontoGravadoTotal');
+    $factura['monto_exento']  = $get('MontoExento');
+    $factura['total_itbis']   = $get('TotalITBIS');
+    return $factura;
 }
 
 function computeTotales(array $items): array
