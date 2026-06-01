@@ -31,6 +31,26 @@ class FacturaPdfGenerator extends FPDF
     private $aligns;
     private $lineHeight;
     private $clientData;
+    private $emisorConfig = null;
+    private $emisorConfigLoaded = false;
+
+    /**
+     * Datos del emisor desde emisor_config (cacheados: Header() se invoca por
+     * pagina). Asi la Representacion Impresa (RNC, direccion, telefono, correo)
+     * sigue al emisor_config en vez de quedar fija en codigo.
+     */
+    private function emisorConfig(): array
+    {
+        if (!$this->emisorConfigLoaded) {
+            try {
+                $this->emisorConfig = (new EmisorConfigModel())->get() ?: [];
+            } catch (\Throwable $e) {
+                $this->emisorConfig = [];
+            }
+            $this->emisorConfigLoaded = true;
+        }
+        return $this->emisorConfig;
+    }
 
     /**
      * Set the factura data
@@ -210,13 +230,19 @@ class FacturaPdfGenerator extends FPDF
         if (file_exists($logoPath)) {
             $this->Image($logoPath, 8, 10, 65);
         }
-        // Company info below logo
+        // Datos del emisor desde emisor_config (fallback a los valores de gratex
+        // si la config no esta disponible, p.ej. en previews sin BD).
+        $emisor = $this->emisorConfig();
+        $direccion = $emisor['direccion'] ?? 'Calle José Nicolás Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.';
+        $telefono  = $emisor['telefono'] ?? '809-681-5141';
+        $correo    = $emisor['correo'] ?? 'info@gratex.net';
+        $rncEmisor = $emisor['rnc'] ?? '131256432';
+
         $this->SetFont('Arial', '', 9);
         $this->SetY(30);
-        $this->Cell(70, 3.8, $this->convertEncoding('Calle José Nicolás Casimiro #85'), 0, 1, 'L');
-        $this->Cell(70, 3.8, 'Ensanche Espaillat, Santo Domingo, D.N.', 0, 1, 'L');
-        $this->Cell(70, 3.8, $this->convertEncoding('Tel.: 809-681-5141 - E-mail:info@gratex.net'), 0, 1, 'L');
-        $this->Cell(70, 3.8, 'RNC: 131256432', 0, 1, 'L');
+        $this->MultiCell(70, 3.8, $this->convertEncoding($direccion), 0, 'L');
+        $this->Cell(70, 3.8, $this->convertEncoding('Tel.: ' . $telefono . ' - E-mail: ' . $correo), 0, 1, 'L');
+        $this->Cell(70, 3.8, 'RNC: ' . $rncEmisor, 0, 1, 'L');
     }
 
     /**
@@ -258,6 +284,25 @@ class FacturaPdfGenerator extends FPDF
             return number_format((float) $m[1], 2, '.', '');
         }
         return number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
+    }
+
+    /**
+     * Razon social del comprador tal como se emitio en el e-CF firmado, para que
+     * el PDF coincida con lo que validó la DGII. Evita divergencias si el registro
+     * del cliente cambia tras emitir, o si la emision uso un override distinto al
+     * cliente vinculado. Null si no hay XML o el nodo no existe (preview / comprador
+     * ausente), dejando que el llamador caiga al registro del cliente.
+     */
+    private function razonSocialCompradorDesdeXml(): ?string
+    {
+        $xml = $this->factura['xml_firmado'] ?? '';
+        if ($xml !== '' && preg_match('/<RazonSocialComprador>([^<]*)<\/RazonSocialComprador>/i', $xml, $m)) {
+            $val = html_entity_decode(trim($m[1]), ENT_QUOTES | ENT_XML1, 'UTF-8');
+            if ($val !== '') {
+                return $val;
+            }
+        }
+        return null;
     }
 
     /**
@@ -312,12 +357,7 @@ class FacturaPdfGenerator extends FPDF
         $codigoSeguridad = $this->factura['codigo_seguridad'] ?? '';
         $isPreview = ($eNcf === '' || $codigoSeguridad === '');
 
-        $emisor = [];
-        try {
-            $emisor = (new EmisorConfigModel())->get() ?: [];
-        } catch (\Throwable $e) {
-            $emisor = [];
-        }
+        $emisor = $this->emisorConfig();
         $rncEmisor = $emisor['rnc'] ?? '';
 
         if ($isPreview) {
@@ -524,8 +564,11 @@ class FacturaPdfGenerator extends FPDF
                 $this->SetX(-73);
                 $this->Cell(70, 3.8, $this->convertEncoding($labelId . $rnc), 0, 1, 'L');
             }
-            // Sin razon social (E32 Consumo sin comprador) se muestra "Consumidor Final".
-            $razonSocial = $companyName !== '' ? $companyName : ($clientName !== '' ? $clientName : 'Consumidor Final');
+            // Prioridad: la razon social emitida en el e-CF firmado (lo que validó
+            // la DGII). Sin XML cae al registro del cliente y, en ultimo caso (E32
+            // Consumo sin comprador), a "Consumidor Final".
+            $razonSocial = $this->razonSocialCompradorDesdeXml()
+                ?? ($companyName !== '' ? $companyName : ($clientName !== '' ? $clientName : 'Consumidor Final'));
             $this->SetX(-73);
             $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $razonSocial), 0, 'L');
             $phoneContact = trim($phone);
