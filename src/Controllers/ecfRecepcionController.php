@@ -219,8 +219,8 @@ function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, 
         : '';
 
     $unsigned = '<?xml version="1.0" encoding="UTF-8"?>' .
-        '<AECF>' .
-            '<DetalleAcuseDeRecibo>' .
+        '<ARECF>' .
+            '<DetalleAcusedeRecibo>' .
                 '<Version>1.0</Version>' .
                 '<RNCEmisor>' . htmlspecialchars($rncEmisor) . '</RNCEmisor>' .
                 '<RNCComprador>' . htmlspecialchars($rncComprador) . '</RNCComprador>' .
@@ -228,8 +228,8 @@ function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, 
                 '<Estado>' . $estado . '</Estado>' .
                 $motivoXml .
                 '<FechaHoraAcuseRecibo>' . htmlspecialchars($fecha) . '</FechaHoraAcuseRecibo>' .
-            '</DetalleAcuseDeRecibo>' .
-        '</AECF>';
+            '</DetalleAcusedeRecibo>' .
+        '</ARECF>';
 
     try {
         $certPath = getenv('DGII_ECF_CERT_PATH') ?: '';
