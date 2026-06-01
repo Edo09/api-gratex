@@ -519,12 +519,15 @@ class FacturaPdfGenerator extends FPDF
         $tipoEcfReceptor = (string) ($this->factura['tipo_ecf'] ?? '');
         if ($tipoEcfReceptor !== '43') {
             $labelId = $tipoEcfReceptor === '47' ? 'Identificación Tributaria: ' : 'RNC Cliente: ';
-            if ($tipoEcfReceptor !== '47' || $rnc !== '') {
+            // Sin RNC (p.ej. E32 Consumo sin comprador) no se imprime la linea.
+            if ($rnc !== '') {
                 $this->SetX(-73);
                 $this->Cell(70, 3.8, $this->convertEncoding($labelId . $rnc), 0, 1, 'L');
             }
+            // Sin razon social (E32 Consumo sin comprador) se muestra "Consumidor Final".
+            $razonSocial = $companyName !== '' ? $companyName : ($clientName !== '' ? $clientName : 'Consumidor Final');
             $this->SetX(-73);
-            $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $companyName), 0, 'L');
+            $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $razonSocial), 0, 'L');
             $phoneContact = trim($phone);
             if ($clientName) {
                 $phoneContact .= ($phoneContact !== '' ? ', ' : '') . 'Att. ' . $clientName;

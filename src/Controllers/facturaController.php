@@ -115,7 +115,11 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         respond(false, 'tipo_ecf requerido (31, 32, 33, 34, 41, 43, 44, 45, 46, 47)', 422);
         return;
     }
-    if (!$clientId) {
+    // E32 (Consumo) y E43 (Gastos Menores) pueden emitirse sin comprador: el e-CF
+    // no exige RNCComprador (ver ECFXmlBuilder::requiereComprador). Para el resto
+    // el client_id sigue siendo obligatorio.
+    $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true);
+    if (!$clientId && !$permiteSinCliente) {
         respond(false, 'client_id requerido', 422);
         return;
     }
@@ -124,14 +128,17 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
-    $clients = $clientModel->getClients($clientId);
-    if (empty($clients)) {
-        respond(false, 'Cliente no encontrado', 404);
-        return;
+    $client = null;
+    if ($clientId) {
+        $clients = $clientModel->getClients($clientId);
+        if (empty($clients)) {
+            respond(false, 'Cliente no encontrado', 404);
+            return;
+        }
+        $client = $clients[0];
     }
-    $client = $clients[0];
 
-    if ($tipoEcf === '31' && empty($client['rnc'])) {
+    if ($tipoEcf === '31' && empty($client['rnc'] ?? null)) {
         respond(false, 'El cliente no tiene RNC y es requerido para e-CF tipo 31 (Credito Fiscal)', 422);
         return;
     }
@@ -147,7 +154,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         $totales = array_merge($totales, $totalesOverride);
     }
 
-    $compradorBase = [
+    $compradorBase = $client ? [
         'rnc' => $client['rnc'] ?? null,
         'razon_social' => $client['razon_social'] ?? $client['company_name'] ?? $client['client_name'],
         'direccion' => $client['direccion'] ?? null,
@@ -155,7 +162,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'provincia' => $client['provincia'] ?? null,
         'correo' => $client['email'] ?? null,
         'contacto' => $client['client_name'] ?? null,
-    ];
+    ] : [];
     $compradorOverride = is_array($input['comprador'] ?? null) ? $input['comprador'] : [];
     $comprador = $strictInput
         ? $compradorOverride
@@ -201,7 +208,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'no_factura' => $result['e_ncf'],
         'date' => $input['date'] ?? date('Y-m-d H:i:s'),
         'client_id' => $clientId,
-        'client_name' => $client['client_name'] ?? '',
+        'client_name' => $client['client_name'] ?? 'Consumidor Final',
         'total' => $totales['monto_total'],
         'user_id' => $input['user_id'] ?? null,
         // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
@@ -452,9 +459,13 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
     require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
     $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
     $pdf->setFactura($factura);
-    $clientData = $clientModel->getClients($factura['client_id']);
-    if (!empty($clientData)) {
-        $pdf->setClientData($clientData[0]);
+    // client_id puede ser null (E32 Consumo / E43 sin comprador). getClients(null)
+    // devolveria TODOS los clientes, asi que solo se consulta cuando hay id.
+    if (!empty($factura['client_id'])) {
+        $clientData = $clientModel->getClients($factura['client_id']);
+        if (!empty($clientData)) {
+            $pdf->setClientData($clientData[0]);
+        }
     }
     $pdfContent = $pdf->generatePdf();
     $filenameBase = $factura['e_ncf'] ?? $factura['no_factura'];
