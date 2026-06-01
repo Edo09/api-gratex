@@ -261,6 +261,43 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Totales para el pie de la Representacion Impresa, tomados del e-CF firmado
+     * para que cuadren con lo emitido a la DGII. Evita recalcular el ITBIS a
+     * ciegas al 18% sobre items exentos/0%/16%. Devuelve null si no hay XML
+     * (preview), dejando que el llamador caiga a la suma por linea.
+     * @return array{subtotal: float, exento: float, itbis: float, total: float}|null
+     */
+    private function totalesParaImpresion(): ?array
+    {
+        $xml = $this->factura['xml_firmado'] ?? '';
+        if ($xml === '') {
+            return null;
+        }
+        $get = static function (string $tag) use ($xml): ?float {
+            if (preg_match('/<' . $tag . '>\s*([0-9.]+)\s*<\/' . $tag . '>/i', $xml, $m)) {
+                return (float) $m[1];
+            }
+            return null;
+        };
+        $total = $get('MontoTotal');
+        if ($total === null) {
+            return null;
+        }
+        $itbis  = $get('TotalITBIS') ?? 0.0;
+        $exento = $get('MontoExento') ?? 0.0;
+        $gravado = $get('MontoGravadoTotal');
+        if ($gravado === null) {
+            $gravado = $total - $itbis - $exento;
+        }
+        return [
+            'subtotal' => round($gravado, 2),
+            'exento'   => round($exento, 2),
+            'itbis'    => round($itbis, 2),
+            'total'    => round($total, 2),
+        ];
+    }
+
+    /**
      * Render DGII timbre QR + Codigo de Seguridad + Fecha Firma en el pie de
      * factura (seccion de validacion fiscal, segun norma DGII de Representacion
      * Impresa). Solo renderiza si la factura tiene e_ncf y codigo_seguridad.
@@ -548,6 +585,7 @@ class FacturaPdfGenerator extends FPDF
         $motivoPendiente = $razonNota;
 
         $subtotal = 0;
+        $itbisLineSum = 0;
         if (isset($this->factura['items']) && is_array($this->factura['items'])) {
             foreach ($this->factura['items'] as $item) {
                 $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
@@ -562,6 +600,7 @@ class FacturaPdfGenerator extends FPDF
                 $itbis = $item['itbis_amount'] ?? ($unitario * 0.18);
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
                 $subtotal += (float) $lineSubtotal;
+                $itbisLineSum += (float) $itbis;
 
                 $this->Row([
                     $cantidad,
@@ -579,32 +618,39 @@ class FacturaPdfGenerator extends FPDF
             $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoPendiente), '', '', '']);
         }
 
-        $itbistotal = $subtotal * 0.18;
+        // Totales del e-CF firmado (cuadran con lo emitido a la DGII). Sin XML
+        // (preview) cae a la suma de ITBIS por linea, nunca a un 18% ciego sobre
+        // el subtotal (que inventaba ITBIS en facturas exentas/0%/16%).
+        $impresion = $this->totalesParaImpresion();
+        $subtotalGravado = $impresion['subtotal'] ?? $subtotal;
+        $montoExento     = $impresion['exento'] ?? 0.0;
+        $itbistotal      = $impresion['itbis'] ?? $itbisLineSum;
+        $totalGeneral    = $impresion['total'] ?? ($subtotalGravado + $itbistotal);
 
         // Totals section (bottom right) — etiquetas exactas exigidas por la DGII:
-        // Subtotal Gravado, Total ITBIS, Total.
+        // Subtotal Gravado, Monto Exento (solo si aplica), Total ITBIS, Total.
+        // 'Monto Exento' se omite cuando es 0 para no recargar facturas gravadas.
+        $filasTotales = [['Subtotal Gravado', $subtotalGravado, false]];
+        if ($montoExento > 0) {
+            $filasTotales[] = ['Monto Exento', $montoExento, false];
+        }
+        $filasTotales[] = ['Total ITBIS', $itbistotal, false];
+        $filasTotales[] = ['Total', $totalGeneral, true];
+
         $this->SetMargins(10, 0, 10);
         $this->SetFillColor(240, 240, 240);
-        $this->SetFont('Arial', '', 9);
 
-        // Subtotal Gravado
-        $this->SetY(-50);
-        $this->SetX(-58);
-        $this->Cell(28, 5, $this->convertEncoding('Subtotal Gravado'), 1, 0, 'R', 1);
-        $this->Cell(20, 5, number_format($subtotal, 2), 1, 1, 'R', 1);
-
-        // Total ITBIS
-        $this->SetY(-45);
-        $this->SetX(-58);
-        $this->Cell(28, 5, 'Total ITBIS', 1, 0, 'R', 1);
-        $this->Cell(20, 5, number_format($itbistotal, 2), 1, 1, 'R', 1);
-
-        // Total
-        $this->SetY(-40);
-        $this->SetX(-58);
-        $this->SetFont('Arial', 'B', 9.5);
-        $this->Cell(28, 5, 'Total', 1, 0, 'R', 1);
-        $this->Cell(20, 5, number_format($subtotal + $itbistotal, 2), 1, 1, 'R', 1);
+        // Ancladas al pie: la fila 'Total' queda en Y=-40 y las demas se apilan
+        // hacia arriba (5 mm c/u), igual que antes al agregar la fila Exento.
+        $y = -40 - 5 * (count($filasTotales) - 1);
+        foreach ($filasTotales as [$label, $valor, $bold]) {
+            $this->SetFont('Arial', $bold ? 'B' : '', $bold ? 9.5 : 9);
+            $this->SetY($y);
+            $this->SetX(-58);
+            $this->Cell(28, 5, $this->convertEncoding($label), 1, 0, 'R', 1);
+            $this->Cell(20, 5, number_format($valor, 2), 1, 1, 'R', 1);
+            $y += 5;
+        }
 
         // QR del timbre al final, en la pagina actual (ultima), junto a las firmas.
         $this->addQRTimbre();
