@@ -176,11 +176,15 @@ class ECFXmlBuilder
         if ($tipoPago !== null && $tipoPago !== '' && (string) $tipoPago !== '0') {
             $idDoc->appendChild($doc->createElement('TipoPago', (string) $tipoPago));
         }
-        // FechaLimitePago solo es valida con TipoPago=2 (Credito). DGII rechaza el
-        // e-CF ("FechaLimitePago ... no es valido") si se informa con Contado (1) o
-        // Gratuito (3). Por eso solo se incluye cuando el pago es a credito.
-        if (!empty($data['fecha_limite_pago']) && (string) $tipoPago === '2') {
-            $idDoc->appendChild($doc->createElement('FechaLimitePago', $this->formatDate($data['fecha_limite_pago'])));
+        // FechaLimitePago aplica SOLO con TipoPago=2 (Credito) y ahi DGII la EXIGE
+        // (rechaza "FechaLimitePago ... no es valido" si falta). Con Contado (1) o
+        // Gratuito (3) no debe enviarse. Si es credito y el front no la manda, se
+        // deriva FechaEmision + 30 dias (norma DGII: debe ser >= FechaEmision).
+        if ((string) $tipoPago === '2') {
+            $fechaLimite = !empty($data['fecha_limite_pago'])
+                ? $data['fecha_limite_pago']
+                : $this->fechaLimitePagoPorDefecto($data);
+            $idDoc->appendChild($doc->createElement('FechaLimitePago', $this->formatDate($fechaLimite)));
         }
         $this->appendIfNotEmpty($doc, $idDoc, 'TerminoPago', $data['termino_pago'] ?? '');
         $this->appendFormasPago($doc, $idDoc, $data['formas_pago'] ?? []);
@@ -622,6 +626,17 @@ class ECFXmlBuilder
         $node = $doc->createElement($name);
         $node->appendChild($doc->createTextNode($value));
         return $node;
+    }
+
+    /**
+     * FechaLimitePago por defecto para e-CF a credito (TipoPago=2) cuando el
+     * emisor no la envia: FechaEmision + 30 dias. DGII exige que sea >= FechaEmision.
+     * Devuelve formato d-m-Y (lo normaliza luego formatDate).
+     */
+    private function fechaLimitePagoPorDefecto(array $data): string
+    {
+        $ts = strtotime((string) ($data['fecha_emision'] ?? '')) ?: time();
+        return date('d-m-Y', strtotime('+30 days', $ts));
     }
 
     private function formatDate(string $date): string
