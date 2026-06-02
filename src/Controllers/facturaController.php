@@ -168,6 +168,17 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         ? $compradorOverride
         : array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
 
+    // No se puede facturar a si mismo: el RNCComprador no puede ser el RNC del
+    // emisor. Cubre tanto el override del body como el RNC tomado del cliente.
+    $compradorRnc = (string) ($comprador['rnc'] ?? '');
+    if ($compradorRnc !== '') {
+        $emisorRnc = (string) ((new EmisorConfigModel())->get()['rnc'] ?? '');
+        if ($emisorRnc !== '' && $compradorRnc === $emisorRnc) {
+            respond(false, 'El RNC del comprador (' . $compradorRnc . ') no puede ser igual al RNC del emisor; no se puede facturar a si mismo.', 422);
+            return;
+        }
+    }
+
     $payload = [
         'tipo_ecf' => $tipoEcf,
         'e_ncf' => $input['e_ncf'] ?? null,
