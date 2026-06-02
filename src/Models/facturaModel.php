@@ -829,6 +829,25 @@ class facturaModel
                  ORDER BY ns.type"
             )->fetchAll(PDO::FETCH_ASSOC);
 
+            // Si el ambiente activo aun no tiene secuencias NCF (p.ej. testecf sin
+            // migrar), devolvemos todos los tipos e-CF en 0 en vez de una lista
+            // vacia, para que el front muestre "0" y no interprete "sin datos".
+            // total_emitidos se toma de $porTipo (ya consultado para este ambiente).
+            if (empty($secuencias)) {
+                $emitidosPorTipo = [];
+                foreach ($porTipo as $t) {
+                    $emitidosPorTipo['E' . $t['tipo_ecf']] = (int) $t['total'];
+                }
+                $secuencias = array_map(
+                    fn($tipo) => [
+                        'type' => 'E' . $tipo,
+                        'secuencia_actual' => 0,
+                        'total_emitidos' => $emitidosPorTipo['E' . $tipo] ?? 0,
+                    ],
+                    ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47']
+                );
+            }
+
             return [
                 'resumen'   => $resumen,
                 'por_tipo'  => $porTipo,
