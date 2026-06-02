@@ -5,6 +5,7 @@
 //   GET    /api/facturas-simples/{id}          -> una factura con sus lineas
 //   GET    /api/facturas-simples?id={id}       -> idem
 //   POST   /api/facturas-simples              -> crear
+//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64)
 //   PUT    /api/facturas-simples/{id}          -> actualizar (id tambien valido en el body)
 //   DELETE /api/facturas-simples/{id}          -> eliminar (id tambien valido en el body)
 //
@@ -36,6 +37,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 // Id opcional desde la ruta /facturas-simples/{id}
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $pathId = preg_match('#/facturas-simples/(\d+)#', $path, $m) ? (int) $m[1] : null;
+// POST /api/facturas-simples/preview -> PDF previo (sin guardar). "preview" no
+// es numerico, asi que nunca colisiona con la ruta /{id}.
+$isPreview = (bool) preg_match('#/facturas-simples/preview$#', $path);
 
 function fsBody(): array
 {
@@ -61,6 +65,107 @@ function fsResolveClientName(array $body, clientModel $clientModel): array
         }
     }
     return $body;
+}
+
+/**
+ * Normaliza las lineas del body al formato que entiende FacturaPdfGenerator
+ * (description/amount/quantity/subtotal/itbis_amount). Misma forma que persiste
+ * facturaModel::createFacturaSimple, para que el preview se vea igual al guardado.
+ */
+function fsMapPreviewItems(array $items): array
+{
+    $mapped = [];
+    foreach ($items as $raw) {
+        $raw = (array) $raw;
+        $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
+        $amount   = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+        $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
+            ? (float) $raw['subtotal']
+            : round($quantity * $amount, 2);
+        $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
+            ? (float) $raw['itbis_amount']
+            : 0.0;
+        $mapped[] = [
+            'description'  => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
+            'amount'       => $amount,
+            'quantity'     => $quantity,
+            'subtotal'     => $subtotal,
+            'itbis_amount' => $itbis,
+        ];
+    }
+    return $mapped;
+}
+
+/**
+ * POST /api/facturas-simples/preview
+ * Genera el PDF de una factura simple desde el body, SIN guardarla. Como no es
+ * un e-CF (tipo_ecf null, sin e_ncf) el generador estampa el timbre "PREVIEW -
+ * Sin validez fiscal". Devuelve base64 por defecto, o el PDF crudo con
+ * ?format=download.
+ */
+function fsHandlePreview(clientModel $clientModel): void
+{
+    $body = fsBody();
+
+    if (empty($body['client_id']) && empty($body['client_name'])) {
+        fsRespond(false, 'client_id o client_name requerido', 422);
+        return;
+    }
+    if (!isset($body['items']) || !is_array($body['items']) || count($body['items']) === 0) {
+        fsRespond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+        return;
+    }
+
+    // Si llega client_id se completan los datos desde la BD; si no, se arma uno
+    // minimo con client_name (igual que el create de simples acepta ambos).
+    $client = [];
+    if (!empty($body['client_id'])) {
+        $clients = $clientModel->getClients($body['client_id']);
+        if (!empty($clients)) {
+            $client = $clients[0];
+        }
+    }
+
+    $items = fsMapPreviewItems($body['items']);
+    $total = isset($body['total']) && $body['total'] !== ''
+        ? (float) $body['total']
+        : array_reduce($items, static fn($c, $it) => $c + $it['subtotal'] + $it['itbis_amount'], 0.0);
+
+    $factura = [
+        'no_factura'       => $body['no_factura'] ?? 'PREVIEW',
+        'e_ncf'            => null,   // factura simple: nunca e-CF -> timbre PREVIEW
+        'codigo_seguridad' => null,
+        'tipo_ecf'         => null,
+        'date'             => $body['date'] ?? date('Y-m-d'),
+        'total'            => round($total, 2),
+        'client_id'        => $body['client_id'] ?? null,
+        'client_name'      => $body['client_name'] ?? ($client['client_name'] ?? ''),
+        'company_name'     => $client['company_name'] ?? ($body['client_name'] ?? null),
+        'items'            => $items,
+    ];
+
+    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
+    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+    $pdf->setFactura($factura);
+    if (!empty($client)) {
+        $pdf->setClientData($client);
+    }
+    $pdfContent = $pdf->generatePdf();
+
+    $format = $_GET['format'] ?? $body['format'] ?? 'base64';
+    if ($format === 'download') {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="Preview_factura_simple.pdf"');
+        header('Content-Length: ' . strlen($pdfContent));
+        echo $pdfContent;
+        return;
+    }
+
+    fsRespond(true, [
+        'filename'  => 'Preview_factura_simple.pdf',
+        'content'   => base64_encode($pdfContent),
+        'mime_type' => 'application/pdf',
+    ]);
 }
 
 switch ($_SERVER['REQUEST_METHOD']) {
@@ -94,6 +199,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'POST':
+        if ($isPreview) {
+            fsHandlePreview($clientModel);
+            break;
+        }
         $body = fsBody();
         // no_factura NO se espera del front: el backend lo genera (ver
         // facturaModel::createFacturaSimple -> nextSimpleFacturaNumber).
