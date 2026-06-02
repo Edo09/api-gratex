@@ -55,7 +55,9 @@
       "Bash(curl -s -X POST \"https://gratex.net/api/ecf/recepcion/fe/recepcion/api/ecf\" -H \"Content-Type: application/xml\" -H \"Authorization: Bearer faketoken\" -d '<?xml version=\"1.0\"?><ECF><test/></ECF>')",
       "PowerShell(php -l src/Controllers/facturaSimpleController.php)",
       "PowerShell(php -l src/Utils/FacturaPdfGenerator.php)",
-      "PowerShell(php -l src/Models/facturaModel.php)"
+      "PowerShell(php -l src/Models/facturaModel.php)",
+      "PowerShell(php -l src/Models/ncfModel.php)",
+      "PowerShell(php -l src/Utils/FacturacionElectronica/ECFEmissionService.php)"
     ]
   }
 }

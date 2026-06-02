@@ -658,6 +658,33 @@ class facturaModel
                 $fechaNcfModificado = $dt ? $dt->format('Y-m-d') : null;
             }
 
+            // Reintento de un e-CF RECHAZADO: cuando DGII rechaza sin consumir la
+            // secuencia (secuenciaUtilizada=false, p.ej. codigo 135) el contador se
+            // revierte y el mismo e-NCF se reutiliza. El registro rechazado anterior
+            // SE CONSERVA (historial); se inserta el nuevo intento como otra fila.
+            // La unicidad la garantiza el indice uk_e_ncf_vigente (migracion 007):
+            // solo puede haber un e-CF NO rechazado por e-NCF. Aqui solo validamos
+            // para devolver un error claro -en vez del error SQL crudo- cuando ya
+            // existe un e-CF vigente (aceptado/en proceso) con ese mismo e-NCF.
+            $estadosRechazo = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
+            $estadoNuevo = (string) ($ecf['estado'] ?? 'PENDIENTE');
+            if (!empty($ecf['e_ncf']) && !in_array($estadoNuevo, $estadosRechazo, true)) {
+                $prev = $this->conexion->prepare(
+                    "SELECT id, estado_dgii FROM facturas
+                     WHERE e_ncf = :encf
+                       AND estado_dgii NOT IN ('RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO')
+                     LIMIT 1"
+                );
+                $prev->execute([':encf' => $ecf['e_ncf']]);
+                $prevRow = $prev->fetch(PDO::FETCH_ASSOC);
+                if ($prevRow) {
+                    $this->conexion->rollBack();
+                    return ['error', 'Ya existe una factura vigente con e-NCF ' . $ecf['e_ncf']
+                        . ' en estado ' . ($prevRow['estado_dgii'] ?? 'desconocido')
+                        . '; no se puede re-emitir.'];
+                }
+            }
+
             $sql = 'INSERT INTO facturas
                 (no_factura, date, client_id, client_name, total, NCF, user_id,
                  tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,

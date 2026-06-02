@@ -123,4 +123,30 @@ class ncfModel
             return null;
         }
     }
+
+    /**
+     * Revierte (-1) el contador de un e-CF cuando DGII rechaza SIN consumir la
+     * secuencia (secuenciaUtilizada=false, p.ej. codigo 135 "No existen rangos de
+     * secuencias disponibles"): asi el mismo e-NCF se reutiliza en el proximo
+     * intento. Condicional: solo decrementa si el contador sigue en el valor que
+     * se entrego, para no pisar el incremento de otra emision posterior. Devuelve
+     * true si revirtio.
+     */
+    public function rollbackECFSequence(string $type, int $expectedValue, ?string $ambiente = null): bool
+    {
+        if (!preg_match('/^E\d{2}$/', $type) || $expectedValue < 1) {
+            return false;
+        }
+        $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+        try {
+            $upd = $this->conexion->prepare(
+                'UPDATE ncf_sequences SET current_value = current_value - 1
+                 WHERE type = :type AND ambiente = :ambiente AND current_value = :expected'
+            );
+            $upd->execute([':type' => $type, ':ambiente' => $amb, ':expected' => $expectedValue]);
+            return $upd->rowCount() > 0;
+        } catch (PDOException $e) {
+            return false;
+        }
+    }
 }
