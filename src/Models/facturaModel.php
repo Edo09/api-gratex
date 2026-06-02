@@ -403,7 +403,13 @@ class facturaModel
                 $params[':query'] = "%{$query}%";
             }
             $whereClause = 'WHERE ' . implode(' AND ', $conditions);
-            $sql = "SELECT f.*, cl.company_name FROM facturas f
+            // 'description' = descripciones de las lineas concatenadas (resumen para
+            // la lista). GROUP_CONCAT respeta group_concat_max_len (1024 por defecto);
+            // el detalle completo va por GET /facturas-simples/{id}.
+            $sql = "SELECT f.*, cl.company_name,
+                           (SELECT GROUP_CONCAT(fi.description ORDER BY fi.id SEPARATOR '\n')
+                              FROM factura_items fi WHERE fi.factura_id = f.id) AS description
+                    FROM facturas f
                     LEFT JOIN clients cl ON f.client_id = cl.id
                     {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);

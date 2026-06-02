@@ -66,12 +66,17 @@ Query params (todos opcionales):
       "total": "4484.00",
       "NCF": "B0100000123",
       "tipo_ecf": null,
-      "user_id": 4
+      "user_id": 4,
+      "description": "Servicio de diseno grafico\nImpresion full color"
     }
   ],
   "pagination": { "page": 1, "pageSize": 10, "total": 42, "totalPages": 5 }
 }
 ```
+
+> `description` = descripciones de las líneas concatenadas (separadas por `\n`),
+> como resumen para la lista. Puede truncarse en facturas con muchas líneas; el
+> detalle completo (`items[]`) viene en `GET /api/facturas-simples/{id}`.
 
 ---
 
