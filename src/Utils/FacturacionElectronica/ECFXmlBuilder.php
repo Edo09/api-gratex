@@ -176,7 +176,10 @@ class ECFXmlBuilder
         if ($tipoPago !== null && $tipoPago !== '' && (string) $tipoPago !== '0') {
             $idDoc->appendChild($doc->createElement('TipoPago', (string) $tipoPago));
         }
-        if (!empty($data['fecha_limite_pago'])) {
+        // FechaLimitePago solo es valida con TipoPago=2 (Credito). DGII rechaza el
+        // e-CF ("FechaLimitePago ... no es valido") si se informa con Contado (1) o
+        // Gratuito (3). Por eso solo se incluye cuando el pago es a credito.
+        if (!empty($data['fecha_limite_pago']) && (string) $tipoPago === '2') {
             $idDoc->appendChild($doc->createElement('FechaLimitePago', $this->formatDate($data['fecha_limite_pago'])));
         }
         $this->appendIfNotEmpty($doc, $idDoc, 'TerminoPago', $data['termino_pago'] ?? '');
