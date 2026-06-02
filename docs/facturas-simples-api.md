@@ -158,8 +158,10 @@ Body (JSON):
 
 ### POST `/api/facturas-simples/preview` — PDF previo (sin guardar)
 
-Genera el PDF de la factura **desde el body, sin persistirla**. Como no es un
-e-CF, el PDF lleva el timbre **"PREVIEW - Sin validez fiscal"** (sin QR DGII).
+Genera el PDF de la factura **desde el body, sin persistirla**. Usa el diseño
+de **factura NO electrónica**: título "Factura", etiqueta "Factura No." (y "NCF"
+si se envía), **sin** fecha de vencimiento y **sin QR de timbre fiscal DGII**
+(eso es exclusivo del e-CF).
 
 Mismo body que el `POST` de creación (acepta `client_id` **o** `client_name`,
 e `items` con ≥ 1 línea). `no_factura` y `total` son opcionales.

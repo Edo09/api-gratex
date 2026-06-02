@@ -33,6 +33,10 @@ class FacturaPdfGenerator extends FPDF
     private $clientData;
     private $emisorConfig = null;
     private $emisorConfigLoaded = false;
+    // true => factura NO electronica (NCF tradicional / factura simple): se omite
+    // todo lo propio del e-CF (titulo "Comprobante Fiscal Electronico", etiqueta
+    // e-NCF, fecha de vencimiento y QR de timbre DGII).
+    private $noElectronica = false;
 
     /**
      * Datos del emisor desde emisor_config (cacheados: Header() se invoca por
@@ -59,6 +63,16 @@ class FacturaPdfGenerator extends FPDF
     public function setFactura($factura)
     {
         $this->factura = $factura;
+    }
+
+    /**
+     * Marca la factura como NO electronica (NCF tradicional / factura simple).
+     * Cambia el diseño: titulo "Factura", etiqueta "NCF" (o "Factura No."),
+     * sin fecha de vencimiento y sin QR de timbre fiscal DGII.
+     */
+    public function setNoElectronica(bool $v = true)
+    {
+        $this->noElectronica = $v;
     }
 
     /**
@@ -349,6 +363,10 @@ class FacturaPdfGenerator extends FPDF
      */
     private function addQRTimbre(): void
     {
+        // Factura NO electronica: no lleva timbre fiscal DGII (no es un e-CF).
+        if ($this->noElectronica) {
+            return;
+        }
         if (!class_exists('QRcode')) {
             return;
         }
@@ -465,6 +483,9 @@ class FacturaPdfGenerator extends FPDF
      */
     private function tituloDocumento(): string
     {
+        if ($this->noElectronica) {
+            return 'Factura';
+        }
         $tipo = (string) ($this->factura['tipo_ecf'] ?? '');
         $titulos = [
             '31' => 'Factura de Crédito Fiscal Electrónica',
@@ -537,19 +558,33 @@ class FacturaPdfGenerator extends FPDF
         // Right side: titulo dinamico del documento + identificacion del e-CF
         // (e-NCF, fechas) + datos del receptor. Empieza arriba (y=10) junto al logo.
         $hasQR = class_exists('QRcode');
-        $eNcfLabel = $this->factura['e_ncf'] ?? $noFactura;
         $this->SetY($hasQR ? 10 : 30);
         $this->SetX(-73);
         $this->SetFont('Arial', 'B', 11);
         $this->MultiCell(70, 5, $this->convertEncoding($this->tituloDocumento()), 0, 'L');
         $this->Ln(1);
         $this->SetFont('Arial', '', 9);
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, 'e-NCF: ' . $eNcfLabel, 0, 1, 'L');
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
-        $this->SetX(-73);
-        $this->Cell(70, 3.8, 'Fecha de Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
+        if ($this->noElectronica) {
+            // Factura NO electronica: numero interno + NCF tradicional (si lo hay).
+            // Sin etiqueta "e-NCF" ni fecha de vencimiento (eso es propio del e-CF).
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, $this->convertEncoding('Factura No.: ' . $noFactura), 0, 1, 'L');
+            $ncfTradicional = $this->factura['NCF'] ?? $this->factura['ncf'] ?? '';
+            if ($ncfTradicional !== '') {
+                $this->SetX(-73);
+                $this->Cell(70, 3.8, 'NCF: ' . $ncfTradicional, 0, 1, 'L');
+            }
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, $this->convertEncoding('Fecha: ' . $fechaEspanol), 0, 1, 'L');
+        } else {
+            $eNcfLabel = $this->factura['e_ncf'] ?? $noFactura;
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, 'e-NCF: ' . $eNcfLabel, 0, 1, 'L');
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
+            $this->SetX(-73);
+            $this->Cell(70, 3.8, 'Fecha de Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
+        }
         $this->Ln(1);
         // El bloque receptor debe reflejar el e-CF emitido (ver ECFXmlBuilder::
         // requiereComprador/buildComprador):
