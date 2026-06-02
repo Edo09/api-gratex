@@ -1,0 +1,74 @@
+### ============================================================================
+### CRUD de facturas NO electronicas (no e-CF) -> /api/facturas-simples
+### Una "factura simple" es una factura interna que NO se emite a la DGII
+### (tipo_ecf IS NULL). No genera e-NCF ni XML ni QR de timbre.
+### ============================================================================
+
+### Listar facturas simples (paginado)
+GET http://localhost:8000/api/facturas-simples?page=1&pageSize=10
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Buscar por no_factura / NCF / cliente
+GET http://localhost:8000/api/facturas-simples?page=1&pageSize=10&query=Roselin
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Obtener una factura simple con sus lineas (por ruta)
+GET http://localhost:8000/api/facturas-simples/1285
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Obtener una factura simple (por query param, equivalente)
+GET http://localhost:8000/api/facturas-simples?id=1285
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Crear una factura simple
+### - no_factura: requerido. client_id O client_name: requerido. items: requerido.
+### - total: opcional (si se omite, se suma subtotal + itbis de las lineas).
+### - NCF: opcional (NCF tradicional, no e-CF).
+POST http://localhost:8000/api/facturas-simples
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "no_factura": "0001-TEST",
+  "client_id": 3511,
+  "date": "2026-06-01",
+  "NCF": "B0100000123",
+  "items": [
+    { "description": "Servicio de diseno grafico", "quantity": 2, "amount": 1500, "itbis_amount": 540 },
+    { "description": "Impresion full color",        "quantity": 1, "amount": 800,  "itbis_amount": 144 }
+  ]
+}
+
+### Crear una factura simple SIN cliente registrado (solo nombre)
+POST http://localhost:8000/api/facturas-simples
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "no_factura": "0002-TEST",
+  "client_name": "Cliente de mostrador",
+  "items": [
+    { "description": "Fotocopias", "quantity": 50, "amount": 2, "itbis_amount": 0 }
+  ]
+}
+
+### Actualizar una factura simple (id en la ruta o en el body)
+### Campos no enviados conservan su valor. Si se envia "items", reemplaza todas las lineas.
+PUT http://localhost:8000/api/facturas-simples/REEMPLAZAR_ID
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "no_factura": "0001-TEST-MOD",
+  "items": [
+    { "description": "Servicio de diseno (ajustado)", "quantity": 3, "amount": 1500, "itbis_amount": 810 }
+  ]
+}
+
+### Eliminar una factura simple (id en la ruta o en el body)
+DELETE http://localhost:8000/api/facturas-simples/REEMPLAZAR_ID
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Guarda: intentar editar/eliminar un e-CF emitido por esta via -> 400 (rechazado)
+DELETE http://localhost:8000/api/facturas-simples/1277
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
