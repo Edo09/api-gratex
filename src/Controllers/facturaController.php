@@ -215,8 +215,12 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         // en la Representacion Impresa (norma DGII).
         'informacion_referencia' => $payload['informacion_referencia'],
         'items' => array_map(function ($item) {
+            // `descripcion` viene de mapItemsForXml como '' cuando el front solo
+            // envia `nombre_item` (caso comun). `??` no cae con string vacio, asi
+            // que se usa el nombre_item como respaldo explicito para no guardar ''.
+            $descripcion = (string) ($item['descripcion'] ?? '');
             return [
-                'description' => $item['descripcion'] ?? $item['nombre_item'] ?? '',
+                'description' => $descripcion !== '' ? $descripcion : (string) ($item['nombre_item'] ?? ''),
                 'amount' => $item['precio_unitario'] ?? 0,
                 'quantity' => $item['cantidad'] ?? 1,
                 'subtotal' => $item['monto_item'] ?? 0,
