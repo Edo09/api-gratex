@@ -222,6 +222,289 @@ class facturaModel
         }
     }
 
+    // =========================================================================
+    // CRUD de facturas NO electronicas (no e-CF).
+    // Una factura simple es la que tiene `tipo_ecf IS NULL`: una factura interna
+    // que NO se emitio a la DGII. Todos los metodos filtran/validan por ese
+    // discriminador para no tocar nunca un e-CF emitido.
+    // =========================================================================
+
+    /**
+     * Normaliza las lineas recibidas a la forma de factura_items.
+     * @param array $items Lineas crudas (description, quantity, amount, ...)
+     * @return array Lineas normalizadas listas para insertar
+     */
+    private function normalizeSimpleItems(array $items): array
+    {
+        $normalized = [];
+        foreach ($items as $raw) {
+            $raw = (array) $raw;
+            $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
+            $amount = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+            $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
+                ? (float) $raw['subtotal']
+                : round($quantity * $amount, 2);
+            $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
+                ? (float) $raw['itbis_amount']
+                : 0.0;
+            $normalized[] = [
+                'description' => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
+                'amount' => $amount,
+                'quantity' => $quantity,
+                'subtotal' => $subtotal,
+                'indicador_facturacion' => (int) ($raw['indicador_facturacion'] ?? 1),
+                'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 1),
+                'itbis_amount' => $itbis,
+            ];
+        }
+        return $normalized;
+    }
+
+    private function insertSimpleItems(int $facturaId, array $items): void
+    {
+        $sql = 'INSERT INTO factura_items
+                (factura_id, description, amount, quantity, subtotal,
+                 indicador_facturacion, indicador_bien_servicio, itbis_amount)
+                VALUES
+                (:factura_id, :description, :amount, :quantity, :subtotal,
+                 :indicador_facturacion, :indicador_bien_servicio, :itbis_amount)';
+        $stmt = $this->conexion->prepare($sql);
+        foreach ($items as $it) {
+            $stmt->execute([
+                ':factura_id' => $facturaId,
+                ':description' => $it['description'],
+                ':amount' => $it['amount'],
+                ':quantity' => $it['quantity'],
+                ':subtotal' => $it['subtotal'],
+                ':indicador_facturacion' => $it['indicador_facturacion'],
+                ':indicador_bien_servicio' => $it['indicador_bien_servicio'],
+                ':itbis_amount' => $it['itbis_amount'],
+            ]);
+        }
+    }
+
+    private function sumSimpleTotal(array $items): float
+    {
+        $total = 0.0;
+        foreach ($items as $it) {
+            $total += (float) $it['subtotal'] + (float) $it['itbis_amount'];
+        }
+        return round($total, 2);
+    }
+
+    /**
+     * Crea una factura no electronica con sus lineas.
+     * @param array $data {no_factura, client_id?, client_name, user_id, date?, NCF?, total?, items[]}
+     * @return array ['success', payload] | ['error', mensaje]
+     */
+    public function createFacturaSimple(array $data): array
+    {
+        $items = $this->normalizeSimpleItems($data['items'] ?? []);
+        if (empty($items)) {
+            return ['error', 'items requerido (al menos una linea)'];
+        }
+        $total = isset($data['total']) && $data['total'] !== ''
+            ? (float) $data['total']
+            : $this->sumSimpleTotal($items);
+
+        try {
+            $this->conexion->beginTransaction();
+            $sql = 'INSERT INTO facturas
+                    (no_factura, date, client_id, client_name, user_id, total, NCF, tipo_ecf)
+                    VALUES
+                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, :NCF, NULL)';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':no_factura' => $data['no_factura'],
+                ':date' => $data['date'] ?? date('Y-m-d H:i:s'),
+                ':client_id' => $data['client_id'] ?? null,
+                ':client_name' => $data['client_name'] ?? '',
+                ':user_id' => $data['user_id'],
+                ':total' => $total,
+                ':NCF' => $data['NCF'] ?? null,
+            ]);
+            $facturaId = (int) $this->conexion->lastInsertId();
+            $this->insertSimpleItems($facturaId, $items);
+            $this->conexion->commit();
+
+            return ['success', $this->getFacturaSimple($facturaId)];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            return ['error', 'No se pudo crear la factura: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Obtiene una factura no electronica por id, con sus lineas.
+     * @return array|null Null si no existe o si es un e-CF.
+     */
+    public function getFacturaSimple(int $id): ?array
+    {
+        try {
+            $sql = 'SELECT f.*, cl.company_name, cl.email AS client_email,
+                           cl.phone_number AS client_phone, cl.rnc AS client_rnc
+                    FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id
+                    WHERE f.id = :id AND f.tipo_ecf IS NULL';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':id' => $id]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                return null;
+            }
+            $row['items'] = $this->getFacturaItems($id);
+            return $row;
+        } catch (PDOException $e) {
+            return null;
+        }
+    }
+
+    public function getFacturasSimplesPaginated(int $offset, int $limit, ?string $query = null): array
+    {
+        try {
+            $conditions = ['f.tipo_ecf IS NULL'];
+            $params = [];
+            if ($query) {
+                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query)';
+                $params[':query'] = "%{$query}%";
+            }
+            $whereClause = 'WHERE ' . implode(' AND ', $conditions);
+            $sql = "SELECT f.*, cl.company_name FROM facturas f
+                    LEFT JOIN clients cl ON f.client_id = cl.id
+                    {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
+            $stmt = $this->conexion->prepare($sql);
+            foreach ($params as $key => $val) {
+                $stmt->bindValue($key, $val, \PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', (int) $limit, \PDO::PARAM_INT);
+            $stmt->bindValue(':offset', (int) $offset, \PDO::PARAM_INT);
+            $stmt->execute();
+            return $stmt->fetchAll();
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
+    public function getFacturasSimplesCount(?string $query = null): int
+    {
+        try {
+            $conditions = ['f.tipo_ecf IS NULL'];
+            $params = [];
+            if ($query) {
+                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query)';
+                $params[':query'] = "%{$query}%";
+            }
+            $whereClause = 'WHERE ' . implode(' AND ', $conditions);
+            $sql = "SELECT COUNT(*) AS total FROM facturas f
+                    LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause}";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute($params);
+            $row = $stmt->fetch();
+            return $row ? (int) $row['total'] : 0;
+        } catch (PDOException $e) {
+            return 0;
+        }
+    }
+
+    /**
+     * Actualiza una factura no electronica. Campos no enviados conservan su valor.
+     * Si se envia `items`, reemplaza todas las lineas. Rechaza e-CF emitidos.
+     * @return array ['success', payload] | ['error', mensaje]
+     */
+    public function updateFacturaSimple(int $id, array $data): array
+    {
+        try {
+            $cur = $this->conexion->prepare('SELECT * FROM facturas WHERE id = :id');
+            $cur->execute([':id' => $id]);
+            $row = $cur->fetch();
+            if (!$row) {
+                return ['error', 'Factura no encontrada'];
+            }
+            if ($row['tipo_ecf'] !== null) {
+                return ['error', 'Esta factura es un e-CF emitido; no puede editarse por esta via'];
+            }
+
+            $noFactura = $data['no_factura'] ?? $row['no_factura'];
+            $date = $data['date'] ?? $row['date'];
+            $clientId = array_key_exists('client_id', $data) ? $data['client_id'] : $row['client_id'];
+            $clientName = $data['client_name'] ?? $row['client_name'];
+            $ncf = array_key_exists('NCF', $data) ? $data['NCF'] : $row['NCF'];
+
+            $replaceItems = isset($data['items']) && is_array($data['items']);
+            $items = $replaceItems ? $this->normalizeSimpleItems($data['items']) : [];
+
+            if (isset($data['total']) && $data['total'] !== '') {
+                $total = (float) $data['total'];
+            } elseif ($replaceItems) {
+                $total = $this->sumSimpleTotal($items);
+            } else {
+                $total = (float) $row['total'];
+            }
+
+            $this->conexion->beginTransaction();
+            $upd = $this->conexion->prepare(
+                'UPDATE facturas SET no_factura = :no_factura, date = :date,
+                        client_id = :client_id, client_name = :client_name,
+                        total = :total, NCF = :NCF
+                 WHERE id = :id AND tipo_ecf IS NULL'
+            );
+            $upd->execute([
+                ':no_factura' => $noFactura,
+                ':date' => $date,
+                ':client_id' => $clientId,
+                ':client_name' => $clientName,
+                ':total' => $total,
+                ':NCF' => $ncf,
+                ':id' => $id,
+            ]);
+
+            if ($replaceItems) {
+                $del = $this->conexion->prepare('DELETE FROM factura_items WHERE factura_id = :id');
+                $del->execute([':id' => $id]);
+                $this->insertSimpleItems($id, $items);
+            }
+
+            $this->conexion->commit();
+            return ['success', $this->getFacturaSimple($id)];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            return ['error', 'No se pudo actualizar la factura: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Elimina una factura no electronica y sus lineas. Rechaza e-CF emitidos.
+     * @return array ['success', mensaje] | ['error', mensaje]
+     */
+    public function deleteFacturaSimple(int $id): array
+    {
+        try {
+            $cur = $this->conexion->prepare('SELECT tipo_ecf FROM facturas WHERE id = :id');
+            $cur->execute([':id' => $id]);
+            $row = $cur->fetch();
+            if (!$row) {
+                return ['error', 'Factura no encontrada'];
+            }
+            if ($row['tipo_ecf'] !== null) {
+                return ['error', 'Esta factura es un e-CF emitido; no puede eliminarse'];
+            }
+
+            $this->conexion->beginTransaction();
+            $this->conexion->prepare('DELETE FROM factura_items WHERE factura_id = :id')->execute([':id' => $id]);
+            $this->conexion->prepare('DELETE FROM facturas WHERE id = :id AND tipo_ecf IS NULL')->execute([':id' => $id]);
+            $this->conexion->commit();
+            return ['success', 'Factura eliminada'];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            return ['error', 'No se pudo eliminar la factura: ' . $e->getMessage()];
+        }
+    }
+
     public function getFacturasPaginated($offset, $limit, $query = null)
     {
         try {

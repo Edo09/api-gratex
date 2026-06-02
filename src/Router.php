@@ -71,6 +71,11 @@ switch ($route) {
         require_once 'src/Controllers/facturaController.php';
         break;
 
+    case 'facturas-simples':
+        // CRUD de facturas NO electronicas (no e-CF) - token required
+        require_once 'src/Controllers/facturaSimpleController.php';
+        break;
+
     case 'ncf':
         // NCF management endpoints - token required
         require_once 'src/Controllers/ncfController.php';
