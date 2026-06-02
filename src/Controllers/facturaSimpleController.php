@@ -95,10 +95,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         $body = fsBody();
-        if (empty($body['no_factura'])) {
-            fsRespond(false, 'no_factura requerido', 422);
-            break;
-        }
+        // no_factura NO se espera del front: el backend lo genera (ver
+        // facturaModel::createFacturaSimple -> nextSimpleFacturaNumber).
         if (empty($body['client_id']) && empty($body['client_name'])) {
             fsRespond(false, 'client_id o client_name requerido', 422);
             break;
