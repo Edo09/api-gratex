@@ -132,20 +132,20 @@ function fsHandlePreview(clientModel $clientModel): void
         : array_reduce($items, static fn($c, $it) => $c + $it['subtotal'] + $it['itbis_amount'], 0.0);
 
     $factura = [
-        'no_factura'       => $body['no_factura'] ?? 'PREVIEW',
-        'e_ncf'            => null,   // factura simple: nunca e-CF -> timbre PREVIEW
-        'codigo_seguridad' => null,
-        'tipo_ecf'         => null,
-        'date'             => $body['date'] ?? date('Y-m-d'),
-        'total'            => round($total, 2),
-        'client_id'        => $body['client_id'] ?? null,
-        'client_name'      => $body['client_name'] ?? ($client['client_name'] ?? ''),
-        'company_name'     => $client['company_name'] ?? ($body['client_name'] ?? null),
-        'items'            => $items,
+        'no_factura'   => $body['no_factura'] ?? 'PREVIEW',
+        'NCF'          => $body['NCF'] ?? null,  // NCF tradicional (no e-CF), opcional
+        'tipo_ecf'     => null,                  // factura simple: nunca e-CF
+        'date'         => $body['date'] ?? date('Y-m-d'),
+        'total'        => round($total, 2),
+        'client_id'    => $body['client_id'] ?? null,
+        'client_name'  => $body['client_name'] ?? ($client['client_name'] ?? ''),
+        'company_name' => $client['company_name'] ?? ($body['client_name'] ?? null),
+        'items'        => $items,
     ];
 
     require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
     $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+    $pdf->setNoElectronica(true);  // diseño NCF, sin timbre/etiquetas de e-CF
     $pdf->setFactura($factura);
     if (!empty($client)) {
         $pdf->setClientData($client);
