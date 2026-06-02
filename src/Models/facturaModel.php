@@ -307,6 +307,12 @@ class facturaModel
             ? (float) $data['total']
             : $this->sumSimpleTotal($items);
 
+        // El front no envia no_factura: se genera aqui como "{secuencia}-{ddmmaa}".
+        // Si llega uno explicito (p.ej. migracion/correccion) se respeta.
+        $noFactura = isset($data['no_factura']) && $data['no_factura'] !== ''
+            ? (string) $data['no_factura']
+            : $this->nextSimpleFacturaNumber();
+
         try {
             $this->conexion->beginTransaction();
             $sql = 'INSERT INTO facturas
@@ -315,7 +321,7 @@ class facturaModel
                     (:no_factura, :date, :client_id, :client_name, :user_id, :total, :NCF, NULL)';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
-                ':no_factura' => $data['no_factura'],
+                ':no_factura' => $noFactura,
                 ':date' => $data['date'] ?? date('Y-m-d H:i:s'),
                 ':client_id' => $data['client_id'] ?? null,
                 ':client_name' => $data['client_name'] ?? '',
@@ -334,6 +340,33 @@ class facturaModel
             }
             return ['error', 'No se pudo crear la factura: ' . $e->getMessage()];
         }
+    }
+
+    /**
+     * Genera el proximo numero de factura simple con formato "{secuencia}-{ddmmaa}".
+     * La secuencia es 1 + el mayor prefijo numerico (antes del "-") entre las
+     * facturas NO electronicas existentes (tipo_ecf IS NULL), con un minimo de 4
+     * digitos. La fecha es la de hoy sin guiones (dia+mes+anio de 2 digitos).
+     * Ej: si la ultima es "0916-010626", hoy (02-06-2026) devuelve "0917-020626".
+     */
+    private function nextSimpleFacturaNumber(): string
+    {
+        $max = 0;
+        try {
+            $stmt = $this->conexion->query(
+                "SELECT MAX(CAST(SUBSTRING_INDEX(no_factura, '-', 1) AS UNSIGNED)) AS max_num
+                 FROM facturas
+                 WHERE tipo_ecf IS NULL AND no_factura REGEXP '^[0-9]+-[0-9]+$'"
+            );
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row && $row['max_num'] !== null) {
+                $max = (int) $row['max_num'];
+            }
+        } catch (PDOException $e) {
+            $max = 0;
+        }
+        $secuencia = str_pad((string) ($max + 1), 4, '0', STR_PAD_LEFT);
+        return $secuencia . '-' . date('dmy');
     }
 
     /**
