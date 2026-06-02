@@ -74,6 +74,11 @@ class ECFEmissionService
                 throw new RuntimeException('No se pudo asignar e-NCF para el tipo E' . $tipoEcf);
             }
         }
+        // Si nosotros dispensamos la secuencia (no es un e_ncf override), se puede
+        // revertir cuando DGII rechace sin consumirla (secuenciaUtilizada=false).
+        $dispensamosSecuencia = ($eNcfOverride === null || $eNcfOverride === '');
+        $secuenciaType = 'E' . $tipoEcf;
+        $secuenciaValor = $dispensamosSecuencia ? (int) substr($eNcf, 3) : 0;
 
         $emisorBase = [
             'rnc' => $emisor['rnc'],
@@ -190,6 +195,11 @@ class ECFEmissionService
             $rfceEstado = $this->mapEstado($rfceReception);
             $rfceTrackId = $this->extractTrackId($rfceReception);
 
+            $this->reclamarSecuenciaSiNoUtilizada(
+                $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
+                is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : []
+            );
+
             return [
                 'e_ncf' => $eNcf,
                 'tipo_ecf' => $tipoEcf,
@@ -219,6 +229,11 @@ class ECFEmissionService
         $estado = $this->mapEstado($reception);
         $trackId = $this->extractTrackId($reception);
 
+        $this->reclamarSecuenciaSiNoUtilizada(
+            $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
+            is_array($reception['data'] ?? null) ? $reception['data'] : []
+        );
+
         return [
             'e_ncf' => $eNcf,
             'tipo_ecf' => $tipoEcf,
@@ -232,6 +247,30 @@ class ECFEmissionService
             'dgii_status_code' => $reception['status_code'],
             'flujo' => 'ECF',
         ];
+    }
+
+    /**
+     * Revierte el contador de secuencia cuando DGII rechaza el e-CF SIN consumir
+     * la secuencia. DGII lo indica con secuenciaUtilizada=false (caso tipico:
+     * codigo 135 "No existen rangos de secuencias disponibles"). Solo aplica a
+     * secuencias que dispensamos nosotros; un e_ncf override no toca el contador.
+     * Si la bandera viene true/ausente NO se revierte (la secuencia se consumio).
+     */
+    private function reclamarSecuenciaSiNoUtilizada(
+        bool $dispensamos,
+        string $type,
+        int $valor,
+        string $ambiente,
+        array $receptionData
+    ): void {
+        if (!$dispensamos || !array_key_exists('secuenciaUtilizada', $receptionData)) {
+            return;
+        }
+        $flag = $receptionData['secuenciaUtilizada'];
+        $utilizada = filter_var($flag, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($utilizada === false) {
+            $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente);
+        }
     }
 
     public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null): array
