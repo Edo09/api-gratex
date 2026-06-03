@@ -31,9 +31,12 @@ POST /api/aprobaciones-comerciales   → aprobar/rechazar cada uno
 
 `GET /api/ecf/recepcion`
 
-Lista paginada de los e-CF que otros emisores enviaron a tu empresa.
+Lista paginada de los e-CF que otros emisores enviaron a tu empresa. Lee de TU DB
+(`ecf_recibidos`), no consulta a la DGII.
 
-- **Auth:** `Authorization: Bearer <token>` (flujo seed DGII, `authSeedModel`). NO usa `X-API-KEY`.
+- **Auth:** `X-API-KEY: <tu_api_key>` (cliente propio — usar este desde tu frontend).
+  Como fallback también acepta `Authorization: Bearer <token>` del flujo seed DGII.
+  Si mandas un `X-API-KEY` inválido devuelve `401` (no cae al Bearer).
 - **Query params:** `?page=1&pageSize=20`
 
 Respuesta:
@@ -63,7 +66,7 @@ Respuesta:
 
 `GET /api/ecf/recepcion/{trackId}`
 
-- Mismo Bearer token.
+- Misma auth que el listado (`X-API-KEY` o Bearer seed).
 - Devuelve la fila completa (sin `xml_firmado`).
 - `404` si el `trackId` no existe.
 

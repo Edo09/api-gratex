@@ -7,6 +7,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../Models/ecfRecibidoModel.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../Models/authSeedModel.php';
+require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/DgiiXmlSigner.php';
@@ -143,8 +144,7 @@ function handleRecepcionEcf(): void
 
 function handleConsultarRecibido(string $trackId): void
 {
-    $check = ecfRecepcionRequireBearer();
-    if (!$check['ok']) {
+    if (!ecfRecepcionRequireReadAuth()) {
         return;
     }
 
@@ -159,8 +159,7 @@ function handleConsultarRecibido(string $trackId): void
 
 function handleListarRecibidos(): void
 {
-    $check = ecfRecepcionRequireBearer();
-    if (!$check['ok']) {
+    if (!ecfRecepcionRequireReadAuth()) {
         return;
     }
 
@@ -181,6 +180,25 @@ function handleListarRecibidos(): void
             'totalPages' => $pageSize > 0 ? (int) ceil($total / $pageSize) : 0,
         ],
     ]);
+}
+
+/**
+ * Auth para lectura (listar/consultar recibidos).
+ * Acepta X-API-KEY de cliente propio (AuthMiddleware) o, como fallback,
+ * el Bearer token del flujo semilla DGII. Solo lectura de nuestra DB.
+ */
+function ecfRecepcionRequireReadAuth(): bool
+{
+    if (isset($_SERVER['HTTP_X_API_KEY']) && trim($_SERVER['HTTP_X_API_KEY']) !== '') {
+        $validation = (new AuthMiddleware())->validateRequest();
+        if ($validation['valid']) {
+            return true;
+        }
+        respondRecepcion(false, 'X-API-KEY invalido o inactivo.', 401);
+        return false;
+    }
+
+    return ecfRecepcionRequireBearer()['ok'];
 }
 
 function ecfRecepcionRequireBearer(): array
