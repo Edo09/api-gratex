@@ -58,7 +58,8 @@
       "PowerShell(php -l src/Models/facturaModel.php)",
       "PowerShell(php -l src/Models/ncfModel.php)",
       "PowerShell(php -l src/Utils/FacturacionElectronica/ECFEmissionService.php)",
-      "PowerShell(php -l src/Utils/FacturacionElectronica/ECFXmlBuilder.php)"
+      "PowerShell(php -l src/Utils/FacturacionElectronica/ECFXmlBuilder.php)",
+      "Bash(findstr /v /c:\".sql\")"
     ]
   }
 }

@@ -76,6 +76,11 @@ switch ($route) {
         require_once 'src/Controllers/facturaSimpleController.php';
         break;
 
+    case 'gastos':
+        // Modulo de Gastos (emitidos 11/13/17 y recibidos 01) - token required
+        require_once 'src/Controllers/gastosController.php';
+        break;
+
     case 'ncf':
         // NCF management endpoints - token required
         require_once 'src/Controllers/ncfController.php';

@@ -1,0 +1,219 @@
+### ============================================================================
+### Modulo de Gastos -> /api/gastos
+### Dos categorias:
+###   - gastos_menores       -> E43 (peajes, suministros, personal)
+###   - facturas_proveedores -> E41/E47 (emite la empresa) + E31/B01/E33/E34 (recibido)
+###
+### Auto-emision (E41/E43/E47): se emite a DGII como e-CF SOLO si
+###   DGII_ECF_EMISSION_ENABLED=true. Con el guard apagado (default) se guarda como
+###   estado_dgii=PENDIENTE_EMISION sin tocar DGII ni consumir secuencia.
+### Recibido (E31/B01/E33/E34): solo se registra; el usuario digita el NCF.
+###
+### Requiere migraciones 007 y 008 corridas.
+### ============================================================================
+
+### Listar gastos (paginado)
+GET http://localhost:8000/api/gastos?page=1&pageSize=10
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Filtrar por categoria
+GET http://localhost:8000/api/gastos?categoria=facturas_proveedores
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Buscar (ncf / rnc / nombre / tipo)
+GET http://localhost:8000/api/gastos?query=Suplidora
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Obtener un gasto con sus lineas (por ruta)
+GET http://localhost:8000/api/gastos/1
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Obtener un gasto (por query param, equivalente)
+GET http://localhost:8000/api/gastos?id=1
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Estadisticas
+GET http://localhost:8000/api/gastos/stats
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+
+### ============================================================================
+### CREAR - RECIBIDOS (solo se registran, NO se emiten a DGII)
+### ============================================================================
+
+### Factura de proveedor - Credito Fiscal (E31). NCF lo digita el usuario.
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E31",
+  "ncf": "E310000000123",
+  "rnc_proveedor": "131880681",
+  "nombre_proveedor": "Suplidora XYZ SRL",
+  "fecha": "2026-06-03",
+  "items": [
+    { "description": "Materiales de construccion", "amount": 1000, "quantity": 1, "indicador_facturacion": 1 }
+  ]
+}
+
+### Factura de proveedor - Credito Fiscal con ITBIS explicito
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "B01",
+  "ncf": "B0100000456",
+  "rnc_proveedor": "101023122",
+  "nombre_proveedor": "Ferreteria Nacional",
+  "items": [
+    { "description": "Cemento (fundas)", "amount": 350, "quantity": 10, "itbis_amount": 630 }
+  ]
+}
+
+### Nota de Credito recibida del proveedor (E34) - solo registra
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E34",
+  "ncf": "E340000000050",
+  "rnc_proveedor": "131880681",
+  "nombre_proveedor": "Suplidora XYZ SRL",
+  "items": [
+    { "description": "Devolucion mercancia", "amount": 500, "quantity": 1, "indicador_facturacion": 1 }
+  ]
+}
+
+
+### ============================================================================
+### CREAR - AUTO-EMISION (E41/E43/E47)
+### Con DGII_ECF_EMISSION_ENABLED=false -> estado_dgii=PENDIENTE_EMISION (sin DGII).
+### Con DGII_ECF_EMISSION_ENABLED=true  -> emite a DGII (probar en testecf/certecf).
+### ============================================================================
+
+### Gasto Menor (E43) - SIN rnc_proveedor (permitido para E43)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "gastos_menores",
+  "tipo_gasto": "E43",
+  "nombre_proveedor": "Juan Perez (peajes)",
+  "fecha": "2026-06-03",
+  "items": [
+    { "description": "Peaje Las Americas", "amount": 60, "quantity": 2, "indicador_facturacion": 4 },
+    { "description": "Suministros oficina", "amount": 350, "quantity": 1, "indicador_facturacion": 1 }
+  ]
+}
+
+### Compras (E41) - proveedor informal, ITBIS calculado por indicador (18%)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E41",
+  "rnc_proveedor": "00112345678",
+  "nombre_proveedor": "Pedro Martinez (informal)",
+  "fecha": "2026-06-03",
+  "items": [
+    { "description": "Servicio de transporte", "amount": 5000, "quantity": 1, "indicador_facturacion": 1, "indicador_bien_servicio": 2 }
+  ]
+}
+
+### Pagos al Exterior (E47)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E47",
+  "rnc_proveedor": "999999999",
+  "nombre_proveedor": "Cloud Provider Inc (USA)",
+  "fecha": "2026-06-03",
+  "items": [
+    { "description": "Servicio de hosting anual", "amount": 1200, "quantity": 1, "indicador_facturacion": 3 }
+  ]
+}
+
+
+### ============================================================================
+### e-CF emitido: consultar estado y XML (solo si se emitio a DGII)
+### Reemplazar {id} por el id de un gasto auto-emision ya emitido.
+### ============================================================================
+
+### Consultar estado en DGII y actualizar el registro
+GET http://localhost:8000/api/gastos/1/estado
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Descargar XML firmado
+GET http://localhost:8000/api/gastos/1/xml
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+
+### ============================================================================
+### Casos de validacion (errores esperados)
+### ============================================================================
+
+### Falta categoria -> 422
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "tipo_gasto": "E41",
+  "rnc_proveedor": "00112345678",
+  "nombre_proveedor": "X",
+  "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
+}
+
+### tipo_gasto no permitido para la categoria -> 400
+### (E41 no pertenece a gastos_menores)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "gastos_menores",
+  "tipo_gasto": "E41",
+  "rnc_proveedor": "00112345678",
+  "nombre_proveedor": "X",
+  "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
+}
+
+### Recibido sin ncf -> 400 (E31 requiere NCF digitado)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E31",
+  "rnc_proveedor": "131880681",
+  "nombre_proveedor": "Suplidora XYZ",
+  "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
+}
+
+### Falta rnc_proveedor en E41 -> 422 (E43 seria la excepcion)
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E41",
+  "nombre_proveedor": "Sin RNC",
+  "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
+}
+
+### Sin token -> 401
+GET http://localhost:8000/api/gastos
