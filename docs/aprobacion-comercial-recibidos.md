@@ -55,12 +55,20 @@ Respuesta:
       "monto_total": 0.0,
       "fecha_emision": "...",
       "estado": "ACEPTADO",
-      "codigo_resultado": 1
+      "aprobacion_comercial": null,
+      "aprobacion_comercial_codigo_dgii": null,
+      "aprobacion_comercial_estado_dgii": null,
+      "aprobacion_comercial_procesada": null,
+      "aprobacion_comercial_fecha": null
     }
   ],
   "pagination": { "page": 1, "pageSize": 20, "total": 0, "totalPages": 0 }
 }
 ```
+
+`estado` = estado **técnico** de recepción (firma). `aprobacion_comercial` = tu
+decisión **comercial** enviada a DGII (`ACEPTADO`/`RECHAZADO`). `null` = aún no
+respondido → el front debe mostrar **"Pendiente"**, no asumir aprobado.
 
 ### Consultar uno solo
 
@@ -124,6 +132,40 @@ Respuesta:
 Errores:
 - `422` — falta un campo requerido, `estado` distinto de `1`/`2`, o `detalle_motivo` vacío con `estado=2`.
 - `502` — fallo enviando el ACECF a la DGII.
+
+### Persistencia (migration 009)
+
+Tras enviar, el resultado se guarda con **`UPDATE` sobre la fila del e-CF** en
+`ecf_recibidos`, matcheando por `(rnc_emisor, e_ncf)`. **No crea filas nuevas** —
+1 e-CF = 1 fila, solo se guarda el último estado (sin historial).
+
+DGII responde `RespuestaAprobacionComercial { codigo, estado, mensaje[] }`:
+- `codigo` `1` = aprobación procesada OK; `2`/`02` = no procesada (factura no
+  encontrada / error técnico / ambiente que no coincide).
+- `estado` `"Aprobacion Comercial Rechazada."` significa que DGII rechazó
+  **procesar tu envío**, no que tu rechazo comercial quedó registrado.
+
+Columnas que se persisten:
+
+| Columna | Contenido |
+|---------|-----------|
+| `aprobacion_comercial` | Tu decisión: `ACEPTADO`/`RECHAZADO` |
+| `aprobacion_comercial_detalle` | Motivo del rechazo |
+| `aprobacion_comercial_codigo_dgii` | `codigo` de DGII |
+| `aprobacion_comercial_estado_dgii` | `estado` textual de DGII |
+| `aprobacion_comercial_mensaje_dgii` | `mensaje[]` unido por ` \| ` |
+| `aprobacion_comercial_procesada` | `1` si `codigo=1`, si no `0` |
+| `aprobacion_comercial_fecha` | Fecha/hora del envío |
+
+Notas:
+- Persiste en **éxito Y error**: si DGII responde `400`, la respuesta viene
+  embebida en el error y se parsea para guardarla igual (con `procesada=0`).
+- Si el e-CF **no** está en `ecf_recibidos`, el `UPDATE` afecta 0 filas → no se
+  guarda. Si la DB falla (ej. migration 009 sin correr), solo se loguea — no
+  rompe la respuesta ni el envío a DGII.
+
+> **Antes de usar en server:** correr `db/migrations/009_add_aprobacion_comercial_tracking.sql`
+> en `mtldtmte_new_gratexdb`.
 
 ---
 
