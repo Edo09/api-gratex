@@ -91,6 +91,7 @@ function handleAprobacionComercial(): void
         'detalle_motivo' => $detalle,
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
+        'ambiente' => getenv('DGII_ECF_ENVIRONMENT') ?: null,
     ]);
 
     http_response_code(200);
