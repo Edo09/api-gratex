@@ -6,6 +6,7 @@ header('content-type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ACECFEmissionService.php';
+require_once __DIR__ . '/../Models/ecfRecibidoModel.php';
 
 $auth = new AuthMiddleware();
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
@@ -48,13 +49,45 @@ function handleEnvioACECF(): void
         return;
     }
 
+    $decision = (string) $input['estado'] === '2' ? 'RECHAZADO' : 'ACEPTADO';
+    $recibidos = new ecfRecibidoModel();
+
     try {
         $service = new ACECFEmissionService();
         $result = $service->enviar($input);
     } catch (Throwable $e) {
+        // DGII devolvio error (ej. HTTP 400): la RespuestaAprobacionComercial
+        // viene embebida en el mensaje. La extraemos para persistir el resultado
+        // real en vez de perderlo.
+        $dgii = parseDgiiAprobacionResponse($e->getMessage());
+        persistAprobacionComercial($recibidos, $input, [
+            'aprobacion_comercial' => $decision,
+            'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
+            'aprobacion_comercial_codigo_dgii' => $dgii['codigo'],
+            'aprobacion_comercial_estado_dgii' => $dgii['estado'],
+            'aprobacion_comercial_mensaje_dgii' => $dgii['mensaje'],
+            'aprobacion_comercial_procesada' => 0,
+        ]);
         respondACECF(false, 'Fallo enviando ACECF a DGII: ' . $e->getMessage(), 502);
         return;
     }
+
+    $dgiiResp = is_array($result['dgii_response']) ? $result['dgii_response'] : [];
+    $codigoDgii = isset($dgiiResp['codigo']) ? (string) $dgiiResp['codigo'] : null;
+    $estadoDgii = $dgiiResp['estado'] ?? $result['estado'] ?? null;
+    $mensajeDgii = isset($dgiiResp['mensaje'])
+        ? (is_array($dgiiResp['mensaje']) ? implode(' | ', $dgiiResp['mensaje']) : (string) $dgiiResp['mensaje'])
+        : null;
+    $procesada = ($codigoDgii !== null && $codigoDgii === '1') ? 1 : 0;
+
+    persistAprobacionComercial($recibidos, $input, [
+        'aprobacion_comercial' => $decision,
+        'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
+        'aprobacion_comercial_codigo_dgii' => $codigoDgii,
+        'aprobacion_comercial_estado_dgii' => $estadoDgii,
+        'aprobacion_comercial_mensaje_dgii' => $mensajeDgii,
+        'aprobacion_comercial_procesada' => $procesada,
+    ]);
 
     echo json_encode([
         'status' => true,
@@ -70,6 +103,43 @@ function handleEnvioACECF(): void
             'dgii_response' => $result['dgii_response'],
         ],
     ]);
+}
+
+/**
+ * Persiste la decision comercial sin romper la respuesta si la DB falla
+ * (ej. migration 009 aun no aplicada). Solo registra el error en el log.
+ */
+function persistAprobacionComercial(ecfRecibidoModel $recibidos, array $input, array $data): void
+{
+    try {
+        $recibidos->updateAprobacionComercial($input['rnc_emisor'], $input['e_ncf'], $data);
+    } catch (Throwable $e) {
+        error_log('[aprobacionComercialOutgoing] no se pudo persistir aprobacion comercial ('
+            . ($input['e_ncf'] ?? '?') . '): ' . $e->getMessage());
+    }
+}
+
+/**
+ * Extrae la RespuestaAprobacionComercial { codigo, estado, mensaje[] } que la
+ * DGII devuelve embebida en el mensaje de error de DgiiAuthService
+ * (formato "HTTP 400 - {json}"). Devuelve campos null si no se puede parsear.
+ */
+function parseDgiiAprobacionResponse(string $message): array
+{
+    $out = ['codigo' => null, 'estado' => null, 'mensaje' => null];
+    if (preg_match('/\{.*\}/s', $message, $m)) {
+        $json = json_decode($m[0], true);
+        if (is_array($json)) {
+            $out['codigo'] = isset($json['codigo']) ? (string) $json['codigo'] : null;
+            $out['estado'] = $json['estado'] ?? null;
+            if (isset($json['mensaje'])) {
+                $out['mensaje'] = is_array($json['mensaje'])
+                    ? implode(' | ', $json['mensaje'])
+                    : (string) $json['mensaje'];
+            }
+        }
+    }
+    return $out;
 }
 
 function respondACECF(bool $status, string $message, int $code = 200): void
