@@ -15,8 +15,8 @@ class aprobacionComercialModel
         $stmt = $this->conexion->prepare(
             'INSERT INTO aprobaciones_comerciales (
                 factura_id, e_ncf, rnc_emisor, rnc_comprador,
-                estado_comercial, detalle_motivo, xml_firmado, validacion_firma
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                estado_comercial, detalle_motivo, xml_firmado, validacion_firma, ambiente
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $data['factura_id'] ?? null,
@@ -27,6 +27,7 @@ class aprobacionComercialModel
             $data['detalle_motivo'] ?? null,
             $data['xml_firmado'] ?? null,
             $data['validacion_firma'] ?? null,
+            $data['ambiente'] ?? null,
         ]);
         return (int) $this->conexion->lastInsertId();
     }

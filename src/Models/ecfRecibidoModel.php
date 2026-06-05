@@ -26,8 +26,8 @@ class ecfRecibidoModel
                 track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                 rnc_comprador, monto_total, fecha_emision,
                 estado, codigo_resultado, mensaje_resultado,
-                xml_firmado, validacion_firma
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                xml_firmado, validacion_firma, ambiente
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $stmt->execute([
             $data['track_id'],
@@ -43,6 +43,7 @@ class ecfRecibidoModel
             $data['mensaje_resultado'] ?? null,
             $data['xml_firmado'] ?? null,
             $data['validacion_firma'] ?? null,
+            $data['ambiente'] ?? null,
         ]);
         return (int) $this->conexion->lastInsertId();
     }
@@ -101,7 +102,7 @@ class ecfRecibidoModel
     {
         $stmt = $this->conexion->prepare(
             'SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
-                    monto_total, fecha_emision, fecha_recepcion, estado,
+                    monto_total, fecha_emision, fecha_recepcion, estado, ambiente,
                     aprobacion_comercial, aprobacion_comercial_codigo_dgii,
                     aprobacion_comercial_estado_dgii, aprobacion_comercial_procesada,
                     aprobacion_comercial_fecha

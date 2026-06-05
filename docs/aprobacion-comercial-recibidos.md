@@ -55,6 +55,7 @@ Respuesta:
       "monto_total": 0.0,
       "fecha_emision": "...",
       "estado": "ACEPTADO",
+      "ambiente": "ecf",
       "aprobacion_comercial": null,
       "aprobacion_comercial_codigo_dgii": null,
       "aprobacion_comercial_estado_dgii": null,
@@ -69,6 +70,9 @@ Respuesta:
 `estado` = estado **técnico** de recepción (firma). `aprobacion_comercial` = tu
 decisión **comercial** enviada a DGII (`ACEPTADO`/`RECHAZADO`). `null` = aún no
 respondido → el front debe mostrar **"Pendiente"**, no asumir aprobado.
+
+`ambiente` (`testecf`/`certecf`/`ecf`) = modo del server cuando se recibió el
+e-CF (migration 010). Se usa para mandar la aprobación al **mismo ambiente**.
 
 ### Consultar uno solo
 
@@ -109,6 +113,7 @@ ACECF y lo envía a la DGII.
 | `monto_total` | sí | |
 | `estado` | sí | `1` = Aceptado, `2` = Rechazado |
 | `detalle_motivo` | si `estado=2` | Motivo del rechazo (obligatorio al rechazar) |
+| `ambiente` | no | Override (`testecf`/`certecf`/`ecf`). Si se omite, usa el ambiente guardado del e-CF recibido; si tampoco hay, el global `DGII_ECF_ENVIRONMENT` |
 
 Respuesta:
 
@@ -145,6 +150,10 @@ DGII responde `RespuestaAprobacionComercial { codigo, estado, mensaje[] }`:
 - `estado` `"Aprobacion Comercial Rechazada."` significa que DGII rechazó
   **procesar tu envío**, no que tu rechazo comercial quedó registrado.
 
+**Ambiente (migration 010):** el envío se apunta automáticamente al ambiente en
+que se recibió el e-CF (columna `ambiente` de `ecf_recibidos`), evitando el
+`codigo 02` por mismatch. Un `ambiente` explícito en el body tiene prioridad.
+
 Columnas que se persisten:
 
 | Columna | Contenido |
@@ -164,8 +173,9 @@ Notas:
   guarda. Si la DB falla (ej. migration 009 sin correr), solo se loguea — no
   rompe la respuesta ni el envío a DGII.
 
-> **Antes de usar en server:** correr `db/migrations/009_add_aprobacion_comercial_tracking.sql`
-> en `mtldtmte_new_gratexdb`.
+> **Antes de usar en server:** correr en `mtldtmte_new_gratexdb`:
+> `db/migrations/009_add_aprobacion_comercial_tracking.sql` y
+> `db/migrations/010_add_ambiente_recepcion.sql`.
 
 ---
 

@@ -52,6 +52,15 @@ function handleEnvioACECF(): void
     $decision = (string) $input['estado'] === '2' ? 'RECHAZADO' : 'ACEPTADO';
     $recibidos = new ecfRecibidoModel();
 
+    // Apuntar la aprobacion al mismo ambiente en que se recibio el e-CF
+    // (evita codigo 02 por mismatch). Un ambiente explicito en el body manda.
+    if (empty($input['ambiente'])) {
+        $rowRecibido = $recibidos->getByENCF($input['rnc_emisor'], $input['e_ncf']);
+        if ($rowRecibido && !empty($rowRecibido['ambiente'])) {
+            $input['ambiente'] = $rowRecibido['ambiente'];
+        }
+    }
+
     try {
         $service = new ACECFEmissionService();
         $result = $service->enviar($input);

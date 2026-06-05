@@ -132,6 +132,7 @@ function handleRecepcionEcf(): void
         'mensaje_resultado' => $mensaje,
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
+        'ambiente' => getenv('DGII_ECF_ENVIRONMENT') ?: null,
     ]);
 
     $nuestroRnc = $emisor['rnc'] ?? '';
