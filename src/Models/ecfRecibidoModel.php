@@ -47,6 +47,38 @@ class ecfRecibidoModel
         return (int) $this->conexion->lastInsertId();
     }
 
+    /**
+     * Persiste la decision comercial (aprobacion/rechazo) que enviamos a DGII
+     * sobre un e-CF recibido, junto con la RespuestaAprobacionComercial de DGII.
+     * Matchea por (rnc_emisor, e_ncf) = unique key uk_e_ncf_emisor.
+     * @return int filas afectadas (0 si el e-CF no existe en ecf_recibidos)
+     */
+    public function updateAprobacionComercial(string $rncEmisor, string $eNcf, array $data): int
+    {
+        $stmt = $this->conexion->prepare(
+            'UPDATE ecf_recibidos SET
+                aprobacion_comercial = ?,
+                aprobacion_comercial_detalle = ?,
+                aprobacion_comercial_codigo_dgii = ?,
+                aprobacion_comercial_estado_dgii = ?,
+                aprobacion_comercial_mensaje_dgii = ?,
+                aprobacion_comercial_procesada = ?,
+                aprobacion_comercial_fecha = NOW()
+             WHERE rnc_emisor = ? AND e_ncf = ?'
+        );
+        $stmt->execute([
+            $data['aprobacion_comercial'] ?? null,
+            $data['aprobacion_comercial_detalle'] ?? null,
+            $data['aprobacion_comercial_codigo_dgii'] ?? null,
+            $data['aprobacion_comercial_estado_dgii'] ?? null,
+            $data['aprobacion_comercial_mensaje_dgii'] ?? null,
+            $data['aprobacion_comercial_procesada'] ?? null,
+            $rncEmisor,
+            $eNcf,
+        ]);
+        return $stmt->rowCount();
+    }
+
     public function getByENCF(string $rncEmisor, string $eNcf): ?array
     {
         $stmt = $this->conexion->prepare(
@@ -69,7 +101,10 @@ class ecfRecibidoModel
     {
         $stmt = $this->conexion->prepare(
             'SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
-                    monto_total, fecha_emision, fecha_recepcion, estado
+                    monto_total, fecha_emision, fecha_recepcion, estado,
+                    aprobacion_comercial, aprobacion_comercial_codigo_dgii,
+                    aprobacion_comercial_estado_dgii, aprobacion_comercial_procesada,
+                    aprobacion_comercial_fecha
              FROM ecf_recibidos
              ORDER BY fecha_recepcion DESC
              LIMIT ?, ?'
