@@ -70,6 +70,12 @@
       <div><label class="req">RNC</label><input name="rnc" required inputmode="numeric"></div>
     </div>
 
+    <!-- Logo (para la Representacion Impresa) -->
+    <h2>Logo (opcional)</h2>
+    <label>Logo para las facturas (PNG/JPG)</label>
+    <input type="file" name="logo" accept=".png,.jpg,.jpeg">
+    <div class="hint">Se guarda en logos/&lt;tenant_id&gt; y aparece en la Representación Impresa (norma DGII).</div>
+
     <!-- Certificado -->
     <h2>Certificado de firma (.p12)</h2>
     <label id="certFileLabel" class="req">Archivo .p12</label>

@@ -57,6 +57,39 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Ruta del logo a usar en la Representacion Impresa.
+     * Prioridad: logo del tenant resuelto (logos/<tenant_id>.png|jpg|jpeg) →
+     * logo global (logo2020.png). Null si no hay ninguno.
+     */
+    private function logoPath(): ?string
+    {
+        $root = __DIR__ . '/../..';
+        if (class_exists('TenantResolver')) {
+            $tenant = TenantResolver::current();
+            if ($tenant) {
+                // 1) Ruta explicita en DB (tenants.logo_path).
+                if (!empty($tenant['logo_path'])) {
+                    $p = $root . '/' . ltrim((string) $tenant['logo_path'], '/');
+                    if (is_file($p)) {
+                        return $p;
+                    }
+                }
+                // 2) Fallback por convencion logos/<tenant_id>.<ext>.
+                if (!empty($tenant['id'])) {
+                    foreach (['png', 'jpg', 'jpeg'] as $ext) {
+                        $p = $root . '/logos/' . (int) $tenant['id'] . '.' . $ext;
+                        if (is_file($p)) {
+                            return $p;
+                        }
+                    }
+                }
+            }
+        }
+        $global = $root . '/logo2020.png';
+        return is_file($global) ? $global : null;
+    }
+
+    /**
      * Set the factura data
      * @param array $factura Factura data
      */
@@ -239,9 +272,9 @@ class FacturaPdfGenerator extends FPDF
      */
     public function Header()
     {
-        // Logo
-        $logoPath = __DIR__ . '/../../logo2020.png';
-        if (file_exists($logoPath)) {
+        // Logo: del tenant (logos/<tenant_id>.<ext>) o el global por defecto.
+        $logoPath = $this->logoPath();
+        if ($logoPath !== null) {
             $this->Image($logoPath, 8, 10, 65);
         }
         // Datos del emisor desde emisor_config (fallback a los valores de gratex
