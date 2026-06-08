@@ -30,7 +30,7 @@
  */
 
 // === Token para ejecucion por navegador (editar antes de usar) =============
-const ONBOARD_TOKEN = 'CAMBIA_ESTE_TOKEN_DE_ONBOARDING';
+const ONBOARD_TOKEN = 'gratextoken.';
 // ===========================================================================
 
 require_once __DIR__ . '/../src/MasterDatabase.php';
@@ -195,7 +195,7 @@ if ($certPathArg !== null && $certPathArg !== '') {
     if (!is_file($certPathArg)) {
         fail("cert-path no existe: {$certPathArg}");
     }
-    $destDir = __DIR__ . '/../certificados/' . $rnc;
+    $destDir = __DIR__ . '/../certificado_dgii/' . $rnc;
     if (!is_dir($destDir) && !mkdir($destDir, 0700, true) && !is_dir($destDir)) {
         fail("No se pudo crear directorio de certificado: {$destDir}");
     }
@@ -204,7 +204,7 @@ if ($certPathArg !== null && $certPathArg !== '') {
     if (!$ok) {
         fail("No se pudo guardar el certificado en {$dest}");
     }
-    $certPathRel = 'certificados/' . $rnc . '/cert.p12';
+    $certPathRel = 'certificado_dgii/' . $rnc . '/cert.p12';
     echo "   certificado guardado en {$certPathRel}\n";
 }
 
