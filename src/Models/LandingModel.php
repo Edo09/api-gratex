@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
+require_once(__DIR__ . '/../MasterDatabase.php');
 
 class LandingModel
 {
@@ -7,7 +8,14 @@ class LandingModel
 
     public function __construct()
     {
-        $this->conexion = Database::getInstance()->getConnection();
+        // landing_* es contenido global: vive en master en modo multi-tenant.
+        // Este endpoint es publico (sin auth -> sin tenant resuelto), por eso
+        // NO puede depender de Database (que en mt-mode exige tenant).
+        if (filter_var(getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false), FILTER_VALIDATE_BOOLEAN)) {
+            $this->conexion = MasterDatabase::getInstance()->getConnection();
+        } else {
+            $this->conexion = Database::getInstance()->getConnection();
+        }
     }
 
     /**
