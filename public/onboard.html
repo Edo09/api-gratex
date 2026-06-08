@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Alta de cliente (tenant)</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); display:flex; justify-content:center; padding:24px; }
+  .wrap { width:100%; max-width:640px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:12px 0 4px; }
+  input, select { width:100%; padding:10px 12px; background:#0b1220; color:var(--txt);
+                  border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .chk input { width:auto; }
+  .chk label { margin:0; }
+  button { width:100%; margin-top:20px; padding:12px; background:var(--accent); color:#06283d;
+           border:none; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
+  h2 { font-size:14px; margin:18px 0 0; color:var(--accent); border-top:1px solid var(--line); padding-top:14px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px;
+        white-space:pre-wrap; word-break:break-word; font-size:13px; max-height:340px; overflow:auto; }
+  .result.ok { border-color:var(--ok); }
+  .result.err { border-color:var(--err); }
+  .hidden { display:none; }
+  .req::after { content:" *"; color:var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Alta de cliente (tenant)</h1>
+  <p class="sub">Crea un emisor. Integración = sin DB, manda JSON. App = usa la app de facturación (DB propia).</p>
+
+  <form id="f" class="card">
+    <label class="req">Token de onboarding</label>
+    <input type="password" name="token" required autocomplete="off">
+    <div class="hint">El valor de ONBOARD_TOKEN configurado en create_tenant.php</div>
+
+    <div class="row">
+      <div>
+        <label class="req">Tipo</label>
+        <select name="tipo" id="tipo">
+          <option value="integracion">Integración (JSON → e-CF)</option>
+          <option value="app">App (DB propia)</option>
+        </select>
+      </div>
+      <div>
+        <label class="req">Ambiente</label>
+        <select name="ambiente">
+          <option value="ecf">ecf (producción)</option>
+          <option value="certecf">certecf</option>
+          <option value="testecf">testecf</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div><label class="req">Nombre / Razón comercial</label><input name="nombre" required></div>
+      <div><label class="req">RNC</label><input name="rnc" required inputmode="numeric"></div>
+    </div>
+
+    <!-- Certificado -->
+    <h2>Certificado de firma (.p12)</h2>
+    <label id="certFileLabel" class="req">Archivo .p12</label>
+    <input type="file" name="cert" id="cert" accept=".p12,.pfx">
+    <label id="certPassLabel" class="req">Clave del certificado</label>
+    <input type="password" name="cert-pass" id="certPass" autocomplete="off">
+
+    <!-- Integración -->
+    <section id="secIntegracion">
+      <h2>Webhook (opcional)</h2>
+      <label>URL para documentos entrantes</label>
+      <input name="webhook-url" placeholder="https://cliente.com/webhook">
+      <div class="hint">Si lo dejas vacío, el cliente consulta por polling (GET). Si lo pones, generamos un webhook secret.</div>
+    </section>
+
+    <!-- App -->
+    <section id="secApp" class="hidden">
+      <h2>Base de datos (tipo App)</h2>
+      <div class="row">
+        <div><label>db-name</label><input name="db-name"></div>
+        <div><label>db-user</label><input name="db-user"></div>
+      </div>
+      <label>db-pass</label>
+      <input type="password" name="db-pass" autocomplete="off">
+      <div class="chk">
+        <input type="checkbox" name="skip-create-db" id="skip" value="1" checked>
+        <label for="skip">La DB ya existe (créala en cPanel primero)</label>
+      </div>
+      <div class="row">
+        <div><label>Razón social</label><input name="razon-social"></div>
+        <div><label>Dirección</label><input name="direccion"></div>
+      </div>
+
+      <h2>Usuario admin (opcional)</h2>
+      <div class="row">
+        <div><label>Email</label><input name="admin-email" type="email"></div>
+        <div><label>Username</label><input name="admin-username"></div>
+      </div>
+      <div class="row">
+        <div><label>Nombre</label><input name="admin-name"></div>
+        <div><label>Password</label><input name="admin-pass" type="password" autocomplete="off"></div>
+      </div>
+    </section>
+
+    <button type="submit" id="btn">Crear tenant</button>
+  </form>
+
+  <div id="resultCard" class="card hidden">
+    <h2 style="border:none;padding:0;margin:0 0 10px">Resultado</h2>
+    <pre id="out" class="result"></pre>
+  </div>
+</div>
+
+<script>
+const f = document.getElementById('f');
+const tipo = document.getElementById('tipo');
+const secApp = document.getElementById('secApp');
+const secInt = document.getElementById('secIntegracion');
+const certFileLabel = document.getElementById('certFileLabel');
+const certPassLabel = document.getElementById('certPassLabel');
+const btn = document.getElementById('btn');
+const resultCard = document.getElementById('resultCard');
+const out = document.getElementById('out');
+
+function toggle() {
+  const isApp = tipo.value === 'app';
+  secApp.classList.toggle('hidden', !isApp);   // seccion App solo si tipo=app
+  secInt.classList.toggle('hidden', isApp);    // seccion Integracion solo si tipo=integracion
+  certFileLabel.classList.toggle('req', !isApp); // cert requerido solo en integracion
+  certPassLabel.classList.toggle('req', !isApp);
+}
+tipo.addEventListener('change', toggle);
+toggle();
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true; btn.textContent = 'Creando...';
+  resultCard.classList.add('hidden');
+  out.classList.remove('ok', 'err');
+
+  // Construir FormData omitiendo campos vacios (para no romper la logica del backend).
+  const fd = new FormData();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'file') {
+      if (el.files && el.files.length) fd.append(el.name, el.files[0]);
+    } else if (el.type === 'checkbox') {
+      if (el.checked) fd.append(el.name, el.value);
+    } else if (el.value !== '') {
+      fd.append(el.name, el.value);
+    }
+  }
+
+  try {
+    const res = await fetch('create_tenant.php', { method: 'POST', body: fd });
+    const text = await res.text();
+    out.textContent = text;
+    out.classList.add(res.ok && /Tenant creado OK/.test(text) ? 'ok' : 'err');
+    resultCard.classList.remove('hidden');
+  } catch (err) {
+    out.textContent = 'Error de red: ' + err.message;
+    out.classList.add('err');
+    resultCard.classList.remove('hidden');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Crear tenant';
+  }
+});
+</script>
+</body>
+</html>
