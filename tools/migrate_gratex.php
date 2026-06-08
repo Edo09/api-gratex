@@ -9,10 +9,10 @@
  * ----------------------------------------------------------------------------
  * EJECUCION POR NAVEGADOR (no requiere CLI):
  *   1. Edita MIGRATION_TOKEN abajo y pon un valor secreto propio.
- *   2. Abre:  https://TU-DOMINIO/api/tools/migrate_gratex.php?token=TU_TOKEN
- *      (ajusta la ruta segun donde quede el archivo en el server)
+ *   2. Abre (via el entrypoint en public/, que el .htaccess sirve directo):
+ *        https://gratex.net/api/public/migrate_gratex.php?token=TU_TOKEN
  *   3. Lee la salida. Si todo OK, pon MULTI_TENANT_ENABLED=true en .env.
- *   4. BORRA este archivo del server (ejecuta migraciones de DB).
+ *   4. BORRA public/migrate_gratex.php y tools/migrate_gratex.php del server.
  *
  * Tambien corre por CLI:  php tools/migrate_gratex.php
  *
