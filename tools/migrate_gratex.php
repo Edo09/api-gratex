@@ -23,7 +23,7 @@
  */
 
 // === CONFIG: editar antes de usar por navegador =============================
-const MIGRATION_TOKEN  = 'CAMBIA_ESTE_TOKEN_Y_LUEGO_BORRA_EL_ARCHIVO';
+const MIGRATION_TOKEN  = 'gratextoken.';
 const DEFAULT_RNC      = '00109122788';
 const DEFAULT_NOMBRE   = 'Gratex SRL';
 const DEFAULT_AMBIENTE = 'ecf';
