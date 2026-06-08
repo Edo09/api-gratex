@@ -279,20 +279,15 @@ Lo implementado está **gated**: con el flag en `false` el comportamiento es id�
 3. ✅ **Funcionalidad de integración (HECHO).** Ver sección 12 — emisión, recepción,
    aprobación entrante/saliente, consulta y webhook implementados y gated.
 
-4. ⏳ **2do tenant tipo `app` con DB distinta — PENDIENTE (refactor de orden de conexión).**
-   Los controllers instancian sus models en el tope del archivo (antes de
-   `validateRequest`), y cada model fija su conexión en el constructor
-   (`Database::getInstance()->getConnection()`). En mt-mode eso pasa ANTES de resolver
-   el tenant, así que el model quedaría atado a la DB por defecto. Por eso `Database`
-   cae al `.env` (no lanza excepción) — si lanzara, rompería toda la app.
-   - **Gratex (tenant #1) NO se ve afectado:** su DB == la default del `.env`.
-   - **Integración NO se ve afectada:** no usa la DB del tenant.
-   - **Antes de onboardear un 2do tenant `app` con otra DB:** resolver el tenant antes
-     de instanciar models (mover `AuthMiddleware::validateRequest()` arriba del todo en
-     cada controller) o hacer la conexión lazy (que los models pidan la conexión por
-     query, no en el constructor). Si no, riesgo de leak a la DB default.
-   - Modelos globales públicos ya corregidos: `LandingModel` lee de master en mt-mode
-     (el endpoint landing es público, sin tenant).
+4. ✅ **2do tenant tipo `app` con DB distinta (HECHO — pre-resolución en Router).**
+   Los controllers instancian sus models en el tope del archivo (antes de su propio
+   `validateRequest`) y el model fija la conexión en el constructor. Fix: `Router.php`
+   **pre-resuelve el tenant** (best-effort `AuthMiddleware::validateRequest()`) ANTES de
+   incluir el controller, así `Database::setCredentials()` ya está puesto cuando el model
+   se construye → queda atado a la DB del tenant correcto. Public endpoints sin token no
+   resuelven nada (y `LandingModel` lee de master). Gratex e integración no se ven afectados.
+   - Si DGII manda `Authorization: Bearer` a `/api/ecf/*`, la pre-resolución no encuentra
+     token de sesión y no resuelve (el controller DGII resuelve por RNC). Sin conflicto.
 
 ### Infra ya lista para estas piezas
 - `tenants.tipo`, `cert_path`/`cert_pass_encrypted`, `webhook_url`/`webhook_secret_encrypted`.
