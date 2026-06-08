@@ -4,6 +4,7 @@
 //   GET    /api/facturas-simples              -> lista paginada (?page,?pageSize,?query)
 //   GET    /api/facturas-simples/{id}          -> una factura con sus lineas
 //   GET    /api/facturas-simples?id={id}       -> idem
+//   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64)
 //   POST   /api/facturas-simples              -> crear
 //   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64)
 //   PUT    /api/facturas-simples/{id}          -> actualizar (id tambien valido en el body)
@@ -40,6 +41,8 @@ $pathId = preg_match('#/facturas-simples/(\d+)#', $path, $m) ? (int) $m[1] : nul
 // POST /api/facturas-simples/preview -> PDF previo (sin guardar). "preview" no
 // es numerico, asi que nunca colisiona con la ruta /{id}.
 $isPreview = (bool) preg_match('#/facturas-simples/preview$#', $path);
+// GET /api/facturas-simples/{id}/pdf -> PDF de la factura guardada.
+$isPdf = (bool) preg_match('#/facturas-simples/\d+/pdf$#', $path);
 
 function fsBody(): array
 {
@@ -168,8 +171,64 @@ function fsHandlePreview(clientModel $clientModel): void
     ]);
 }
 
+/**
+ * GET /api/facturas-simples/{id}/pdf
+ * Genera el PDF de una factura simple YA guardada. Misma factura que persiste
+ * el create (tipo_ecf null), con diseño NCF y sin etiquetas de e-CF. Devuelve el
+ * PDF crudo con ?format=download, o base64 por defecto.
+ */
+function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientModel): void
+{
+    $factura = $facturaModel->getFacturaSimple($id);
+    if ($factura === null) {
+        fsRespond(false, 'Factura no encontrada', 404);
+        return;
+    }
+
+    // getFacturaSimple ya trae los items en la forma que entiende el generador
+    // (description/amount/quantity/subtotal). Se completan los datos del cliente
+    // desde la BD para el encabezado (rnc/telefono/email/direccion), igual que el
+    // preview cuando llega client_id.
+    $client = [];
+    if (!empty($factura['client_id'])) {
+        $clients = $clientModel->getClients($factura['client_id']);
+        if (!empty($clients)) {
+            $client = $clients[0];
+        }
+    }
+
+    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
+    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
+    $pdf->setNoElectronica(true);  // diseño NCF, sin timbre/etiquetas de e-CF
+    $pdf->setFactura($factura);
+    if (!empty($client)) {
+        $pdf->setClientData($client);
+    }
+    $pdfContent = $pdf->generatePdf();
+
+    $filename = 'Factura_' . ($factura['no_factura'] ?? $id) . '.pdf';
+    $format = $_GET['format'] ?? 'base64';
+    if ($format === 'download') {
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . $filename . '"');
+        header('Content-Length: ' . strlen($pdfContent));
+        echo $pdfContent;
+        return;
+    }
+
+    fsRespond(true, [
+        'filename'  => $filename,
+        'content'   => base64_encode($pdfContent),
+        'mime_type' => 'application/pdf',
+    ]);
+}
+
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
+        if ($isPdf && $pathId !== null) {
+            fsHandlePdf($pathId, $facturaModel, $clientModel);
+            break;
+        }
         $id = $pathId ?? (isset($_GET['id']) && is_numeric($_GET['id']) ? (int) $_GET['id'] : null);
         if ($id !== null) {
             $factura = $facturaModel->getFacturaSimple($id);
