@@ -37,13 +37,14 @@ class Database
             $user = self::$credentials['user'] ?? '';
             $pass = self::$credentials['pass'] ?? '';
         } else {
-            // En modo multi-tenant estricto, negar el fallback implicito al DB
-            // por defecto: si no se resolvio el tenant, es un bug de ruteo.
-            if (filter_var($_ENV['MULTI_TENANT_ENABLED'] ?? getenv('MULTI_TENANT_ENABLED'), FILTER_VALIDATE_BOOLEAN)) {
-                throw new RuntimeException(
-                    'Multi-tenant activo: tenant no resuelto. Llamar Database::setCredentials() antes de consultar.'
-                );
-            }
+            // Sin tenant resuelto: cae al DB por defecto del .env.
+            // NOTA multi-tenant: los controllers instancian sus models en el tope
+            // (antes de validateRequest), y los models fijan la conexion en su
+            // constructor. Por eso NO se lanza excepcion aqui: romperia toda la app.
+            // Implicacion: para un 2do tenant tipo "app" con DB distinta hace falta
+            // resolver el tenant ANTES de instanciar models (o conexion lazy).
+            // Gratex (tenant #1) no se ve afectado: su DB == la default del .env.
+            // Integracion no usa la DB de tenant. Ver docs/multi-emisor-master-db-prd.md.
             $host = $_ENV['DB_HOST'] ?? 'sh00032.hostgator.com';
             $port = $_ENV['DB_PORT'] ?? '3306';
             $name = $_ENV['DB_NAME'] ?? 'mtldtmte_new_gratexdb';
