@@ -8,7 +8,7 @@
 
 // Handle CORS at the router level FIRST, before any other logic
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
+header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
 header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
 header('Content-Type: application/json; charset=utf-8');
@@ -114,6 +114,28 @@ switch ($route) {
             echo json_encode([
                 'status' => false,
                 'error' => 'Sub-ruta no encontrada bajo /api/ecf. Use recepcion, aprobacion-comercial o autenticacion.',
+            ]);
+        }
+        break;
+
+    case 'integracion':
+        // Endpoints para clientes tipo integracion (sin DB; auth X-API-KEY + X-API-SECRET):
+        //   /api/integracion/ecf                  -> emitir e-CF (JSON -> XML firmado)
+        //   /api/integracion/aprobacion-comercial -> aprobar/rechazar e-CF recibido (ACECF)
+        //   /api/integracion/recibidos            -> listar e-CF recibidos
+        //   /api/integracion/aprobaciones         -> listar aprobaciones recibidas
+        $sub = strtolower($route_segments[1] ?? '');
+        if ($sub === 'ecf') {
+            require_once 'src/Controllers/integracionEcfController.php';
+        } elseif ($sub === 'aprobacion-comercial' || $sub === 'aprobacioncomercial') {
+            require_once 'src/Controllers/integracionAprobacionController.php';
+        } elseif ($sub === 'recibidos' || $sub === 'aprobaciones') {
+            require_once 'src/Controllers/integracionConsultaController.php';
+        } else {
+            http_response_code(404);
+            echo json_encode([
+                'status' => false,
+                'error' => 'Sub-ruta no encontrada bajo /api/integracion. Use ecf, aprobacion-comercial, recibidos o aprobaciones.',
             ]);
         }
         break;

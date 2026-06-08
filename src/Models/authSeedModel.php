@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../Database.php';
+require_once __DIR__ . '/../MasterDatabase.php';
 
 class authSeedModel
 {
@@ -7,7 +8,14 @@ class authSeedModel
 
     public function __construct()
     {
-        $this->conexion = Database::getInstance()->getConnection();
+        // The DGII auth/seed flow runs before the receiver tenant is known
+        // (the tenant is resolved later from RNCComprador/RNCEmisor in the XML),
+        // so this auth state is global and lives in the master DB.
+        if (filter_var(getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false), FILTER_VALIDATE_BOOLEAN)) {
+            $this->conexion = MasterDatabase::getInstance()->getConnection();
+        } else {
+            $this->conexion = Database::getInstance()->getConnection();
+        }
     }
 
     public function create(string $seedValue, string $xml, int $ttlSeconds = 300): int

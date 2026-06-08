@@ -5,6 +5,7 @@ require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ECFXmlBuilder.php';
 require_once __DIR__ . '/RFCEXmlBuilder.php';
+require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
 
@@ -55,14 +56,27 @@ class ECFEmissionService
             throw new RuntimeException('tipo_ecf invalido: ' . $tipoEcf);
         }
 
-        $emisor = $this->emisorModel->get();
-        if (!$emisor) {
-            throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
+        // Modo integracion: sin DB propia. El emisor viene en el payload y el
+        // cliente envia el e_ncf (no dispensamos secuencia ni leemos emisor_config).
+        $integration = !empty($payload['integration']);
+        if ($integration) {
+            $emisor = is_array($payload['emisor'] ?? null) ? $payload['emisor'] : [];
+            if (empty($emisor['rnc']) || empty($emisor['razon_social']) || empty($emisor['direccion'])) {
+                throw new RuntimeException('Integracion: el payload debe incluir emisor con rnc, razon_social y direccion.');
+            }
+            $ambienteEarly = (string) ($payload['ambiente'] ?? 'ecf');
+        } else {
+            $emisor = $this->emisorModel->get();
+            if (!$emisor) {
+                throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
+            }
+            $ambienteEarly = $this->ncfModel->resolveActiveAmbiente() ?? 'certecf';
         }
 
-        $ambienteEarly = $this->ncfModel->resolveActiveAmbiente() ?? 'certecf';
-
         $eNcfOverride = $payload['e_ncf'] ?? null;
+        if ($integration && ($eNcfOverride === null || $eNcfOverride === '')) {
+            throw new RuntimeException('Integracion: el e_ncf es requerido en el payload (no generamos secuencia).');
+        }
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
                 throw new RuntimeException('e_ncf override invalido: debe ser E' . $tipoEcf . ' + 10 digitos. Recibido: ' . $eNcfOverride);
@@ -130,21 +144,22 @@ class ECFEmissionService
 
         $unsignedXml = $this->builder->build($xmlData);
 
-        $certPath = $this->resolveCertPath();
-        $certContent = file_get_contents($certPath);
-        if ($certContent === false) {
-            throw new RuntimeException('No se puede leer el certificado: ' . $certPath);
-        }
-        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
+        // Cert del tenant resuelto (multi-tenant) o el global del .env (fallback).
+        $cert = CertResolver::resolve();
+        $certContent = $cert['content'];
+        $certPassword = $cert['password'];
         if ($certPassword === '') {
-            throw new RuntimeException('DGII_ECF_CERT_PASSWORD no configurado.');
+            throw new RuntimeException('Password del certificado no configurado (DGII_ECF_CERT_PASSWORD o cert del tenant).');
         }
 
         $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
         $codigoSeguridad = $this->extractCodigoSeguridad($signedXml);
 
+        // El mismo cert firma la semilla de autenticacion DGII.
         $tokenInfo = $this->auth->autenticar([
             'environment' => $payload['ambiente'] ?? null,
+            'certificate_content' => $certContent,
+            'certificate_password' => $certPassword,
         ]);
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];
@@ -279,7 +294,12 @@ class ECFEmissionService
         if (!$emisor) {
             throw new RuntimeException('emisor_config no configurado.');
         }
-        $tokenInfo = $this->auth->autenticar(['environment' => $ambiente]);
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
         return $this->reception->consultarEstado(
             $trackId,
             $emisor['rnc'],
@@ -300,7 +320,12 @@ class ECFEmissionService
         if (!$emisor) {
             throw new RuntimeException('emisor_config no configurado.');
         }
-        $tokenInfo = $this->auth->autenticar(['environment' => $ambiente]);
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
         return $this->reception->consultarResumenRFCE(
             $emisor['rnc'],
             $eNcf,

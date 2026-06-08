@@ -4,6 +4,7 @@ require_once __DIR__ . '/DgiiAuthService.php';
 require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ACECFXmlBuilder.php';
+require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 
 /**
@@ -50,9 +51,19 @@ class ACECFEmissionService
      */
     public function enviar(array $payload): array
     {
-        $emisor = $this->emisorModel->get();
-        if (!$emisor) {
-            throw new RuntimeException('emisor_config no configurado.');
+        // Integracion: sin DB. El comprador (nosotros) es el tenant; su RNC viene
+        // en el payload. App: se lee de emisor_config.
+        $integration = !empty($payload['integration']);
+        if ($integration) {
+            if (empty($payload['rnc_comprador'])) {
+                throw new RuntimeException('Integracion: rnc_comprador requerido en el payload.');
+            }
+            $emisor = ['rnc' => (string) $payload['rnc_comprador']];
+        } else {
+            $emisor = $this->emisorModel->get();
+            if (!$emisor) {
+                throw new RuntimeException('emisor_config no configurado.');
+            }
         }
 
         $xmlData = [
@@ -68,14 +79,12 @@ class ACECFEmissionService
 
         $unsignedXml = $this->builder->build($xmlData);
 
-        $certPath = $this->resolveCertPath();
-        $certContent = file_get_contents($certPath);
-        if ($certContent === false) {
-            throw new RuntimeException("No se puede leer el certificado: $certPath");
-        }
-        $certPassword = getenv('DGII_ECF_CERT_PASSWORD') ?: '';
+        // Cert del tenant resuelto (integracion/app) o el global del .env.
+        $cert = CertResolver::resolve();
+        $certContent = $cert['content'];
+        $certPassword = $cert['password'];
         if ($certPassword === '') {
-            throw new RuntimeException('DGII_ECF_CERT_PASSWORD no configurado.');
+            throw new RuntimeException('Password del certificado no configurado.');
         }
 
         $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
@@ -83,6 +92,8 @@ class ACECFEmissionService
 
         $tokenInfo = $this->auth->autenticar([
             'environment' => $payload['ambiente'] ?? null,
+            'certificate_content' => $certContent,
+            'certificate_password' => $certPassword,
         ]);
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];

@@ -8,6 +8,10 @@ require_once __DIR__ . '/../Models/ecfRecibidoModel.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
+require_once __DIR__ . '/../TenantResolver.php';
+require_once __DIR__ . '/../CertResolver.php';
+require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
+require_once __DIR__ . '/../Utils/WebhookDispatcher.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/DgiiXmlSigner.php';
@@ -83,10 +87,29 @@ function handleRecepcionEcf(): void
         return;
     }
 
-    $emisor = (new EmisorConfigModel())->get();
-    if (!$emisor) {
-        respondRecepcion(false, 'emisor_config no configurado en este sistema.', 500);
-        return;
+    // Multi-tenant: el RNCComprador identifica al tenant receptor (nosotros).
+    // Resolver su DB antes de tocar emisor_config / ecf_recibidos.
+    if (ecfRecepcionMultiTenant()) {
+        $rncDestino = (string) ($rncComprador ?? '');
+        if ($rncDestino === '' || !TenantResolver::resolveByRnc($rncDestino)) {
+            respondRecepcion(false, 'RNC comprador (' . $rncDestino . ') no registrado en este sistema.', 404);
+            return;
+        }
+    }
+
+    // Receptor (nosotros). En integracion no hay emisor_config: el RNC es el del tenant.
+    $isIntegration = ecfRecepcionMultiTenant() && TenantResolver::isIntegration();
+    $tenant = $isIntegration ? TenantResolver::current() : null;
+    $tenantId = $isIntegration ? (int) $tenant['id'] : null;
+
+    if ($isIntegration) {
+        $emisor = ['rnc' => (string) $tenant['rnc']];
+    } else {
+        $emisor = (new EmisorConfigModel())->get();
+        if (!$emisor) {
+            respondRecepcion(false, 'emisor_config no configurado en este sistema.', 500);
+            return;
+        }
     }
     if ($rncComprador !== null && $rncComprador !== $emisor['rnc']) {
         respondRecepcion(
@@ -97,17 +120,16 @@ function handleRecepcionEcf(): void
         return;
     }
 
-    $model = new ecfRecibidoModel();
-    if ($model->exists($rncEmisor, $eNcf)) {
-        $existing = $model->getByENCF($rncEmisor, $eNcf);
-        $trackIdEx = $existing['track_id'] ?? '';
-        $codigoEx  = $existing['codigo_resultado'] ?? 1;
-        $estadoEx  = $existing['estado'] ?? 'ACEPTADO';
-        $fechaEx   = $existing['fecha_recepcion'] ?? date('d-m-Y H:i:s');
-        $emisorRnc = (new EmisorConfigModel())->get()['rnc'] ?? '';
+    // Store: master (integracion, por tenant_id) o DB del tenant (app).
+    $store = $isIntegration ? new IntegracionStoreModel() : new ecfRecibidoModel();
+
+    $yaExiste = $isIntegration
+        ? $store->existsRecibido($tenantId, $rncEmisor, $eNcf)
+        : $store->exists($rncEmisor, $eNcf);
+    if ($yaExiste) {
         http_response_code(200);
         header('Content-Type: text/xml; charset=utf-8');
-        echo buildSignedAECF($rncEmisor, $emisorRnc, $eNcf, 0, null);
+        echo buildSignedAECF($rncEmisor, $emisor['rnc'] ?? '', $eNcf, 0, null);
         return;
     }
 
@@ -118,7 +140,7 @@ function handleRecepcionEcf(): void
         ? 'e-CF recibido y firma verificada.'
         : 'e-CF recibido pero la firma digital no es valida: ' . ($validation['firma_detalle'] ?? '');
 
-    $id = $model->save([
+    $recData = [
         'track_id' => $trackId,
         'tipo_ecf' => $tipoEcf,
         'e_ncf' => $eNcf,
@@ -133,7 +155,12 @@ function handleRecepcionEcf(): void
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
         'ambiente' => getenv('DGII_ECF_ENVIRONMENT') ?: null,
-    ]);
+    ];
+    if ($isIntegration) {
+        $store->saveRecibido($tenantId, $recData);
+    } else {
+        $store->save($recData);
+    }
 
     $nuestroRnc = $emisor['rnc'] ?? '';
     $estadoAecf = $validation['firma'] === 'OK' ? 0 : 1;
@@ -141,6 +168,24 @@ function handleRecepcionEcf(): void
     http_response_code(200);
     header('Content-Type: text/xml; charset=utf-8');
     echo buildSignedAECF($rncEmisor, $nuestroRnc, $eNcf, $estadoAecf, $motivoAecf);
+
+    // Integracion: notificar al cliente por webhook (tras responder a DGII).
+    if ($isIntegration && !empty($tenant['webhook_url'])) {
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+        WebhookDispatcher::dispatch($tenant, 'ecf.recibido', [
+            'track_id' => $trackId,
+            'tipo_ecf' => $tipoEcf,
+            'e_ncf' => $eNcf,
+            'rnc_emisor' => $rncEmisor,
+            'razon_social_emisor' => $razonSocial,
+            'rnc_comprador' => $rncComprador,
+            'monto_total' => $montoTotal,
+            'fecha_emision' => $fechaEmision,
+            'estado' => $estado,
+        ]);
+    }
 }
 
 function handleConsultarRecibido(string $trackId): void
@@ -251,15 +296,11 @@ function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, 
         '</ARECF>';
 
     try {
-        $certPath = getenv('DGII_ECF_CERT_PATH') ?: '';
-        if ($certPath && !preg_match('/^[A-Za-z]:[\\\\\/]/', $certPath) && !str_starts_with($certPath, '/')) {
-            $certPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $certPath);
-        }
-        $certContent = $certPath ? file_get_contents($certPath) : false;
-        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
-        if ($certContent !== false && $certPassword !== '') {
+        // Cert del tenant resuelto (integracion/app) o el global del .env.
+        $cert = CertResolver::resolve();
+        if ($cert['password'] !== '') {
             $signer = new DgiiXmlSigner();
-            return $signer->sign($certContent, $certPassword, $unsigned);
+            return $signer->sign($cert['content'], $cert['password'], $unsigned);
         }
     } catch (Throwable $e) {
         error_log('[ecfRecepcion] AECF sign error: ' . $e->getMessage());
@@ -271,6 +312,14 @@ function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, 
 function ecfRecepcionGenerarTrackId(): string
 {
     return strtoupper(bin2hex(random_bytes(16)));
+}
+
+function ecfRecepcionMultiTenant(): bool
+{
+    return filter_var(
+        getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false),
+        FILTER_VALIDATE_BOOLEAN
+    );
 }
 
 function respondRecepcion(bool $status, string $message, int $code = 200, array $extra = []): void
