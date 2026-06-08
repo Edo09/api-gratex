@@ -5,7 +5,7 @@ class Database
     private static $credentials = null;
     private $conexion;
 
-    private static function loadEnv(): void
+    public static function loadEnv(): void
     {
         $envFile = __DIR__ . '/../.env';
         if (!is_file($envFile)) {

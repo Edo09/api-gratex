@@ -6,6 +6,13 @@
  *   /api/users/* -> User CRUD endpoints (requires token)
  */
 
+// Cargar .env al inicio de CADA request, antes de instanciar cualquier model.
+// Critico para multi-tenant: authModel/LandingModel/etc leen MULTI_TENANT_ENABLED
+// en su constructor; si el .env no esta cargado aun, creerian que es single-tenant
+// y consultarian la DB equivocada (login -> tenant DB, validacion -> master).
+require_once __DIR__ . '/Database.php';
+Database::loadEnv();
+
 // Handle CORS at the router level FIRST, before any other logic
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
