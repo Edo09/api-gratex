@@ -58,8 +58,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
                 $respuesta = ['success' => false, 'error' => 'Password is required'];
             } else {
-                $login_result = $authModel->loginUser($_POST->emailOrUsername, $_POST->password);
-                
+                // tenant_id opcional: requerido para login por USERNAME en multi-tenant
+                // (el username es unico por tenant; el email es unico global).
+                $tenantId = $_POST->tenant_id ?? null;
+                $login_result = $authModel->loginUser($_POST->emailOrUsername, $_POST->password, $tenantId);
+
                 if ($login_result[0] === 'success') {
                     $respuesta = [
                         'success' => true,

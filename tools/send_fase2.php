@@ -518,4 +518,8 @@ function printSummary(array $results): void
     }
 }
 
-exit(main($argv));
+// Auto-run solo por CLI. Por web (wrapper en public/) se incluye este archivo y
+// se llama main($argv) con un $argv construido desde la peticion.
+if (PHP_SAPI === 'cli') {
+    exit(main($argv));
+}

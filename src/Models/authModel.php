@@ -178,20 +178,37 @@ class authModel
     }
 
     /**
-     * Login user with email or username and password
+     * Login user with email or username and password.
      * @param string $email_or_username User email or username
      * @param string $password User password
+     * @param int|string|null $tenant_id Requerido para login por USERNAME en multi-tenant
+     *        (el username es unico por tenant, no global; el email si es global).
      * @return array ['success', ['token' => token, 'user' => user_data]] or ['error', message]
      */
-    public function loginUser($email_or_username, $password)
+    public function loginUser($email_or_username, $password, $tenant_id = null)
     {
         try {
-            // Find user by email or username (email is the globally-unique key in multi-tenant)
-            $sql = self::multiTenant()
-                ? "SELECT id, tenant_id, email, username, name, last_name, password, role FROM users WHERE email = :email_or_username OR username = :email_or_username LIMIT 1"
-                : "SELECT id, email, username, name, last_name, password, role FROM users WHERE email = :email_or_username OR username = :email_or_username LIMIT 1";
+            if (self::multiTenant()) {
+                if ($tenant_id !== null && $tenant_id !== '') {
+                    // Con tenant_id: email O username, acotado al tenant -> sin ambiguedad.
+                    $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
+                            FROM users
+                            WHERE (email = :eu OR username = :eu) AND tenant_id = :tid LIMIT 1";
+                    $params = [':eu' => $email_or_username, ':tid' => (int) $tenant_id];
+                } else {
+                    // Sin tenant_id: solo por email (unico global). El username solo
+                    // seria ambiguo entre tenants, por eso no se permite aqui.
+                    $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
+                            FROM users WHERE email = :eu LIMIT 1";
+                    $params = [':eu' => $email_or_username];
+                }
+            } else {
+                $sql = "SELECT id, email, username, name, last_name, password, role
+                        FROM users WHERE email = :eu OR username = :eu LIMIT 1";
+                $params = [':eu' => $email_or_username];
+            }
             $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([':email_or_username' => $email_or_username]);
+            $stmt->execute($params);
             $user = $stmt->fetch();
 
             // Verify user exists and password is correct

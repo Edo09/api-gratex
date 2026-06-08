@@ -60,7 +60,11 @@
       "PowerShell(php -l src/Utils/FacturacionElectronica/ECFEmissionService.php)",
       "PowerShell(php -l src/Utils/FacturacionElectronica/ECFXmlBuilder.php)",
       "Bash(findstr /v /c:\".sql\")",
-      "Bash(php -l \"c:/Users/edgarcia/Documents/grat/api-gratex/src/Controllers/ecfRecepcionController.php\")"
+      "Bash(php -l \"c:/Users/edgarcia/Documents/grat/api-gratex/src/Controllers/ecfRecepcionController.php\")",
+      "PowerShell(php -l public/cert_run.php)",
+      "PowerShell(php -l tools/send_fase2.php)",
+      "PowerShell(php -l tools/send_fase3.php)",
+      "PowerShell(php -l tools/send_fase4_simulation.php)"
     ]
   }
 }

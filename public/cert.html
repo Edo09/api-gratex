@@ -54,8 +54,11 @@
 <body>
 <header>
   <h1>Asistente de certificación DGII e-CF</h1>
-  <input id="tenantId" placeholder="Tenant ID (para guardar progreso)" style="width:200px">
-  <input id="apiToken" type="password" placeholder="Token API del tenant (para PDFs)" style="width:240px">
+  <input id="tenantId" placeholder="Tenant ID (progreso)" style="width:130px">
+  <input id="apiToken" type="password" placeholder="Token API del tenant" style="width:190px" title="X-API-KEY del tenant: para PDFs y para correr los runners">
+  <input id="clientId" placeholder="client_id" style="width:90px" title="ID del comprador de prueba en la tabla clients del tenant">
+  <input id="userId" placeholder="user_id" style="width:80px">
+  <input id="certToken" type="password" placeholder="CERT_RUN_TOKEN" style="width:150px" title="Token del .env para autorizar correr los runners">
 </header>
 
 <div class="layout">
@@ -71,26 +74,53 @@ const API = location.origin + '/api';
 const STEPS = [
   { n:1,  t:'Datos del contribuyente', tipo:'manual', body:`
      <p>Registro inicial del emisor en el <b>portal DGII</b> (RNC, datos fiscales, autorización de secuencias).</p>
-     <p>En <b>nuestro</b> sistema: da de alta el emisor como tenant (cert, RNC, secuencias).</p>
-     <p><a href="onboard.html" target="_blank">→ Abrir alta de cliente (onboarding)</a> · <a href="upload_logo.php" target="_blank">→ Subir logo</a></p>` },
+     <p>En <b>nuestro</b> sistema: da de alta el emisor como tenant (cert, RNC, secuencias) y su usuario admin.</p>
+     <p><a href="onboard.html" target="_blank">→ Alta de cliente (onboarding)</a> ·
+        <a href="upload_logo.php" target="_blank">→ Subir logo</a> ·
+        <a href="create_user.php" target="_blank">→ Alta de usuario</a></p>
+     <div class="panel">
+       <b>Obtener el Token API del tenant</b>
+       <p class="muted">Login con un usuario del tenant (por email). Llena el campo "Token API del tenant" de arriba.</p>
+       <label>Email</label><input type="text" id="loginEmail" placeholder="admin@cliente.com">
+       <label>Password</label><input type="password" id="loginPass">
+       <button class="act" id="btnLogin">Login y usar token</button>
+       <pre id="loginOut" style="display:none"></pre>
+     </div>` },
 
   { n:2,  t:'Pruebas de Datos e-CF', tipo:'auto', body:`
-     <p>Emite los 25 casos del set de pruebas que entrega DGII (xlsx).</p>
+     <p>Emite los 25 casos del set de pruebas que entrega DGII (xlsx) vía <code>POST /api/facturas</code>.</p>
      <div class="panel">
-       <b>Runner:</b> <code>send_fase2.php</code> (lee el xlsx → <code>POST /api/facturas</code> con el e-NCF de cada caso).
-       <p class="muted">Automatización web del runner: próxima iteración. Hoy se corre el runner apuntando al API con el <b>api-key del tenant</b>.</p>
+       <label>Archivo del set de pruebas (.xlsx)</label>
+       <input type="file" id="xlsx2" accept=".xlsx">
+       <label>Filtro (opcional, ej. E31,E32)</label>
+       <input type="text" id="filter2" placeholder="vacío = todos">
+       <button class="act" data-run="2" data-xlsx="xlsx2" data-filter="filter2">Correr Fase 2</button>
+       <button class="act ghost" data-run="2" data-xlsx="xlsx2" data-filter="filter2" data-dry="1">Dry-run (no envía)</button>
+       <pre class="runout" style="display:none"></pre>
      </div>
-     <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante, reinicia el set completo. Deben pasar todos en una corrida limpia.</p>` },
+     <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante reinicia el set completo: deben pasar todos en una corrida limpia. Usa el <b>Token API del tenant</b> + <b>CERT_RUN_TOKEN</b> de arriba.</p>` },
 
   { n:3,  t:'Pruebas de Datos Aprobación Comercial', tipo:'auto', body:`
-     <p>Envía las Aprobaciones Comerciales (ACECF) de la hoja <code>ACEECF_Generadas</code> del xlsx.</p>
-     <div class="panel"><b>Runner:</b> <code>send_fase3.php</code> → <code>POST /api/aprobaciones-comerciales</code>.
-       <p class="muted">Automatización web: próxima iteración.</p></div>` },
+     <p>Envía las Aprobaciones Comerciales (ACECF) de la hoja <code>ACEECF_Generadas</code> del xlsx → <code>POST /api/aprobaciones-comerciales</code>.</p>
+     <div class="panel">
+       <label>Archivo del set de pruebas (.xlsx)</label>
+       <input type="file" id="xlsx3" accept=".xlsx">
+       <button class="act" data-run="3" data-xlsx="xlsx3">Correr Fase 3</button>
+       <button class="act ghost" data-run="3" data-xlsx="xlsx3" data-dry="1">Dry-run</button>
+       <pre class="runout" style="display:none"></pre>
+     </div>` },
 
   { n:4,  t:'Pruebas Simulación e-CF', tipo:'auto', body:`
-     <p>Emite los 10 tipos e-CF con datos simulados (E31, E32 ≥/&lt;250k, E33, E34, E41, E43-E47).</p>
-     <div class="panel"><b>Runner:</b> <code>send_fase4_simulation.php</code>. Las notas (E33/E34) referencian E31 ya aceptados.
-       <p class="muted">Automatización web: próxima iteración.</p></div>` },
+     <p>Emite los 10 tipos e-CF con datos simulados (E31, E32 ≥/&lt;250k, E33, E34, E41, E43-E47). Las notas (E33/E34) referencian E31 ya aceptados.</p>
+     <div class="panel">
+       <label>counts (opcional, ej. E31:2,E34:2) — vacío = distribución completa (25)</label>
+       <input type="text" id="counts4" placeholder="vacío = 25 casos">
+       <label>nota-wait-accepted (seg., opcional para que las notas esperen E31 aceptados)</label>
+       <input type="text" id="wait4" placeholder="ej. 240">
+       <button class="act" data-run="4" data-counts="counts4" data-wait="wait4">Correr Fase 4</button>
+       <button class="act ghost" data-run="4" data-counts="counts4" data-dry="1">Dry-run</button>
+       <pre class="runout" style="display:none"></pre>
+     </div>` },
 
   { n:5,  t:'Simulación Representación Impresa', tipo:'auto', body:`
      <p>Genera la Representación Impresa (PDF con QR de timbre DGII) de cada e-CF emitido y súbela al portal.</p>
@@ -138,6 +168,9 @@ const nav = document.getElementById('stepsNav');
 const content = document.getElementById('content');
 const tenantIdEl = document.getElementById('tenantId');
 const apiTokenEl = document.getElementById('apiToken');
+const clientIdEl = document.getElementById('clientId');
+const userIdEl = document.getElementById('userId');
+const certTokenEl = document.getElementById('certToken');
 
 tenantIdEl.value = localStorage.getItem('cert_tenant') || '';
 tenantIdEl.addEventListener('change', () => { localStorage.setItem('cert_tenant', tenantIdEl.value.trim()); renderNav(); });
@@ -174,8 +207,95 @@ function render() {
     <div class="done-toggle"><input type="checkbox" id="doneChk" ${isDone(s.n) ? 'checked' : ''}>
       <label for="doneChk" style="margin:0">Marcar paso ${s.n} como completado</label></div>`;
   document.getElementById('doneChk').onchange = (e) => toggleDone(s.n, e.target.checked);
+  if (s.n === 1) wireLogin();
   if (s.n === 5) wireStep5();
   if (s.n === 7) wireStep7();
+  content.querySelectorAll('[data-run]').forEach(wireRunner);
+}
+
+function wireLogin() {
+  const btn = document.getElementById('btnLogin');
+  const out = document.getElementById('loginOut');
+  btn.onclick = async () => {
+    const email = document.getElementById('loginEmail').value.trim();
+    const pass = document.getElementById('loginPass').value;
+    if (!email || !pass) { alert('Email y password requeridos.'); return; }
+    btn.disabled = true; out.style.display = 'block'; out.textContent = 'Login...';
+    try {
+      const body = { emailOrUsername: email, password: pass };
+      const tid = tenantIdEl.value.trim();
+      if (tid) body.tenant_id = tid; // permite login por username (acotado al tenant)
+      const res = await fetch(`${API}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      const j = await res.json();
+      const token = j?.data?.token;
+      if (res.ok && token) {
+        apiTokenEl.value = token;
+        out.textContent = 'OK. Token cargado en "Token API del tenant".\n'
+          + 'Usuario: ' + (j.data.user?.name || '') + ' (' + (j.data.user?.role || '') + ')';
+      } else {
+        out.textContent = 'Fallo login: ' + (j?.error || ('HTTP ' + res.status));
+      }
+    } catch (e) {
+      out.textContent = 'Error de red: ' + e.message;
+    } finally {
+      btn.disabled = false;
+    }
+  };
+}
+
+function wireRunner(btn) {
+  btn.addEventListener('click', async () => {
+    const fase = btn.dataset.run;
+    const certToken = certTokenEl.value.trim();
+    const apiKey = apiTokenEl.value.trim();
+    if (!certToken) { alert('Falta CERT_RUN_TOKEN (arriba).'); return; }
+    if (!apiKey) { alert('Falta el Token API del tenant (arriba).'); return; }
+
+    const out = btn.closest('.panel').querySelector('.runout');
+    const fd = new FormData();
+    fd.append('token', certToken);
+    fd.append('fase', fase);
+    fd.append('api_key', apiKey);
+    if (clientIdEl.value.trim()) fd.append('client_id', clientIdEl.value.trim());
+    if (userIdEl.value.trim()) fd.append('user_id', userIdEl.value.trim());
+    if (btn.dataset.dry) fd.append('dry-run', '1');
+
+    if (btn.dataset.xlsx) {
+      const fileEl = document.getElementById(btn.dataset.xlsx);
+      if (!fileEl.files.length) { alert('Sube el archivo .xlsx.'); return; }
+      fd.append('xlsx', fileEl.files[0]);
+    }
+    if (btn.dataset.filter && document.getElementById(btn.dataset.filter).value.trim())
+      fd.append('filter', document.getElementById(btn.dataset.filter).value.trim());
+    if (btn.dataset.counts && document.getElementById(btn.dataset.counts).value.trim())
+      fd.append('counts', document.getElementById(btn.dataset.counts).value.trim());
+    if (btn.dataset.wait && document.getElementById(btn.dataset.wait).value.trim())
+      fd.append('nota-wait-accepted', document.getElementById(btn.dataset.wait).value.trim());
+
+    const buttons = btn.closest('.panel').querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+    out.style.display = 'block';
+    out.textContent = 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') + '... puede tardar varios minutos.\n\n';
+    try {
+      const res = await fetch('cert_run.php', { method: 'POST', body: fd });
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        out.textContent += dec.decode(value, { stream: true });
+        out.scrollTop = out.scrollHeight;
+      }
+    } catch (e) {
+      out.textContent += '\nError de red: ' + e.message + '\n';
+    } finally {
+      buttons.forEach(b => b.disabled = false);
+    }
+  });
 }
 
 function wireStep7() {
