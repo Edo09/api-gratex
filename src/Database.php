@@ -2,6 +2,7 @@
 class Database
 {
     private static $instance = null;
+    private static $credentials = null;
     private $conexion;
 
     private static function loadEnv(): void
@@ -27,11 +28,28 @@ class Database
     private function __construct()
     {
         self::loadEnv();
-        $host = $_ENV['DB_HOST'] ?? 'sh00032.hostgator.com';
-        $port = $_ENV['DB_PORT'] ?? '3306';
-        $name = $_ENV['DB_NAME'] ?? 'mtldtmte_new_gratexdb';
-        $user = $_ENV['DB_USER'] ?? 'mtldtmte_edwin';
-        $pass = $_ENV['DB_PASS'] ?? 'gratexdb.';
+
+        if (self::$credentials !== null) {
+            // Credenciales dinamicas del tenant resuelto (TenantResolver).
+            $host = self::$credentials['host'] ?? 'localhost';
+            $port = self::$credentials['port'] ?? '3306';
+            $name = self::$credentials['name'] ?? '';
+            $user = self::$credentials['user'] ?? '';
+            $pass = self::$credentials['pass'] ?? '';
+        } else {
+            // En modo multi-tenant estricto, negar el fallback implicito al DB
+            // por defecto: si no se resolvio el tenant, es un bug de ruteo.
+            if (filter_var($_ENV['MULTI_TENANT_ENABLED'] ?? getenv('MULTI_TENANT_ENABLED'), FILTER_VALIDATE_BOOLEAN)) {
+                throw new RuntimeException(
+                    'Multi-tenant activo: tenant no resuelto. Llamar Database::setCredentials() antes de consultar.'
+                );
+            }
+            $host = $_ENV['DB_HOST'] ?? 'sh00032.hostgator.com';
+            $port = $_ENV['DB_PORT'] ?? '3306';
+            $name = $_ENV['DB_NAME'] ?? 'mtldtmte_new_gratexdb';
+            $user = $_ENV['DB_USER'] ?? 'mtldtmte_edwin';
+            $pass = $_ENV['DB_PASS'] ?? 'gratexdb.';
+        }
 
         try {
             $this->conexion = new PDO(
@@ -55,6 +73,34 @@ class Database
             self::$instance = new Database();
         }
         return self::$instance;
+    }
+
+    /**
+     * Set dynamic connection credentials for the resolved tenant.
+     * Resets the singleton so the next getInstance() reconnects to that DB.
+     * @param array $creds ['host','port'?,'name','user','pass']
+     */
+    public static function setCredentials(array $creds): void
+    {
+        self::$credentials = $creds;
+        self::$instance = null;
+    }
+
+    /**
+     * Clear tenant credentials and reset the singleton (back to .env default).
+     */
+    public static function clearCredentials(): void
+    {
+        self::$credentials = null;
+        self::$instance = null;
+    }
+
+    /**
+     * @return bool True if tenant credentials have been resolved.
+     */
+    public static function hasCredentials(): bool
+    {
+        return self::$credentials !== null;
     }
 
     public function getConnection()

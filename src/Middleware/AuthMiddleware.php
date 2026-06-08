@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../Models/authModel.php');
+require_once(__DIR__ . '/../TenantResolver.php');
 
 class AuthMiddleware
 {
@@ -10,35 +11,84 @@ class AuthMiddleware
         $this->authModel = new authModel();
     }
 
+    private static function multiTenant(): bool
+    {
+        return filter_var(
+            getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
+
     /**
-     * Validate API token from request header
-     * Header format: X-API-KEY: <token> or Authorization: Bearer <token>
-     * @return array ['valid' => bool, 'user_id' => int|null, 'message' => string]
+     * Validate API credentials from request headers.
+     *
+     * Two schemes:
+     *  - Integration (Method A): X-API-KEY + X-API-SECRET (per-tenant credentials).
+     *  - App session: X-API-KEY: <token> or Authorization: Bearer <token>.
+     *
+     * @return array ['valid' => bool, 'user_id' => int|null, 'tenant_id' => int|null, 'message' => string]
      */
     public function validateRequest()
     {
-        // Check for token in header
+        // --- Integration credentials (api_key + api_secret) ---
+        // Presence of X-API-SECRET signals integration mode (machine, JSON->XML).
+        if (self::multiTenant() && isset($_SERVER['HTTP_X_API_SECRET'])) {
+            $apiKey = isset($_SERVER['HTTP_X_API_KEY']) ? trim($_SERVER['HTTP_X_API_KEY']) : '';
+            $apiSecret = trim((string) $_SERVER['HTTP_X_API_SECRET']);
+            if ($apiKey === '' || !TenantResolver::resolveByCredentials($apiKey, $apiSecret)) {
+                return [
+                    'valid' => false,
+                    'user_id' => null,
+                    'tenant_id' => null,
+                    'message' => 'api_key/api_secret invalido o inactivo.'
+                ];
+            }
+            $tenant = TenantResolver::current();
+            return [
+                'valid' => true,
+                'user_id' => null,
+                'tenant_id' => (int) $tenant['id'],
+                'message' => 'Integration tenant validated'
+            ];
+        }
+
+        // --- App session token (X-API-KEY or Bearer) ---
         $token = $this->getTokenFromHeader();
 
         if (!$token) {
             return [
                 'valid' => false,
                 'user_id' => null,
-                'message' => 'API token is required. Use header: X-API-KEY: <token> or Authorization: Bearer <token>'
+                'tenant_id' => null,
+                'message' => 'Credenciales requeridas. Integracion: X-API-KEY + X-API-SECRET. App: Authorization: Bearer <token>.'
             ];
         }
 
-        // Validate token
+        // Validate token (session token; from master DB in multi-tenant mode)
         $validation = $this->authModel->validateToken($token);
 
         if ($validation['valid']) {
+            // In multi-tenant mode, point the DB connection at the token's tenant
+            // before any controller runs a business query.
+            if (self::multiTenant() && !empty($validation['tenant_id'])) {
+                if (!TenantResolver::resolveById((int)$validation['tenant_id'])) {
+                    return [
+                        'valid' => false,
+                        'user_id' => null,
+                        'tenant_id' => null,
+                        'message' => 'Tenant inactivo o no encontrado'
+                    ];
+                }
+            }
+
             // Update last_used timestamp
             $token_hash = hash('sha256', $token);
             $this->authModel->updateLastUsed($token_hash);
-            
+
             return [
                 'valid' => true,
                 'user_id' => $validation['user_id'],
+                'tenant_id' => $validation['tenant_id'] ?? null,
                 'message' => 'Token validated'
             ];
         }
@@ -46,6 +96,7 @@ class AuthMiddleware
         return [
             'valid' => false,
             'user_id' => null,
+            'tenant_id' => null,
             'message' => 'Invalid or inactive API token'
         ];
     }

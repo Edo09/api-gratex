@@ -7,6 +7,10 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../Models/aprobacionComercialModel.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../Models/authSeedModel.php';
+require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
+require_once __DIR__ . '/../TenantResolver.php';
+require_once __DIR__ . '/../CertResolver.php';
+require_once __DIR__ . '/../Utils/WebhookDispatcher.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/DgiiXmlSigner.php';
@@ -47,14 +51,33 @@ function handleAprobacionComercial(): void
         return;
     }
 
-    $emisor = (new EmisorConfigModel())->get();
-    if (!$emisor) {
-        respondAprobacion(false, 'emisor_config no configurado en este sistema.', 500);
-        return;
-    }
-
     $rncEmisor = $validator->getText($document, 'RNCEmisor');
     $rncComprador = $validator->getText($document, 'RNCComprador');
+
+    // Multi-tenant: somos el emisor que recibe la aprobacion -> resolver por RNCEmisor.
+    if (aprobacionMultiTenant()) {
+        $rncDestino = (string) ($rncEmisor ?? '');
+        if ($rncDestino === '' || !TenantResolver::resolveByRnc($rncDestino)) {
+            respondAprobacion(false, 'RNC emisor (' . $rncDestino . ') no registrado en este sistema.', 404);
+            return;
+        }
+    }
+
+    // Receptor de la aprobacion (nosotros = emisor del e-CF). En integracion no
+    // hay emisor_config: el RNC es el del tenant resuelto por RNCEmisor.
+    $isIntegration = aprobacionMultiTenant() && TenantResolver::isIntegration();
+    $tenant = $isIntegration ? TenantResolver::current() : null;
+    $tenantId = $isIntegration ? (int) $tenant['id'] : null;
+
+    if ($isIntegration) {
+        $emisor = ['rnc' => (string) $tenant['rnc']];
+    } else {
+        $emisor = (new EmisorConfigModel())->get();
+        if (!$emisor) {
+            respondAprobacion(false, 'emisor_config no configurado en este sistema.', 500);
+            return;
+        }
+    }
     $eNcf = $validator->getText($document, 'eNCF') ?? $validator->getText($document, 'ENCF');
     $estado = strtoupper((string) ($validator->getText($document, 'Estado') ?? $validator->getText($document, 'EstadoComercial') ?? ''));
     $detalle = $validator->getText($document, 'DetalleMotivoRechazo') ?? $validator->getText($document, 'Detalle');
@@ -79,11 +102,7 @@ function handleAprobacionComercial(): void
         return;
     }
 
-    $model = new aprobacionComercialModel();
-    $facturaId = $model->findFacturaIdByENcf($eNcf);
-
-    $id = $model->save([
-        'factura_id' => $facturaId,
+    $aprData = [
         'e_ncf' => $eNcf,
         'rnc_emisor' => $rncEmisor,
         'rnc_comprador' => $rncComprador ?? '',
@@ -92,11 +111,32 @@ function handleAprobacionComercial(): void
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
         'ambiente' => getenv('DGII_ECF_ENVIRONMENT') ?: null,
-    ]);
+    ];
+    if ($isIntegration) {
+        (new IntegracionStoreModel())->saveAprobacion($tenantId, $aprData);
+    } else {
+        $model = new aprobacionComercialModel();
+        $aprData['factura_id'] = $model->findFacturaIdByENcf($eNcf);
+        $model->save($aprData);
+    }
 
     http_response_code(200);
     header('Content-Type: text/xml; charset=utf-8');
     echo buildSignedARCF($rncEmisor, $emisor['rnc'], $eNcf);
+
+    // Integracion: notificar al cliente por webhook (tras responder a DGII).
+    if ($isIntegration && !empty($tenant['webhook_url'])) {
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        }
+        WebhookDispatcher::dispatch($tenant, 'aprobacion.recibida', [
+            'e_ncf' => $eNcf,
+            'rnc_emisor' => $rncEmisor,
+            'rnc_comprador' => $rncComprador,
+            'estado_comercial' => $estadoNormalizado,
+            'detalle_motivo' => $detalle,
+        ]);
+    }
 }
 
 function aprobacionMapEstado(string $estado): ?string
@@ -150,6 +190,14 @@ function respondAprobacion(bool $status, string $message, int $code = 200): void
     ]);
 }
 
+function aprobacionMultiTenant(): bool
+{
+    return filter_var(
+        getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false),
+        FILTER_VALIDATE_BOOLEAN
+    );
+}
+
 function buildSignedARCF(string $rncEmisor, string $rncComprador, string $eNcf): string
 {
     $fecha = (new DateTime())->format('d-m-Y H:i:s');
@@ -166,14 +214,10 @@ function buildSignedARCF(string $rncEmisor, string $rncComprador, string $eNcf):
         '</ARECF>';
 
     try {
-        $certPath = getenv('DGII_ECF_CERT_PATH') ?: '';
-        if ($certPath && !preg_match('/^[A-Za-z]:[\\\\\/]/', $certPath) && !str_starts_with($certPath, '/')) {
-            $certPath = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $certPath);
-        }
-        $certContent = $certPath ? file_get_contents($certPath) : false;
-        $certPassword = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: '');
-        if ($certContent !== false && $certPassword !== '') {
-            return (new DgiiXmlSigner())->sign($certContent, $certPassword, $unsigned);
+        // Cert del tenant resuelto (integracion/app) o el global del .env.
+        $cert = CertResolver::resolve();
+        if ($cert['password'] !== '') {
+            return (new DgiiXmlSigner())->sign($cert['content'], $cert['password'], $unsigned);
         }
     } catch (Throwable $e) {
         error_log('[ecfAprobacion] ARCF sign error: ' . $e->getMessage());

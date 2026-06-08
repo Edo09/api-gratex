@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Utils/TokenGenerator.php');
 require_once(__DIR__ . '/../Database.php');
+require_once(__DIR__ . '/../MasterDatabase.php');
 
 class authModel
 {
@@ -8,7 +9,32 @@ class authModel
 
     public function __construct()
     {
-        $this->conexion = Database::getInstance()->getConnection();
+        // In multi-tenant mode, auth (users + api_tokens) lives in the master DB
+        // so a token can be resolved to its tenant before any business query.
+        if (self::multiTenant()) {
+            $this->conexion = MasterDatabase::getInstance()->getConnection();
+        } else {
+            $this->conexion = Database::getInstance()->getConnection();
+        }
+    }
+
+    private static function multiTenant(): bool
+    {
+        return filter_var(
+            getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
+
+    /**
+     * @return int|null tenant_id of a user, or null if none (multi-tenant only).
+     */
+    private function tenantIdForUser(int $user_id): ?int
+    {
+        $stmt = $this->conexion->prepare("SELECT tenant_id FROM users WHERE id = :id LIMIT 1");
+        $stmt->execute([':id' => $user_id]);
+        $row = $stmt->fetch();
+        return $row && $row['tenant_id'] !== null ? (int)$row['tenant_id'] : null;
     }
 
     /**
@@ -23,14 +49,29 @@ class authModel
             $token_hash = TokenGenerator::hashToken($token);
             $created_at = date('Y-m-d H:i:s');
 
-            $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([
-                ':user_id' => $user_id,
-                ':token_hash' => $token_hash,
-                ':created_at' => $created_at
-            ]);
-            
+            if (self::multiTenant()) {
+                $tenant_id = $this->tenantIdForUser((int)$user_id);
+                if ($tenant_id === null) {
+                    return ['error', 'Usuario sin tenant asociado'];
+                }
+                $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':user_id' => $user_id,
+                    ':tenant_id' => $tenant_id,
+                    ':token_hash' => $token_hash,
+                    ':created_at' => $created_at
+                ]);
+            } else {
+                $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':user_id' => $user_id,
+                    ':token_hash' => $token_hash,
+                    ':created_at' => $created_at
+                ]);
+            }
+
             return ['success', $token];
         } catch (PDOException $e) {
             return ['error', 'Failed to create token'];
@@ -46,15 +87,21 @@ class authModel
     {
         try {
             $token_hash = TokenGenerator::hashToken($token);
-            $sql = "SELECT user_id, is_active FROM api_tokens WHERE token_hash = :token_hash LIMIT 1";
+            $sql = self::multiTenant()
+                ? "SELECT user_id, tenant_id, is_active FROM api_tokens WHERE token_hash = :token_hash LIMIT 1"
+                : "SELECT user_id, is_active FROM api_tokens WHERE token_hash = :token_hash LIMIT 1";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':token_hash' => $token_hash]);
             $row = $stmt->fetch();
 
             if ($row && $row['is_active'] == 1) {
-                return ['valid' => true, 'user_id' => $row['user_id']];
+                return [
+                    'valid' => true,
+                    'user_id' => (int)$row['user_id'],
+                    'tenant_id' => isset($row['tenant_id']) ? (int)$row['tenant_id'] : null,
+                ];
             }
-            return ['valid' => false, 'user_id' => null];
+            return ['valid' => false, 'user_id' => null, 'tenant_id' => null];
         } catch (PDOException $e) {
             return ['valid' => false, 'user_id' => null];
         }
@@ -139,8 +186,10 @@ class authModel
     public function loginUser($email_or_username, $password)
     {
         try {
-            // Find user by email or username
-            $sql = "SELECT id, email, username, name, last_name, password, role FROM users WHERE email = :email_or_username OR username = :email_or_username LIMIT 1";
+            // Find user by email or username (email is the globally-unique key in multi-tenant)
+            $sql = self::multiTenant()
+                ? "SELECT id, tenant_id, email, username, name, last_name, password, role FROM users WHERE email = :email_or_username OR username = :email_or_username LIMIT 1"
+                : "SELECT id, email, username, name, last_name, password, role FROM users WHERE email = :email_or_username OR username = :email_or_username LIMIT 1";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':email_or_username' => $email_or_username]);
             $user = $stmt->fetch();
@@ -155,13 +204,24 @@ class authModel
             $token_hash = TokenGenerator::hashToken($token);
             $created_at = date('Y-m-d H:i:s');
 
-            $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([
-                ':user_id' => $user['id'],
-                ':token_hash' => $token_hash,
-                ':created_at' => $created_at
-            ]);
+            if (self::multiTenant()) {
+                $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':user_id' => $user['id'],
+                    ':tenant_id' => $user['tenant_id'],
+                    ':token_hash' => $token_hash,
+                    ':created_at' => $created_at
+                ]);
+            } else {
+                $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':user_id' => $user['id'],
+                    ':token_hash' => $token_hash,
+                    ':created_at' => $created_at
+                ]);
+            }
 
             // Prepare user data response (without password)
             $user_data = [
@@ -186,10 +246,14 @@ class authModel
      * @param string $username Username
      * @return array ['success', user_data] or ['error', message]
      */
-    public function registerUser($email, $password, $name, $username)
+    public function registerUser($email, $password, $name, $username, $tenant_id = null)
     {
         try {
-            // Check if email already exists
+            if (self::multiTenant() && $tenant_id === null) {
+                return ['error', 'tenant_id es requerido en modo multi-tenant'];
+            }
+
+            // Check if email already exists (email is globally unique across tenants)
             $sql = "SELECT id FROM users WHERE email = :email LIMIT 1";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':email' => $email]);
@@ -197,10 +261,16 @@ class authModel
                 return ['error', 'Email already registered'];
             }
 
-            // Check if username already exists
-            $sql = "SELECT id FROM users WHERE username = :username LIMIT 1";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([':username' => $username]);
+            // Check if username already exists (scoped per-tenant in multi-tenant mode)
+            if (self::multiTenant()) {
+                $sql = "SELECT id FROM users WHERE username = :username AND tenant_id = :tenant_id LIMIT 1";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([':username' => $username, ':tenant_id' => $tenant_id]);
+            } else {
+                $sql = "SELECT id FROM users WHERE username = :username LIMIT 1";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([':username' => $username]);
+            }
             if ($stmt->fetch()) {
                 return ['error', 'Username already taken'];
             }
@@ -214,16 +284,30 @@ class authModel
             $password_hash = password_hash($password, PASSWORD_BCRYPT, ['cost' => 10]);
 
             // Insert new user
-            $sql = "INSERT INTO users (name, last_name, email, username, password, role) VALUES (:name, :last_name, :email, :username, :password, :role)";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([
-                ':name' => $first_name,
-                ':last_name' => $last_name,
-                ':email' => $email,
-                ':username' => $username,
-                ':password' => $password_hash,
-                ':role' => 'user'
-            ]);
+            if (self::multiTenant()) {
+                $sql = "INSERT INTO users (tenant_id, name, last_name, email, username, password, role) VALUES (:tenant_id, :name, :last_name, :email, :username, :password, :role)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':tenant_id' => $tenant_id,
+                    ':name' => $first_name,
+                    ':last_name' => $last_name,
+                    ':email' => $email,
+                    ':username' => $username,
+                    ':password' => $password_hash,
+                    ':role' => 'user'
+                ]);
+            } else {
+                $sql = "INSERT INTO users (name, last_name, email, username, password, role) VALUES (:name, :last_name, :email, :username, :password, :role)";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute([
+                    ':name' => $first_name,
+                    ':last_name' => $last_name,
+                    ':email' => $email,
+                    ':username' => $username,
+                    ':password' => $password_hash,
+                    ':role' => 'user'
+                ]);
+            }
 
             // Get the newly created user
             $user_id = $this->conexion->lastInsertId();
