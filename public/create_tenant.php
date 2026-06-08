@@ -8,7 +8,7 @@
  * Integracion (caso comun, sin DB):
  *   https://gratex.net/api/public/create_tenant.php?token=TU_TOKEN
  *     &tipo=integracion&nombre=Cliente+A+SRL&rnc=131111111
- *     &cert-path=certificados/131111111/cert.p12&cert-pass=CLAVE
+ *     &cert-path=certificado_dgii/131111111/cert.p12&cert-pass=CLAVE
  *     [&webhook-url=https://cliente.com/webhook]
  *
  * App (con DB; crea la DB en cPanel primero y usa skip-create-db):
