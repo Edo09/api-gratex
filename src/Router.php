@@ -52,6 +52,21 @@ $route_part = $apiPos !== false ? substr($endpoint, $apiPos + 5) : ltrim($endpoi
 $route_segments = explode('/', ltrim($route_part, '/'));
 $route = $route_segments[0] ?? 'default';
 
+// Multi-tenant: pre-resolver el tenant ANTES de incluir el controller. Muchos
+// controllers instancian sus models en el tope del archivo (antes de su propio
+// validateRequest) y el model fija la conexion en el constructor; si el tenant
+// no esta resuelto aun, el model quedaria atado a la DB default. Esto lo evita.
+// Best-effort: si no hay credenciales validas no resuelve nada (el AuthMiddleware
+// del controller respondera 401). No corta el flujo aqui.
+if (filter_var(getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false), FILTER_VALIDATE_BOOLEAN)) {
+    require_once __DIR__ . '/Middleware/AuthMiddleware.php';
+    try {
+        (new AuthMiddleware())->validateRequest();
+    } catch (Throwable $e) {
+        error_log('[Router] pre-resolucion tenant fallo: ' . $e->getMessage());
+    }
+}
+
 // Route to appropriate controller
 switch ($route) {
     case 'auth':
