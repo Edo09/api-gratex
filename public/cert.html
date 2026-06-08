@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Asistente de certificación DGII</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --pend:#475569; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); }
+  header { padding:16px 24px; border-bottom:1px solid var(--line); display:flex; gap:16px;
+           align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0; flex:1; min-width:200px; }
+  header input { padding:8px 10px; background:#0b1220; color:var(--txt); border:1px solid var(--line);
+                 border-radius:8px; font-size:13px; }
+  .layout { display:flex; min-height:calc(100vh - 65px); }
+  .steps { width:300px; border-right:1px solid var(--line); padding:12px 0; overflow:auto; }
+  .step { display:flex; gap:12px; align-items:flex-start; padding:10px 18px; cursor:pointer; border:none;
+          background:none; color:var(--txt); width:100%; text-align:left; font-size:13.5px; }
+  .step:hover { background:#172033; }
+  .step.active { background:#172033; border-left:3px solid var(--accent); }
+  .num { width:26px; height:26px; border-radius:50%; background:var(--pend); color:#fff; display:flex;
+         align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0; }
+  .step.done .num { background:var(--ok); }
+  .step.auto .tag { color:var(--accent); }
+  .step .label { line-height:1.3; }
+  .step .tag { font-size:10px; color:var(--mut); display:block; margin-top:2px; }
+  .content { flex:1; padding:28px 32px; max-width:760px; }
+  .content h2 { margin:0 0 4px; font-size:20px; }
+  .content .badge { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px;
+                    margin-bottom:14px; }
+  .badge.manual { background:#3f2d12; color:#fbbf24; }
+  .badge.auto { background:#0c2a3a; color:var(--accent); }
+  .content p, .content li { color:#cbd5e1; line-height:1.55; font-size:14px; }
+  .content a { color:var(--accent); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0; }
+  label { display:block; font-size:13px; color:var(--mut); margin:10px 0 4px; }
+  input[type=text], textarea, select { width:100%; padding:9px 11px; background:#0b1220; color:var(--txt);
+         border:1px solid var(--line); border-radius:8px; font-size:13px; }
+  textarea { min-height:64px; resize:vertical; font-family:ui-monospace,monospace; }
+  button.act { margin-top:14px; padding:10px 16px; background:var(--accent); color:#06283d; border:none;
+               border-radius:8px; font-weight:600; cursor:pointer; }
+  button.act:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:#0b1220; color:var(--txt); border:1px solid var(--line); }
+  .done-toggle { margin-top:18px; display:flex; align-items:center; gap:8px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:12px;
+        white-space:pre-wrap; word-break:break-word; font-size:12.5px; max-height:280px; overflow:auto; }
+  .muted { color:var(--mut); font-size:12.5px; }
+  code { background:#0b1220; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Asistente de certificación DGII e-CF</h1>
+  <input id="tenantId" placeholder="Tenant ID (para guardar progreso)" style="width:200px">
+  <input id="apiToken" type="password" placeholder="Token API del tenant (para PDFs)" style="width:240px">
+</header>
+
+<div class="layout">
+  <nav class="steps" id="stepsNav"></nav>
+  <main class="content" id="content"></main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+const API = location.origin + '/api';
+
+// tipo: manual (portal DGII) | auto (lo hace nuestro sistema) | semi (auto + acción manual)
+const STEPS = [
+  { n:1,  t:'Datos del contribuyente', tipo:'manual', body:`
+     <p>Registro inicial del emisor en el <b>portal DGII</b> (RNC, datos fiscales, autorización de secuencias).</p>
+     <p>En <b>nuestro</b> sistema: da de alta el emisor como tenant (cert, RNC, secuencias).</p>
+     <p><a href="onboard.html" target="_blank">→ Abrir alta de cliente (onboarding)</a> · <a href="upload_logo.php" target="_blank">→ Subir logo</a></p>` },
+
+  { n:2,  t:'Pruebas de Datos e-CF', tipo:'auto', body:`
+     <p>Emite los 25 casos del set de pruebas que entrega DGII (xlsx).</p>
+     <div class="panel">
+       <b>Runner:</b> <code>send_fase2.php</code> (lee el xlsx → <code>POST /api/facturas</code> con el e-NCF de cada caso).
+       <p class="muted">Automatización web del runner: próxima iteración. Hoy se corre el runner apuntando al API con el <b>api-key del tenant</b>.</p>
+     </div>
+     <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante, reinicia el set completo. Deben pasar todos en una corrida limpia.</p>` },
+
+  { n:3,  t:'Pruebas de Datos Aprobación Comercial', tipo:'auto', body:`
+     <p>Envía las Aprobaciones Comerciales (ACECF) de la hoja <code>ACEECF_Generadas</code> del xlsx.</p>
+     <div class="panel"><b>Runner:</b> <code>send_fase3.php</code> → <code>POST /api/aprobaciones-comerciales</code>.
+       <p class="muted">Automatización web: próxima iteración.</p></div>` },
+
+  { n:4,  t:'Pruebas Simulación e-CF', tipo:'auto', body:`
+     <p>Emite los 10 tipos e-CF con datos simulados (E31, E32 ≥/&lt;250k, E33, E34, E41, E43-E47).</p>
+     <div class="panel"><b>Runner:</b> <code>send_fase4_simulation.php</code>. Las notas (E33/E34) referencian E31 ya aceptados.
+       <p class="muted">Automatización web: próxima iteración.</p></div>` },
+
+  { n:5,  t:'Simulación Representación Impresa', tipo:'auto', body:`
+     <p>Genera la Representación Impresa (PDF con QR de timbre DGII) de cada e-CF emitido y súbela al portal.</p>
+     <div class="panel">
+       <label>IDs de factura (separados por coma) — de los resultados de Fase 2/4</label>
+       <textarea id="pdfIds" placeholder="887, 888, 889, ..."></textarea>
+       <button class="act" id="btnPdfs">Descargar ZIP de Representaciones Impresas</button>
+       <pre id="pdfOut" style="display:none"></pre>
+       <p class="muted">Usa el <b>Token API del tenant</b> (arriba). Cada PDF se baja de <code>/api/facturas/{id}/pdf</code> y se empaqueta en un ZIP. Luego subes los PDF al portal DGII (paso 6).</p>
+     </div>` },
+
+  { n:6,  t:'Validación Representación Impresa', tipo:'manual', body:`
+     <p>DGII <b>valida</b> en el portal los PDF que subiste en el paso 5 (formato, QR, campos obligatorios).</p>
+     <p class="muted">Manual: subir los PDF del ZIP en la interfaz DGII y esperar la validación.</p>` },
+
+  { n:7,  t:'URL Servicios Prueba', tipo:'semi', body:`
+     <p>Registra en el portal DGII tus URLs de recepción (ambiente prueba):</p>
+     <div class="panel"><pre id="urlsPrueba"></pre></div>
+     <p class="muted">Manual: pegar estas URLs en el portal DGII. Nuestro sistema ya las atiende.</p>` },
+
+  { n:8,  t:'Inicio Prueba Recepción e-CF', tipo:'auto', body:`
+     <p>DGII envía e-CF de prueba a tu URL de recepción. El sistema valida la firma y responde el ARECF (acuse) firmado con tu cert.</p>
+     <p class="muted">Endpoint: <code>POST /api/ecf/recepcion</code> — ya operativo.</p>` },
+
+  { n:9,  t:'Recepción e-CF', tipo:'auto', body:`
+     <p>Los e-CF recibidos quedan guardados. Intégracion: consúltalos por <code>GET /api/integracion/recibidos</code> o webhook.</p>` },
+
+  { n:10, t:'Inicio Prueba Recepción Aprobación Comercial', tipo:'auto', body:`
+     <p>DGII envía aprobaciones comerciales de prueba a tu URL. El sistema las procesa y responde.</p>
+     <p class="muted">Endpoint: <code>POST /api/ecf/aprobacion-comercial</code> — ya operativo.</p>` },
+
+  { n:11, t:'Recepción Aprobación Comercial', tipo:'auto', body:`
+     <p>Aprobaciones recibidas guardadas. Integración: <code>GET /api/integracion/aprobaciones</code> o webhook.</p>` },
+
+  { n:12, t:'URL Servicios Producción', tipo:'manual', body:`
+     <p>Registra en el portal DGII las URLs de <b>producción</b> (ambiente <code>ecf</code>). Mismas rutas, dominio producción.</p>` },
+
+  { n:13, t:'Declaración Jurada', tipo:'manual', body:`<p>Firmar la declaración jurada en el portal DGII. Manual.</p>` },
+  { n:14, t:'Verificación Estatus', tipo:'manual', body:`<p>DGII verifica el estatus final del proceso. Manual.</p>` },
+  { n:15, t:'Finalizado', tipo:'manual', body:`<p>🎉 Certificación completada. Cambia el ambiente del tenant a <code>ecf</code> (producción).</p>` },
+];
+
+let current = 1;
+const nav = document.getElementById('stepsNav');
+const content = document.getElementById('content');
+const tenantIdEl = document.getElementById('tenantId');
+const apiTokenEl = document.getElementById('apiToken');
+
+tenantIdEl.value = localStorage.getItem('cert_tenant') || '';
+tenantIdEl.addEventListener('change', () => { localStorage.setItem('cert_tenant', tenantIdEl.value.trim()); renderNav(); });
+
+function progressKey() { return 'cert_done_' + (tenantIdEl.value.trim() || 'default'); }
+function getDone() { try { return JSON.parse(localStorage.getItem(progressKey()) || '[]'); } catch { return []; } }
+function setDone(arr) { localStorage.setItem(progressKey(), JSON.stringify(arr)); }
+function isDone(n) { return getDone().includes(n); }
+function toggleDone(n, v) {
+  let d = getDone();
+  if (v) { if (!d.includes(n)) d.push(n); } else { d = d.filter(x => x !== n); }
+  setDone(d); renderNav();
+}
+
+function renderNav() {
+  const done = getDone();
+  nav.innerHTML = '';
+  for (const s of STEPS) {
+    const b = document.createElement('button');
+    b.className = 'step' + (s.n === current ? ' active' : '') + (done.includes(s.n) ? ' done' : '') + (s.tipo === 'auto' ? ' auto' : '');
+    b.innerHTML = `<span class="num">${done.includes(s.n) ? '✓' : s.n}</span>
+      <span class="label">${s.t}<span class="tag">${s.tipo === 'manual' ? 'Portal DGII' : s.tipo === 'auto' ? 'Automatizado' : 'Mixto'}</span></span>`;
+    b.onclick = () => { current = s.n; render(); };
+    nav.appendChild(b);
+  }
+}
+
+function render() {
+  renderNav();
+  const s = STEPS.find(x => x.n === current);
+  content.innerHTML = `<h2>${s.n}. ${s.t}</h2>
+    <span class="badge ${s.tipo === 'manual' ? 'manual' : 'auto'}">${s.tipo === 'manual' ? 'Portal DGII (manual)' : s.tipo === 'auto' ? 'Automatizado' : 'Mixto'}</span>
+    ${s.body}
+    <div class="done-toggle"><input type="checkbox" id="doneChk" ${isDone(s.n) ? 'checked' : ''}>
+      <label for="doneChk" style="margin:0">Marcar paso ${s.n} como completado</label></div>`;
+  document.getElementById('doneChk').onchange = (e) => toggleDone(s.n, e.target.checked);
+  if (s.n === 5) wireStep5();
+  if (s.n === 7) wireStep7();
+}
+
+function wireStep7() {
+  const rnc = tenantIdEl.value.trim() ? '' : '';
+  document.getElementById('urlsPrueba').textContent =
+    `Recepción e-CF:        ${location.origin}/api/ecf/recepcion\n` +
+    `Aprobación Comercial:  ${location.origin}/api/ecf/aprobacion-comercial\n` +
+    `Autenticación:         ${location.origin}/api/ecf/autenticacion`;
+}
+
+function wireStep5() {
+  const btn = document.getElementById('btnPdfs');
+  const out = document.getElementById('pdfOut');
+  btn.onclick = async () => {
+    const token = apiTokenEl.value.trim();
+    const ids = document.getElementById('pdfIds').value.split(/[\s,]+/).map(s => s.trim()).filter(Boolean);
+    if (!token) { alert('Pon el Token API del tenant (arriba).'); return; }
+    if (!ids.length) { alert('Pon al menos un ID de factura.'); return; }
+    btn.disabled = true; out.style.display = 'block'; out.textContent = 'Descargando ' + ids.length + ' PDF...\n';
+    const zip = new JSZip();
+    let ok = 0, fail = 0;
+    for (const id of ids) {
+      try {
+        const res = await fetch(`${API}/facturas/${id}/pdf`, { headers: { 'X-API-KEY': token, 'Accept': 'application/pdf' } });
+        if (!res.ok) { out.textContent += `  ${id}: HTTP ${res.status}\n`; fail++; continue; }
+        const blob = await res.blob();
+        if (blob.type.includes('json')) { out.textContent += `  ${id}: respuesta JSON (¿token?)\n`; fail++; continue; }
+        zip.file(`factura_${id}.pdf`, blob);
+        out.textContent += `  ${id}: OK\n`; ok++;
+      } catch (e) { out.textContent += `  ${id}: ${e.message}\n`; fail++; }
+    }
+    if (ok > 0) {
+      const content = await zip.generateAsync({ type: 'blob' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(content);
+      a.download = 'representaciones_impresas.zip';
+      a.click();
+      out.textContent += `\nZIP descargado: ${ok} PDF (${fail} fallaron).\n`;
+    } else {
+      out.textContent += `\nNo se descargó ningún PDF.\n`;
+    }
+    btn.disabled = false;
+  };
+}
+
+render();
+</script>
+</body>
+</html>

@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'Integracion: URL del cliente para push de documentos entrantes',
   webhook_secret_encrypted VARBINARY(512) NULL
                         COMMENT 'AES-256-GCM; secret para firmar (HMAC) el payload del webhook',
+  logo_path           VARCHAR(255)   NULL
+                        COMMENT 'Ruta relativa al project root del logo (Representacion Impresa), ej. logos/5.png',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP

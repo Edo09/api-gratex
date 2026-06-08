@@ -273,6 +273,19 @@ if ($createAdmin) {
 }
 
 // =============================================================================
+// Logo (opcional, web): se guarda en logos/<tenant_id>.<ext> para la Representacion Impresa
+// =============================================================================
+if (!$isCli && isset($_FILES['logo']) && is_array($_FILES['logo'])
+    && ($_FILES['logo']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+    $logoRes = saveTenantLogo($tenantId, $_FILES['logo']);
+    echo "-> {$logoRes['msg']}\n";
+    if ($logoRes['path'] !== null) {
+        $master->prepare('UPDATE tenants SET logo_path = :p WHERE id = :id')
+               ->execute([':p' => $logoRes['path'], ':id' => $tenantId]);
+    }
+}
+
+// =============================================================================
 // Listo
 // =============================================================================
 echo "\n== Tenant creado OK ==\n";
@@ -325,6 +338,38 @@ function runSqlFile(PDO $pdo, string $path): void
     }
     // PDO_MYSQL ejecuta multiples sentencias separadas por ';' en un exec().
     $pdo->exec($sql);
+}
+
+/**
+ * Guarda el logo del tenant en logos/<tenant_id>.<ext> (png|jpg). El PDF lo usa
+ * en la Representacion Impresa (FacturaPdfGenerator::logoPath()).
+ * @return array{path: ?string, msg: string} path relativo (logos/<id>.<ext>) o null.
+ */
+function saveTenantLogo(int $tenantId, array $file): array
+{
+    $ext = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+    if (!in_array($ext, ['png', 'jpg', 'jpeg'], true)) {
+        return ['path' => null, 'msg' => "logo ignorado: extension '{$ext}' no permitida (png/jpg)."];
+    }
+    $ext = $ext === 'jpeg' ? 'jpg' : $ext;
+
+    $logosDir = __DIR__ . '/../logos';
+    if (!is_dir($logosDir) && !mkdir($logosDir, 0755, true) && !is_dir($logosDir)) {
+        return ['path' => null, 'msg' => 'logo NO guardado: no se pudo crear la carpeta logos/.'];
+    }
+    // Quitar logos previos del tenant (cualquier extension) para evitar stale.
+    foreach (['png', 'jpg', 'jpeg'] as $old) {
+        $p = $logosDir . '/' . $tenantId . '.' . $old;
+        if (is_file($p)) {
+            @unlink($p);
+        }
+    }
+    $dest = $logosDir . '/' . $tenantId . '.' . $ext;
+    if (!move_uploaded_file($file['tmp_name'], $dest)) {
+        return ['path' => null, 'msg' => 'logo NO guardado: fallo move_uploaded_file (revisa permisos de logos/).'];
+    }
+    $rel = 'logos/' . $tenantId . '.' . $ext;
+    return ['path' => $rel, 'msg' => "logo guardado en {$rel}"];
 }
 
 function fail(string $msg): void
