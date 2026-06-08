@@ -29,28 +29,45 @@
  * .env, o si faltan MASTER_DB_USER/PASS. En hosting compartido usar --skip-create-db.
  */
 
-if (PHP_SAPI !== 'cli') {
-    http_response_code(403);
-    exit("Este script solo corre por CLI.\n");
-}
+// === Token para ejecucion por navegador (editar antes de usar) =============
+const ONBOARD_TOKEN = 'CAMBIA_ESTE_TOKEN_DE_ONBOARDING';
+// ===========================================================================
 
 require_once __DIR__ . '/../src/MasterDatabase.php';
 require_once __DIR__ . '/../src/TenantResolver.php';
 require_once __DIR__ . '/../src/Utils/TokenGenerator.php';
 
+$isCli = PHP_SAPI === 'cli';
+if (!$isCli) {
+    header('Content-Type: text/plain; charset=utf-8');
+    if (ONBOARD_TOKEN === 'CAMBIA_ESTE_TOKEN_DE_ONBOARDING') {
+        http_response_code(403);
+        exit("Configura ONBOARD_TOKEN en el archivo antes de usarlo.\n");
+    }
+    if (!hash_equals(ONBOARD_TOKEN, (string) ($_REQUEST['token'] ?? ''))) {
+        http_response_code(403);
+        exit("Token invalido. Use ?token=...\n");
+    }
+}
+
 loadEnvFile(__DIR__ . '/../.env');
 
-// --- Parseo de argumentos ----------------------------------------------------
-$opts = getopt('', [
-    'tipo::',
-    'nombre:', 'rnc:',
-    'db-name::', 'db-user::', 'db-pass::', 'db-host::', 'db-port::',
-    'razon-social::', 'direccion::', 'ambiente::',
-    'cert-path::', 'cert-pass::',
-    'webhook-url::', 'webhook-secret::',
-    'admin-email::', 'admin-pass::', 'admin-name::', 'admin-username::',
-    'skip-create-db',
-]);
+// --- Parametros: CLI (--flag) o navegador (?param) ---------------------------
+if ($isCli) {
+    $opts = getopt('', [
+        'tipo::',
+        'nombre:', 'rnc:',
+        'db-name::', 'db-user::', 'db-pass::', 'db-host::', 'db-port::',
+        'razon-social::', 'direccion::', 'ambiente::',
+        'cert-path::', 'cert-pass::',
+        'webhook-url::', 'webhook-secret::',
+        'admin-email::', 'admin-pass::', 'admin-name::', 'admin-username::',
+        'skip-create-db',
+    ]);
+} else {
+    $opts = $_REQUEST; // GET o POST (usa POST para cert-pass y no exponerlo en logs)
+    unset($opts['token']); // no es parametro de tenant
+}
 
 $tipo = strtolower((string) ($opts['tipo'] ?? 'app'));
 if (!in_array($tipo, ['app', 'integracion'], true)) {
@@ -62,7 +79,7 @@ $required = ['nombre', 'rnc'];
 if ($tipo === 'app') {
     $required = array_merge($required, ['db-name', 'db-user', 'db-pass']);
 } else { // integracion: cert obligatorio para poder firmar
-    $required = array_merge($required, ['cert-path', 'cert-pass']);
+    $required = array_merge($required, ['cert-pass']);
 }
 $missing = array_filter($required, fn($k) => !isset($opts[$k]) || $opts[$k] === '');
 if ($missing) {
@@ -72,8 +89,17 @@ if ($missing) {
 $nombre       = (string) $opts['nombre'];
 $rnc          = preg_replace('/\D/', '', (string) $opts['rnc']); // solo digitos
 $ambiente     = (string) ($opts['ambiente'] ?? 'ecf');
-$certPathArg  = isset($opts['cert-path']) ? (string) $opts['cert-path'] : null;
 $certPass     = isset($opts['cert-pass']) ? (string) $opts['cert-pass'] : null;
+
+// Cert: archivo subido (web, $_FILES['cert']) o ruta en el server (cert-path).
+$certUploadTmp = (!$isCli && isset($_FILES['cert']) && is_array($_FILES['cert'])
+    && ($_FILES['cert']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK)
+    ? $_FILES['cert']['tmp_name'] : null;
+$certIsUpload = $certUploadTmp !== null;
+$certPathArg  = $certIsUpload ? $certUploadTmp : (isset($opts['cert-path']) ? (string) $opts['cert-path'] : null);
+if ($tipo === 'integracion' && ($certPathArg === null || $certPathArg === '')) {
+    fail('Integracion requiere el certificado .p12 (sube el archivo o pasa cert-path).');
+}
 
 // Webhook (opcional, integracion): si se da URL sin secret, generamos uno.
 $webhookUrl    = isset($opts['webhook-url']) ? (string) $opts['webhook-url'] : null;
@@ -174,11 +200,12 @@ if ($certPathArg !== null && $certPathArg !== '') {
         fail("No se pudo crear directorio de certificado: {$destDir}");
     }
     $dest = $destDir . '/cert.p12';
-    if (!copy($certPathArg, $dest)) {
-        fail("No se pudo copiar el certificado a {$dest}");
+    $ok = $certIsUpload ? move_uploaded_file($certPathArg, $dest) : copy($certPathArg, $dest);
+    if (!$ok) {
+        fail("No se pudo guardar el certificado en {$dest}");
     }
     $certPathRel = 'certificados/' . $rnc . '/cert.p12';
-    echo "   certificado copiado a {$certPathRel}\n";
+    echo "   certificado guardado en {$certPathRel}\n";
 }
 
 // =============================================================================
@@ -302,6 +329,11 @@ function runSqlFile(PDO $pdo, string $path): void
 
 function fail(string $msg): void
 {
-    fwrite(STDERR, "ERROR: {$msg}\n");
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, "ERROR: {$msg}\n");
+    } else {
+        http_response_code(400);
+        echo "ERROR: {$msg}\n";
+    }
     exit(1);
 }
