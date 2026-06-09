@@ -104,7 +104,20 @@ class IncomingXmlValidator
             return ['ok' => false, 'detalle' => 'Signature incompleta (faltan SignedInfo / SignatureValue / DigestValue / X509Certificate).'];
         }
 
-        $signedInfoCanonical = $signedInfoNodes->item(0)->C14N();
+        // SignedInfo se canonicaliza con el algoritmo declarado en CanonicalizationMethod.
+        // e-CF / DGII usan c14n EXCLUSIVO (xml-exc-c14n#). PHP ->C14N() es INCLUSIVO por
+        // defecto: arrastra namespaces en-scope del ancestro (p.ej. xmlns:xsi declarado en
+        // el root ECF) que el firmante NO incluyo -> los bytes difieren -> openssl_verify
+        // falla ("La firma de SignedInfo no coincide"). Hay que usar modo exclusivo cuando
+        // asi se declara, o no se podran verificar firmas de terceros (ViaFirma, etc.).
+        $c14nAlgorithm = '';
+        $cmNodes = $signature->getElementsByTagName('CanonicalizationMethod');
+        if ($cmNodes->length > 0) {
+            $c14nAlgorithm = (string) $cmNodes->item(0)->getAttribute('Algorithm');
+        }
+        $exclusiveC14n = stripos($c14nAlgorithm, 'xml-exc-c14n') !== false;
+
+        $signedInfoCanonical = $signedInfoNodes->item(0)->C14N($exclusiveC14n);
         $signatureValueB64 = preg_replace('/\s+/', '', $signatureValueNodes->item(0)->textContent);
         $digestValueB64 = preg_replace('/\s+/', '', $digestValueNodes->item(0)->textContent);
         $x509Raw = preg_replace('/\s+/', '', $x509Nodes->item(0)->textContent);
