@@ -28,6 +28,12 @@ Relacionado: [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [
 | `GET /api/public/cert.html` | Wizard de 15 pasos (mini-login, correr fases 2/3/4, bajar Representación Impresa, URLs) | usa los de abajo |
 | `POST /api/public/cert_run.php` | Corre los runners fase 2/3/4 (lo invoca el wizard; reusa `tools/send_faseX.php`) | `CERT_RUN_TOKEN` (.env) |
 
+## Recepción / operación
+
+| Ruta | Qué hace | Token |
+|---|---|---|
+| `GET/POST /api/public/import_recibido.php` | Importa manualmente e-CF recibidos a `ecf_recibidos` (sube los XML firmados). Para e-CF que un emisor te envió sin completar el handshake de auth y que tu recepción no guardó. Resuelve el tenant por RNCComprador; los deja `estado=RECIBIDO`, pendientes de aprobar/rechazar | `IMPORT_RECIBIDO_TOKEN` |
+
 ## Preexistentes
 
 | Ruta | Qué hace |
@@ -47,6 +53,7 @@ Relacionado: [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [
 | `ONBOARD_TOKEN` | const en `tools/create_tenant.php` |
 | `CREATE_USER_TOKEN` | const en `public/create_user.php` |
 | `UPLOAD_LOGO_TOKEN` | const en `public/upload_logo.php` |
+| `IMPORT_RECIBIDO_TOKEN` | const en `public/import_recibido.php` |
 | `CERT_RUN_TOKEN` | `.env` |
 | "Token API del tenant" | no es fijo: sale del login del usuario del tenant (`POST /api/auth/login`) |
 
@@ -66,13 +73,23 @@ Relacionado: [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [
 | `POST /api/integracion/aprobacion-comercial` | key+secret | Aprobar/rechazar e-CF recibido (integración) |
 | `GET /api/integracion/recibidos` | key+secret | Listar e-CF recibidos (integración) |
 | `GET /api/integracion/aprobaciones` | key+secret | Listar aprobaciones recibidas (integración) |
-| `POST /api/ecf/recepcion` | DGII (Bearer + RNC del XML) | Recepción de e-CF entrantes |
-| `POST /api/ecf/aprobacion-comercial` | DGII | Recepción de aprobaciones comerciales |
+| `POST /api/ecf/recepcion` | Bearer DGII **o** firma XMLDSig válida (receptor abierto) | Recepción de e-CF entrantes. Resuelve tenant por RNCComprador |
+| `POST /api/ecf/aprobacion-comercial` | Bearer DGII **o** firma XMLDSig válida | Recepción de aprobaciones comerciales (ACECF). Resuelve tenant por RNCEmisor |
 | `GET/POST /api/ecf/autenticacion[...]` | DGII (semilla) | Flujo de autenticación DGII entrante |
 
 ### Headers
 - **App:** `X-API-KEY: <token de sesión del tenant>` (del login).
 - **Integración:** `X-API-KEY: <api_key>` + `X-API-SECRET: <api_secret>` (del onboarding).
+
+### Recepción abierta (e-CF / ACECF entrantes)
+`POST /api/ecf/recepcion` y `POST /api/ecf/aprobacion-comercial` aceptan el documento
+si trae un **Bearer DGII válido** (handshake semilla→token) **o** si su **firma
+digital XMLDSig es válida**. Así se reciben e-CF de emisores cuyo software no
+completa el handshake (la `URL Autenticación` del directorio es opcional). La firma
+es el gate de integridad/autenticidad; **no** valida la cadena de CAs de la DGII, así
+que el e-CF entra como `RECIBIDO`/pendiente (se revisa antes de aprobar/rechazar) y el
+RNC destino debe ser un tenant registrado. El **listado** (`GET /api/ecf/recepcion`)
+sigue requiriendo `X-API-KEY`.
 
 ---
 

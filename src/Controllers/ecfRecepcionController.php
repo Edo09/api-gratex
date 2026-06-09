@@ -45,10 +45,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
 function handleRecepcionEcf(): void
 {
-    $bearerCheck = ecfRecepcionRequireBearer();
-    if (!$bearerCheck['ok']) {
-        return;
-    }
+    // Auth relajada (receptor "abierto"): aceptamos el e-CF si trae Bearer valido
+    // O si su firma digital XMLDSig es valida (se exige mas abajo). Permite recibir
+    // de emisores cuyo software no completa el handshake semilla->token. La firma
+    // es el gate de autenticidad/integridad; el Bearer queda opcional.
+    // NOTA: la firma se valida contra el certificado EMBEBIDO, no contra la cadena
+    // de CAs de la DGII (ver IncomingXmlValidator) -> garantiza integridad y posesion
+    // de llave, no la confianza del emisor. El e-CF entra como pendiente y se revisa
+    // antes de aprobar/rechazar, y el RNCComprador debe ser un tenant registrado.
+    $bearerCheck = ecfRecepcionRequireBearer(true); // soft: no corta si falta el token
+    $hasValidBearer = $bearerCheck['ok'];
 
     $extractor = new IncomingXmlExtractor();
     $xml = $extractor->extract();
@@ -60,10 +66,15 @@ function handleRecepcionEcf(): void
     $validator = new IncomingXmlValidator();
     $validation = $validator->loadAndValidate($xml);
 
+    // Gate de autenticidad: sin Bearer valido, la firma DEBE ser valida. Con Bearer
+    // valido igual exigimos un XML bien formado y firmado.
     if (!$validation['ok']) {
-        respondRecepcion(false, $validation['firma_detalle'] ?? 'XML invalido.', 400, [
-            'validacion' => $validation,
-        ]);
+        respondRecepcion(
+            false,
+            $validation['firma_detalle'] ?? 'XML invalido o firma digital no verificable.',
+            $hasValidBearer ? 400 : 401,
+            ['validacion' => $validation]
+        );
         return;
     }
 
@@ -139,6 +150,9 @@ function handleRecepcionEcf(): void
     $mensaje = $estado === 'ACEPTADO'
         ? 'e-CF recibido y firma verificada.'
         : 'e-CF recibido pero la firma digital no es valida: ' . ($validation['firma_detalle'] ?? '');
+    if (!$hasValidBearer) {
+        $mensaje .= ' (recibido sin autenticacion previa; aceptado por firma digital valida).';
+    }
 
     $recData = [
         'track_id' => $trackId,
@@ -247,7 +261,13 @@ function ecfRecepcionRequireReadAuth(): bool
     return ecfRecepcionRequireBearer()['ok'];
 }
 
-function ecfRecepcionRequireBearer(): array
+/**
+ * Valida el Bearer token del flujo semilla DGII.
+ * @param bool $soft Si true, no responde ni corta cuando falta/expira el token;
+ *        solo devuelve ['ok' => false]. Usado por recepcion (auth relajada: la
+ *        firma digital es el gate). El modo estricto (default) responde 401.
+ */
+function ecfRecepcionRequireBearer(bool $soft = false): array
 {
     $headers = function_exists('getallheaders') ? getallheaders() : [];
     $auth = '';
@@ -261,15 +281,19 @@ function ecfRecepcionRequireBearer(): array
         $auth = (string) $_SERVER['HTTP_AUTHORIZATION'];
     }
     if (!preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
-        error_log('[ecfRecepcion] 401: no Bearer token. auth_header=' . substr($auth, 0, 80));
-        respondRecepcion(false, 'Bearer token requerido en Authorization.', 401);
+        if (!$soft) {
+            error_log('[ecfRecepcion] 401: no Bearer token. auth_header=' . substr($auth, 0, 80));
+            respondRecepcion(false, 'Bearer token requerido en Authorization.', 401);
+        }
         return ['ok' => false];
     }
     $token = trim($m[1]);
     $valid = (new authSeedModel())->findValidToken($token);
     if (!$valid) {
-        error_log('[ecfRecepcion] 401: token invalido o expirado. token_prefix=' . substr($token, 0, 40));
-        respondRecepcion(false, 'Bearer token invalido o expirado.', 401);
+        if (!$soft) {
+            error_log('[ecfRecepcion] 401: token invalido o expirado. token_prefix=' . substr($token, 0, 40));
+            respondRecepcion(false, 'Bearer token invalido o expirado.', 401);
+        }
         return ['ok' => false];
     }
     return ['ok' => true, 'rnc' => $valid['rnc_consumidor']];
