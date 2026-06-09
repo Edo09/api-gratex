@@ -100,25 +100,76 @@ class ecfRecibidoModel
 
     public function listPaginated(int $offset, int $pageSize): array
     {
+        // Filtrar por el ambiente activo (ecf/certecf/testecf) para no mezclar
+        // datos de prueba (certecf) en la bandeja de produccion. Mismo criterio
+        // que facturaModel.
+        $ambiente = $this->resolveActiveAmbiente();
+        $where = $ambiente !== null ? 'WHERE ambiente = :ambiente' : '';
         $stmt = $this->conexion->prepare(
-            'SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
+            "SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                     monto_total, fecha_emision, fecha_recepcion, estado, ambiente,
                     aprobacion_comercial, aprobacion_comercial_codigo_dgii,
                     aprobacion_comercial_estado_dgii, aprobacion_comercial_procesada,
                     aprobacion_comercial_fecha
              FROM ecf_recibidos
+             {$where}
              ORDER BY fecha_recepcion DESC
-             LIMIT ?, ?'
+             LIMIT :offset, :pageSize"
         );
-        $stmt->bindValue(1, $offset, PDO::PARAM_INT);
-        $stmt->bindValue(2, $pageSize, PDO::PARAM_INT);
+        if ($ambiente !== null) {
+            $stmt->bindValue(':ambiente', $ambiente, PDO::PARAM_STR);
+        }
+        $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
+        $stmt->bindValue(':pageSize', $pageSize, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
     public function count(): int
     {
-        $stmt = $this->conexion->query('SELECT COUNT(*) AS c FROM ecf_recibidos');
+        $ambiente = $this->resolveActiveAmbiente();
+        if ($ambiente !== null) {
+            $stmt = $this->conexion->prepare('SELECT COUNT(*) AS c FROM ecf_recibidos WHERE ambiente = :ambiente');
+            $stmt->execute([':ambiente' => $ambiente]);
+        } else {
+            $stmt = $this->conexion->query('SELECT COUNT(*) AS c FROM ecf_recibidos');
+        }
         return (int) ($stmt->fetch()['c'] ?? 0);
+    }
+
+    /**
+     * Ambiente DGII activo, normalizado (ecf/certecf/testecf), o null si no hay.
+     * Lee getenv y, como respaldo, el .env. Igual que facturaModel para mantener
+     * un solo criterio de filtrado de datos de prueba.
+     */
+    private function resolveActiveAmbiente(): ?string
+    {
+        $val = getenv('DGII_ECF_ENVIRONMENT') ?: ($_ENV['DGII_ECF_ENVIRONMENT'] ?? null);
+        if (!$val) {
+            $envFile = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env';
+            if (is_file($envFile)) {
+                $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
+                foreach ($lines as $line) {
+                    $line = trim($line);
+                    if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+                        continue;
+                    }
+                    [$key, $value] = explode('=', $line, 2);
+                    if (trim($key) === 'DGII_ECF_ENVIRONMENT') {
+                        $val = trim($value, " '\"");
+                        break;
+                    }
+                }
+            }
+        }
+        if (!$val) {
+            return null;
+        }
+        $aliases = [
+            'certecf' => 'certecf', 'cert' => 'certecf', 'certificacion' => 'certecf',
+            'ecf'     => 'ecf',     'prod' => 'ecf',      'produccion'   => 'ecf',
+            'testecf' => 'testecf', 'test' => 'testecf',
+        ];
+        return $aliases[strtolower(trim($val))] ?? strtolower(trim($val));
     }
 }
