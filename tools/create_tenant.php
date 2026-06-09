@@ -3,8 +3,9 @@
  * create_tenant.php — Onboarding CLI para un cliente (tenant) nuevo.
  *
  * Dos tipos (--tipo):
- *  - app          : DB-per-tenant. Crea DB, corre schema + migrations, configura
- *                   emisor_config, opcionalmente crea usuario admin. (default)
+ *  - app          : DB-per-tenant. Crea DB, aplica tenant_schema.sql (esquema
+ *                   completo consolidado), configura emisor_config, opcionalmente
+ *                   crea usuario admin. (default)
  *  - integracion  : SIN DB propia. Solo registra key+secret + cert para firmar.
  *                   Los e-CF generados se guardan en gratex_master.ecf_integracion_backup.
  *                   El cliente manda el eNCF en el JSON y maneja sus facturas en su sistema.
@@ -171,15 +172,11 @@ if ($tipo === 'app') {
         [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]
     );
 
-    echo "-> Aplicando tenant_schema.sql ...\n";
+    // tenant_schema.sql es el snapshot COMPLETO (base + migraciones consolidadas);
+    // ya no se reproducen las migraciones una por una. Cambios futuros: nueva
+    // migracion en db/migrations/ (DBs existentes) + reflejarla en el schema.
+    echo "-> Aplicando tenant_schema.sql (esquema completo consolidado) ...\n";
     runSqlFile($tenantPdo, __DIR__ . '/../db/tenant_schema.sql');
-
-    $migrations = glob(__DIR__ . '/../db/migrations/*.sql');
-    sort($migrations); // 001..010 (zero-padded)
-    foreach ($migrations as $file) {
-        echo '   migration ' . basename($file) . "\n";
-        runSqlFile($tenantPdo, $file);
-    }
 
     echo "-> Configurando emisor_config ...\n";
     $stmt = $tenantPdo->prepare(

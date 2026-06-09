@@ -52,11 +52,15 @@ class IntegracionStoreModel
             'INSERT INTO ecf_recibidos
                 (tenant_id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                  rnc_comprador, monto_total, fecha_emision, estado, codigo_resultado,
-                 mensaje_resultado, xml_firmado, validacion_firma, ambiente)
+                 mensaje_resultado, xml_firmado, validacion_firma, ambiente,
+                 origen_ip, origen_user_agent, origen_auth, origen_rnc_bearer,
+                 firma_rnc, firma_subject)
              VALUES
                 (:tenant_id, :track_id, :tipo_ecf, :e_ncf, :rnc_emisor, :razon_social_emisor,
                  :rnc_comprador, :monto_total, :fecha_emision, :estado, :codigo_resultado,
-                 :mensaje_resultado, :xml_firmado, :validacion_firma, :ambiente)'
+                 :mensaje_resultado, :xml_firmado, :validacion_firma, :ambiente,
+                 :origen_ip, :origen_user_agent, :origen_auth, :origen_rnc_bearer,
+                 :firma_rnc, :firma_subject)'
         );
         $stmt->execute([
             ':tenant_id'           => $tenantId,
@@ -74,6 +78,12 @@ class IntegracionStoreModel
             ':xml_firmado'         => $d['xml_firmado'] ?? null,
             ':validacion_firma'    => $d['validacion_firma'] ?? null,
             ':ambiente'            => $d['ambiente'] ?? null,
+            ':origen_ip'           => $d['origen_ip'] ?? null,
+            ':origen_user_agent'   => $d['origen_user_agent'] ?? null,
+            ':origen_auth'         => $d['origen_auth'] ?? null,
+            ':origen_rnc_bearer'   => $d['origen_rnc_bearer'] ?? null,
+            ':firma_rnc'           => $d['firma_rnc'] ?? null,
+            ':firma_subject'       => $d['firma_subject'] ?? null,
         ]);
         return (int) $this->conexion->lastInsertId();
     }
@@ -92,6 +102,7 @@ class IntegracionStoreModel
             "SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                     rnc_comprador, monto_total, fecha_emision, fecha_recepcion, estado,
                     codigo_resultado, mensaje_resultado, validacion_firma, ambiente,
+                    origen_ip, origen_auth, firma_rnc, firma_subject,
                     aprobacion_comercial, aprobacion_comercial_estado_dgii
                FROM ecf_recibidos
               {$where}
