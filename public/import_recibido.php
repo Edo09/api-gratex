@@ -162,10 +162,15 @@ function importarUno(string $xml, ?string $ambienteDefault, bool $multiTenant): 
 
     // Firma: best-effort (puede no verificarse offline por cadena/OCSP). No bloquea.
     $firma = 'NO_VALIDADA';
+    $firmaRnc = null;
+    $firmaSubject = null;
     try {
         $validation = (new IncomingXmlValidator())->loadAndValidate($xml);
         if (is_array($validation) && isset($validation['firma'])) {
             $firma = (string) $validation['firma'];
+            $firmaRnc = $validation['firma_rnc'] ?? null;
+            $firmaSubject = isset($validation['firma_subject']['CN'])
+                ? substr((string) $validation['firma_subject']['CN'], 0, 255) : null;
         }
     } catch (Throwable $e) {
         $firma = 'NO_VALIDADA';
@@ -216,6 +221,9 @@ function importarUno(string $xml, ?string $ambienteDefault, bool $multiTenant): 
         'xml_firmado' => $xml,
         'validacion_firma' => $firma,
         'ambiente' => $ambiente,
+        'origen_auth' => 'manual',
+        'firma_rnc' => $firmaRnc,
+        'firma_subject' => $firmaSubject,
     ]);
 
     return $trackId;

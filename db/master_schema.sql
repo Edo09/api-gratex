@@ -188,6 +188,18 @@ CREATE TABLE IF NOT EXISTS ecf_recibidos (
   xml_firmado         MEDIUMTEXT   NULL,
   validacion_firma    VARCHAR(20)  NULL,
   ambiente            VARCHAR(20)  NULL,
+  origen_ip           VARCHAR(45)  NULL
+                        COMMENT 'IP del POST (X-Forwarded-For o REMOTE_ADDR)',
+  origen_user_agent   VARCHAR(255) NULL
+                        COMMENT 'User-Agent del software del emisor',
+  origen_auth         VARCHAR(10)  NULL
+                        COMMENT 'bearer = handshake completo | firma = receptor abierto',
+  origen_rnc_bearer   VARCHAR(20)  NULL
+                        COMMENT 'RNC del Bearer token (si autentico)',
+  firma_rnc           VARCHAR(20)  NULL
+                        COMMENT 'RNC/cedula del certificado firmante (X509 de la Signature)',
+  firma_subject       VARCHAR(255) NULL
+                        COMMENT 'CN del certificado firmante',
   aprobacion_comercial             VARCHAR(20)  NULL,
   aprobacion_comercial_detalle     VARCHAR(500) NULL,
   aprobacion_comercial_codigo_dgii VARCHAR(5)   NULL,

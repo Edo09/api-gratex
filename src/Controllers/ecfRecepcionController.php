@@ -173,6 +173,16 @@ function handleRecepcionEcf(): void
         'ambiente' => $isIntegration
             ? ($tenant['ambiente'] ?? null)
             : (getenv('DGII_ECF_ENVIRONMENT') ?: null),
+        // Origen (auditoria): el RNCEmisor del XML es declarativo; esto registra
+        // quien firmo (cert X509) y desde donde/como llego el POST (migration 011).
+        'origen_ip' => ecfRecepcionOrigenIp(),
+        'origen_user_agent' => isset($_SERVER['HTTP_USER_AGENT'])
+            ? substr((string) $_SERVER['HTTP_USER_AGENT'], 0, 255) : null,
+        'origen_auth' => $hasValidBearer ? 'bearer' : 'firma',
+        'origen_rnc_bearer' => $bearerCheck['rnc'] ?? null,
+        'firma_rnc' => $validation['firma_rnc'] ?? null,
+        'firma_subject' => isset($validation['firma_subject']['CN'])
+            ? substr((string) $validation['firma_subject']['CN'], 0, 255) : null,
     ];
     if ($isIntegration) {
         $store->saveRecibido($tenantId, $recData);
@@ -340,6 +350,23 @@ function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, 
 function ecfRecepcionGenerarTrackId(): string
 {
     return strtoupper(bin2hex(random_bytes(16)));
+}
+
+/**
+ * IP de origen del POST. Tras un proxy/CDN la IP real viene en X-Forwarded-For
+ * (lista separada por comas; el primer hop es el cliente); si no, REMOTE_ADDR.
+ */
+function ecfRecepcionOrigenIp(): ?string
+{
+    $xff = $_SERVER['HTTP_X_FORWARDED_FOR'] ?? '';
+    if ($xff !== '') {
+        $first = trim(explode(',', $xff)[0]);
+        if ($first !== '') {
+            return substr($first, 0, 45);
+        }
+    }
+    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+    return $ip !== '' ? substr($ip, 0, 45) : null;
 }
 
 function ecfRecepcionMultiTenant(): bool

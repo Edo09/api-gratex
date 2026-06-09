@@ -17,7 +17,7 @@ Relacionado: [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [
 | Ruta | Qué hace | Token |
 |---|---|---|
 | `GET /api/public/onboard.html` | UI alta de tenant (app/integración): datos, cert `.p12`, logo, usuario admin | el form pide el token |
-| `POST /api/public/create_tenant.php` | Handler del onboarding. Crea tenant + (app) DB schema/migrations + `emisor_config` + usuario admin + logo | `ONBOARD_TOKEN` |
+| `POST /api/public/create_tenant.php` | Handler del onboarding. Crea tenant + (app) DB con `tenant_schema.sql` (esquema completo consolidado) + `emisor_config` + usuario admin + logo | `ONBOARD_TOKEN` |
 | `GET/POST /api/public/create_user.php` | Alta de usuarios extra de un tenant (form + handler) | `CREATE_USER_TOKEN` |
 | `GET/POST /api/public/upload_logo.php` | Subir/cambiar el logo de un tenant | `UPLOAD_LOGO_TOKEN` |
 
