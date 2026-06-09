@@ -87,7 +87,9 @@ function handleEnvioACECF(): void
     $mensajeDgii = isset($dgiiResp['mensaje'])
         ? (is_array($dgiiResp['mensaje']) ? implode(' | ', $dgiiResp['mensaje']) : (string) $dgiiResp['mensaje'])
         : null;
-    $procesada = ($codigoDgii !== null && $codigoDgii === '1') ? 1 : 0;
+    // DGII devuelve el codigo zero-padded ("01" = procesada). Comparar como entero
+    // para no fallar el flag por el "0" inicial ("01" !== "1" como string).
+    $procesada = ($codigoDgii !== null && (int) $codigoDgii === 1) ? 1 : 0;
 
     persistAprobacionComercial($recibidos, $input, [
         'aprobacion_comercial' => $decision,
