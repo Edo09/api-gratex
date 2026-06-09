@@ -47,6 +47,9 @@ function handleIntegracionConsulta(): void
 {
     $tenant = TenantResolver::current();
     $tenantId = (int) $tenant['id'];
+    // Ambiente actual del tenant (certecf durante certificacion, ecf en produccion):
+    // filtra la bandeja para no mezclar datos de certificacion con produccion.
+    $ambiente = $tenant['ambiente'] ?? null;
 
     $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH) ?? '';
     $recurso = str_contains($endpoint, 'aprobaciones') ? 'aprobaciones' : 'recibidos';
@@ -59,11 +62,11 @@ function handleIntegracionConsulta(): void
 
     $store = new IntegracionStoreModel();
     if ($recurso === 'aprobaciones') {
-        $rows = $store->listAprobaciones($tenantId, $offset, $pageSize);
-        $total = $store->countAprobaciones($tenantId);
+        $rows = $store->listAprobaciones($tenantId, $offset, $pageSize, $ambiente);
+        $total = $store->countAprobaciones($tenantId, $ambiente);
     } else {
-        $rows = $store->listRecibidos($tenantId, $offset, $pageSize);
-        $total = $store->countRecibidos($tenantId);
+        $rows = $store->listRecibidos($tenantId, $offset, $pageSize, $ambiente);
+        $total = $store->countRecibidos($tenantId, $ambiente);
     }
 
     echo json_encode([

@@ -116,7 +116,11 @@ function handleAprobacionComercial(): void
         'detalle_motivo' => $detalle,
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
-        'ambiente' => getenv('DGII_ECF_ENVIRONMENT') ?: null,
+        // Integracion: ambiente per-tenant (tenants.ambiente: certecf en certificacion,
+        // ecf en produccion). App: el env global del servidor.
+        'ambiente' => $isIntegration
+            ? ($tenant['ambiente'] ?? null)
+            : (getenv('DGII_ECF_ENVIRONMENT') ?: null),
     ];
     if ($isIntegration) {
         (new IntegracionStoreModel())->saveAprobacion($tenantId, $aprData);
