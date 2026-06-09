@@ -140,6 +140,9 @@ if ($createAdmin) {
 
 echo "== Onboarding tenant ({$tipo}): {$nombre} (RNC {$rnc}) ==\n";
 
+// id del cliente de prueba (RNC 131880681) para el wizard de cert; se llena en app.
+$certClientId = null;
+
 // =============================================================================
 // Tipo APP: crear DB + schema + migrations + emisor_config
 // =============================================================================
@@ -185,6 +188,15 @@ if ($tipo === 'app') {
           WHERE id = 1'
     );
     $stmt->execute([':rnc' => $rnc, ':rs' => $razonSocial, ':nc' => $nombre, ':dir' => $direccion]);
+
+    // Cliente de prueba para certificacion: lo inserta la migracion 004 (RNC 131880681).
+    // Su id (autoincrement, varia por tenant) se usa como client_id en el wizard (Fase 2/4).
+    try {
+        $cstmt = $tenantPdo->query("SELECT id FROM clients WHERE rnc = '131880681' ORDER BY id LIMIT 1");
+        $certClientId = $cstmt ? ($cstmt->fetchColumn() ?: null) : null;
+    } catch (Throwable $e) {
+        $certClientId = null;
+    }
 }
 
 // =============================================================================
@@ -294,6 +306,8 @@ echo "  tipo       : {$tipo}\n";
 echo "  db_name    : " . ($tipo === 'app' ? $dbName : '(integracion: sin DB)') . "\n";
 if ($tipo === 'app') {
     echo "  admin      : " . ($createAdmin ? $adminEmail : '(sin usuario admin)') . "\n";
+    echo "  client_id certificacion (RNC 131880681): "
+        . ($certClientId !== null ? $certClientId : 'NO encontrado (revisa que corrio la migracion 004)') . "\n";
 }
 echo "  API KEY    : {$apiKey}\n";
 echo "  API SECRET : {$apiSecret}\n";
