@@ -78,29 +78,46 @@ class IntegracionStoreModel
         return (int) $this->conexion->lastInsertId();
     }
 
-    public function listRecibidos(int $tenantId, int $offset, int $limit): array
+    public function listRecibidos(int $tenantId, int $offset, int $limit, ?string $ambiente = null): array
     {
+        // El ambiente de un tenant integracion es per-tenant (tenants.ambiente:
+        // certecf durante certificacion, ecf en produccion), NO el env global del
+        // servidor. Filtrar por el ambiente actual del tenant evita mezclar datos
+        // de prueba con produccion.
+        $where = 'WHERE tenant_id = :t';
+        if ($ambiente !== null && $ambiente !== '') {
+            $where .= ' AND ambiente = :amb';
+        }
         $stmt = $this->conexion->prepare(
-            'SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
+            "SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                     rnc_comprador, monto_total, fecha_emision, fecha_recepcion, estado,
                     codigo_resultado, mensaje_resultado, validacion_firma, ambiente,
                     aprobacion_comercial, aprobacion_comercial_estado_dgii
                FROM ecf_recibidos
-              WHERE tenant_id = :t
+              {$where}
               ORDER BY fecha_recepcion DESC
-              LIMIT :lim OFFSET :off'
+              LIMIT :lim OFFSET :off"
         );
         $stmt->bindValue(':t', $tenantId, PDO::PARAM_INT);
+        if ($ambiente !== null && $ambiente !== '') {
+            $stmt->bindValue(':amb', $ambiente, PDO::PARAM_STR);
+        }
         $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
-    public function countRecibidos(int $tenantId): int
+    public function countRecibidos(int $tenantId, ?string $ambiente = null): int
     {
-        $stmt = $this->conexion->prepare('SELECT COUNT(*) FROM ecf_recibidos WHERE tenant_id = :t');
-        $stmt->execute([':t' => $tenantId]);
+        $sql = 'SELECT COUNT(*) FROM ecf_recibidos WHERE tenant_id = :t';
+        $params = [':t' => $tenantId];
+        if ($ambiente !== null && $ambiente !== '') {
+            $sql .= ' AND ambiente = :amb';
+            $params[':amb'] = $ambiente;
+        }
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute($params);
         return (int) $stmt->fetchColumn();
     }
 
@@ -161,27 +178,40 @@ class IntegracionStoreModel
         return (int) $this->conexion->lastInsertId();
     }
 
-    public function listAprobaciones(int $tenantId, int $offset, int $limit): array
+    public function listAprobaciones(int $tenantId, int $offset, int $limit, ?string $ambiente = null): array
     {
+        $where = 'WHERE tenant_id = :t';
+        if ($ambiente !== null && $ambiente !== '') {
+            $where .= ' AND ambiente = :amb';
+        }
         $stmt = $this->conexion->prepare(
-            'SELECT id, e_ncf, rnc_emisor, rnc_comprador, estado_comercial, detalle_motivo,
+            "SELECT id, e_ncf, rnc_emisor, rnc_comprador, estado_comercial, detalle_motivo,
                     validacion_firma, ambiente, fecha_recepcion
                FROM aprobaciones_comerciales
-              WHERE tenant_id = :t
+              {$where}
               ORDER BY fecha_recepcion DESC
-              LIMIT :lim OFFSET :off'
+              LIMIT :lim OFFSET :off"
         );
         $stmt->bindValue(':t', $tenantId, PDO::PARAM_INT);
+        if ($ambiente !== null && $ambiente !== '') {
+            $stmt->bindValue(':amb', $ambiente, PDO::PARAM_STR);
+        }
         $stmt->bindValue(':lim', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':off', $offset, PDO::PARAM_INT);
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
-    public function countAprobaciones(int $tenantId): int
+    public function countAprobaciones(int $tenantId, ?string $ambiente = null): int
     {
-        $stmt = $this->conexion->prepare('SELECT COUNT(*) FROM aprobaciones_comerciales WHERE tenant_id = :t');
-        $stmt->execute([':t' => $tenantId]);
+        $sql = 'SELECT COUNT(*) FROM aprobaciones_comerciales WHERE tenant_id = :t';
+        $params = [':t' => $tenantId];
+        if ($ambiente !== null && $ambiente !== '') {
+            $sql .= ' AND ambiente = :amb';
+            $params[':amb'] = $ambiente;
+        }
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute($params);
         return (int) $stmt->fetchColumn();
     }
 
