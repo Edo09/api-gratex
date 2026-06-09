@@ -25,10 +25,12 @@ handleAprobacionComercial();
 
 function handleAprobacionComercial(): void
 {
-    $bearer = aprobacionRequireBearer();
-    if (!$bearer['ok']) {
-        return;
-    }
+    // Auth relajada (igual que recepcion): aceptamos el ACECF si trae Bearer
+    // valido O si su firma digital XMLDSig es valida. La firma es el gate de
+    // autenticidad/integridad (cert embebido, no cadena de CAs de la DGII); el
+    // Bearer queda opcional para quienes no completan el handshake semilla->token.
+    $bearer = aprobacionRequireBearer(true); // soft: no corta si falta el token
+    $hasValidBearer = $bearer['ok'];
 
     $extractor = new IncomingXmlExtractor();
     $xml = $extractor->extract();
@@ -40,7 +42,11 @@ function handleAprobacionComercial(): void
     $validator = new IncomingXmlValidator();
     $validation = $validator->loadAndValidate($xml);
     if (!$validation['ok']) {
-        respondAprobacion(false, $validation['firma_detalle'] ?? 'XML invalido.', 400);
+        respondAprobacion(
+            false,
+            $validation['firma_detalle'] ?? 'XML invalido o firma digital no verificable.',
+            $hasValidBearer ? 400 : 401
+        );
         return;
     }
 
@@ -155,7 +161,13 @@ function aprobacionMapEstado(string $estado): ?string
     return null;
 }
 
-function aprobacionRequireBearer(): array
+/**
+ * Valida el Bearer token del flujo semilla DGII.
+ * @param bool $soft Si true, no responde 401 cuando falta/expira el token; solo
+ *        devuelve ['ok' => false]. Usado por la recepcion de ACECF (auth relajada:
+ *        la firma digital es el gate). El modo estricto (default) responde 401.
+ */
+function aprobacionRequireBearer(bool $soft = false): array
 {
     $headers = function_exists('getallheaders') ? getallheaders() : [];
     $auth = '';
@@ -169,13 +181,17 @@ function aprobacionRequireBearer(): array
         $auth = (string) $_SERVER['HTTP_AUTHORIZATION'];
     }
     if (!preg_match('/^Bearer\s+(.+)$/i', $auth, $m)) {
-        respondAprobacion(false, 'Bearer token requerido en Authorization.', 401);
+        if (!$soft) {
+            respondAprobacion(false, 'Bearer token requerido en Authorization.', 401);
+        }
         return ['ok' => false];
     }
     $token = trim($m[1]);
     $valid = (new authSeedModel())->findValidToken($token);
     if (!$valid) {
-        respondAprobacion(false, 'Bearer token invalido o expirado.', 401);
+        if (!$soft) {
+            respondAprobacion(false, 'Bearer token invalido o expirado.', 401);
+        }
         return ['ok' => false];
     }
     return ['ok' => true, 'rnc' => $valid['rnc_consumidor']];
