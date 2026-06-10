@@ -1,6 +1,37 @@
 # e-CF API — Referencia de Endpoints y Payloads
 
-Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
+## Autenticación
+
+Todos los endpoints (salvo `/api/auth/login`) requieren credenciales. Dos esquemas:
+
+| Esquema | Headers | Uso |
+|---------|---------|-----|
+| **Sesión de app** | `Authorization: Bearer <token>` (o `X-API-KEY: <token>`) | Apps con usuarios (ej. fiscalo-react). El token sale del login. |
+| **Integración** | `X-API-KEY: <api_key>` + `X-API-SECRET: <api_secret>` | Clientes máquina-a-máquina (credenciales por tenant, ver `/api/integracion/*`). |
+
+> OJO: si se envía `X-API-KEY`, tiene prioridad sobre el `Authorization: Bearer`.
+
+### Login — `POST /api/auth/login`
+
+```json
+{ "emailOrUsername": "ana@empresa.do", "password": "...", "tenant_id": 1 }
+```
+
+`tenant_id` es opcional para login por **email** (único global); para login por
+**username** sin `tenant_id` solo funciona si el username existe en un único
+tenant. Respuesta (envoltorio `{success,...}`, distinto al `{status,...}` del resto):
+
+```json
+{
+  "success": true,
+  "data": {
+    "token": "988f9777dea9383661bc2d6e735f1d3b",
+    "user": { "id": 2, "email": "ana@empresa.do", "username": "ana", "name": "Ana Reyes", "role": "admin" }
+  }
+}
+```
+
+`POST /api/auth/signout` (con el token) revoca la sesión.
 
 ---
 
@@ -27,6 +58,34 @@ Headers requeridos en todos los endpoints: `X-API-KEY: <key>`
 | `page` | `1` | Página |
 | `pageSize` | `10` | Resultados por página |
 | `query` | — | Filtro por e-NCF, nombre, etc. |
+
+#### Detalle por ID (`GET /api/facturas?id={id}`)
+
+`data` es un **array** con la factura (compatibilidad histórica; tomar `data[0]`).
+A diferencia del listado, el detalle viene **enriquecido** para pintar el
+documento completo en una sola llamada:
+
+```json
+{
+  "status": true,
+  "data": [
+    {
+      "id": 1154, "e_ncf": "E310000000335", "tipo_ecf": "31", "total": "2950.00",
+      "estado_dgii": "ACEPTADO", "codigo_seguridad": "mG2wqe",
+      "items": [
+        { "description": "Servicio profesional", "quantity": "5", "amount": "1500.00",
+          "subtotal": "7500.00", "itbis_amount": "1350.00" }
+      ],
+      "cliente": { "id": 3511, "client_name": "...", "razon_social": "...", "rnc": "...", "direccion": "..." },
+      "emisor": { "rnc": "...", "razon_social": "...", "nombre_comercial": "...", "direccion": "...", "correo": "..." }
+    }
+  ]
+}
+```
+
+- `items` — líneas de `factura_items`.
+- `cliente` — registro completo de `clients` (solo si la factura tiene `client_id`).
+- `emisor` — fila de `emisor_config` del tenant.
 
 #### Parámetro `?format=base64`
 
@@ -162,15 +221,20 @@ X-API-KEY: <key>
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| `POST` | `/api/auth/...` | Autenticación / tokens |
-| `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes |
+| `POST` | `/api/auth/login` · `/signout` | Autenticación de usuarios (ver sección Autenticación) |
+| `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes (`?page,?pageSize,?query` para listado) |
+| `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query`) |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
+| `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver `docs/gastos-module.md` |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
+| `GET/POST/PUT/DELETE` | `/api/facturas-simples` | Facturas NO electrónicas — ver `docs/facturas-simples-api.md` |
 | `GET/POST` | `/api/ncf` | Gestión de secuencias NCF |
 | `POST` | `/api/aprobaciones-comerciales` | Enviar ACECF a DGII (aprobación comercial saliente) |
 | `POST` | `/api/ecf/recepcion` | Recibir e-CFs entrantes de otros emisores |
 | `POST` | `/api/ecf/aprobacion-comercial` | Aprobación comercial entrante |
 | `GET/POST` | `/api/ecf/autenticacion` | Flujo seed/validación DGII |
+| `POST/GET` | `/api/integracion/ecf` · `/aprobacion-comercial` · `/recibidos` · `/aprobaciones` | Modo integración (X-API-KEY + X-API-SECRET, sin DB propia) |
+| `GET/POST` | `/api/landing` | Configuración de landing page |
 
 ---
 
