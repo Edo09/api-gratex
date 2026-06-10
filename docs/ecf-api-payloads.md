@@ -76,7 +76,7 @@ documento completo en una sola llamada:
       "estado_dgii": "ACEPTADO", "codigo_seguridad": "mG2wqe",
       "items": [
         { "description": "Servicio profesional", "quantity": "5", "amount": "1500.00",
-          "subtotal": "7500.00", "itbis_amount": "1350.00" }
+          "subtotal": "7500.00", "itbis_amount": "1350.00", "indicador_facturacion": 1 }
       ],
       "cliente": { "id": 3511, "client_name": "...", "razon_social": "...", "rnc": "...", "direccion": "..." },
       "emisor": { "rnc": "...", "razon_social": "...", "nombre_comercial": "...", "direccion": "...", "correo": "..." }
