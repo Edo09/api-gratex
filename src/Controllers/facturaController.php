@@ -49,6 +49,20 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         if (isset($_GET['id'])) {
             $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturas($_GET['id']));
+            // Detalle por id: enriquecer con lineas, cliente y emisor para que el
+            // front pinte el documento completo en una sola llamada. La forma de
+            // `data` sigue siendo un array (compatibilidad con clientes previos).
+            if (!empty($facturas)) {
+                $facturas[0]['items'] = $facturaModel->getFacturaItems((int) $_GET['id']);
+                if (!empty($facturas[0]['client_id'])) {
+                    $clientData = $clientModel->getClients($facturas[0]['client_id']);
+                    if (!empty($clientData)) {
+                        $facturas[0]['cliente'] = $clientData[0];
+                    }
+                }
+                require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+                $facturas[0]['emisor'] = (new EmisorConfigModel())->get();
+            }
             echo json_encode(['status' => true, 'data' => $facturas]);
             break;
         }
