@@ -69,9 +69,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
         $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
         $query = $_GET['query'] ?? null;
+        $estado = normalizeEstadoFilter($_GET['estado'] ?? null);
+        if ($estado === false) {
+            respond(false, "estado invalido: use 'aprobado', 'rechazado' o 'todos'", 422);
+            break;
+        }
+        $tipoEcf = normalizeTipoEcfFilter($_GET['tipo_ecf'] ?? null);
+        if ($tipoEcf === false) {
+            respond(false, 'tipo_ecf invalido: use E31, E32, E33, E34, E41, E43, E44, E45, E46 o E47', 422);
+            break;
+        }
         $offset = ($page - 1) * $pageSize;
-        $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturasPaginated($offset, $pageSize, $query));
-        $total = $facturaModel->getFacturasCount($query);
+        $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturasPaginated($offset, $pageSize, $query, $estado, $tipoEcf));
+        $total = $facturaModel->getFacturasCount($query, $estado, $tipoEcf);
         echo json_encode([
             'status' => true,
             'data' => $facturas,
@@ -739,6 +749,50 @@ function handleECFStats(facturaModel $facturaModel): void
 
     $stats['ambiente_activo'] = $facturaModel->getActiveAmbiente();
     echo json_encode(['status' => true, 'data' => $stats]);
+}
+
+/**
+ * Normaliza el filtro `estado` del listado.
+ * Acepta 'aprobado' (y la variante 'aprovado'), 'rechazado' y 'todos' en
+ * cualquier capitalizacion. 'todos', vacio o ausente => null (sin filtro).
+ * @return string|null|false null = sin filtro, false = valor invalido
+ */
+function normalizeEstadoFilter($raw)
+{
+    if ($raw === null || trim((string) $raw) === '') {
+        return null;
+    }
+    $estado = strtolower(trim((string) $raw));
+    if ($estado === 'todos') {
+        return null;
+    }
+    if ($estado === 'aprobado' || $estado === 'aprovado') {
+        return 'aprobado';
+    }
+    if ($estado === 'rechazado') {
+        return 'rechazado';
+    }
+    return false;
+}
+
+/**
+ * Normaliza el filtro `tipo_ecf` del listado: acepta 'E31' o '31' y devuelve
+ * el codigo sin la 'E' (como se guarda en facturas.tipo_ecf).
+ * @return string|null|false null = sin filtro, false = valor invalido
+ */
+function normalizeTipoEcfFilter($raw)
+{
+    if ($raw === null || trim((string) $raw) === '') {
+        return null;
+    }
+    $tipo = strtoupper(trim((string) $raw));
+    if ($tipo[0] === 'E') {
+        $tipo = substr($tipo, 1);
+    }
+    if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipo)) {
+        return false;
+    }
+    return $tipo;
 }
 
 function respond(bool $status, string $message, int $code = 200): void
