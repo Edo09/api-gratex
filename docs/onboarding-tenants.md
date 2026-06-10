@@ -170,6 +170,32 @@ Sus listados (`/recibidos`, `/aprobaciones`) muestran solo el ambiente actual.
 
 ---
 
+## Empresa DEMO (funcional, testecf)
+
+Tenant app normal pero apuntando al ambiente de pruebas libres de DGII
+(`testecf`): emite XML real, firmado y enviado, sin tocar certificación ni
+producción. Útil para demos de venta con flujo completo.
+
+1. cPanel: crear DB (ej. `mtldtmte_demodb`) + usuario + privilegios.
+2. `onboard.html` → tipo **App**:
+   - nombre "Empresa Demo", **ambiente = `testecf`**.
+   - RNC: uno real distinto al de Gratex (`tenants.rnc` es UNIQUE; no puede
+     repetir 131256432). Si DGII testecf rechaza un RNC no habilitado, el demo
+     igual muestra todo el flujo hasta la respuesta de DGII.
+   - cert: el `.p12` propio, o vacío (cae al cert global del `.env`).
+   - usuario demo (email/password para el login del demo).
+3. El schema ya siembra secuencias e-NCF en `testecf` (ademas de certecf/ecf),
+   así que la emisión funciona de una.
+4. Login con el usuario demo → emitir facturas/gastos → van a
+   `https://ecf.dgii.gov.do/testecf/...`. Los listados solo muestran datos
+   `testecf` (filtro por ambiente del tenant) — el demo nunca se mezcla con
+   producción.
+5. Reset del demo: `TRUNCATE` de `facturas`/`factura_items`/`gastos` en SU DB
+   (o re-crear el tenant). Nada de Gratex se toca.
+
+> Nota: `testecf` de DGII a veces está caído o lento; si el demo es en vivo,
+> probar emisión 10 min antes.
+
 ## Dónde queda cada cosa
 
 | Dato | app | integración |

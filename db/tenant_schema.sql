@@ -171,7 +171,18 @@ INSERT INTO ncf_sequences (type, prefix, current_value, description, ambiente) V
   ('E44', 'E44', 0, 'Regimenes Especiales Electronico', 'ecf'),
   ('E45', 'E45', 0, 'Gubernamental Electronico', 'ecf'),
   ('E46', 'E46', 0, 'Comprobante de Exportaciones', 'ecf'),
-  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior', 'ecf')
+  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior', 'ecf'),
+  -- e-CF en testecf (pruebas libres / tenants demo)
+  ('E31', 'E31', 0, 'Credito Fiscal Electronico', 'testecf'),
+  ('E32', 'E32', 0, 'Consumo Electronico', 'testecf'),
+  ('E33', 'E33', 0, 'Nota de Debito Electronica', 'testecf'),
+  ('E34', 'E34', 0, 'Nota de Credito Electronica', 'testecf'),
+  ('E41', 'E41', 0, 'Compras Electronico', 'testecf'),
+  ('E43', 'E43', 0, 'Gastos Menores Electronico', 'testecf'),
+  ('E44', 'E44', 0, 'Regimenes Especiales Electronico', 'testecf'),
+  ('E45', 'E45', 0, 'Gubernamental Electronico', 'testecf'),
+  ('E46', 'E46', 0, 'Comprobante de Exportaciones', 'testecf'),
+  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior', 'testecf')
 ON DUPLICATE KEY UPDATE type = type;
 
 -- ----------------------------------------------------------------------------
