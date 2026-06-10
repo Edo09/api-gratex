@@ -191,7 +191,12 @@ class gastoModel
 
         $nombreProveedor = trim((string) ($data['nombre_proveedor'] ?? ''));
         if ($nombreProveedor === '') {
-            return ['error', 'nombre_proveedor requerido'];
+            if ($tipoGasto !== 'E43') {
+                return ['error', 'nombre_proveedor requerido (excepto Gastos Menores E43)'];
+            }
+            // E43 sin proveedor formal: etiqueta neutra (la columna es NOT NULL y
+            // el e-CF 43 se emite SIN comprador, ver buildEcfPayload).
+            $nombreProveedor = 'Gasto menor';
         }
 
         $items = $this->normalizeItems($data['items'] ?? []);
