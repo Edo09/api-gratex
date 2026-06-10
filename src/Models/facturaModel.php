@@ -74,7 +74,7 @@ class facturaModel
     public function getFacturaItems($factura_id)
     {
         try {
-            $sql = "SELECT id, description, amount, quantity, subtotal FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
+            $sql = "SELECT id, description, amount, quantity, subtotal, itbis_amount, indicador_facturacion FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':factura_id' => $factura_id]);
             return $stmt->fetchAll();
