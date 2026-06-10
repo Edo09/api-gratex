@@ -17,8 +17,8 @@ Relacionado: [rutas-publicas.md](rutas-publicas.md) ·
 | DB propia | **Sí** (DB-per-tenant, esquema completo) | **No** (sus datos viven en tablas espejo del master, por `tenant_id`) |
 | Auth | Login de persona → token de sesión (`X-API-KEY`) | Credenciales de máquina: `X-API-KEY` + `X-API-SECRET` |
 | Certificado | El suyo (`.p12`), por tenant | El suyo (`.p12`), **obligatorio** |
-| Secuencias e-NCF | Las maneja el sistema (`ncf_sequences` en su DB) | Las maneja el cliente (manda el `e_ncf` en el JSON) |
-| Ambiente | Global del server (`DGII_ECF_ENVIRONMENT`) ⚠️ | Per-tenant (`tenants.ambiente`) |
+| Secuencias e-NCF | Las maneja el sistema (`ncf_sequences` en su DB, por ambiente) | Las maneja el cliente (manda el `e_ncf` en el JSON) |
+| Ambiente | Per-tenant (`tenants.ambiente`) | Per-tenant (`tenants.ambiente`) |
 
 **Ciclo de vida del ambiente:** todo tenant arranca en `certecf` mientras pasa la
 certificación DGII; al certificar se promueve a `ecf` (producción):
@@ -27,10 +27,12 @@ certificación DGII; al certificar se promueve a `ecf` (producción):
 UPDATE gratex_master.tenants SET ambiente = 'ecf' WHERE id = <tenant_id>;
 ```
 
-⚠️ Limitación actual tipo app: el ambiente de emisión/listados usa el
-`DGII_ECF_ENVIRONMENT` global del server, no `tenants.ambiente`. Hoy el server
-está en `ecf`; un tenant app certificando necesita coordinarse (los runners de
-cert apuntan a `certecf` explícitamente, eso cubre la certificación).
+El ambiente lo resuelve `src/AmbienteResolver.php` con prioridad:
+**override explícito del request** (ej. los runners de cert mandan `certecf`) >
+**`tenants.ambiente` del tenant resuelto** > **`DGII_ECF_ENVIRONMENT` global**
+(fallback single-tenant). Aplica a emisión, secuencias e-NCF, filtros de
+listados/stats y al ambiente que se graba al recibir documentos — así un tenant
+puede certificar en `certecf` mientras otro opera en `ecf`, en el mismo server.
 
 **Cómo enruta el sistema (master = `gratex_master`):**
 - Login (`POST /api/auth/login`) → busca en `master.users` → token en
