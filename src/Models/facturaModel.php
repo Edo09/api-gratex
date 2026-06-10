@@ -545,7 +545,7 @@ class facturaModel
         }
     }
 
-    public function getFacturasPaginated($offset, $limit, $query = null)
+    public function getFacturasPaginated($offset, $limit, $query = null, $estado = null, $tipoEcf = null)
     {
         try {
             $ambiente = $this->resolveActiveAmbiente();
@@ -560,6 +560,7 @@ class facturaModel
                 $conditions[] = "f.ambiente_dgii = :ambiente";
                 $params[':ambiente'] = $ambiente;
             }
+            $this->applyEstadoTipoFilters($conditions, $params, $estado, $tipoEcf);
 
             $whereClause = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
             $sql = "SELECT f.*, cl.client_name, cl.company_name FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause} ORDER BY f.id DESC LIMIT :limit OFFSET :offset";
@@ -580,7 +581,7 @@ class facturaModel
         }
     }
 
-    public function getFacturasCount($query = null)
+    public function getFacturasCount($query = null, $estado = null, $tipoEcf = null)
     {
         try {
             $ambiente = $this->resolveActiveAmbiente();
@@ -595,6 +596,7 @@ class facturaModel
                 $conditions[] = "f.ambiente_dgii = :ambiente";
                 $params[':ambiente'] = $ambiente;
             }
+            $this->applyEstadoTipoFilters($conditions, $params, $estado, $tipoEcf);
 
             $whereClause = $conditions ? 'WHERE ' . implode(' AND ', $conditions) : '';
             $sql = "SELECT COUNT(*) as total FROM facturas f LEFT JOIN clients cl ON f.client_id = cl.id {$whereClause}";
@@ -604,6 +606,24 @@ class facturaModel
             return $row ? (int)$row['total'] : 0;
         } catch (PDOException $e) {
             return 0;
+        }
+    }
+
+    /**
+     * Filtros compartidos del listado: estado ('aprobado'|'rechazado', ya
+     * normalizado por el controller; 'aprobado' incluye ACEPTADO_CONDICIONAL y
+     * los estados RFCE_*) y tipo_ecf ('31'..'47', sin la 'E').
+     */
+    private function applyEstadoTipoFilters(array &$conditions, array &$params, $estado, $tipoEcf): void
+    {
+        if ($estado === 'aprobado') {
+            $conditions[] = "f.estado_dgii LIKE '%ACEPTADO%'";
+        } elseif ($estado === 'rechazado') {
+            $conditions[] = "f.estado_dgii LIKE '%RECHAZADO%'";
+        }
+        if ($tipoEcf !== null && $tipoEcf !== '') {
+            $conditions[] = "f.tipo_ecf = :tipo_ecf";
+            $params[':tipo_ecf'] = $tipoEcf;
         }
     }
 
