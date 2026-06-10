@@ -10,6 +10,7 @@ require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../CertResolver.php';
+require_once __DIR__ . '/../AmbienteResolver.php';
 require_once __DIR__ . '/../Utils/WebhookDispatcher.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
@@ -116,11 +117,9 @@ function handleAprobacionComercial(): void
         'detalle_motivo' => $detalle,
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
-        // Integracion: ambiente per-tenant (tenants.ambiente: certecf en certificacion,
-        // ecf en produccion). App: el env global del servidor.
-        'ambiente' => $isIntegration
-            ? ($tenant['ambiente'] ?? null)
-            : (getenv('DGII_ECF_ENVIRONMENT') ?: null),
+        // Ambiente per-tenant (tenants.ambiente; el tenant ya quedo resuelto por
+        // RNCEmisor, tanto app como integracion). Fallback: env global.
+        'ambiente' => AmbienteResolver::active(),
     ];
     if ($isIntegration) {
         (new IntegracionStoreModel())->saveAprobacion($tenantId, $aprData);

@@ -202,7 +202,10 @@ class DgiiReceptionService
 
     private function resolveEnvironment(array $options): string
     {
-        $env = $options['environment'] ?? $options['ambiente'] ?? getenv('DGII_ECF_ENVIRONMENT') ?: 'testecf';
+        // Sin override explicito: ambiente per-tenant (tenants.ambiente) o global.
+        $env = $options['environment'] ?? $options['ambiente']
+            ?? AmbienteResolver::active()
+            ?? (getenv('DGII_ECF_ENVIRONMENT') ?: 'testecf');
         $env = strtolower(trim((string) $env));
         $aliases = [
             'test' => 'testecf', 'testing' => 'testecf', 'prueba' => 'testecf',

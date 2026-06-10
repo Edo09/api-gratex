@@ -8,7 +8,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 > Las de `public/` son **herramientas admin** (crean tenants, emiten facturas).
 > Protégelas: tokens fuertes + HTTPS, y considera Basic Auth de cPanel sobre `/api/public/`.
 
-Relacionado: [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [pasos_certificacion_dgii](../pasos_certificacion_dgii/README.md)
+Relacionado: [onboarding-tenants.md](onboarding-tenants.md) (guía paso a paso app/integración) · [multi-emisor-master-db-prd.md](multi-emisor-master-db-prd.md) · [pasos_certificacion_dgii](../pasos_certificacion_dgii/README.md)
 
 ---
 
