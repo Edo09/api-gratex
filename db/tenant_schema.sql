@@ -454,3 +454,26 @@ CREATE TABLE IF NOT EXISTS products (
   KEY idx_categoria (categoria),
   KEY idx_activo (activo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 12) Directorio de proveedores (los gastos guardan el proveedor inline; esta
+--     tabla es el catalogo para autocompletar/gestionar). El conteo de compras
+--     se deriva uniendo gastos por rnc_proveedor.
+--     Ver db/migrations/013_add_proveedores.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS proveedores (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  rnc VARCHAR(11) NULL,
+  nombre VARCHAR(150) NOT NULL,
+  contacto VARCHAR(100) NULL,
+  telefono VARCHAR(20) NULL,
+  correo VARCHAR(100) NULL,
+  direccion VARCHAR(150) NULL,
+  notas VARCHAR(255) NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_rnc (rnc),
+  KEY idx_activo (activo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
