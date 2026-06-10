@@ -124,9 +124,11 @@ CREATE TABLE IF NOT EXISTS factura_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 4) Secuencias NCF / e-NCF
---    current_value=0 => la proxima sera 1 (E310000000001). Las secuencias e-CF
---    por ambiente las maneja tools/migration_ncf_ambiente.sql si aplica.
+-- 4) Secuencias NCF / e-NCF — POR AMBIENTE (unique type+ambiente).
+--    El codigo consulta/incrementa con WHERE type AND ambiente (ncfModel,
+--    facturaModel, gastoModel), asi que la columna es OBLIGATORIA.
+--    current_value=0 => la proxima sera 1 (E310000000001). Se siembran las
+--    secuencias e-CF en certecf (certificacion) Y ecf (produccion), ambas en 0.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ncf_sequences (
   id            INT(11)      NOT NULL AUTO_INCREMENT,
@@ -134,27 +136,42 @@ CREATE TABLE IF NOT EXISTS ncf_sequences (
   prefix        VARCHAR(10)  NOT NULL,
   current_value INT(11)      NOT NULL DEFAULT 0,
   description   VARCHAR(100) DEFAULT NULL,
+  ambiente      VARCHAR(20)  NOT NULL DEFAULT 'certecf'
+                  COMMENT 'testecf | certecf | ecf — las secuencias son independientes por ambiente',
   created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY type (type)
+  UNIQUE KEY uq_type_ambiente (type, ambiente)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO ncf_sequences (type, prefix, current_value, description) VALUES
-  ('B01', 'B01', 0, 'Facturas de Credito Fiscal'),
-  ('B02', 'B02', 0, 'Facturas de Consumidor Final'),
-  ('B14', 'B14', 0, 'Regimenes Especiales'),
-  ('B15', 'B15', 0, 'Gubernamental'),
-  ('E31', 'E31', 0, 'Credito Fiscal Electronico'),
-  ('E32', 'E32', 0, 'Consumo Electronico'),
-  ('E33', 'E33', 0, 'Nota de Debito Electronica'),
-  ('E34', 'E34', 0, 'Nota de Credito Electronica'),
-  ('E41', 'E41', 0, 'Compras Electronico'),
-  ('E43', 'E43', 0, 'Gastos Menores Electronico'),
-  ('E44', 'E44', 0, 'Regimenes Especiales Electronico'),
-  ('E45', 'E45', 0, 'Gubernamental Electronico'),
-  ('E46', 'E46', 0, 'Comprobante de Exportaciones'),
-  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior')
+INSERT INTO ncf_sequences (type, prefix, current_value, description, ambiente) VALUES
+  -- NCF tradicionales (no electronicos; una sola fila, certecf por paridad con Gratex)
+  ('B01', 'B01', 0, 'Facturas de Credito Fiscal', 'certecf'),
+  ('B02', 'B02', 0, 'Facturas de Consumidor Final', 'certecf'),
+  ('B14', 'B14', 0, 'Regimenes Especiales', 'certecf'),
+  ('B15', 'B15', 0, 'Gubernamental', 'certecf'),
+  -- e-CF en ambiente de certificacion
+  ('E31', 'E31', 0, 'Credito Fiscal Electronico', 'certecf'),
+  ('E32', 'E32', 0, 'Consumo Electronico', 'certecf'),
+  ('E33', 'E33', 0, 'Nota de Debito Electronica', 'certecf'),
+  ('E34', 'E34', 0, 'Nota de Credito Electronica', 'certecf'),
+  ('E41', 'E41', 0, 'Compras Electronico', 'certecf'),
+  ('E43', 'E43', 0, 'Gastos Menores Electronico', 'certecf'),
+  ('E44', 'E44', 0, 'Regimenes Especiales Electronico', 'certecf'),
+  ('E45', 'E45', 0, 'Gubernamental Electronico', 'certecf'),
+  ('E46', 'E46', 0, 'Comprobante de Exportaciones', 'certecf'),
+  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior', 'certecf'),
+  -- e-CF en produccion (arrancan en 0 al promover el tenant a ecf)
+  ('E31', 'E31', 0, 'Credito Fiscal Electronico', 'ecf'),
+  ('E32', 'E32', 0, 'Consumo Electronico', 'ecf'),
+  ('E33', 'E33', 0, 'Nota de Debito Electronica', 'ecf'),
+  ('E34', 'E34', 0, 'Nota de Credito Electronica', 'ecf'),
+  ('E41', 'E41', 0, 'Compras Electronico', 'ecf'),
+  ('E43', 'E43', 0, 'Gastos Menores Electronico', 'ecf'),
+  ('E44', 'E44', 0, 'Regimenes Especiales Electronico', 'ecf'),
+  ('E45', 'E45', 0, 'Gubernamental Electronico', 'ecf'),
+  ('E46', 'E46', 0, 'Comprobante de Exportaciones', 'ecf'),
+  ('E47', 'E47', 0, 'Comprobante para Pagos al Exterior', 'ecf')
 ON DUPLICATE KEY UPDATE type = type;
 
 -- ----------------------------------------------------------------------------
