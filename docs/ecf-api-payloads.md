@@ -226,6 +226,7 @@ X-API-KEY: <key>
 | `POST` | `/api/auth/login` · `/signout` | Autenticación de usuarios (ver sección Autenticación) |
 | `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes (`?page,?pageSize,?query` para listado) |
 | `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query`) |
+| `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver `docs/gastos-module.md` |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
