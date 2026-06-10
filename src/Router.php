@@ -84,6 +84,11 @@ switch ($route) {
         require_once 'src/Controllers/clientController.php';
         break;
 
+    case 'products':
+        // Product catalog CRUD endpoints - token required
+        require_once 'src/Controllers/productController.php';
+        break;
+
     case 'cotizaciones':
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';
