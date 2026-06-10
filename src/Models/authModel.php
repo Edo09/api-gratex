@@ -196,8 +196,9 @@ class authModel
                             WHERE (email = :eu OR username = :eu) AND tenant_id = :tid LIMIT 1";
                     $params = [':eu' => $email_or_username, ':tid' => (int) $tenant_id];
                 } else {
-                    // Sin tenant_id: solo por email (unico global). El username solo
-                    // seria ambiguo entre tenants, por eso no se permite aqui.
+                    // Sin tenant_id: primero por email (unico global). Si no hay
+                    // match, mas abajo se intenta por username SOLO si es
+                    // inequivoco (un unico tenant lo tiene).
                     $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
                             FROM users WHERE email = :eu LIMIT 1";
                     $params = [':eu' => $email_or_username];
@@ -210,6 +211,23 @@ class authModel
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute($params);
             $user = $stmt->fetch();
+
+            // Multi-tenant sin tenant_id: el query anterior solo busca por email.
+            // Fallback por username, pero SOLO si es inequivoco (existe en un
+            // unico tenant). Con duplicados entre tenants no se puede saber a
+            // cual entrar, asi que se mantiene el rechazo generico (el cliente
+            // puede reintentar con su correo o enviando tenant_id).
+            if (!$user && self::multiTenant() && ($tenant_id === null || $tenant_id === '')) {
+                $stmt = $this->conexion->prepare(
+                    "SELECT id, tenant_id, email, username, name, last_name, password, role
+                     FROM users WHERE username = :eu LIMIT 2"
+                );
+                $stmt->execute([':eu' => $email_or_username]);
+                $rows = $stmt->fetchAll();
+                if (count($rows) === 1) {
+                    $user = $rows[0];
+                }
+            }
 
             // Verify user exists and password is correct
             if (!$user || !password_verify($password, $user['password'])) {
