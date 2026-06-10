@@ -10,6 +10,7 @@ require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../CertResolver.php';
+require_once __DIR__ . '/../AmbienteResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../Utils/WebhookDispatcher.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
@@ -168,11 +169,9 @@ function handleRecepcionEcf(): void
         'mensaje_resultado' => $mensaje,
         'xml_firmado' => $xml,
         'validacion_firma' => $validation['firma'],
-        // Integracion: ambiente per-tenant (tenants.ambiente: certecf en certificacion,
-        // ecf en produccion). App: el env global del servidor.
-        'ambiente' => $isIntegration
-            ? ($tenant['ambiente'] ?? null)
-            : (getenv('DGII_ECF_ENVIRONMENT') ?: null),
+        // Ambiente per-tenant (tenants.ambiente; el tenant ya quedo resuelto por
+        // RNCComprador, tanto app como integracion). Fallback: env global.
+        'ambiente' => AmbienteResolver::active(),
         // Origen (auditoria): el RNCEmisor del XML es declarativo; esto registra
         // quien firmo (cert X509) y desde donde/como llego el POST (migration 011).
         'origen_ip' => ecfRecepcionOrigenIp(),

@@ -1,6 +1,7 @@
 <?php
 
 require_once(__DIR__ . '/DgiiXmlSigner.php');
+require_once(__DIR__ . '/../../AmbienteResolver.php');
 
 class DgiiAuthService
 {
@@ -125,8 +126,11 @@ class DgiiAuthService
 
     private function buildConfig(array $options): array
     {
+        // Sin override explicito: ambiente per-tenant (tenants.ambiente) o global.
         $environment = $this->normalizeEnvironment(
-            $options['environment'] ?? $options['ambiente'] ?? $this->env('DGII_ECF_ENVIRONMENT', self::DEFAULT_ENVIRONMENT)
+            $options['environment'] ?? $options['ambiente']
+                ?? AmbienteResolver::active()
+                ?? $this->env('DGII_ECF_ENVIRONMENT', self::DEFAULT_ENVIRONMENT)
         );
 
         $baseUrl = rtrim((string)($options['base_url'] ?? $this->env('DGII_ECF_BASE_URL', self::DEFAULT_BASE_URL)), '/');

@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
+require_once(__DIR__ . '/../AmbienteResolver.php');
 
 class facturaModel
 {
@@ -804,33 +805,10 @@ class facturaModel
         return $this->resolveActiveAmbiente();
     }
 
+    /** Ambiente activo: per-tenant (tenants.ambiente) o global del .env. */
     private function resolveActiveAmbiente(): ?string
     {
-        $val = getenv('DGII_ECF_ENVIRONMENT') ?: ($_ENV['DGII_ECF_ENVIRONMENT'] ?? null);
-        if (!$val) {
-            $envFile = dirname(__DIR__, 2) . DIRECTORY_SEPARATOR . '.env';
-            if (is_file($envFile)) {
-                $lines = file($envFile, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [];
-                foreach ($lines as $line) {
-                    $line = trim($line);
-                    if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
-                        continue;
-                    }
-                    [$key, $value] = explode('=', $line, 2);
-                    if (trim($key) === 'DGII_ECF_ENVIRONMENT') {
-                        $val = trim($value, " '\"");
-                        break;
-                    }
-                }
-            }
-        }
-        if (!$val) return null;
-        $aliases = [
-            'certecf' => 'certecf', 'cert' => 'certecf', 'certificacion' => 'certecf',
-            'ecf'     => 'ecf',     'prod' => 'ecf',      'produccion'   => 'ecf',
-            'testecf' => 'testecf', 'test' => 'testecf',
-        ];
-        return $aliases[strtolower(trim($val))] ?? strtolower(trim($val));
+        return AmbienteResolver::active();
     }
 
     public function getECFStats(): array
