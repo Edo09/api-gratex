@@ -1,0 +1,99 @@
+### ============================================================================
+### Branding de la Representacion Impresa por tenant -> /api/branding
+### Plantilla (clasico | moderno | compacto | custom:tenant<id>), color de
+### acento (#RRGGBB) y logo. Requiere modo multi-tenant (el tenant sale del
+### token). Ver docs/plantillas-factura.md.
+### ============================================================================
+
+### Branding actual + plantillas disponibles
+GET http://localhost:8000/api/branding
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Cambiar plantilla + acento
+PUT http://localhost:8000/api/branding
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "template": "moderno",
+  "accent_color": "#1A56DB"
+}
+
+### Limpiar el acento (color por defecto de la plantilla)
+PUT http://localhost:8000/api/branding
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "accent_color": null
+}
+
+### Plantilla invalida -> 422
+PUT http://localhost:8000/api/branding
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "template": "no-existe"
+}
+
+### Hex invalido -> 422
+PUT http://localhost:8000/api/branding
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "accent_color": "rojo"
+}
+
+### Subir logo (multipart, campo "logo"; png/jpg max 2 MB)
+POST http://localhost:8000/api/branding/logo
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: multipart/form-data; boundary=----LogoBoundary
+
+------LogoBoundary
+Content-Disposition: form-data; name="logo"; filename="logo.png"
+Content-Type: image/png
+
+< ./logo.png
+------LogoBoundary--
+
+### Eliminar el logo (vuelve al logo global)
+DELETE http://localhost:8000/api/branding/logo
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Preview: clasico (base64 por defecto; no persiste nada)
+POST http://localhost:8000/api/branding/preview
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "template": "clasico"
+}
+
+### Preview: moderno con acento, PDF crudo
+POST http://localhost:8000/api/branding/preview?format=download
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "template": "moderno",
+  "accent_color": "#1A56DB"
+}
+
+### Preview: compacto, factura NO electronica
+POST http://localhost:8000/api/branding/preview
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "template": "compacto",
+  "no_electronica": true
+}
+
+### Preview con lo persistido del tenant (sin body)
+POST http://localhost:8000/api/branding/preview
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{}

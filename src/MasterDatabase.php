@@ -112,6 +112,31 @@ class MasterDatabase
         return $row ?: null;
     }
 
+    /**
+     * Update branding fields of a tenant (Representacion Impresa).
+     * Only whitelisted columns; values may be null to clear them.
+     * @param array $fields Subset of: pdf_template, pdf_accent_color, logo_path
+     */
+    public function updateTenantBranding(int $tenantId, array $fields): void
+    {
+        $allowed = ['pdf_template', 'pdf_accent_color', 'logo_path'];
+        $sets = [];
+        $params = [':id' => $tenantId];
+        foreach ($allowed as $col) {
+            if (array_key_exists($col, $fields)) {
+                $sets[] = "`{$col}` = :{$col}";
+                $params[":{$col}"] = $fields[$col];
+            }
+        }
+        if (!$sets) {
+            return;
+        }
+        $stmt = $this->conexion->prepare(
+            'UPDATE tenants SET ' . implode(', ', $sets) . ' WHERE id = :id'
+        );
+        $stmt->execute($params);
+    }
+
     // ------------------------------------------------------------------
     // Centralized auth (App mode: users + api_tokens live here)
     // ------------------------------------------------------------------

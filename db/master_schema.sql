@@ -45,6 +45,10 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'AES-256-GCM; secret para firmar (HMAC) el payload del webhook',
   logo_path           VARCHAR(255)   NULL
                         COMMENT 'Ruta relativa al project root del logo (Representacion Impresa), ej. logos/5.png',
+  pdf_template        VARCHAR(40)    NOT NULL DEFAULT 'clasico'
+                        COMMENT 'Plantilla Representacion Impresa: clasico | moderno | compacto | custom:<nombre>',
+  pdf_accent_color    CHAR(7)        NULL
+                        COMMENT 'Color de acento hex #RRGGBB (NULL = colores por defecto de la plantilla)',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP

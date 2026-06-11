@@ -172,6 +172,12 @@ switch ($route) {
         }
         break;
 
+    case 'branding':
+        // Branding de la Representacion Impresa por tenant (plantilla, color,
+        // logo) - token required, solo multi-tenant
+        require_once 'src/Controllers/brandingController.php';
+        break;
+
     case 'landing':
         // Landing page configuration endpoints
         require_once 'src/Controllers/landingController.php';
