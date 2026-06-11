@@ -1,0 +1,714 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Propuesta FiscalPoint - Facturación Electrónica DGII</title>
+  <style>
+    @page {
+      size: Letter;
+      margin: 0;
+    }
+
+    :root {
+      --ink: #121a2b;
+      --muted: #5b6678;
+      --line: #dfe5ee;
+      --soft: #f5f8fc;
+      --navy: #172342;
+      --blue: #2f6fdb;
+      --cyan: #11b7d4;
+      --green: #13a36f;
+      --amber: #f1a208;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: #ffffff;
+      font-family: "Aptos", "Segoe UI", Arial, sans-serif;
+      line-height: 1.42;
+    }
+
+    .page {
+      position: relative;
+      width: 8.5in;
+      height: 11in;
+      padding: 0.55in 0.62in 0.48in;
+      page-break-after: always;
+      break-after: page;
+      overflow: hidden;
+    }
+
+    .page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+
+    .cover {
+      color: #ffffff;
+      background: linear-gradient(135deg, #172342 0%, #1e3265 58%, #123850 100%);
+    }
+
+    .cover::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      height: 0.12in;
+      background: linear-gradient(90deg, var(--blue), var(--cyan), var(--green), var(--amber));
+    }
+
+    .cover-logo {
+      width: 2.25in;
+      height: 1.05in;
+      object-fit: contain;
+      padding: 0.05in;
+      border-radius: 8px;
+      background: #ffffff;
+    }
+
+    .cover-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .proposal-tag {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 1.3px;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      width: 6.65in;
+      margin: 0.56in 0 0.16in;
+      color: #ffffff;
+      font-size: 38px;
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      width: 5.9in;
+      color: rgba(255, 255, 255, 0.84);
+      font-size: 15px;
+    }
+
+    .snapshot {
+      display: grid;
+      grid-template-columns: 1.1fr 0.9fr;
+      gap: 0.22in;
+      align-items: center;
+      margin-top: 0.46in;
+    }
+
+    .shot-wrap {
+      padding: 0.08in;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.09);
+    }
+
+    .shot-wrap img {
+      display: block;
+      width: 100%;
+      height: 2.62in;
+      border-radius: 6px;
+      object-fit: cover;
+      object-position: top left;
+    }
+
+    .cover-cards {
+      display: grid;
+      gap: 0.12in;
+    }
+
+    .cover-card {
+      padding: 0.14in;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .cover-card strong {
+      display: block;
+      color: #ffffff;
+      font-size: 12.4px;
+      margin-bottom: 0.035in;
+    }
+
+    .cover-card span {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 10.2px;
+      line-height: 1.34;
+    }
+
+    .prepared {
+      position: absolute;
+      left: 0.62in;
+      bottom: 0.42in;
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 10.5px;
+    }
+
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 0.16in;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .header img {
+      width: 1.55in;
+      height: 0.5in;
+      object-fit: contain;
+    }
+
+    .doc-label {
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    h2 {
+      margin: 0.28in 0 0.1in;
+      color: var(--ink);
+      font-size: 24px;
+      line-height: 1.12;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 0.07in;
+      color: var(--navy);
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    p {
+      margin: 0 0 0.1in;
+      color: var(--muted);
+      font-size: 10.7px;
+    }
+
+    .lead {
+      color: #364254;
+      font-size: 12.3px;
+      line-height: 1.46;
+    }
+
+    .rule {
+      width: 0.65in;
+      height: 4px;
+      margin: 0 0 0.17in;
+      border-radius: 99px;
+      background: linear-gradient(90deg, var(--blue), var(--cyan), var(--green));
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.16in;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.13in;
+    }
+
+    .panel {
+      padding: 0.16in;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #ffffff;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .panel.soft {
+      background: var(--soft);
+    }
+
+    .panel.requirement {
+      border-color: #f0c36d;
+      background: #fff8ea;
+    }
+
+    .table {
+      width: 100%;
+      margin: 0.16in 0;
+      border: 1px solid var(--line);
+      border-collapse: separate;
+      border-spacing: 0;
+      border-radius: 8px;
+      overflow: hidden;
+    }
+
+    .table th {
+      padding: 0.115in 0.14in;
+      color: #ffffff;
+      background: var(--navy);
+      text-align: left;
+      font-size: 10px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+    }
+
+    .table td {
+      padding: 0.12in 0.14in;
+      border-top: 1px solid var(--line);
+      color: #344054;
+      font-size: 10.7px;
+      vertical-align: top;
+    }
+
+    .table tr:nth-child(even) td {
+      background: #f8fafc;
+    }
+
+    .price {
+      white-space: nowrap;
+      color: var(--ink);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    ul {
+      margin: 0.05in 0 0;
+      padding-left: 0.17in;
+      color: var(--muted);
+      font-size: 10.35px;
+    }
+
+    li {
+      margin-bottom: 0.052in;
+    }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.12in;
+      margin-top: 0.15in;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 0.28in 1fr;
+      gap: 0.09in;
+      padding: 0.13in;
+      border: 1px solid #eed28e;
+      border-radius: 8px;
+      background: #fffaf0;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .checkmark {
+      width: 0.25in;
+      height: 0.25in;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--amber);
+      font-size: 13px;
+      font-weight: 800;
+      line-height: 0.25in;
+      text-align: center;
+    }
+
+    .check strong {
+      display: block;
+      margin-bottom: 0.025in;
+      color: var(--ink);
+      font-size: 11px;
+    }
+
+    .check span {
+      display: block;
+      color: var(--muted);
+      font-size: 9.85px;
+      line-height: 1.32;
+    }
+
+    .callout {
+      margin: 0.16in 0;
+      padding: 0.15in 0.18in;
+      border-left: 5px solid var(--cyan);
+      border-radius: 8px;
+      background: #edfaff;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .callout strong {
+      display: block;
+      margin-bottom: 0.04in;
+      color: var(--ink);
+      font-size: 11.5px;
+    }
+
+    .callout p {
+      margin: 0;
+      font-size: 10.4px;
+    }
+
+    .phase-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.1in 0.14in;
+      margin-top: 0.14in;
+    }
+
+    .phase {
+      display: grid;
+      grid-template-columns: 0.32in 1fr;
+      gap: 0.09in;
+      align-items: start;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    .phase b {
+      display: block;
+      width: 0.28in;
+      height: 0.28in;
+      border-radius: 50%;
+      color: #ffffff;
+      background: var(--blue);
+      font-size: 10px;
+      line-height: 0.28in;
+      text-align: center;
+    }
+
+    .phase strong {
+      display: block;
+      color: var(--ink);
+      font-size: 10.8px;
+    }
+
+    .phase span {
+      color: var(--muted);
+      font-size: 9.65px;
+      line-height: 1.32;
+    }
+
+    .contact {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1.2fr;
+      gap: 0.12in;
+      margin-top: 0.14in;
+    }
+
+    .contact-card {
+      padding: 0.13in;
+      border-radius: 8px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+    }
+
+    .contact-card small {
+      display: block;
+      margin-bottom: 0.03in;
+      color: var(--muted);
+      font-size: 8.8px;
+      font-weight: 800;
+      letter-spacing: 0.7px;
+      text-transform: uppercase;
+    }
+
+    .contact-card strong {
+      color: var(--ink);
+      font-size: 11.5px;
+    }
+
+    .footer {
+      position: absolute;
+      left: 0.62in;
+      right: 0.62in;
+      bottom: 0.23in;
+      display: flex;
+      justify-content: space-between;
+      padding-top: 0.08in;
+      border-top: 1px solid var(--line);
+      color: #8792a4;
+      font-size: 8.8px;
+    }
+  </style>
+</head>
+<body>
+  <section class="page cover">
+    <div class="cover-top">
+      <img class="cover-logo" src="assets/fiscalpoint-logo.png" alt="FiscalPoint">
+      <div class="proposal-tag">Propuesta comercial</div>
+    </div>
+
+    <h1>Implementación de Facturación Electrónica DGII</h1>
+    <p class="subtitle">Certificación e-CF, plataforma FiscalPoint e integración API para empresas en República Dominicana.</p>
+
+    <div class="snapshot">
+      <div class="shot-wrap">
+        <img src="assets/fiscalpoint-dashboard.png" alt="Dashboard FiscalPoint">
+      </div>
+      <div class="cover-cards">
+        <div class="cover-card">
+          <strong>Certificación DGII</strong>
+          <span>Acompañamiento completo para completar las fases oficiales de e-CF.</span>
+        </div>
+        <div class="cover-card">
+          <strong>FiscalPoint Web App</strong>
+          <span>Facturación, clientes, productos, gastos, comprobantes y reportes desde la nube.</span>
+        </div>
+        <div class="cover-card">
+          <strong>Integración API</strong>
+          <span>Conexión fiscal para empresas que ya tienen ERP, POS o sistema contable.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="prepared">
+      Contacto: Edwin Garcia · 849-401-1017 · omareogm09@gmail.com<br>
+      Junio 2026
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="header">
+      <img src="assets/fiscalpoint-logo.png" alt="FiscalPoint">
+      <div class="doc-label">Resumen y servicios</div>
+    </div>
+
+    <h2>Resumen Ejecutivo</h2>
+    <div class="rule"></div>
+    <p class="lead">FiscalPoint permite a la empresa operar facturación electrónica e-CF con cumplimiento DGII, reducción de trabajo manual y trazabilidad de cada comprobante. La solución cubre emisión, recepción, XML firmado, representación impresa, consulta de estados, aprobación comercial y soporte operativo.</p>
+
+    <div class="grid-3">
+      <div class="panel soft">
+        <h3>Beneficio fiscal</h3>
+        <p>Cumplimiento con la normativa de facturación electrónica en República Dominicana.</p>
+      </div>
+      <div class="panel soft">
+        <h3>Beneficio operativo</h3>
+        <p>Menos tareas manuales y mayor velocidad para facturar, consultar y entregar documentos.</p>
+      </div>
+      <div class="panel soft">
+        <h3>Beneficio de control</h3>
+        <p>Información centralizada para ventas, gastos, clientes, proveedores y documentos recibidos.</p>
+      </div>
+    </div>
+
+    <h2>Opciones de Servicio</h2>
+    <div class="rule"></div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Servicio</th>
+          <th>Mensualidad</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Acceso completo a FiscalPoint, nuestra aplicación web de facturación electrónica</td>
+          <td class="price">RD$ 1,500 DOP</td>
+        </tr>
+        <tr>
+          <td>Integración API con el sistema existente del cliente</td>
+          <td class="price">RD$ 1,000 DOP</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="grid-2">
+      <div class="panel">
+        <h3>FiscalPoint Web App</h3>
+        <ul>
+          <li>Ideal si el cliente desea sustituir o complementar su software actual.</li>
+          <li>Incluye gestión de facturas, clientes, productos, gastos y comprobantes recibidos.</li>
+          <li>Acceso cloud para equipos administrativos, contables y gerenciales.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Integración API</h3>
+        <ul>
+          <li>Ideal si el cliente ya tiene ERP, POS, contabilidad o sistema propio.</li>
+          <li>El sistema del cliente envía los datos y recibe XML, estado DGII y trazabilidad.</li>
+          <li>Puede recibir documentos por consulta o webhook, según el flujo acordado.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>FiscalPoint · Propuesta comercial</span>
+      <span>2</span>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="header">
+      <img src="assets/fiscalpoint-logo.png" alt="FiscalPoint">
+      <div class="doc-label">Requisitos del cliente</div>
+    </div>
+
+    <h2>Información Que Debe Proveer el Cliente</h2>
+    <div class="rule"></div>
+    <p class="lead">Para evitar retrasos, el cliente debe entregar estos elementos antes de iniciar la configuración técnica y el proceso de certificación DGII. Esta información es responsabilidad del cliente y es necesaria para firmar, certificar y operar correctamente.</p>
+
+    <div class="checklist">
+      <div class="check">
+        <div class="checkmark">1</div>
+        <div>
+          <strong>Certificado digital vigente</strong>
+          <span>Archivo de Firma Digital del contribuyente y contraseña correspondiente para firmar XML e-CF.</span>
+        </div>
+      </div>
+      <div class="check">
+        <div class="checkmark">2</div>
+        <div>
+          <strong>Datos fiscales del emisor</strong>
+          <span>RNC, razón social, nombre comercial, dirección, municipio, provincia, teléfono, correo y actividad económica.</span>
+        </div>
+      </div>
+      <div class="check">
+        <div class="checkmark">3</div>
+        <div>
+          <strong>Formato de factura</strong>
+          <span>Diseño o layout actual de factura para preparar la representación impresa que verá el cliente final.</span>
+        </div>
+      </div>
+      <div class="check">
+        <div class="checkmark">4</div>
+        <div>
+          <strong>Información para DGII</strong>
+          <span>Datos, formularios, accesos o documentos requeridos durante el proceso oficial de certificación.</span>
+        </div>
+      </div>
+      <div class="check">
+        <div class="checkmark">5</div>
+        <div>
+          <strong>Secuencias y tipos e-CF</strong>
+          <span>Tipos de comprobantes que utilizará la empresa y autorizaciones de secuencias cuando correspondan.</span>
+        </div>
+      </div>
+      <div class="check">
+        <div class="checkmark">6</div>
+        <div>
+          <strong>Responsable del proyecto</strong>
+          <span>Persona de contacto administrativa o contable para validar pruebas, formatos y decisiones operativas.</span>
+        </div>
+      </div>
+    </div>
+
+    <h2>Si Habrá Migración de Datos</h2>
+    <div class="rule"></div>
+    <div class="grid-2">
+      <div class="panel requirement">
+        <h3>El cliente debe entregar un backup con:</h3>
+        <ul>
+          <li>Clientes.</li>
+          <li>Productos y servicios.</li>
+          <li>Facturas históricas.</li>
+          <li>Suplidores y proveedores.</li>
+          <li>Cualquier otro dato relevante para operar.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Validación previa</h3>
+        <p>La migración depende de la calidad y estructura del respaldo entregado. Antes de importar datos definitivos se revisa una muestra, se confirman campos obligatorios y se acuerda el alcance exacto.</p>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>FiscalPoint · Requisitos del cliente</span>
+      <span>3</span>
+    </div>
+  </section>
+
+  <section class="page">
+    <div class="header">
+      <img src="assets/fiscalpoint-logo.png" alt="FiscalPoint">
+      <div class="doc-label">Proceso, inversión y contacto</div>
+    </div>
+
+    <h2>Proceso de Implementación</h2>
+    <div class="rule"></div>
+    <div class="phase-list">
+      <div class="phase"><b>1</b><div><strong>Evaluación inicial</strong><span>Revisión de operación, tipos e-CF, volumen y modalidad.</span></div></div>
+      <div class="phase"><b>2</b><div><strong>Certificado digital</strong><span>Configuración y validación de firma electrónica.</span></div></div>
+      <div class="phase"><b>3</b><div><strong>Certificación DGII</strong><span>Fases de prueba, documentos requeridos y seguimiento.</span></div></div>
+      <div class="phase"><b>4</b><div><strong>Configuración o API</strong><span>FiscalPoint, usuarios, secuencias o conexión del sistema actual.</span></div></div>
+      <div class="phase"><b>5</b><div><strong>Migración</strong><span>Carga de datos si el cliente reemplaza su software.</span></div></div>
+      <div class="phase"><b>6</b><div><strong>Pruebas y capacitación</strong><span>Validación operativa con usuarios administrativos y contables.</span></div></div>
+      <div class="phase"><b>7</b><div><strong>Producción</strong><span>Activación del ambiente e-CF y acompañamiento inicial.</span></div></div>
+    </div>
+
+    <h2>Inversión</h2>
+    <div class="rule"></div>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Concepto</th>
+          <th>Precio</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Asistencia de certificación DGII e-CF</td>
+          <td class="price">RD$ 2,000 DOP único</td>
+        </tr>
+        <tr>
+          <td>Suscripción mensual a FiscalPoint Web App</td>
+          <td class="price">RD$ 1,500 DOP / mes</td>
+        </tr>
+        <tr>
+          <td>Integración API con sistema existente</td>
+          <td class="price">RD$ 1,000 DOP / mes</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="grid-2">
+      <div class="panel soft">
+        <h3>Soporte y mantenimiento</h3>
+        <ul>
+          <li>Asistencia ante rechazos, errores o consultas DGII.</li>
+          <li>Apoyo a usuarios administrativos y contables.</li>
+          <li>Mantenimiento de la plataforma y ajustes operativos.</li>
+        </ul>
+      </div>
+      <div class="panel soft">
+        <h3>Beneficios principales</h3>
+        <ul>
+          <li>Cumplimiento DGII y emisión automática de e-CF.</li>
+          <li>Facturación más rápida y trazabilidad centralizada.</li>
+          <li>Escalabilidad, nube e integración con sistemas actuales.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="callout">
+      <strong>Contacto</strong>
+      <p>Para iniciar, se recomienda agendar una evaluación de 30 minutos y confirmar modalidad, estado del certificado digital, datos disponibles y fecha objetivo de certificación.</p>
+    </div>
+
+    <div class="contact">
+      <div class="contact-card"><small>Contacto</small><strong>Edwin Garcia</strong></div>
+      <div class="contact-card"><small>Teléfono</small><strong>849-401-1017</strong></div>
+      <div class="contact-card"><small>Correo</small><strong>omareogm09@gmail.com</strong></div>
+    </div>
+
+    <div class="footer">
+      <span>FiscalPoint · Contacto: Edwin Garcia</span>
+      <span>4</span>
+    </div>
+  </section>
+</body>
+</html>
