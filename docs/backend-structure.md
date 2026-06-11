@@ -76,6 +76,7 @@ api-gratex/
 | `ecf/recepcion` | `ecfRecepcionController.php` | Bearer (DGII) | incoming e-CF from emisores |
 | `ecf/aprobacion-comercial` | `ecfAprobacionComercialController.php` | Bearer (DGII) | incoming commercial approvals |
 | `ecf/autenticacion` | `ecfAutenticacionController.php` | Bearer (DGII) | seed/validate auth flow |
+| `emisor` | `emisorController.php` | token | GET issuer fiscal data (emisor_config; tenant row for integracion) |
 | `branding` | `brandingController.php` | token | per-tenant PDF template/color/logo (multi-tenant) |
 | `landing` | `landingController.php` | token | landing page config |
 | `/`, `/docs`, `/api/docs` | — | none | serves `public/docs.html` |

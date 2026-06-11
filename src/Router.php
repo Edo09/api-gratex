@@ -172,6 +172,11 @@ switch ($route) {
         }
         break;
 
+    case 'emisor':
+        // Datos fiscales del emisor (emisor_config del tenant) - token required
+        require_once 'src/Controllers/emisorController.php';
+        break;
+
     case 'branding':
         // Branding de la Representacion Impresa por tenant (plantilla, color,
         // logo) - token required, solo multi-tenant
