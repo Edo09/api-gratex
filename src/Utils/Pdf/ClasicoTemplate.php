@@ -16,9 +16,8 @@ class ClasicoTemplate extends FacturaTemplate
             return;
         }
         // Logo: del tenant (logos/<tenant_id>.<ext>) o el global por defecto.
-        if ($logoPath !== null) {
-            $pdf->Image($logoPath, 8, 10, 65);
-        }
+        // Caja maxima 65x18 mm: el bloque del emisor empieza en y=30.
+        $this->drawLogo($pdf, $logoPath, 8, 10, 65, 18);
         $pdf->SetFont('Arial', '', 9);
         $pdf->SetY(30);
         $pdf->MultiCell(70, 3.8, $this->enc($emisor['direccion']), 0, 'L');
@@ -33,9 +32,8 @@ class ClasicoTemplate extends FacturaTemplate
      */
     private function drawCotizacionHeader($pdf, array $emisor, ?string $logoPath): void
     {
-        if ($logoPath !== null) {
-            $pdf->Image($logoPath, 5, 10, 65);
-        }
+        // Caja maxima 65x18 mm: el titulo de la cotizacion empieza en y=30.
+        $this->drawLogo($pdf, $logoPath, 5, 10, 65, 18);
         $pdf->SetFont('Arial', 'B', 8);
         $pdf->SetY(10);
         $pdf->SetX(-78);

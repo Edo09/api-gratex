@@ -28,11 +28,11 @@ class ModernoTemplate extends FacturaTemplate
         $pdf->SetFillColor($accent[0], $accent[1], $accent[2]);
         $pdf->Rect(0, 0, 215.9, 26, 'F');
 
-        // Logo sobre recuadro blanco dentro de la banda.
+        // Logo sobre recuadro blanco dentro de la banda (caja 50x16 mm).
         if ($logoPath !== null) {
             $pdf->SetFillColor(255, 255, 255);
             $pdf->Rect(6, 3, 54, 20, 'F');
-            $pdf->Image($logoPath, 8, 5, 50);
+            $this->drawLogo($pdf, $logoPath, 8, 5, 50, 16);
         }
 
         // Contacto del emisor a la derecha, en texto de contraste sobre la banda.
