@@ -31,9 +31,8 @@ class CompactoTemplate extends FacturaTemplate
 
     public function drawCompanyHeader($pdf, array $emisor, ?string $logoPath, string $variant = 'factura'): void
     {
-        if ($logoPath !== null) {
-            $pdf->Image($logoPath, 8, 8, 45);
-        }
+        // Caja maxima 45x14 mm: el bloque del emisor empieza en y=24.
+        $this->drawLogo($pdf, $logoPath, 8, 8, 45, 14);
         $font = $this->narrowFont($pdf);
         $pdf->SetFont($font, '', 8);
         $pdf->SetY(24);

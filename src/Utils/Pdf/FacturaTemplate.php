@@ -105,6 +105,33 @@ abstract class FacturaTemplate
         return mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
     }
 
+    /**
+     * Dibuja el logo ajustado DENTRO de una caja maxima (mm), preservando la
+     * proporcion. FPDF con solo width escala la altura libremente: un logo
+     * cuadrado/vertical a 65 mm de ancho invadia el bloque del emisor y la
+     * tabla. Aqui un logo ancho llena el ancho; uno alto se limita por altura.
+     */
+    protected function drawLogo($pdf, ?string $logoPath, float $x, float $y, float $maxW, float $maxH): void
+    {
+        if ($logoPath === null) {
+            return;
+        }
+        $info = @getimagesize($logoPath);
+        if ($info && (int) $info[0] > 0 && (int) $info[1] > 0) {
+            $ratio = $info[1] / $info[0]; // alto/ancho
+            $w = $maxW;
+            $h = $maxW * $ratio;
+            if ($h > $maxH) {
+                $h = $maxH;
+                $w = $maxH / $ratio;
+            }
+            $pdf->Image($logoPath, $x, $y, $w, $h);
+            return;
+        }
+        // Sin dimensiones legibles: comportamiento anterior (solo ancho).
+        $pdf->Image($logoPath, $x, $y, $maxW);
+    }
+
     /** Acento del tenant o el color por defecto de la plantilla. */
     protected function accentOr(array $default): array
     {
