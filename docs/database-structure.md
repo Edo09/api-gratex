@@ -159,6 +159,7 @@ Base columns + e-CF tracking (migrations 001/003/005/006).
 | `subtotal` | decimal(10,2) | |
 | `indicador_facturacion` | tinyint | (001) 0=No fact 1=ITBIS18 2=ITBIS16 3=ITBIS0 4=Exento |
 | `indicador_bien_servicio` | tinyint | (001) 1=Bien 2=Servicio |
+| `unidad_medida` | varchar(10) | (014) código DGII (43 = unidad); columna "Und. Medida" de la RI |
 | `itbis_amount` | decimal(18,2) | (001) |
 
 ### `ncf_sequences`

@@ -76,6 +76,7 @@ api-gratex/
 | `ecf/recepcion` | `ecfRecepcionController.php` | Bearer (DGII) | incoming e-CF from emisores |
 | `ecf/aprobacion-comercial` | `ecfAprobacionComercialController.php` | Bearer (DGII) | incoming commercial approvals |
 | `ecf/autenticacion` | `ecfAutenticacionController.php` | Bearer (DGII) | seed/validate auth flow |
+| `branding` | `brandingController.php` | token | per-tenant PDF template/color/logo (multi-tenant) |
 | `landing` | `landingController.php` | token | landing page config |
 | `/`, `/docs`, `/api/docs` | — | none | serves `public/docs.html` |
 
@@ -112,10 +113,18 @@ PDO data access, one per domain:
 
 | File | Purpose |
 |---|---|
-| `FacturaPdfGenerator.php` | invoice PDF (fpdf) |
-| `CotizacionPdfGenerator.php` | quote PDF |
+| `FacturaPdfGenerator.php` | invoice PDF engine (fpdf) — DGII RI content; visuals delegated to `Pdf/` templates |
+| `CotizacionPdfGenerator.php` | quote PDF (shares tenant branding header) |
+| `LogoStorage.php` | tenant logo save/validation (`logos/<tenant_id>.<ext>`) |
 | `TokenGenerator.php` | API token gen |
 | `WelcomeEmailService.php` | onboarding email |
+
+### `Utils/Pdf/` — per-tenant PDF templates (branding)
+
+Plantillas de Representación Impresa por tenant (ver `docs/plantillas-factura.md`):
+`BrandingResolver` (lee `master.tenants`: pdf_template/pdf_accent_color/logo_path),
+`FacturaTemplate` (base), `ClasicoTemplate`/`ModernoTemplate`/`CompactoTemplate`
+(predefinidas), `FacturaTemplateFactory` (incl. `custom:*` → `Pdf/Custom/`).
 
 ### `Utils/FacturacionElectronica/` — DGII e-CF core
 

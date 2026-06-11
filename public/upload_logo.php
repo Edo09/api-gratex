@@ -15,6 +15,7 @@ const UPLOAD_LOGO_TOKEN = 'CAMBIA_ESTE_TOKEN_LOGO';
 // ===========================================================================
 
 require_once __DIR__ . '/../src/MasterDatabase.php';
+require_once __DIR__ . '/../src/Utils/LogoStorage.php';
 
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 
@@ -64,40 +65,15 @@ if (!$tenant) {
     exit("Tenant {$tenantId} no encontrado (o inactivo).\n");
 }
 
-if (!isset($_FILES['logo']) || ($_FILES['logo']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-    http_response_code(422);
-    exit("No se recibio el archivo de logo.\n");
-}
-
-$ext = strtolower(pathinfo((string) ($_FILES['logo']['name'] ?? ''), PATHINFO_EXTENSION));
-if (!in_array($ext, ['png', 'jpg', 'jpeg'], true)) {
-    http_response_code(422);
-    exit("Extension '{$ext}' no permitida (png/jpg).\n");
-}
-$ext = $ext === 'jpeg' ? 'jpg' : $ext;
-
-$logosDir = __DIR__ . '/../logos';
-if (!is_dir($logosDir) && !mkdir($logosDir, 0755, true) && !is_dir($logosDir)) {
-    http_response_code(500);
-    exit("No se pudo crear la carpeta logos/.\n");
-}
-// Quitar logos previos del tenant (cualquier extension).
-foreach (['png', 'jpg', 'jpeg'] as $old) {
-    $p = $logosDir . '/' . $tenantId . '.' . $old;
-    if (is_file($p)) {
-        @unlink($p);
-    }
-}
-$dest = $logosDir . '/' . $tenantId . '.' . $ext;
-if (!move_uploaded_file($_FILES['logo']['tmp_name'], $dest)) {
-    http_response_code(500);
-    exit("No se pudo guardar el logo (revisa permisos de logos/).\n");
+// Validacion + guardado compartidos con POST /api/branding/logo.
+$result = LogoStorage::store($tenantId, $_FILES['logo'] ?? []);
+if (!$result['ok']) {
+    http_response_code($result['code'] ?? 422);
+    exit($result['error'] . "\n");
 }
 
 // Registrar la ruta en DB (tenants.logo_path).
-$rel = 'logos/' . $tenantId . '.' . $ext;
-MasterDatabase::getInstance()->getConnection()
-    ->prepare('UPDATE tenants SET logo_path = :p WHERE id = :id')
-    ->execute([':p' => $rel, ':id' => $tenantId]);
+$rel = $result['logo_path'];
+MasterDatabase::getInstance()->updateTenantBranding($tenantId, ['logo_path' => $rel]);
 
 echo "OK: logo guardado en {$rel} para tenant '{$tenant['nombre']}' (RNC {$tenant['rnc']}).\n";

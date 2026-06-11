@@ -16,6 +16,9 @@ if (file_exists($composerPath)) {
     die('FPDF library not found. Please install via composer (composer require setasign/fpdf) or download from http://www.fpdf.org/');
 }
 
+require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+require_once __DIR__ . '/Pdf/FacturaTemplateFactory.php';
+
 /**
  * PDF Generator for Cotizaciones
  * Extends FPDF to create quotation PDFs with custom layout
@@ -54,6 +57,78 @@ class CotizacionPdfGenerator extends FPDF
     private $widths;
     private $aligns;
     private $lineHeight;
+    /** @var FacturaTemplate|null Plantilla del tenant (encabezado de identidad). */
+    private $template = null;
+    private $emisorConfig = null;
+    private $emisorConfigLoaded = false;
+    /** @var bool|null Arial Narrow vendorizada cargada (guard del AddFont). */
+    private $narrowLoaded = null;
+
+    /** Plantilla del tenant (branding), lazy igual que en FacturaPdfGenerator. */
+    private function template(): FacturaTemplate
+    {
+        if ($this->template === null) {
+            $this->template = FacturaTemplateFactory::create();
+        }
+        return $this->template;
+    }
+
+    /**
+     * Datos del emisor desde emisor_config con los fallbacks historicos de
+     * gratex (misma forma que FacturaPdfGenerator::emisorParaPlantilla()).
+     */
+    private function emisorParaPlantilla(): array
+    {
+        if (!$this->emisorConfigLoaded) {
+            try {
+                // Mismo guard que FacturaPdfGenerator::emisorConfig(): sin
+                // driver pdo_mysql, Database::getInstance() haria die().
+                $this->emisorConfig = extension_loaded('pdo_mysql')
+                    ? ((new EmisorConfigModel())->get() ?: [])
+                    : [];
+            } catch (\Throwable $e) {
+                $this->emisorConfig = [];
+            }
+            $this->emisorConfigLoaded = true;
+        }
+        $emisor = $this->emisorConfig;
+        return [
+            'razon_social' => $emisor['nombre_comercial'] ?? $emisor['razon_social'] ?? '',
+            'direccion'    => $emisor['direccion'] ?? 'Calle José Nicolás Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.',
+            'telefono'     => $emisor['telefono'] ?? '809-681-5141',
+            'correo'       => $emisor['correo'] ?? 'info@gratex.net',
+            'rnc'          => $emisor['rnc'] ?? '131256432',
+            'website'      => $emisor['website'] ?? 'www.gratex.net',
+        ];
+    }
+
+    /**
+     * Fuente para el pie: Arial Narrow vendorizada si existe, Arial si no
+     * (el AddFont sin guard rompia el PDF cuando faltaba la fuente).
+     */
+    private function narrowFont(): string
+    {
+        if ($this->narrowLoaded === null) {
+            $this->narrowLoaded = false;
+            if (is_file(__DIR__ . '/../../vendor/fpdf/font/arial-narrow.php')) {
+                try {
+                    $this->AddFont('Arial-narrow', '', 'arial-narrow.php');
+                    $this->narrowLoaded = true;
+                } catch (\Throwable $e) {
+                    $this->narrowLoaded = false;
+                }
+            }
+        }
+        return $this->narrowLoaded ? 'Arial-narrow' : 'Arial';
+    }
+
+    /** Acento del tenant (o negro) + texto de contraste, para las bandas. */
+    private function bandColors(): array
+    {
+        $branding = BrandingResolver::resolve();
+        $fill = $branding['accent'] ?? [0, 0, 0];
+        return [$fill, BrandingResolver::contrastText($fill)];
+    }
 
     /**
      * Set the cotizacion data
@@ -176,30 +251,20 @@ class CotizacionPdfGenerator extends FPDF
      */
     public function Header()
     {
-        // Custom Gratex Header (logo, address, etc.)
-        // Add custom fonts if available
-        if (method_exists($this, 'AddFont')) {
-            // Uncomment if you have these fonts available
-            $this->AddFont('Arial-narrow', '', 'arial-narrow.php');
-            $this->AddFont('Arial-narrow-bold', '', 'arial-narrow-bold.php');
-        }
-        // Logo (adjust path as needed)
-        $logoPath = __DIR__ . '/../../logo2020.png';
-        if (file_exists($logoPath)) {
-            $this->Image($logoPath, 5, 10, 65); // X, Y, Width
-        }
-        $this->SetFont('Arial', 'B', 8);
-        $this->SetY(10);
-        $this->SetX(-78);
-        $this->Cell(70, 3.2, $this->convertEncoding('Calle José Nicolás Casimiro #85'), 0, 1, 'R');
-        $this->SetX(-78);
-        $this->Cell(70, 3.2, 'Ensanche Espaillat, Santo Domingo, D.N.', 0, 1, 'R');
-        $this->SetX(-78);
-        $this->Cell(70, 3.2, $this->convertEncoding('Tel.: 809-681-5141 - E-mail:info@gratex.net'), 0, 1, 'R');
-        $this->SetX(-78);
-        $this->Cell(70, 3.2, 'www.gratex.net', 0, 1, 'R');
+        // Identidad del emisor (logo + contacto) segun la plantilla/branding
+        // del tenant; los datos salen de emisor_config (fallback gratex).
+        $this->template()->drawCompanyHeader(
+            $this,
+            $this->emisorParaPlantilla(),
+            BrandingResolver::logoPath(),
+            'cotizacion'
+        );
+        $this->SetTextColor(0, 0, 0);
 
-        $this->SetY(30);
+        // Bloque propio de la cotizacion (titulo, numero, descargo): se
+        // mantiene en el generador. max(30, Y) por si la plantilla deja el
+        // cursor mas abajo (p.ej. banda del moderno).
+        $this->SetY(max(30, $this->GetY() + 1));
         $this->SetFont('Arial', 'B', 12);
         $this->Cell(30, 4, $this->convertEncoding('Cotización/Factura Proforma'), 0, 1, 'L');
         $this->Ln(1);
@@ -217,10 +282,11 @@ class CotizacionPdfGenerator extends FPDF
     public function Footer()
     {
         // Firmas
+        $firmaFont = $this->narrowFont();
         $this->Line(15, 268, 70, 268);
         $this->SetY(-10);
         $this->SetX(40);
-        $this->SetFont('Arial-narrow', '', 9);
+        $this->SetFont($firmaFont, '', 9);
         $this->Cell(15, 6, 'Firma y sello cliente', 0, 0, 'R');
 
         $this->Line(145, 268, 200, 268);
@@ -231,7 +297,7 @@ class CotizacionPdfGenerator extends FPDF
         if (file_exists($selloPath)) {
             $this->Image($selloPath, 145, 252, -400);
         }
-        $this->SetFont('Arial-narrow', '', 9);
+        $this->SetFont($firmaFont, '', 9);
         $this->Cell(15, 6, 'Firma y sello empresa', 0, 0, 'R');
     }
 
@@ -269,10 +335,12 @@ class CotizacionPdfGenerator extends FPDF
         $fulltelandcel = trim('Tel.: ' . $telefono);
         $condiciones = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
 
-        // Client info section styled as a table row (like products)
+        // Client info section styled as a table row (like products).
+        // Bandas en el acento del tenant (negro si no hay) + texto de contraste.
+        [$bandFill, $bandText] = $this->bandColors();
         $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor(0, 0, 0);
-        $this->SetTextColor(255, 255, 255);
+        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
+        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
         $this->Cell(40, 6, 'Cliente', 0, 0, 'L', 1);
         $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
         $this->Cell(55, 6, 'Correo Electronico', 0, 0, 'L', 1);
@@ -301,8 +369,8 @@ class CotizacionPdfGenerator extends FPDF
 
         // Second header row: Fecha, Cliente, Cliente#, Cantidad, Descripcion Producto, ITBIS, Valor Unit
         $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor(0, 0, 0);
-        $this->SetTextColor(255, 255, 255);
+        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
+        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
         $this->Cell(25, 6, 'Fecha', 0, 0, 'L', 1);
         $this->Cell(25, 6, 'Cantidad', 0, 0, 'L', 1);
         $this->Cell(105, 6, 'Descripcion Producto', 0, 0, 'L', 1);

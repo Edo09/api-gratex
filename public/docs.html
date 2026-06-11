@@ -395,6 +395,7 @@
                 <li><a href="#cotizaciones">Cotizaciones</a></li>
                 <li><a href="#facturas">Facturas</a></li>
                 <li><a href="#ncf">NCF</a></li>
+                <li><a href="#branding">Branding</a></li>
                 <li><a href="#landing">Landing</a></li>
             </ul>
         </div>
@@ -1041,6 +1042,107 @@ Header: Authorization: Bearer your-token</code></pre>
         </section>
 
         <!-- Landing Section -->
+        <section id="branding">
+            <h2>🖌️ Branding (Representación Impresa)</h2>
+            <p>Plantilla de factura PDF, color de acento y logo por tenant. Requiere modo multi-tenant; el tenant sale siempre del token. Plantillas: <code>clasico</code>, <code>moderno</code>, <code>compacto</code> y diseños a la medida <code>custom:tenant&lt;id&gt;</code> (ver <code>docs/plantillas-factura.md</code>).</p>
+
+            <!-- Get Branding -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-get">GET</span>
+                    <span class="endpoint-path">/api/branding</span>
+                    <span class="endpoint-desc">Branding actual + plantillas disponibles</span>
+                </div>
+                <div class="endpoint-body">
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"template"</span>: <span class="json-string">"clasico"</span>,
+    <span class="json-key">"accent_color"</span>: <span class="json-string">"#1A56DB"</span>,
+    <span class="json-key">"logo_path"</span>: <span class="json-string">"logos/5.png"</span>,
+    <span class="json-key">"has_custom_logo"</span>: <span class="json-boolean">true</span>,
+    <span class="json-key">"available_templates"</span>: [<span class="json-string">"clasico"</span>, <span class="json-string">"moderno"</span>, <span class="json-string">"compacto"</span>]
+  }
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- Update Branding -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-put">PUT</span>
+                    <span class="endpoint-path">/api/branding</span>
+                    <span class="endpoint-desc">Cambiar plantilla y/o color de acento</span>
+                </div>
+                <div class="endpoint-body">
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>template</code></td><td>string</td><td>clasico | moderno | compacto | custom:tenant&lt;id&gt; (422 si no existe)</td></tr>
+                        <tr><td><code>accent_color</code></td><td>string|null</td><td>Hex #RRGGBB; null o "" limpia el acento (422 si inválido)</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Upload Logo -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-post">POST</span>
+                    <span class="endpoint-path">/api/branding/logo</span>
+                    <span class="endpoint-desc">Subir logo (multipart/form-data)</span>
+                </div>
+                <div class="endpoint-body">
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>logo</code> <span class="required">*</span></td><td>file</td><td>PNG/JPG real (se valida el contenido), máx 2 MB. Se guarda en logos/&lt;tenant_id&gt;.&lt;ext&gt;</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Delete Logo -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-delete">DELETE</span>
+                    <span class="endpoint-path">/api/branding/logo</span>
+                    <span class="endpoint-desc">Eliminar el logo (vuelve al logo global)</span>
+                </div>
+                <div class="endpoint-body">
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: { <span class="json-key">"logo_path"</span>: <span class="json-string">null</span> }
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- Preview -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-post">POST</span>
+                    <span class="endpoint-path">/api/branding/preview</span>
+                    <span class="endpoint-desc">PDF de muestra con una plantilla/color, sin persistir</span>
+                </div>
+                <div class="endpoint-body">
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>template</code></td><td>string</td><td>Plantilla a previsualizar (default: la persistida del tenant)</td></tr>
+                        <tr><td><code>accent_color</code></td><td>string</td><td>Hex #RRGGBB a previsualizar</td></tr>
+                        <tr><td><code>no_electronica</code></td><td>bool</td><td>true = diseño factura simple (sin timbre e-CF)</td></tr>
+                        <tr><td><code>format</code></td><td>query/body</td><td><code>base64</code> (default) o <code>download</code> (PDF crudo)</td></tr>
+                    </table>
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"filename"</span>: <span class="json-string">"Preview_branding.pdf"</span>,
+    <span class="json-key">"content"</span>: <span class="json-string">"JVBERi0xLjci..."</span>,
+    <span class="json-key">"mime_type"</span>: <span class="json-string">"application/pdf"</span>
+  }
+}</code></pre>
+                </div>
+            </div>
+        </section>
+
         <section id="landing">
             <h2>🎨 Landing Page</h2>
             <p>Manage carousel and services content for landing pages.</p>

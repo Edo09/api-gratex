@@ -117,6 +117,8 @@ CREATE TABLE IF NOT EXISTS factura_items (
                  COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=ITBIS 0% | 4=Exento',
   indicador_bien_servicio TINYINT NOT NULL DEFAULT 1
                  COMMENT '1=Bien | 2=Servicio',
+  unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
+                 COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
   itbis_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   PRIMARY KEY (id),
   KEY factura_id (factura_id),

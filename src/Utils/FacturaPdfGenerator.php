@@ -19,6 +19,7 @@ if (file_exists($qrLibPath)) {
 }
 
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+require_once __DIR__ . '/Pdf/FacturaTemplateFactory.php';
 
 /**
  * PDF Generator for Facturas
@@ -33,6 +34,8 @@ class FacturaPdfGenerator extends FPDF
     private $clientData;
     private $emisorConfig = null;
     private $emisorConfigLoaded = false;
+    /** @var FacturaTemplate|null Plantilla visual (estrategia). Lazy: branding del tenant. */
+    private $template = null;
     // true => factura NO electronica (NCF tradicional / factura simple): se omite
     // todo lo propio del e-CF (titulo "Comprobante Fiscal Electronico", etiqueta
     // e-NCF, fecha de vencimiento y QR de timbre DGII).
@@ -47,7 +50,12 @@ class FacturaPdfGenerator extends FPDF
     {
         if (!$this->emisorConfigLoaded) {
             try {
-                $this->emisorConfig = (new EmisorConfigModel())->get() ?: [];
+                // Sin driver pdo_mysql (CLI local sin BD) no se intenta conectar:
+                // Database::getInstance() hace die() en fallo de conexion (no
+                // lanza), lo que mataria el preview en vez de caer al fallback.
+                $this->emisorConfig = extension_loaded('pdo_mysql')
+                    ? ((new EmisorConfigModel())->get() ?: [])
+                    : [];
             } catch (\Throwable $e) {
                 $this->emisorConfig = [];
             }
@@ -57,36 +65,41 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
-     * Ruta del logo a usar en la Representacion Impresa.
-     * Prioridad: logo del tenant resuelto (logos/<tenant_id>.png|jpg|jpeg) →
-     * logo global (logo2020.png). Null si no hay ninguno.
+     * Plantilla visual activa. Lazy: sin setTemplate() previo usa el branding
+     * del tenant resuelto (tenants.pdf_template + pdf_accent_color).
      */
-    private function logoPath(): ?string
+    private function template(): FacturaTemplate
     {
-        $root = __DIR__ . '/../..';
-        if (class_exists('TenantResolver')) {
-            $tenant = TenantResolver::current();
-            if ($tenant) {
-                // 1) Ruta explicita en DB (tenants.logo_path).
-                if (!empty($tenant['logo_path'])) {
-                    $p = $root . '/' . ltrim((string) $tenant['logo_path'], '/');
-                    if (is_file($p)) {
-                        return $p;
-                    }
-                }
-                // 2) Fallback por convencion logos/<tenant_id>.<ext>.
-                if (!empty($tenant['id'])) {
-                    foreach (['png', 'jpg', 'jpeg'] as $ext) {
-                        $p = $root . '/logos/' . (int) $tenant['id'] . '.' . $ext;
-                        if (is_file($p)) {
-                            return $p;
-                        }
-                    }
-                }
-            }
+        if ($this->template === null) {
+            $this->template = FacturaTemplateFactory::create();
         }
-        $global = $root . '/logo2020.png';
-        return is_file($global) ? $global : null;
+        return $this->template;
+    }
+
+    /**
+     * Fija la plantilla explicitamente (p.ej. POST /api/branding/preview, que
+     * renderiza una plantilla distinta a la persistida del tenant).
+     */
+    public function setTemplate(FacturaTemplate $template): void
+    {
+        $this->template = $template;
+    }
+
+    /**
+     * Datos del emisor con fallbacks (los valores historicos de gratex, p.ej.
+     * en previews sin BD), ya listos para que la plantilla los dibuje.
+     */
+    private function emisorParaPlantilla(): array
+    {
+        $emisor = $this->emisorConfig();
+        return [
+            'razon_social' => $emisor['nombre_comercial'] ?? $emisor['razon_social'] ?? '',
+            'direccion'    => $emisor['direccion'] ?? 'Calle José Nicolás Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.',
+            'telefono'     => $emisor['telefono'] ?? '809-681-5141',
+            'correo'       => $emisor['correo'] ?? 'info@gratex.net',
+            'rnc'          => $emisor['rnc'] ?? '131256432',
+            'website'      => $emisor['website'] ?? '',
+        ];
     }
 
     /**
@@ -192,7 +205,7 @@ class FacturaPdfGenerator extends FPDF
             $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
             $x = $this->GetX();
             $y = $this->GetY();
-            $this->MultiCell($w, 4, $data[$i], 0, $a);
+            $this->MultiCell($w, $this->lineHeight ?: 4, $data[$i], 0, $a);
             $this->SetXY($x + $w, $y);
         }
         $this->Ln($h);
@@ -268,53 +281,32 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
-     * Page header
+     * Page header — la identidad del emisor (logo + contacto) la dibuja la
+     * plantilla del tenant; el contenido (emisor_config) lo fija el motor.
      */
     public function Header()
     {
-        // Logo: del tenant (logos/<tenant_id>.<ext>) o el global por defecto.
-        $logoPath = $this->logoPath();
-        if ($logoPath !== null) {
-            $this->Image($logoPath, 8, 10, 65);
-        }
-        // Datos del emisor desde emisor_config (fallback a los valores de gratex
-        // si la config no esta disponible, p.ej. en previews sin BD).
-        $emisor = $this->emisorConfig();
-        $direccion = $emisor['direccion'] ?? 'Calle José Nicolás Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.';
-        $telefono  = $emisor['telefono'] ?? '809-681-5141';
-        $correo    = $emisor['correo'] ?? 'info@gratex.net';
-        $rncEmisor = $emisor['rnc'] ?? '131256432';
-
-        $this->SetFont('Arial', '', 9);
-        $this->SetY(30);
-        $this->MultiCell(70, 3.8, $this->convertEncoding($direccion), 0, 'L');
-        $this->Cell(70, 3.8, $this->convertEncoding('Tel.: ' . $telefono . ' - E-mail: ' . $correo), 0, 1, 'L');
-        $this->Cell(70, 3.8, 'RNC: ' . $rncEmisor, 0, 1, 'L');
+        $this->template()->drawCompanyHeader(
+            $this,
+            $this->emisorParaPlantilla(),
+            BrandingResolver::logoPath()
+        );
+        $this->SetTextColor(0, 0, 0);
     }
 
     /**
-     * Page footer - signatures
+     * Page footer — firmas/sello segun la plantilla + paginacion "Página X de Y"
+     * (obligatoria DGII en documentos de mas de una hoja; el motor la agrega
+     * siempre para que ninguna plantilla pueda omitirla).
      */
     public function Footer()
     {
-        // Sello image
-        $selloPath = __DIR__ . '/../../sello.png';
-        if (file_exists($selloPath)) {
-            $this->Image($selloPath, 8, 246, 40);
-        }
-        // Firma empresa
-        $this->Line(8, 259, 50, 259);
-        $this->SetY(-20);
-        $this->SetX(9);
-        $this->SetFont('Arial', '', 10);
-        $this->Cell(38, 6, 'Firma y sello empresa', 0, 0, 'R');
+        $this->template()->drawFooter($this);
 
-        // Firma cliente
-        $this->Line(80, 259, 125, 259);
-        $this->SetY(-20);
-        $this->SetX(81);
-        $this->SetFont('Arial', '', 10);
-        $this->Cell(38, 6, 'Firma y sello cliente', 0, 0, 'R');
+        $this->SetTextColor(0, 0, 0);
+        $this->SetY(-8);
+        $this->SetFont('Arial', '', 7);
+        $this->Cell(0, 4, $this->convertEncoding('Página ' . $this->PageNo() . ' de {nb}'), 0, 0, 'C');
     }
 
     /**
@@ -536,11 +528,41 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Sigla a imprimir en la columna "Und. Medida" (norma DGII: siglas
+     * estandar, ej. UND, PZA, CAJ). Las lineas guardan el CODIGO DGII
+     * (43 = unidad, ver products.unidad_medida); valores no numericos se
+     * asumen ya como sigla y se imprimen tal cual.
+     */
+    private function unidadMedidaSigla($value): string
+    {
+        $value = trim((string) $value);
+        if ($value === '') {
+            return 'UND';
+        }
+        if (!ctype_digit($value)) {
+            return strtoupper($value);
+        }
+        $siglas = [
+            '43' => 'UND',
+        ];
+        return $siglas[$value] ?? $value;
+    }
+
+    /**
      * Generate the PDF content
      * @return string PDF content as string
      */
     public function generatePdf()
     {
+        // Resolver plantilla ANTES de AddPage() (Header/Footer la usan).
+        $tpl = $this->template();
+        $style = $tpl->style();
+        $layout = $tpl->layout();
+        // Limites del motor: la tabla jamas invade la zona de totales/QR
+        // (anclados abajo) ni el encabezado minimo.
+        $tableStartY = max(36, min(120, (float) ($layout['table_start_y'] ?? 56)));
+        $docIdY = max(6, min(80, (float) ($layout['doc_id_y'] ?? 10)));
+
         $this->AliasNbPages();
         $this->SetMargins(8, 10, 8);
         $this->AddPage();
@@ -589,11 +611,12 @@ class FacturaPdfGenerator extends FPDF
         // etiqueta "Factura No.": debe usarse exclusivamente "e-NCF".
 
         // Right side: titulo dinamico del documento + identificacion del e-CF
-        // (e-NCF, fechas) + datos del receptor. Empieza arriba (y=10) junto al logo.
+        // (e-NCF, fechas) + datos del receptor. La Y inicial la decide la
+        // plantilla (doc_id_y) — p.ej. moderno la baja para librar su banda.
         $hasQR = class_exists('QRcode');
-        $this->SetY($hasQR ? 10 : 30);
+        $this->SetY($hasQR ? $docIdY : max(30, $docIdY));
         $this->SetX(-73);
-        $this->SetFont('Arial', 'B', 11);
+        $this->SetFont('Arial', 'B', $style['title_font_size'] ?? 11);
         $this->MultiCell(70, 5, $this->convertEncoding($this->tituloDocumento()), 0, 'L');
         $this->Ln(1);
         $this->SetFont('Arial', '', 9);
@@ -672,29 +695,30 @@ class FacturaPdfGenerator extends FPDF
 
         // Force cursor below the header block so the table header doesn't overlap
         // the emisor / receptor columns.
-        if ($this->GetY() < 56) {
-            $this->SetY(56);
+        if ($this->GetY() < $tableStartY) {
+            $this->SetY($tableStartY);
         }
 
-        // Table header
-        $this->SetFont('Arial', '', 10);
-        $this->SetFillColor(0, 0, 0);
-        $this->SetTextColor(255, 255, 255);
-        // Columnas exactas y en el orden exigido por la norma DGII:
-        // Cantidad | Descripción | Precio | ITBIS | Valor (Precio x Cantidad sin imp.)
-        $this->Cell(25, 6, 'Cantidad', 0, 0, 'C', 1);
-        $this->Cell(110, 6, $this->convertEncoding('Descripción'), 0, 0, 'C', 1);
-        $this->Cell(20, 6, 'Precio', 0, 0, 'C', 1);
-        $this->Cell(20, 6, 'ITBIS', 0, 0, 'C', 1);
-        $this->Cell(25, 6, 'Valor', 0, 0, 'C', 1);
-        $this->Ln(8);
+        // Table header — columnas exactas y en el orden exigido por la norma
+        // DGII (anchos y etiquetas los fija el motor; la plantilla solo dibuja):
+        // Cantidad | Descripción | Unidad de Medida | Precio | ITBIS | Valor
+        $columnWidths = [18, 92, 24, 21, 21, 24];
+        $columnLabels = [
+            'Cantidad',
+            $this->convertEncoding('Descripción'),
+            'Und. Medida',
+            'Precio',
+            'ITBIS',
+            'Valor',
+        ];
+        $tpl->drawItemsTableHeader($this, $columnWidths, $columnLabels);
 
         // Table rows
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('Arial', '', 10);
-        $this->SetAligns(array('C', 'L', 'C', 'C', 'C'));
-        $this->SetLineHeight(4);
-        $this->SetWidths(array(25, 110, 20, 20, 25));
+        $this->SetFont('Arial', '', $style['body_font_size'] ?? 10);
+        $this->SetAligns(array('C', 'L', 'C', 'C', 'C', 'C'));
+        $this->SetLineHeight($style['line_height'] ?? 4);
+        $this->SetWidths($columnWidths);
 
         // En Notas E33/E34 el Motivo (razon de modificacion) se muestra como
         // descripcion: si las lineas no traen descripcion propia, llena la columna
@@ -724,12 +748,14 @@ class FacturaPdfGenerator extends FPDF
                 $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
                 $itbis = $item['itbis_amount'] ?? ($unitario * 0.18);
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
+                $unidad = $this->unidadMedidaSigla($item['unidad_medida'] ?? '');
                 $subtotal += (float) $lineSubtotal;
                 $itbisLineSum += (float) $itbis;
 
                 $this->Row([
                     $cantidad,
                     $this->convertEncoding(html_entity_decode($descripcion)) . "\n ",
+                    $unidad,
                     number_format($unitario, 2),
                     number_format($itbis, 2),
                     number_format($lineSubtotal, 2)
@@ -740,7 +766,7 @@ class FacturaPdfGenerator extends FPDF
         // Si el Motivo no se uso como descripcion de una linea (porque los items
         // ya traen su propia descripcion), se muestra en su propia fila.
         if ($motivoPendiente !== '') {
-            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoPendiente), '', '', '']);
+            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoPendiente), '', '', '', '']);
         }
 
         // Totales del e-CF firmado (cuadran con lo emitido a la DGII). Sin XML
@@ -762,20 +788,11 @@ class FacturaPdfGenerator extends FPDF
         $filasTotales[] = ['Total ITBIS', $itbistotal, false];
         $filasTotales[] = ['Total', $totalGeneral, true];
 
+        // Cuadro de totales anclado al pie (la plantilla decide colores/fuente;
+        // las filas y etiquetas DGII las fija el motor).
         $this->SetMargins(10, 0, 10);
-        $this->SetFillColor(240, 240, 240);
-
-        // Ancladas al pie: la fila 'Total' queda en Y=-40 y las demas se apilan
-        // hacia arriba (5 mm c/u), igual que antes al agregar la fila Exento.
-        $y = -40 - 5 * (count($filasTotales) - 1);
-        foreach ($filasTotales as [$label, $valor, $bold]) {
-            $this->SetFont('Arial', $bold ? 'B' : '', $bold ? 9.5 : 9);
-            $this->SetY($y);
-            $this->SetX(-58);
-            $this->Cell(28, 5, $this->convertEncoding($label), 1, 0, 'R', 1);
-            $this->Cell(20, 5, number_format($valor, 2), 1, 1, 'R', 1);
-            $y += 5;
-        }
+        $tpl->drawTotals($this, $filasTotales);
+        $this->SetTextColor(0, 0, 0);
 
         // QR del timbre al final, en la pagina actual (ultima), junto a las firmas.
         $this->addQRTimbre();
