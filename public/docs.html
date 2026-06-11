@@ -395,6 +395,7 @@
                 <li><a href="#cotizaciones">Cotizaciones</a></li>
                 <li><a href="#facturas">Facturas</a></li>
                 <li><a href="#ncf">NCF</a></li>
+                <li><a href="#emisor">Emisor</a></li>
                 <li><a href="#branding">Branding</a></li>
                 <li><a href="#landing">Landing</a></li>
             </ul>
@@ -1042,6 +1043,46 @@ Header: Authorization: Bearer your-token</code></pre>
         </section>
 
         <!-- Landing Section -->
+        <section id="emisor">
+            <h2>🏢 Emisor</h2>
+            <p>Datos fiscales del emisor del tenant (fila única de <code>emisor_config</code>). Para tenants tipo integración (sin DB propia) responde con nombre/RNC/ambiente del registro en master (<code>"fuente": "tenant"</code>).</p>
+
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-get">GET</span>
+                    <span class="endpoint-path">/api/emisor</span>
+                    <span class="endpoint-desc">Datos fiscales del emisor</span>
+                </div>
+                <div class="endpoint-body">
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"rnc"</span>: <span class="json-string">"131256432"</span>,
+    <span class="json-key">"razon_social"</span>: <span class="json-string">"Gratex EIRL"</span>,
+    <span class="json-key">"nombre_comercial"</span>: <span class="json-string">"Gratex"</span>,
+    <span class="json-key">"sucursal"</span>: <span class="json-string">"Principal"</span>,
+    <span class="json-key">"direccion"</span>: <span class="json-string">"Calle José Nicolás Casimiro #85..."</span>,
+    <span class="json-key">"municipio"</span>: <span class="json-string">"Santo Domingo"</span>,
+    <span class="json-key">"provincia"</span>: <span class="json-string">"Distrito Nacional"</span>,
+    <span class="json-key">"telefono"</span>: <span class="json-string">"809-681-5141"</span>,
+    <span class="json-key">"correo"</span>: <span class="json-string">"info@gratex.net"</span>,
+    <span class="json-key">"website"</span>: <span class="json-string">"www.gratex.net"</span>,
+    <span class="json-key">"actividad_economica"</span>: <span class="json-string">"Imprenta"</span>,
+    <span class="json-key">"fecha_vencimiento_secuencia"</span>: <span class="json-string">"2026-12-31"</span>,
+    <span class="json-key">"ambiente"</span>: <span class="json-string">"ecf"</span>,
+    <span class="json-key">"fuente"</span>: <span class="json-string">"emisor_config"</span>
+  }
+}</code></pre>
+                    <span class="code-label">Error Response (404)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">false</span>,
+  <span class="json-key">"error"</span>: <span class="json-string">"emisor_config no configurado en este sistema."</span>
+}</code></pre>
+                </div>
+            </div>
+        </section>
+
         <section id="branding">
             <h2>🖌️ Branding (Representación Impresa)</h2>
             <p>Plantilla de factura PDF, color de acento y logo por tenant. Requiere modo multi-tenant; el tenant sale siempre del token. Plantillas: <code>clasico</code>, <code>moderno</code>, <code>compacto</code> y diseños a la medida <code>custom:tenant&lt;id&gt;</code> (ver <code>docs/plantillas-factura.md</code>).</p>

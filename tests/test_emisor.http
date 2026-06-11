@@ -1,0 +1,17 @@
+### ============================================================================
+### Datos fiscales del emisor -> GET /api/emisor
+### App: fila unica de emisor_config del tenant (+ ambiente del tenant).
+### Integracion: nombre/rnc/ambiente del registro en master (fuente: "tenant").
+### ============================================================================
+
+### Emisor del tenant (token app)
+GET http://localhost:8000/api/emisor
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Emisor de un tenant integracion (key + secret)
+GET http://localhost:8000/api/emisor
+X-API-KEY: api_key_integracion
+X-API-SECRET: api_secret_integracion
+
+### Sin token -> 401
+GET http://localhost:8000/api/emisor
