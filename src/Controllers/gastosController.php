@@ -151,14 +151,34 @@ function handleGastoEstado(int $gastoId, gastoModel $gastoModel): void
         $consulta = $service->consultarEstado($ecf['track_id'], $ecf['ncf'], $ecf['ambiente'] ?? null);
         $estadoNuevo = mapEstadoConsultaGasto($consulta);
         if ($estadoNuevo !== null) {
+            $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $gastoModel->updateEcfEstado($gastoId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
+            
+            // Si el e-CF es rechazado asincronamente y la secuencia no se consumió, revertir el contador
+            $secuenciaUtilizada = normalizeSecuenciaUtilizadaGasto($consulta['data']['secuenciaUtilizada'] ?? null);
+            if (($estadoNuevo === 'RECHAZADO' || $estadoNuevo === 'NO_ENCONTRADO') && 
+                ($estadoAnterior !== 'RECHAZADO' && $estadoAnterior !== 'NO_ENCONTRADO')) {
+                if ($secuenciaUtilizada === false) {
+                    require_once __DIR__ . '/../Models/ncfModel.php';
+                    $ncfModel = new ncfModel();
+                    $tipoEcf = substr($ecf['ncf'], 0, 3);
+                    $valor = (int) substr($ecf['ncf'], 3);
+                    
+                    $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente'] ?? null);
+                    error_log(sprintf(
+                        '[ECF GASTO] consulta estado rollback: gasto_id=%d ncf=%s estado=%s -> %s',
+                        $gastoId, $ecf['ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
+                    ));
+                }
+            }
         }
         gastoRespond(true, [
             'gasto_id' => $gastoId,
             'ncf' => $ecf['ncf'],
             'track_id' => $ecf['track_id'],
             'estado_dgii' => $ecf['estado_dgii'],
+            'secuencia_utilizada' => normalizeSecuenciaUtilizadaGasto($consulta['data']['secuenciaUtilizada'] ?? null),
             'consulta' => $consulta['data'],
         ]);
     } catch (Throwable $e) {
@@ -185,6 +205,18 @@ function mapEstadoConsultaGasto(array $consulta): ?string
         case 4: return 'ACEPTADO_CONDICIONAL';
         default: return null;
     }
+}
+
+/**
+ * Normaliza el flag `secuenciaUtilizada` de DGII a bool|null.
+ * false => el e-NCF puede reutilizarse en un nuevo envio; true => consumido.
+ */
+function normalizeSecuenciaUtilizadaGasto($value): ?bool
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    return (bool) filter_var($value, FILTER_VALIDATE_BOOLEAN);
 }
 
 /**
