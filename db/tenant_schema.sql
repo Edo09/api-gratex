@@ -126,24 +126,36 @@ CREATE TABLE IF NOT EXISTS factura_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 4) Secuencias NCF / e-NCF — POR AMBIENTE (unique type+ambiente).
---    El codigo consulta/incrementa con WHERE type AND ambiente (ncfModel,
---    facturaModel, gastoModel), asi que la columna es OBLIGATORIA.
---    current_value=0 => la proxima sera 1 (E310000000001). Se siembran las
---    secuencias e-CF en certecf (certificacion) Y ecf (produccion), ambas en 0.
+-- 4) Secuencias NCF / e-NCF — RANGOS AUTORIZADOS por ambiente.
+--    Modelo DGII real: cada fila es UN rango aprobado (Numero Desde/Hasta, No.
+--    Autorizacion y Fecha Vencimiento). El dispensador (ncfModel) toma el rango
+--    activo (capacidad restante + no vencido, menor numero_desde) e incrementa
+--    current_value acotado por numero_hasta; agotado el rango se registra el
+--    siguiente (POST /api/ncf/rangos). numero_hasta NULL = sin limite (modo
+--    pruebas/legacy: certecf y testecf). current_value = ultimo dispensado;
+--    en rangos nuevos arranca en numero_desde - 1.
+--    Ver db/migrations/014_ncf_rangos_autorizados.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS ncf_sequences (
   id            INT(11)      NOT NULL AUTO_INCREMENT,
   type          VARCHAR(10)  NOT NULL,
   prefix        VARCHAR(10)  NOT NULL,
   current_value INT(11)      NOT NULL DEFAULT 0,
+  numero_desde  INT(11)      NOT NULL DEFAULT 1
+                  COMMENT 'Inicio del rango autorizado por DGII',
+  numero_hasta  INT(11)      NULL
+                  COMMENT 'Fin del rango autorizado; NULL = sin limite (legacy/pruebas)',
+  fecha_vencimiento DATE     NULL
+                  COMMENT 'Vencimiento del rango (FechaVencimientoSecuencia del XML)',
+  no_solicitud  VARCHAR(20)  NULL COMMENT 'No. Solicitud DGII del rango',
+  no_autorizacion VARCHAR(20) NULL COMMENT 'No. Autorizacion DGII del rango',
   description   VARCHAR(100) DEFAULT NULL,
   ambiente      VARCHAR(20)  NOT NULL DEFAULT 'certecf'
                   COMMENT 'testecf | certecf | ecf — las secuencias son independientes por ambiente',
   created_at    DATETIME     DEFAULT CURRENT_TIMESTAMP,
   updated_at    DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_type_ambiente (type, ambiente)
+  UNIQUE KEY uq_type_amb_desde (type, ambiente, numero_desde)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 INSERT INTO ncf_sequences (type, prefix, current_value, description, ambiente) VALUES

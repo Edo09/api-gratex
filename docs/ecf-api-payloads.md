@@ -231,13 +231,62 @@ X-API-KEY: <key>
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver `docs/gastos-module.md` |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
 | `GET/POST/PUT/DELETE` | `/api/facturas-simples` | Facturas NO electrónicas — ver `docs/facturas-simples-api.md` |
-| `GET/POST` | `/api/ncf` | Gestión de secuencias NCF |
+| `GET/POST` | `/api/ncf/rangos` | Rangos e-NCF autorizados por DGII (listar / registrar) — ver sección abajo |
+| `GET/PUT` | `/api/ncf` | Gestión legacy de secuencias NCF (B01) |
 | `POST` | `/api/aprobaciones-comerciales` | Enviar ACECF a DGII (aprobación comercial saliente) |
 | `POST` | `/api/ecf/recepcion` | Recibir e-CFs entrantes de otros emisores |
 | `POST` | `/api/ecf/aprobacion-comercial` | Aprobación comercial entrante |
 | `GET/POST` | `/api/ecf/autenticacion` | Flujo seed/validación DGII |
 | `POST/GET` | `/api/integracion/ecf` · `/aprobacion-comercial` · `/recibidos` · `/aprobaciones` | Modo integración (X-API-KEY + X-API-SECRET, sin DB propia) |
 | `GET/POST` | `/api/landing` | Configuración de landing page |
+
+---
+
+### Rangos e-NCF autorizados — `/api/ncf/rangos`
+
+Las secuencias e-NCF funcionan como en DGII: por cada tipo se **solicita un rango**
+(Número Desde/Hasta) que llega con **No. Autorización** y **Fecha Vencimiento**.
+La emisión dispensa números del rango ACTIVO (con capacidad y no vencido); cuando
+se agota, la emisión falla con un error claro hasta que se registre el siguiente
+rango aprobado. El `FechaVencimientoSecuencia` del XML sale del rango que dispensó
+(fallback: `emisor_config.fecha_vencimiento_secuencia`).
+
+**`GET /api/ncf/rangos`** (ambiente activo; filtro opcional `?type=E31`):
+
+```json
+{
+  "status": true,
+  "ambiente": "ecf",
+  "data": [
+    { "type": "E31", "numero_desde": 1, "numero_hasta": 100, "current_value": 3,
+      "usados": 3, "restantes": 97, "fecha_vencimiento": "2027-12-31",
+      "no_solicitud": "6009804999", "no_autorizacion": "6005308087", "estado": "activo" }
+  ]
+}
+```
+
+`estado`: `activo` (dispensando) · `pendiente` (rango futuro en cola) · `agotado` ·
+`vencido` · `sin_limite` (fila legacy sin rango registrado; emite sin tope).
+
+**`POST /api/ncf/rangos`** — registrar un rango aprobado por DGII:
+
+```json
+{
+  "type": "E31",
+  "numero_desde": 101,
+  "numero_hasta": 200,
+  "fecha_vencimiento": "2028-12-31",
+  "no_solicitud": "6009805000",
+  "no_autorizacion": "6005308099"
+}
+```
+
+Validaciones: `numero_desde` debe ser **mayor** que todo número ya usado/autorizado
+del tipo en el ambiente (422 si no). Si existía una fila legacy "sin límite", se
+cierra en su consumo actual y el rango nuevo pasa a dispensar al agotarse el activo.
+
+> `GET /api/facturas/stats` y `/api/gastos/stats` ahora incluyen por secuencia
+> `restantes` (capacidad vigente; `null` = sin rango con límite) y `vencimiento`.
 
 ---
 

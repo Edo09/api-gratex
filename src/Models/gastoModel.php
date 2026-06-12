@@ -231,7 +231,7 @@ class gastoModel
             'tipo_gasto' => $tipoGasto,
             'ncf' => $ncf !== '' ? $ncf : null,
             'rnc_proveedor' => $rncProveedor !== '' ? $rncProveedor : null,
-            'nombre_proveedor' => $nombreProveedor,
+            'nombre_proveedor' => $nombreProveedor !== '' ? $nombreProveedor : null,
             'fecha' => $data['fecha'] ?? date('Y-m-d'),
             'subtotal' => $subtotal,
             'itbis' => $itbis,
@@ -492,16 +492,26 @@ class gastoModel
             )->fetchAll(PDO::FETCH_ASSOC);
 
             // Secuencias internas solo para los tipos que EMITE la empresa.
+            // Varias filas por tipo = rangos autorizados DGII (agregadas por tipo;
+            // restantes NULL = sin rango con limite registrado).
             $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
             $secuencias = $this->conexion->query(
-                "SELECT ns.type, ns.current_value as secuencia_actual,
-                        COALESCE(g.total_emitidos, 0) as total_emitidos
+                "SELECT ns.type,
+                        MAX(ns.current_value) as secuencia_actual,
+                        COALESCE(MAX(g.total_emitidos), 0) as total_emitidos,
+                        SUM(CASE WHEN ns.numero_hasta IS NOT NULL
+                                  AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())
+                                 THEN GREATEST(ns.numero_hasta - ns.current_value, 0) END) as restantes,
+                        MIN(CASE WHEN (ns.numero_hasta IS NULL OR ns.current_value < ns.numero_hasta)
+                                  AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())
+                                 THEN ns.fecha_vencimiento END) as vencimiento
                  FROM ncf_sequences ns
                  LEFT JOIN (
                      SELECT tipo_gasto as type, COUNT(*) as total_emitidos
                      FROM gastos WHERE es_auto_emision = 1 {$ambFilter} GROUP BY tipo_gasto
                  ) g ON ns.type = g.type
                  WHERE ns.type IN ('E41','E43','E47') {$ambSeqFilter}
+                 GROUP BY ns.type
                  ORDER BY ns.type"
             )->fetchAll(PDO::FETCH_ASSOC);
 
