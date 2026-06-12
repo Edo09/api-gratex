@@ -303,6 +303,25 @@ class gastoModel
     {
         try {
             $this->conexion->beginTransaction();
+
+            // Archivar reintentos de e-CF rechazados para conservar historial sin chocar con uk_proveedor_ncf
+            if (!empty($g['ncf']) && !empty($g['rnc_proveedor'])) {
+                $prev = $this->conexion->prepare('SELECT id, estado_dgii FROM gastos WHERE ncf = :ncf AND rnc_proveedor = :rnc_proveedor');
+                $prev->execute([':ncf' => $g['ncf'], ':rnc_proveedor' => $g['rnc_proveedor']]);
+                $prevRow = $prev->fetch(PDO::FETCH_ASSOC);
+                if ($prevRow) {
+                    $estadosRechazo = ['RECHAZADO', 'NO_ENCONTRADO'];
+                    if (!in_array((string) ($prevRow['estado_dgii'] ?? ''), $estadosRechazo, true)) {
+                        $this->conexion->rollBack();
+                        return ['error', 'Ya existe un gasto con NCF ' . $g['ncf'] . ' para este proveedor en estado ' . ($prevRow['estado_dgii'] ?? 'desconocido')];
+                    }
+                    $delId = (int) $prevRow['id'];
+                    $this->conexion->prepare(
+                        "UPDATE gastos SET ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO') WHERE id = :id"
+                    )->execute([':id' => $delId]);
+                }
+            }
+
             $sql = 'INSERT INTO gastos
                     (categoria, tipo_gasto, ncf, rnc_proveedor, nombre_proveedor, fecha,
                      subtotal, itbis, total, es_auto_emision, ambiente, user_id,

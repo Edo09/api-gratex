@@ -700,8 +700,11 @@ class facturaModel
                             . '; no se puede re-emitir (solo se permite reintentar e-CF rechazados).'];
                     }
                     $delId = (int) $prevRow['id'];
-                    $this->conexion->prepare('DELETE FROM factura_items WHERE factura_id = :id')->execute([':id' => $delId]);
-                    $this->conexion->prepare('DELETE FROM facturas WHERE id = :id')->execute([':id' => $delId]);
+                    // Archive the rejected attempt to maintain history for the client,
+                    // setting e_ncf to NULL to bypass the uk_e_ncf unique constraint.
+                    $this->conexion->prepare(
+                        "UPDATE facturas SET e_ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO') WHERE id = :id"
+                    )->execute([':id' => $delId]);
                 }
             }
 
