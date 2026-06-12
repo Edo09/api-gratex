@@ -100,6 +100,7 @@ class ECFEmissionService
         $dispensamosSecuencia = ($eNcfOverride === null || $eNcfOverride === '');
         $secuenciaType = 'E' . $tipoEcf;
         $secuenciaValor = $dispensamosSecuencia ? (int) substr($eNcf, 3) : 0;
+        $secuenciaRangoId = $dispensamosSecuencia ? ($disp['rango_id'] ?? null) : null;
 
         $emisorBase = [
             'rnc' => $emisor['rnc'],
@@ -223,7 +224,8 @@ class ECFEmissionService
             $this->reclamarSecuenciaSiNoUtilizada(
                 $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
                 is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : [],
-                $rfceEstado
+                $rfceEstado,
+                $secuenciaRangoId
             );
 
             return [
@@ -258,7 +260,8 @@ class ECFEmissionService
         $this->reclamarSecuenciaSiNoUtilizada(
             $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
             is_array($reception['data'] ?? null) ? $reception['data'] : [],
-            $estado
+            $estado,
+            $secuenciaRangoId
         );
 
         return [
@@ -295,7 +298,8 @@ class ECFEmissionService
         int $valor,
         string $ambiente,
         array $receptionData,
-        string $estado
+        string $estado,
+        ?int $rangoId = null
     ): void {
         if (!$dispensamos) {
             return;
@@ -314,15 +318,15 @@ class ECFEmissionService
         $flagTxt = $utilizada === null ? 'ausente' : ($utilizada ? 'true' : 'false');
         $resultado = 'no_revierte';
         if ($debeRevertir) {
-            $resultado = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente)
+            $resultado = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente, $rangoId)
                 ? 'revertido'
                 : 'rollback_sin_coincidencia';
         }
         // Siempre se registra: deja claro en error_log que decision se tomo y por
         // que (dispensamos/estado/bandera) ante cualquier duda sobre la secuencia.
         error_log(sprintf(
-            '[ECF] reclamar secuencia: type=%s valor=%d ambiente=%s estado=%s dispensamos=si utilizada=%s -> %s',
-            $type, $valor, $ambiente, $estado, $flagTxt, $resultado
+            '[ECF] reclamar secuencia: type=%s valor=%d ambiente=%s estado=%s dispensamos=si utilizada=%s rango_id=%s -> %s',
+            $type, $valor, $ambiente, $estado, $flagTxt, $rangoId !== null ? (string) $rangoId : 'null', $resultado
         ));
     }
 
