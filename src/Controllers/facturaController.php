@@ -272,15 +272,69 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
+    // La respuesta de DGII puede venir en dgii_response (e-CF integro) o
+    // rfce_response (RFCE E32 < 250k).
+    $dgiiResp = $result['dgii_response'] ?? $result['rfce_response'] ?? null;
+    $data = $saved[1] + [
+        'tipo_ecf' => $result['tipo_ecf'],
+        'ambiente' => $result['ambiente'],
+        'fecha_emision_dgii' => $result['fecha_emision_dgii'],
+        'dgii_response' => $dgiiResp,
+    ];
+
+    // DGII proceso el e-CF y lo RECHAZO (o no se encontro). El intento queda
+    // persistido (historial) y, si la secuencia no se consumio
+    // (secuenciaUtilizada=false), ya fue revertida para reutilizar el e-NCF.
+    // Se responde como error para que la UI muestre el motivo del rechazo, pero
+    // con `data` incluido para confirmar que se guardo y con que e-NCF.
+    $estadoFinal = (string) ($result['estado'] ?? '');
+    $rechazado = in_array($estadoFinal, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO', 'ERROR'], true);
+    if ($rechazado) {
+        http_response_code(422);
+        echo json_encode([
+            'status' => false,
+            'error' => dgiiMensajeRechazo($dgiiResp, $estadoFinal),
+            'data' => $data,
+        ]);
+        return;
+    }
+
     echo json_encode([
         'status' => true,
-        'data' => $saved[1] + [
-            'tipo_ecf' => $result['tipo_ecf'],
-            'ambiente' => $result['ambiente'],
-            'fecha_emision_dgii' => $result['fecha_emision_dgii'],
-            'dgii_response' => $result['dgii_response'],
-        ],
+        'data' => $data,
     ]);
+}
+
+/**
+ * Construye un mensaje legible a partir del cuerpo de rechazo de DGII
+ * ({"codigo":..,"estado":"Rechazado","mensajes":[{"valor":"..."}]}). Cae a un
+ * texto generico si no hay mensajes estructurados.
+ */
+function dgiiMensajeRechazo($dgiiResponse, string $estado): string
+{
+    $prefijo = in_array($estado, ['RECHAZADO', 'RFCE_RECHAZADO'], true)
+        ? 'e-CF rechazado por DGII'
+        : 'e-CF no procesado por DGII (' . $estado . ')';
+    if (is_array($dgiiResponse)) {
+        $mensajes = $dgiiResponse['mensajes'] ?? $dgiiResponse['mensaje'] ?? null;
+        if (is_array($mensajes)) {
+            $textos = [];
+            foreach ($mensajes as $m) {
+                if (is_array($m) && isset($m['valor']) && $m['valor'] !== '') {
+                    $textos[] = (string) $m['valor'];
+                } elseif (is_string($m) && $m !== '') {
+                    $textos[] = $m;
+                }
+            }
+            if ($textos) {
+                return $prefijo . ': ' . implode(' | ', $textos);
+            }
+        }
+        if (isset($dgiiResponse['mensaje']) && is_string($dgiiResponse['mensaje']) && $dgiiResponse['mensaje'] !== '') {
+            return $prefijo . ': ' . $dgiiResponse['mensaje'];
+        }
+    }
+    return $prefijo . '.';
 }
 
 function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void

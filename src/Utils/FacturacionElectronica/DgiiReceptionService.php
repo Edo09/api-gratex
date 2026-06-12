@@ -41,12 +41,15 @@ class DgiiReceptionService
             'Content-Length: ' . strlen($body),
         ];
 
+        // DGII puede RECHAZAR el e-CF con HTTP 4xx + cuerpo estructurado
+        // (codigo/estado/secuenciaUtilizada). Es un veredicto de negocio, no una
+        // caida: se tolera para que la emision lo persista y revierta la secuencia.
         $response = $this->auth->consultarEndpointAutenticado(
             'POST',
             $path,
             $bearerToken,
             $body,
-            $options,
+            array_merge($options, ['tolerate_http_errors' => true]),
             $extraHeaders
         );
 
@@ -79,12 +82,13 @@ class DgiiReceptionService
             'Content-Length: ' . strlen($body),
         ];
 
+        // Igual que recibir(): un RECHAZO de RFCE llega como 4xx estructurado.
         $response = $this->auth->consultarEndpointAutenticado(
             'POST',
             $url,
             $bearerToken,
             $body,
-            $options,
+            array_merge($options, ['tolerate_http_errors' => true]),
             $extraHeaders
         );
 

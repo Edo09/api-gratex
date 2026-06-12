@@ -385,19 +385,35 @@ class ECFEmissionService
     {
         $code = $reception['status_code'];
         $data = is_array($reception['data']) ? $reception['data'] : [];
-        $estadoCodigo = $data['codigo'] ?? $data['estado'] ?? null;
 
-        if ($code >= 200 && $code < 300) {
-            if (is_numeric($estadoCodigo)) {
-                // Codigos DGII: 0=No encontrado, 1=Aceptado, 2=Rechazado,
-                // 3=En Proceso, 4=Aceptado Condicional.
-                $estadoCodigo = (int) $estadoCodigo;
-                if ($estadoCodigo === 0) return 'NO_ENCONTRADO';
-                if ($estadoCodigo === 1) return 'ACEPTADO';
-                if ($estadoCodigo === 2) return 'RECHAZADO';
-                if ($estadoCodigo === 3) return 'EN_PROCESO';
-                if ($estadoCodigo === 4) return 'ACEPTADO_CONDICIONAL';
+        // El veredicto se mapea por el CONTENIDO, no por el HTTP: DGII rechaza
+        // algunos e-CF con 4xx + cuerpo estructurado ({"codigo":2,"estado":
+        // "Rechazado",...}). Es un rechazo de negocio (debe persistirse), no un
+        // fallo de transporte. Primero el texto `estado`, luego el `codigo`.
+        $estadoTexto = is_string($data['estado'] ?? null) ? strtolower(trim($data['estado'])) : '';
+        if ($estadoTexto !== '') {
+            if (str_contains($estadoTexto, 'rechaz')) return 'RECHAZADO';
+            if (str_contains($estadoTexto, 'condicion')) return 'ACEPTADO_CONDICIONAL';
+            if (str_contains($estadoTexto, 'acept')) return 'ACEPTADO';
+            if (str_contains($estadoTexto, 'proceso')) return 'EN_PROCESO';
+            if (str_contains($estadoTexto, 'no encontrado')) return 'NO_ENCONTRADO';
+        }
+
+        $estadoCodigo = $data['codigo'] ?? null;
+        if (is_numeric($estadoCodigo)) {
+            // Codigos DGII: 0=No encontrado, 1=Aceptado, 2=Rechazado,
+            // 3=En Proceso, 4=Aceptado Condicional.
+            switch ((int) $estadoCodigo) {
+                case 0: return 'NO_ENCONTRADO';
+                case 1: return 'ACEPTADO';
+                case 2: return 'RECHAZADO';
+                case 3: return 'EN_PROCESO';
+                case 4: return 'ACEPTADO_CONDICIONAL';
             }
+        }
+
+        // 2xx sin veredicto explicito: recepcion aceptada, se consulta despues.
+        if ($code >= 200 && $code < 300) {
             return 'ENVIADO';
         }
         return 'ERROR';
