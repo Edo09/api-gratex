@@ -11,15 +11,18 @@
 //
 // Dos categorias (campo `categoria`):
 //   - gastos_menores       -> E43 (peajes, suministros, pagos del personal).
-//   - facturas_proveedores -> E41/E47 (emitidos por la empresa) y E31/B01/E33/E34
-//                             (recibidos del proveedor).
+//   - facturas_proveedores -> E41/E47 (emitidos por la empresa) y E33/E34
+//                             (notas recibidas del proveedor).
 //
 // Reglas de negocio (DGII):
 //   - Compras (11/E41), Gastos Menores (13/E43) y Pagos Exterior (17/E47): la
 //     empresa los EMITE a DGII como e-CF (firmar + enviar) reusando
 //     ECFEmissionService. Guard DGII_ECF_EMISSION_ENABLED protege produccion.
-//   - Credito Fiscal (01/E31, B01) y notas recibidas (E33/E34): es_auto_emision=
-//     false; solo se registran (ya los emitio el proveedor). El usuario digita el NCF.
+//   - Notas recibidas (E33/E34): es_auto_emision=false; solo se registran (ya
+//     las emitio el proveedor). El usuario digita el NCF.
+//   - E31/B01 (Credito Fiscal) YA NO se registran como gasto (2026-06-12):
+//     llegan por la recepcion e-CF. Filas historicas se conservan y /stats
+//     las sigue etiquetando.
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
@@ -64,7 +67,8 @@ function gastoRespond(bool $ok, $payload, int $code = 200): void
 /**
  * GET /api/gastos/stats
  * Estadisticas de gastos. Cada comprobante usa su propio tipo: E41 (Compras/11),
- * E43 (Gastos Menores/13), E47 (Pagos Exterior/17), E31/B01 (Credito Fiscal/01).
+ * E43 (Gastos Menores/13), E47 (Pagos Exterior/17), E33/E34 (notas). E31/B01
+ * quedan fuera (el modelo los excluye de las agregaciones).
  */
 function handleGastosStats(gastoModel $gastoModel): void
 {
@@ -74,8 +78,6 @@ function handleGastosStats(gastoModel $gastoModel): void
         'E41' => 'Comprobante de Compras (11)',
         'E43' => 'Comprobante para Gastos Menores (13)',
         'E47' => 'Comprobante para Pagos al Exterior (17)',
-        'E31' => 'Factura de Crédito Fiscal (01)',
-        'B01' => 'Factura de Crédito Fiscal (01)',
         'E33' => 'Nota de Débito (03)',
         'E34' => 'Nota de Crédito (04)',
     ];

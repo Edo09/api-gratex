@@ -10,7 +10,8 @@ require_once(__DIR__ . '/ncfModel.php');
  *     interna via ncfModel. Tipos electronicos: E41 (Compras / NCF 11),
  *     E43 (Gastos Menores / NCF 13), E47 (Pagos al Exterior / NCF 17).
  *   - Recibido (0): el proveedor entrego el comprobante; el usuario digita el
- *     NCF. Tipico: B01 / E31 (Credito Fiscal / NCF 01).
+ *     NCF. Hoy: E33/E34 (notas). E31/B01 ya no se dan de alta como gasto
+ *     (solo quedan filas historicas).
  */
 class gastoModel
 {
@@ -21,20 +22,24 @@ class gastoModel
      * Tipos de NCF/e-CF permitidos por categoria de gasto:
      *   - gastos_menores       -> E43 (Gastos Menores: peajes, suministros, personal).
      *   - facturas_proveedores -> E41 (Compras informal) y E47 (Pagos al Exterior)
-     *                             emitidos por la empresa; mas E31/B01 (Credito
-     *                             Fiscal), E33 (Nota de Debito) y E34 (Nota de
-     *                             Credito) recibidos del proveedor. La nota referencia
-     *                             un comprobante previo, por eso el usuario digita su NCF.
+     *                             emitidos por la empresa; mas E33 (Nota de Debito)
+     *                             y E34 (Nota de Credito) recibidas del proveedor.
+     *                             La nota referencia un comprobante previo, por eso
+     *                             el usuario digita su NCF.
+     *
+     * E31/B01 (Credito Fiscal) ya NO se registran como gasto (decision
+     * 2026-06-12): esas facturas llegan del proveedor por la recepcion e-CF.
+     * Las filas historicas con esos tipos se conservan (solo se bloquea el alta).
      */
     private const CATEGORIAS = [
         'gastos_menores' => ['E43'],
-        'facturas_proveedores' => ['E41', 'E47', 'E31', 'B01', 'E33', 'E34'],
+        'facturas_proveedores' => ['E41', 'E47', 'E33', 'E34'],
     ];
 
     /**
      * Tipos que EMITE la empresa: para ellos el sistema genera la secuencia
-     * interna (es_auto_emision = true). El resto (E31/B01 Credito Fiscal, E33/E34
-     * notas) son recibidos y el usuario digita el NCF del proveedor.
+     * interna (es_auto_emision = true). El resto (E33/E34 notas) son recibidos
+     * y el usuario digita el NCF del proveedor.
      */
     private const AUTO_EMISION_TYPES = ['E41', 'E43', 'E47'];
 
@@ -155,7 +160,7 @@ class gastoModel
      *   - Auto-emision (E41/E43/E47): la empresa lo emite a DGII como e-CF
      *     (build XML -> firmar -> enviar) reusando ECFEmissionService. Guarda
      *     track_id/estado/codigo_seguridad/xml_firmado.
-     *   - Recibido (E31/B01/E33/E34): solo se registra (estado REGISTRADO); ya lo
+     *   - Recibido (E33/E34): solo se registra (estado REGISTRADO); ya lo
      *     emitio el proveedor a DGII.
      *
      * GUARD de seguridad: si DGII_ECF_EMISSION_ENABLED no esta en true, los
@@ -205,7 +210,7 @@ class gastoModel
         }
 
         // es_auto_emision se DERIVA del tipo: E41/E43/E47 los emite la empresa;
-        // E31/B01/E33/E34 son recibidos (el usuario digita el NCF del proveedor).
+        // E33/E34 son recibidos (el usuario digita el NCF del proveedor).
         $esAutoEmision = in_array($tipoGasto, self::AUTO_EMISION_TYPES, true);
         $ncf = trim((string) ($data['ncf'] ?? ''));
         if (!$esAutoEmision && $ncf === '') {
@@ -439,7 +444,8 @@ class gastoModel
      * Estadisticas de gastos, analogas a facturaModel::getECFStats pero sobre la
      * tabla `gastos`. Cada comprobante usa su propio tipo:
      *   E41 (Compras/11), E43 (Gastos Menores/13), E47 (Pagos Exterior/17),
-     *   E31/B01 (Credito Fiscal/01 recibido).
+     *   E33/E34 (notas recibidas). Las filas historicas E31/B01 (alta bloqueada
+     *   2026-06-12) se EXCLUYEN de todas las agregaciones.
      * Agrupa por tipo_gasto, por categoria y por mes; ademas reporta el estado de
      * las secuencias internas de los tipos que emite la empresa (E41/E43/E47).
      */
@@ -448,6 +454,8 @@ class gastoModel
         try {
             $ambiente = $this->ncfModel->resolveActiveAmbiente();
             $ambFilter = $ambiente !== null ? "AND ambiente = '{$ambiente}'" : '';
+            // E31/B01 ya no son gastos: fuera de stats aunque existan filas viejas.
+            $tipoFilter = "AND tipo_gasto NOT IN ('E31','B01')";
 
             $resumen = $this->conexion->query(
                 "SELECT COUNT(*) as total_gastos,
@@ -457,7 +465,7 @@ class gastoModel
                         COUNT(DISTINCT tipo_gasto) as tipos_distintos,
                         MIN(fecha) as primer_gasto,
                         MAX(fecha) as ultimo_gasto
-                 FROM gastos WHERE 1=1 {$ambFilter}"
+                 FROM gastos WHERE 1=1 {$ambFilter} {$tipoFilter}"
             )->fetch(PDO::FETCH_ASSOC);
 
             $porTipo = $this->conexion->query(
@@ -469,7 +477,7 @@ class gastoModel
                         SUM(CASE WHEN es_auto_emision = 1 THEN 1 ELSE 0 END) as auto_emitidos,
                         SUM(CASE WHEN es_auto_emision = 0 THEN 1 ELSE 0 END) as recibidos,
                         MAX(fecha) as ultimo
-                 FROM gastos WHERE 1=1 {$ambFilter}
+                 FROM gastos WHERE 1=1 {$ambFilter} {$tipoFilter}
                  GROUP BY tipo_gasto ORDER BY tipo_gasto"
             )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -478,7 +486,7 @@ class gastoModel
                         COUNT(*) as total,
                         COALESCE(SUM(total), 0) as monto_total,
                         COALESCE(SUM(itbis), 0) as itbis_total
-                 FROM gastos WHERE 1=1 {$ambFilter}
+                 FROM gastos WHERE 1=1 {$ambFilter} {$tipoFilter}
                  GROUP BY categoria ORDER BY total DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -487,7 +495,7 @@ class gastoModel
                         COUNT(*) as total,
                         COALESCE(SUM(total), 0) as monto_total
                  FROM gastos
-                 WHERE fecha >= DATE_SUB(NOW(), INTERVAL 12 MONTH) {$ambFilter}
+                 WHERE fecha >= DATE_SUB(NOW(), INTERVAL 12 MONTH) {$ambFilter} {$tipoFilter}
                  GROUP BY mes ORDER BY mes DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 

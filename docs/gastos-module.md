@@ -3,9 +3,13 @@
 Gestiona los gastos de la empresa en dos categorías:
 
 1. **Gastos Menores** — pagos del personal (peajes, suministros). Tipo `E43`.
-2. **Facturas de Proveedores** — comprobantes emitidos por la empresa a proveedores (`E41`, `E47`) y comprobantes de Crédito Fiscal recibidos del proveedor (`E31`, `B01`).
+2. **Facturas de Proveedores** — comprobantes emitidos por la empresa a proveedores (`E41`, `E47`) y notas recibidas del proveedor (`E33`, `E34`).
 
-La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secuencia interna) y como **receptor** para `E31/B01` (el usuario digita el NCF que entregó el proveedor).
+La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secuencia interna) y como **receptor** para `E33/E34` (el usuario digita el NCF que entregó el proveedor).
+
+> **2026-06-12:** `E31`/`B01` (Crédito Fiscal recibido) **ya no se registran como
+> gasto** — esas facturas llegan por la recepción e-CF. El alta devuelve 400;
+> las filas históricas se conservan en la tabla pero **quedan fuera de `/stats`**.
 
 ---
 
@@ -16,8 +20,6 @@ La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secue
 | `gastos_menores` | `E43` | 13 | **true** | secuencia interna (ncfModel) |
 | `facturas_proveedores` | `E41` | 11 | **true** | secuencia interna (ncfModel) |
 | `facturas_proveedores` | `E47` | 17 | **true** | secuencia interna (ncfModel) |
-| `facturas_proveedores` | `E31` | 01 | false | lo digita el usuario |
-| `facturas_proveedores` | `B01` | 01 | false | lo digita el usuario |
 | `facturas_proveedores` | `E33` | 03 | false | lo digita el usuario (Nota de Débito recibida) |
 | `facturas_proveedores` | `E34` | 04 | false | lo digita el usuario (Nota de Crédito recibida) |
 
@@ -69,7 +71,7 @@ La lista también filtra por **ambiente activo** (`DGII_ECF_ENVIRONMENT`), igual
 | `tipo_gasto` | sí | debe estar permitido para la categoría |
 | `rnc_proveedor` | sí | RNC/Cédula. En Compras (11/E41) = proveedor informal |
 | `nombre_proveedor` | sí | |
-| `ncf` | solo si recibido (E31/B01) | el que entregó el proveedor. En auto-emisión se ignora y se genera |
+| `ncf` | solo si recibido (E33/E34) | el que entregó el proveedor. En auto-emisión se ignora y se genera |
 | `items[]` | sí (≥1) | líneas del gasto |
 | `fecha` | no | default: hoy (`Y-m-d`) |
 | `subtotal` | no | default: suma de `subtotal` de los items |
@@ -112,8 +114,9 @@ Content-Type: application/json
 ```
 Total calculado = 470.
 
-### 2. Factura de Proveedor (E31 — recibida)
-Crédito Fiscal recibido. **Sí** se manda el `ncf` del proveedor.
+### 2. Nota de Crédito de Proveedor (E34 — recibida)
+
+Nota recibida del proveedor. **Sí** se manda el `ncf` del proveedor.
 
 ```http
 POST /api/gastos
@@ -122,13 +125,13 @@ Content-Type: application/json
 
 {
   "categoria": "facturas_proveedores",
-  "tipo_gasto": "E31",
-  "ncf": "E310000000123",
+  "tipo_gasto": "E34",
+  "ncf": "E340000000045",
   "rnc_proveedor": "131880681",
   "nombre_proveedor": "Suplidora XYZ SRL",
   "fecha": "2026-06-03",
   "items": [
-    { "description": "Materiales de construccion", "amount": 1000, "quantity": 1, "itbis_amount": 180 }
+    { "description": "Devolucion materiales", "amount": 1000, "quantity": 1, "itbis_amount": 180 }
   ]
 }
 ```
@@ -141,10 +144,10 @@ curl -X POST http://localhost/api/gastos \
   -H "X-API-KEY: TU_TOKEN" -H "Content-Type: application/json" \
   -d '{"categoria":"gastos_menores","tipo_gasto":"E43","rnc_proveedor":"00112345678","nombre_proveedor":"Juan Perez","items":[{"description":"Peaje","amount":60,"quantity":2}]}'
 
-# Factura proveedor
+# Nota de credito de proveedor (recibida)
 curl -X POST http://localhost/api/gastos \
   -H "X-API-KEY: TU_TOKEN" -H "Content-Type: application/json" \
-  -d '{"categoria":"facturas_proveedores","tipo_gasto":"E31","ncf":"E310000000123","rnc_proveedor":"131880681","nombre_proveedor":"Suplidora XYZ","items":[{"description":"Materiales","amount":1000,"quantity":1,"itbis_amount":180}]}'
+  -d '{"categoria":"facturas_proveedores","tipo_gasto":"E34","ncf":"E340000000045","rnc_proveedor":"131880681","nombre_proveedor":"Suplidora XYZ","items":[{"description":"Devolucion","amount":1000,"quantity":1,"itbis_amount":180}]}'
 ```
 
 ---
@@ -153,7 +156,7 @@ curl -X POST http://localhost/api/gastos \
 
 Los gastos que **emite la empresa** (E41/E43/E47) se envían a la DGII como e-CF real,
 reusando el mismo pipeline de facturas (`ECFEmissionService`: build XML → firmar →
-token → enviar). Los **recibidos** (E31/B01/E33/E34) solo se registran — ya los
+token → enviar). Los **recibidos** (E33/E34) solo se registran — ya los
 emitió el proveedor.
 
 ### Guard de seguridad — `DGII_ECF_EMISSION_ENABLED`
@@ -185,7 +188,9 @@ no se envía `itbis_amount`.
 
 Análogo a `GET /api/facturas/stats`, pero sobre la tabla `gastos`. Cada comprobante
 usa su propio tipo: `E41` (Compras/11), `E43` (Gastos Menores/13), `E47` (Pagos
-Exterior/17), `E31`/`B01` (Crédito Fiscal/01 recibido). Filtra por ambiente activo.
+Exterior/17), `E33`/`E34` (notas recibidas). Las filas históricas `E31`/`B01`
+(Crédito Fiscal/01, alta bloqueada) se **excluyen de todas las agregaciones**.
+Filtra por ambiente activo.
 
 Devuelve:
 - `resumen` — `total_gastos`, `monto_total`, `subtotal_total`, `itbis_total`, `tipos_distintos`, `primer_gasto`, `ultimo_gasto`
@@ -201,7 +206,6 @@ Devuelve:
   "data": {
     "resumen": { "total_gastos": 12, "monto_total": 45200.00, "subtotal_total": 39800.00, "itbis_total": 5400.00, "tipos_distintos": 3, "primer_gasto": "2026-01-05", "ultimo_gasto": "2026-06-03" },
     "por_tipo": [
-      { "tipo_gasto": "E31", "total": 4, "monto_total": 20000.00, "subtotal_total": 17000.00, "itbis_total": 3000.00, "auto_emitidos": 0, "recibidos": 4, "nombre": "Factura de Crédito Fiscal (01)" },
       { "tipo_gasto": "E41", "total": 5, "monto_total": 18000.00, "subtotal_total": 16000.00, "itbis_total": 2000.00, "auto_emitidos": 5, "recibidos": 0, "nombre": "Comprobante de Compras (11)" },
       { "tipo_gasto": "E43", "total": 3, "monto_total": 7200.00, "subtotal_total": 6800.00, "itbis_total": 400.00, "auto_emitidos": 3, "recibidos": 0, "nombre": "Comprobante para Gastos Menores (13)" }
     ],
@@ -222,8 +226,8 @@ Devuelve:
 
 > Nota INGRESOS vs GASTOS: `/api/facturas/stats` cubre lo que la empresa **emite al
 > vender** (01/E31, 02/E32, 15/E45, 14/E44, 16/E46, 03/E33, 04/E34). `/api/gastos/stats`
-> cubre lo que **justifica costos** (01/E31 recibido, 11/E41, 13/E43, 17/E47,
-> 03/E33, 04/E34 recibidas). Notas de Débito/Crédito aparecen en ambos lados.
+> cubre lo que **justifica costos** (11/E41, 13/E43, 17/E47, 03/E33, 04/E34
+> recibidas; 01/E31 solo histórico). Notas de Débito/Crédito aparecen en ambos lados.
 
 ## Respuestas
 

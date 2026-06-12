@@ -2,12 +2,13 @@
 ### Modulo de Gastos -> /api/gastos
 ### Dos categorias:
 ###   - gastos_menores       -> E43 (peajes, suministros, personal)
-###   - facturas_proveedores -> E41/E47 (emite la empresa) + E31/B01/E33/E34 (recibido)
+###   - facturas_proveedores -> E41/E47 (emite la empresa) + E33/E34 (recibido)
 ###
 ### Auto-emision (E41/E43/E47): se emite a DGII como e-CF SOLO si
 ###   DGII_ECF_EMISSION_ENABLED=true. Con el guard apagado (default) se guarda como
 ###   estado_dgii=PENDIENTE_EMISION sin tocar DGII ni consumir secuencia.
-### Recibido (E31/B01/E33/E34): solo se registra; el usuario digita el NCF.
+### Recibido (E33/E34): solo se registra; el usuario digita el NCF.
+### E31/B01 ya NO se registran como gasto (2026-06-12) -> 400.
 ###
 ### Requiere migraciones 007 y 008 corridas.
 ### ============================================================================
@@ -41,7 +42,24 @@ X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 ### CREAR - RECIBIDOS (solo se registran, NO se emiten a DGII)
 ### ============================================================================
 
-### Factura de proveedor - Credito Fiscal (E31). NCF lo digita el usuario.
+### Nota de Debito recibida del proveedor (E33). NCF lo digita el usuario.
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E33",
+  "ncf": "E330000000123",
+  "rnc_proveedor": "131880681",
+  "nombre_proveedor": "Suplidora XYZ SRL",
+  "fecha": "2026-06-03",
+  "items": [
+    { "description": "Cargo adicional flete", "amount": 1000, "quantity": 1, "indicador_facturacion": 1 }
+  ]
+}
+
+### E31 ya no permitido -> 400 (Credito Fiscal no se registra como gasto)
 POST http://localhost:8000/api/gastos
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
@@ -52,13 +70,12 @@ Content-Type: application/json
   "ncf": "E310000000123",
   "rnc_proveedor": "131880681",
   "nombre_proveedor": "Suplidora XYZ SRL",
-  "fecha": "2026-06-03",
   "items": [
-    { "description": "Materiales de construccion", "amount": 1000, "quantity": 1, "indicador_facturacion": 1 }
+    { "description": "Materiales", "amount": 1000, "quantity": 1 }
   ]
 }
 
-### Factura de proveedor - Credito Fiscal con ITBIS explicito
+### B01 ya no permitido -> 400
 POST http://localhost:8000/api/gastos
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
@@ -190,14 +207,14 @@ Content-Type: application/json
   "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
 }
 
-### Recibido sin ncf -> 400 (E31 requiere NCF digitado)
+### Recibido sin ncf -> 400 (E33/E34 requieren NCF digitado)
 POST http://localhost:8000/api/gastos
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
 
 {
   "categoria": "facturas_proveedores",
-  "tipo_gasto": "E31",
+  "tipo_gasto": "E33",
   "rnc_proveedor": "131880681",
   "nombre_proveedor": "Suplidora XYZ",
   "items": [ { "description": "y", "amount": 1, "quantity": 1 } ]
