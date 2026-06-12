@@ -491,3 +491,102 @@ CREATE TABLE IF NOT EXISTS proveedores (
   UNIQUE KEY uk_rnc (rnc),
   KEY idx_activo (activo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- =============================================================================
+-- Tabla: Unidades de Medida (basado en Unidades.xml - DGII)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS `unidades_medida` (
+  `id` TINYINT UNSIGNED NOT NULL,
+  `codigo` VARCHAR(10) NOT NULL COMMENT 'Código abreviado de la unidad',
+  `descripcion` VARCHAR(100) NOT NULL COMMENT 'Descripción completa de la unidad',
+  `activo` BOOLEAN NOT NULL DEFAULT TRUE,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_codigo` (`codigo`),
+  INDEX `idx_descripcion` (`descripcion`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+COMMENT='Unidades de medida para facturación electrónica DGII';
+
+-- =============================================================================
+-- Insertar todas las unidades de medida (1-62)
+-- =============================================================================
+
+INSERT INTO `unidades_medida` (`id`, `codigo`, `descripcion`) VALUES
+(1, 'BARR', 'Barril'),
+(2, 'BOL', 'Bolsa'),
+(3, 'BOT', 'Bote'),
+(4, 'BULTO', 'Bultos'),
+(5, 'BOTELLA', 'Botella'),
+(6, 'CAJ', 'Caja/Cajón'),
+(7, 'CAJETILLA', 'Cajetilla'),
+(8, 'CM', 'Centímetro'),
+(9, 'CIL', 'Cilindro'),
+(10, 'CONJ', 'Conjunto'),
+(11, 'CONT', 'Contenedor'),
+(12, 'DÍA', 'Día'),
+(13, 'DOC', 'Docena'),
+(14, 'FARD', 'Fardo'),
+(15, 'GL', 'Galones'),
+(16, 'GRAD', 'Grado'),
+(17, 'GR', 'Gramo'),
+(18, 'GRAN', 'Granel'),
+(19, 'HOR', 'Hora'),
+(20, 'HUAC', 'Huacal'),
+(21, 'KG', 'Kilogramo'),
+(22, 'kWh', 'Kilovatio Hora'),
+(23, 'LB', 'Libra'),
+(24, 'LITRO', 'Litro'),
+(25, 'LOT', 'Lote'),
+(26, 'M', 'Metro'),
+(27, 'M2', 'Metro Cuadrado'),
+(28, 'M3', 'Metro Cúbico'),
+(29, 'MMBTU', 'Millones de Unidades Térmicas'),
+(30, 'MIN', 'Minuto'),
+(31, 'PAQ', 'Paquete'),
+(32, 'PAR', 'Par'),
+(33, 'PIE', 'Pie'),
+(34, 'PZA', 'Pieza'),
+(35, 'ROL', 'Rollo'),
+(36, 'SOBR', 'Sobre'),
+(37, 'SEG', 'Segundo'),
+(38, 'TANQUE', 'Tanque'),
+(39, 'TONE', 'Tonelada'),
+(40, 'TUB', 'Tubo'),
+(41, 'YD', 'Yarda'),
+(42, 'YD2', 'Yarda cuadrada'),
+(43, 'UND', 'Unidad'),
+(44, 'EA', 'Elemento'),
+(45, 'MILLAR', 'Millar'),
+(46, 'SAC', 'Saco'),
+(47, 'LAT', 'Lata'),
+(48, 'DIS', 'Display'),
+(49, 'BID', 'Bidón'),
+(50, 'RAC', 'Ración'),
+(51, 'Q', 'Quintal'),
+(52, 'GRT', 'Toneladas de registro bruto'),
+(53, 'P2', 'Pie Cuadrado'),
+(54, 'PAX', 'Pasajero'),
+(55, 'PULG', 'Pulgadas'),
+(56, 'STAY', 'Parqueo Barcos En Muelle'),
+(57, 'BDJ', 'Bandeja'),
+(58, 'HA', 'Hectárea'),
+(59, 'ML', 'Mililitro'),
+(60, 'MG', 'Miligramo'),
+(61, 'OZ', 'Onzas'),
+(62, 'OZT', 'Onzas Troy')
+ON DUPLICATE KEY UPDATE
+  `codigo` = VALUES(`codigo`),
+  `descripcion` = VALUES(`descripcion`);
+
+-- =============================================================================
+-- Consultas útiles:
+-- =============================================================================
+
+-- Ver todas las unidades activas:
+-- SELECT * FROM unidades_medida WHERE activo = TRUE ORDER BY id;
+
+-- Buscar por código:
+-- SELECT * FROM unidades_medida WHERE codigo = 'KG';
+
+-- Buscar por descripción (LIKE):
+-- SELECT * FROM unidades_medida WHERE descripcion LIKE '%metro%';
