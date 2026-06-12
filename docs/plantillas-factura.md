@@ -46,6 +46,9 @@ La herramienta de operaciones `public/upload_logo.php` (token propio) sigue
 funcionando y puede fijar el logo de cualquier tenant (útil en onboarding de
 integración). Ambas vías comparten `src/Utils/LogoStorage.php`.
 
+Dimensiones y composición del logo (cajas por plantilla, proporción ~3:1,
+lockup horizontal): ver `docs/logo-guia.md`.
+
 ## Diseños a la medida (`custom:*`)
 
 Cuando un cliente pide su propio formato de factura:
