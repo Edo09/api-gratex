@@ -108,12 +108,19 @@ class DgiiAuthService
         }
 
         $response = $this->request(strtoupper($method), $endpoint, $requestHeaders, $requestBody, $config['timeout']);
+        $decoded = json_decode($response['body'], true);
+        $isError = $response['status_code'] < 200 || $response['status_code'] >= 300;
 
-        if ($response['status_code'] < 200 || $response['status_code'] >= 300) {
+        // DGII responde algunos RECHAZOS de negocio con HTTP 4xx + cuerpo JSON
+        // estructurado ({"codigo":2,"estado":"Rechazado","secuenciaUtilizada":false}).
+        // Con tolerate_http_errors el llamador (recepcion e-CF) recibe ese cuerpo
+        // para persistir el rechazo y revertir la secuencia, en vez de tratarlo
+        // como caida. Un 4xx/5xx SIN cuerpo JSON (gateway/caida real) sigue
+        // lanzando excepcion.
+        $tolerate = !empty($options['tolerate_http_errors']);
+        if ($isError && (!$tolerate || !is_array($decoded))) {
             throw new RuntimeException('DGII authenticated request failed: ' . $this->responseSummary($response));
         }
-
-        $decoded = json_decode($response['body'], true);
 
         return [
             'status_code' => $response['status_code'],

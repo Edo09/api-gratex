@@ -64,7 +64,8 @@
       "PowerShell(php -l public/cert_run.php)",
       "PowerShell(php -l tools/send_fase2.php)",
       "PowerShell(php -l tools/send_fase3.php)",
-      "PowerShell(php -l tools/send_fase4_simulation.php)"
+      "PowerShell(php -l tools/send_fase4_simulation.php)",
+      "PowerShell(php C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\test_rechazo.php)"
     ]
   }
 }
