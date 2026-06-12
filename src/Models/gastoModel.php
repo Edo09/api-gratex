@@ -231,7 +231,7 @@ class gastoModel
             'tipo_gasto' => $tipoGasto,
             'ncf' => $ncf !== '' ? $ncf : null,
             'rnc_proveedor' => $rncProveedor !== '' ? $rncProveedor : null,
-            'nombre_proveedor' => $nombreProveedor,
+            'nombre_proveedor' => $nombreProveedor !== '' ? $nombreProveedor : null,
             'fecha' => $data['fecha'] ?? date('Y-m-d'),
             'subtotal' => $subtotal,
             'itbis' => $itbis,
