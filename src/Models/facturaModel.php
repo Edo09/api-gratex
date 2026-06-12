@@ -881,15 +881,26 @@ class facturaModel
             )->fetchAll(PDO::FETCH_ASSOC);
 
             $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
+            // Varias filas por tipo = rangos autorizados DGII: se agregan por tipo.
+            // restantes = capacidad disponible en rangos vigentes (NULL = sin limite
+            // registrado); vencimiento = el del rango vigente mas proximo a dispensar.
             $secuencias = $this->conexion->query(
-                "SELECT ns.type, ns.current_value as secuencia_actual,
-                        COALESCE(f.total_emitidos, 0) as total_emitidos
+                "SELECT ns.type,
+                        MAX(ns.current_value) as secuencia_actual,
+                        COALESCE(MAX(f.total_emitidos), 0) as total_emitidos,
+                        SUM(CASE WHEN ns.numero_hasta IS NOT NULL
+                                  AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())
+                                 THEN GREATEST(ns.numero_hasta - ns.current_value, 0) END) as restantes,
+                        MIN(CASE WHEN (ns.numero_hasta IS NULL OR ns.current_value < ns.numero_hasta)
+                                  AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())
+                                 THEN ns.fecha_vencimiento END) as vencimiento
                  FROM ncf_sequences ns
                  LEFT JOIN (
                      SELECT CONCAT('E', tipo_ecf) as type, COUNT(*) as total_emitidos
                      FROM facturas WHERE tipo_ecf IS NOT NULL {$ambFilter} GROUP BY tipo_ecf
                  ) f ON ns.type = f.type
                  WHERE ns.type LIKE 'E%' {$ambSeqFilter}
+                 GROUP BY ns.type
                  ORDER BY ns.type"
             )->fetchAll(PDO::FETCH_ASSOC);
 
@@ -907,6 +918,8 @@ class facturaModel
                         'type' => 'E' . $tipo,
                         'secuencia_actual' => 0,
                         'total_emitidos' => $emitidosPorTipo['E' . $tipo] ?? 0,
+                        'restantes' => null,
+                        'vencimiento' => null,
                     ],
                     ['31', '32', '33', '34', '41', '43', '44', '45', '46', '47']
                 );
