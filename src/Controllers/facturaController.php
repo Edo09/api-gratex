@@ -361,8 +361,26 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         $consulta = $service->consultarEstado($ecf['track_id'], $ecf['e_ncf'], $ecf['ambiente_dgii'] ?? null);
         $estadoNuevo = mapEstadoFromConsulta($consulta);
         if ($estadoNuevo !== null) {
+            $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
+            
+            // Si el e-CF es rechazado asincronamente y la secuencia no se consumió, revertir el contador
+            $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
+            if (($estadoNuevo === 'RECHAZADO' || $estadoNuevo === 'NO_ENCONTRADO') && 
+                ($estadoAnterior !== 'RECHAZADO' && $estadoAnterior !== 'NO_ENCONTRADO')) {
+                if ($secuenciaUtilizada === false) {
+                    $ncfModel = new ncfModel();
+                    $tipoEcf = 'E' . $ecf['tipo_ecf'];
+                    $valor = (int) substr($ecf['e_ncf'], 3);
+                    
+                    $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
+                    error_log(sprintf(
+                        '[ECF] consulta estado rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
+                        $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
+                    ));
+                }
+            }
         }
         echo json_encode([
             'status' => true,
@@ -410,8 +428,26 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
         $estadoBase = mapEstadoFromConsulta($consulta);
         $estadoNuevo = $estadoBase !== null ? 'RFCE_' . $estadoBase : null;
         if ($estadoNuevo !== null) {
+            $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
+            
+            // Si el RFCE es rechazado asincronamente y la secuencia no se consumió, revertir el contador
+            $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
+            if (($estadoNuevo === 'RFCE_RECHAZADO' || $estadoNuevo === 'RFCE_NO_ENCONTRADO') && 
+                ($estadoAnterior !== 'RFCE_RECHAZADO' && $estadoAnterior !== 'RFCE_NO_ENCONTRADO')) {
+                if ($secuenciaUtilizada === false) {
+                    $ncfModel = new ncfModel();
+                    $tipoEcf = 'E' . $ecf['tipo_ecf'];
+                    $valor = (int) substr($ecf['e_ncf'], 3);
+                    
+                    $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
+                    error_log(sprintf(
+                        '[ECF] consulta RFCE rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
+                        $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
+                    ));
+                }
+            }
         }
         echo json_encode([
             'status' => true,
