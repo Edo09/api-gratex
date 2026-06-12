@@ -65,7 +65,9 @@
       "PowerShell(php -l tools/send_fase2.php)",
       "PowerShell(php -l tools/send_fase3.php)",
       "PowerShell(php -l tools/send_fase4_simulation.php)",
-      "PowerShell(php C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\test_rechazo.php)"
+      "PowerShell(php C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\test_rechazo.php)",
+      "PowerShell(php -r '$f=false; var_dump\\(filter_var\\($f, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE\\)\\); $j=json_decode\\(''{\"secuenciaUtilizada\":false}'',true\\); var_dump\\($j[\"secuenciaUtilizada\"], filter_var\\($j[\"secuenciaUtilizada\"], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE\\)\\);')",
+      "PowerShell(php C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\test_reclamar.php)"
     ]
   }
 }
