@@ -222,7 +222,8 @@ class ECFEmissionService
 
             $this->reclamarSecuenciaSiNoUtilizada(
                 $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
-                is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : []
+                is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : [],
+                $rfceEstado
             );
 
             return [
@@ -256,7 +257,8 @@ class ECFEmissionService
 
         $this->reclamarSecuenciaSiNoUtilizada(
             $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
-            is_array($reception['data'] ?? null) ? $reception['data'] : []
+            is_array($reception['data'] ?? null) ? $reception['data'] : [],
+            $estado
         );
 
         return [
@@ -275,26 +277,55 @@ class ECFEmissionService
     }
 
     /**
-     * Revierte el contador de secuencia cuando DGII rechaza el e-CF SIN consumir
-     * la secuencia. DGII lo indica con secuenciaUtilizada=false (caso tipico:
-     * codigo 135 "No existen rangos de secuencias disponibles"). Solo aplica a
-     * secuencias que dispensamos nosotros; un e_ncf override no toca el contador.
-     * Si la bandera viene true/ausente NO se revierte (la secuencia se consumio).
+     * Revierte el contador de secuencia cuando DGII NO consume el e-NCF, para
+     * reutilizarlo en el proximo intento. Solo aplica a secuencias que
+     * dispensamos nosotros; un e_ncf override no toca el contador.
+     *
+     * Regla (DGII): un e-CF RECHAZADO no consume la secuencia autorizada salvo
+     * que DGII lo indique con secuenciaUtilizada=true (p.ej. e-NCF duplicado).
+     * La bandera no siempre viene y su forma varia entre la recepcion integra y
+     * RecepcionFC (RFCE E32 < 250k), por eso se decide por bandera + estado:
+     *   - secuenciaUtilizada === false            -> revertir
+     *   - secuenciaUtilizada ausente + RECHAZADO  -> revertir (no se consumio)
+     *   - secuenciaUtilizada === true             -> NO revertir (DGII la consumio)
      */
     private function reclamarSecuenciaSiNoUtilizada(
         bool $dispensamos,
         string $type,
         int $valor,
         string $ambiente,
-        array $receptionData
+        array $receptionData,
+        string $estado
     ): void {
-        if (!$dispensamos || !array_key_exists('secuenciaUtilizada', $receptionData)) {
+        if (!$dispensamos) {
             return;
         }
-        $flag = $receptionData['secuenciaUtilizada'];
-        $utilizada = filter_var($flag, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
-        if ($utilizada === false) {
-            $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente);
+        $utilizada = null;
+        if (array_key_exists('secuenciaUtilizada', $receptionData)) {
+            $utilizada = filter_var(
+                $receptionData['secuenciaUtilizada'],
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE
+            );
+        }
+        $esRechazo = in_array($estado, ['RECHAZADO', 'NO_ENCONTRADO'], true);
+        $debeRevertir = ($utilizada === false) || ($utilizada === null && $esRechazo);
+
+        $flagTxt = $utilizada === null ? 'ausente' : ($utilizada ? 'true' : 'false');
+        if ($debeRevertir) {
+            $ok = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente);
+            if (!$ok) {
+                error_log(sprintf(
+                    '[ECF] rollback secuencia NO aplico: type=%s valor=%d ambiente=%s estado=%s utilizada=%s '
+                    . '(ninguna fila ncf_sequences con ese current_value+ambiente; revisar rango activo).',
+                    $type, $valor, $ambiente, $estado, $flagTxt
+                ));
+            }
+        } elseif ($utilizada === true) {
+            error_log(sprintf(
+                '[ECF] secuencia type=%s valor=%d marcada utilizada=true por DGII (estado=%s); no se revierte.',
+                $type, $valor, $estado
+            ));
         }
     }
 

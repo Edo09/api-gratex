@@ -153,7 +153,21 @@ class ncfModel
                  WHERE type = :type AND ambiente = :ambiente AND current_value = :expected'
             );
             $upd->execute([':type' => $type, ':ambiente' => $amb, ':expected' => $expectedValue]);
-            return $upd->rowCount() > 0;
+            if ($upd->rowCount() > 0) {
+                return true;
+            }
+            // No coincidio: deja rastro del estado real del contador para diagnostico
+            // (p.ej. el contador avanzo por otra emision, o el ambiente difiere).
+            $cur = $this->conexion->prepare(
+                'SELECT current_value FROM ncf_sequences WHERE type = :type AND ambiente = :ambiente'
+            );
+            $cur->execute([':type' => $type, ':ambiente' => $amb]);
+            $valores = $cur->fetchAll(PDO::FETCH_COLUMN);
+            error_log(sprintf(
+                '[NCF] rollbackECFSequence sin coincidencia: type=%s ambiente=%s esperado=%d current_value(es)=[%s]',
+                $type, $amb, $expectedValue, implode(',', array_map('intval', $valores))
+            ));
+            return false;
         } catch (PDOException $e) {
             return false;
         }
