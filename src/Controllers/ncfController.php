@@ -93,8 +93,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (strpos($uri, '/api/ncf/rangos') !== false) {
             $body = json_decode(file_get_contents('php://input', true));
             if (!is_object($body)) {
-                echo json_encode(['status' => false, 'error' => 'JSON body invalido']);
                 http_response_code(400);
+                echo json_encode(['status' => false, 'error' => 'JSON body invalido']);
                 break;
             }
             $type = strtoupper(trim((string) ($body->type ?? '')));
@@ -102,8 +102,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $hasta = $body->numero_hasta ?? null;
             $venc = trim((string) ($body->fecha_vencimiento ?? ''));
             if ($type === '' || !is_numeric($desde) || !is_numeric($hasta) || $venc === '') {
-                echo json_encode(['status' => false, 'error' => 'type, numero_desde, numero_hasta y fecha_vencimiento son requeridos']);
                 http_response_code(422);
+                echo json_encode(['status' => false, 'error' => 'type, numero_desde, numero_hasta y fecha_vencimiento son requeridos']);
                 break;
             }
             $result = $ncfModel->registerRange(
@@ -117,13 +117,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
             if ($result[0] === 'success') {
                 echo json_encode(['status' => true, 'data' => $result[1]]);
             } else {
-                echo json_encode(['status' => false, 'error' => $result[1]]);
                 http_response_code(422);
+                echo json_encode(['status' => false, 'error' => $result[1]]);
             }
             break;
         }
-        echo json_encode(['status' => false, 'error' => 'Ruta POST no soportada. Use /api/ncf/rangos']);
         http_response_code(404);
+        echo json_encode(['status' => false, 'error' => 'Ruta POST no soportada. Use /api/ncf/rangos']);
         break;
 
     case 'PUT':

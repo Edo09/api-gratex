@@ -312,21 +312,18 @@ class ECFEmissionService
         $debeRevertir = ($utilizada === false) || ($utilizada === null && $esRechazo);
 
         $flagTxt = $utilizada === null ? 'ausente' : ($utilizada ? 'true' : 'false');
+        $resultado = 'no_revierte';
         if ($debeRevertir) {
-            $ok = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente);
-            if (!$ok) {
-                error_log(sprintf(
-                    '[ECF] rollback secuencia NO aplico: type=%s valor=%d ambiente=%s estado=%s utilizada=%s '
-                    . '(ninguna fila ncf_sequences con ese current_value+ambiente; revisar rango activo).',
-                    $type, $valor, $ambiente, $estado, $flagTxt
-                ));
-            }
-        } elseif ($utilizada === true) {
-            error_log(sprintf(
-                '[ECF] secuencia type=%s valor=%d marcada utilizada=true por DGII (estado=%s); no se revierte.',
-                $type, $valor, $estado
-            ));
+            $resultado = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente)
+                ? 'revertido'
+                : 'rollback_sin_coincidencia';
         }
+        // Siempre se registra: deja claro en error_log que decision se tomo y por
+        // que (dispensamos/estado/bandera) ante cualquier duda sobre la secuencia.
+        error_log(sprintf(
+            '[ECF] reclamar secuencia: type=%s valor=%d ambiente=%s estado=%s dispensamos=si utilizada=%s -> %s',
+            $type, $valor, $ambiente, $estado, $flagTxt, $resultado
+        ));
     }
 
     public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null): array
