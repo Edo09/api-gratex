@@ -120,6 +120,7 @@ class ncfModel
                 return [
                     'e_ncf' => $type . str_pad((string) $current, 10, '0', STR_PAD_LEFT),
                     'valor' => $current,
+                    'rango_id' => (int) $rango['id'],
                     'fecha_vencimiento' => $rango['fecha_vencimiento'] ?: null,
                     'numero_hasta' => $rango['numero_hasta'] !== null ? (int) $rango['numero_hasta'] : null,
                     'restantes' => $rango['numero_hasta'] !== null
@@ -141,31 +142,49 @@ class ncfModel
      * se entrego, para no pisar el incremento de otra emision posterior. Devuelve
      * true si revirtio.
      */
-    public function rollbackECFSequence(string $type, int $expectedValue, ?string $ambiente = null): bool
+    public function rollbackECFSequence(string $type, int $expectedValue, ?string $ambiente = null, ?int $rangoId = null): bool
     {
         if (!preg_match('/^E\d{2}$/', $type) || $expectedValue < 1) {
             return false;
         }
         $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
         try {
-            $upd = $this->conexion->prepare(
-                'UPDATE ncf_sequences SET current_value = current_value - 1
-                 WHERE type = :type AND ambiente = :ambiente AND current_value = :expected'
-            );
-            $upd->execute([':type' => $type, ':ambiente' => $amb, ':expected' => $expectedValue]);
+            // Cuando se conoce el rango_id (dispensado por dispenseNextECF), se
+            // apunta directamente a esa fila. De lo contrario se usa el filtro
+            // clasico type+ambiente (legacy / e_ncf override).
+            if ($rangoId !== null) {
+                $upd = $this->conexion->prepare(
+                    'UPDATE ncf_sequences SET current_value = current_value - 1
+                     WHERE id = :id AND current_value = :expected'
+                );
+                $upd->execute([':id' => $rangoId, ':expected' => $expectedValue]);
+            } else {
+                $upd = $this->conexion->prepare(
+                    'UPDATE ncf_sequences SET current_value = current_value - 1
+                     WHERE type = :type AND ambiente = :ambiente AND current_value = :expected'
+                );
+                $upd->execute([':type' => $type, ':ambiente' => $amb, ':expected' => $expectedValue]);
+            }
             if ($upd->rowCount() > 0) {
                 return true;
             }
             // No coincidio: deja rastro del estado real del contador para diagnostico
             // (p.ej. el contador avanzo por otra emision, o el ambiente difiere).
-            $cur = $this->conexion->prepare(
-                'SELECT current_value FROM ncf_sequences WHERE type = :type AND ambiente = :ambiente'
-            );
-            $cur->execute([':type' => $type, ':ambiente' => $amb]);
+            if ($rangoId !== null) {
+                $cur = $this->conexion->prepare(
+                    'SELECT current_value FROM ncf_sequences WHERE id = :id'
+                );
+                $cur->execute([':id' => $rangoId]);
+            } else {
+                $cur = $this->conexion->prepare(
+                    'SELECT current_value FROM ncf_sequences WHERE type = :type AND ambiente = :ambiente'
+                );
+                $cur->execute([':type' => $type, ':ambiente' => $amb]);
+            }
             $valores = $cur->fetchAll(PDO::FETCH_COLUMN);
             error_log(sprintf(
-                '[NCF] rollbackECFSequence sin coincidencia: type=%s ambiente=%s esperado=%d current_value(es)=[%s]',
-                $type, $amb, $expectedValue, implode(',', array_map('intval', $valores))
+                '[NCF] rollbackECFSequence sin coincidencia: type=%s ambiente=%s rango_id=%s esperado=%d current_value(es)=[%s]',
+                $type, $amb, $rangoId !== null ? (string) $rangoId : 'null', $expectedValue, implode(',', array_map('intval', $valores))
             ));
             return false;
         } catch (PDOException $e) {
