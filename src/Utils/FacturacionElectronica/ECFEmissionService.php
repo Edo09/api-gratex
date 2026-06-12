@@ -77,16 +77,23 @@ class ECFEmissionService
         if ($integration && ($eNcfOverride === null || $eNcfOverride === '')) {
             throw new RuntimeException('Integracion: el e_ncf es requerido en el payload (no generamos secuencia).');
         }
+        $rangoVencimiento = null; // vencimiento del rango autorizado que dispensa
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
                 throw new RuntimeException('e_ncf override invalido: debe ser E' . $tipoEcf . ' + 10 digitos. Recibido: ' . $eNcfOverride);
             }
             $eNcf = (string) $eNcfOverride;
         } else {
-            $eNcf = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
-            if ($eNcf === null) {
-                throw new RuntimeException('No se pudo asignar e-NCF para el tipo E' . $tipoEcf);
+            $disp = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
+            if ($disp === null) {
+                throw new RuntimeException(
+                    'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
+                    . ': el rango autorizado esta agotado o vencido. Solicite un nuevo rango a la DGII '
+                    . 'y registrelo en la app (POST /api/ncf/rangos).'
+                );
             }
+            $eNcf = $disp['e_ncf'];
+            $rangoVencimiento = $disp['fecha_vencimiento'] ?? null;
         }
         // Si nosotros dispensamos la secuencia (no es un e_ncf override), se puede
         // revertir cuando DGII rechace sin consumirla (secuenciaUtilizada=false).
@@ -117,7 +124,10 @@ class ECFEmissionService
             'tipo_ecf' => $tipoEcf,
             'e_ncf' => $eNcf,
             'fecha_emision' => $payload['fecha_emision'] ?? date('d-m-Y'),
+            // Prioridad: override del payload > vencimiento del RANGO autorizado
+            // que dispenso este e-NCF > emisor_config (legacy) > default.
             'fecha_vencimiento_secuencia' => $payload['fecha_vencimiento_secuencia']
+                ?? $rangoVencimiento
                 ?? $emisor['fecha_vencimiento_secuencia']
                 ?? '31-12-2030',
             'tipo_ingresos' => $payload['tipo_ingresos'] ?? '01',

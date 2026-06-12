@@ -261,7 +261,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             gastoRespond(false, 'rnc_proveedor requerido (excepto Gastos Menores E43)', 422);
             break;
         }
-        if (empty($body['nombre_proveedor'])) {
+        if (empty($body['nombre_proveedor']) && strtoupper(trim((string) $body['tipo_gasto'])) !== 'E43') {
             gastoRespond(false, 'nombre_proveedor requerido', 422);
             break;
         }

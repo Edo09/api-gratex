@@ -1,8 +1,8 @@
 <?php
 header('Access-Control-Allow-Origin: *');
 header("Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method");
-header("Access-Control-Allow-Methods: GET, PUT, OPTIONS");
-header("Allow: GET, PUT, OPTIONS");
+header("Access-Control-Allow-Methods: GET, POST, PUT, OPTIONS");
+header("Allow: GET, POST, PUT, OPTIONS");
 header('content-type: application/json; charset=utf-8');
 
 require_once(__DIR__ . '/../Models/facturaModel.php');
@@ -26,6 +26,20 @@ $uri = $_SERVER['REQUEST_URI'];
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
+        // /api/ncf/rangos -> rangos e-NCF autorizados por DGII del ambiente
+        // activo, con usados/restantes/vencimiento/estado por rango.
+        // Filtro opcional: ?type=E31
+        if (strpos($uri, '/api/ncf/rangos') !== false) {
+            $type = isset($_GET['type']) ? strtoupper(trim((string) $_GET['type'])) : null;
+            $rangos = $ncfModel->listRanges(null, $type !== '' ? $type : null);
+            echo json_encode([
+                'status' => true,
+                'data' => $rangos,
+                'ambiente' => $ncfModel->resolveActiveAmbiente(),
+            ]);
+            break;
+        }
+
         // /api/ncf/sequence -> Get stats
         if (strpos($uri, '/api/ncf/sequence') !== false) {
             $data = $ncfModel->getCurrentSequence('B01');
@@ -70,6 +84,46 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
         }
         echo json_encode($respuesta);
+        break;
+
+    case 'POST':
+        // /api/ncf/rangos -> registrar un rango autorizado por DGII.
+        // Body: { type, numero_desde, numero_hasta, fecha_vencimiento (YYYY-MM-DD),
+        //         no_solicitud?, no_autorizacion? }
+        if (strpos($uri, '/api/ncf/rangos') !== false) {
+            $body = json_decode(file_get_contents('php://input', true));
+            if (!is_object($body)) {
+                echo json_encode(['status' => false, 'error' => 'JSON body invalido']);
+                http_response_code(400);
+                break;
+            }
+            $type = strtoupper(trim((string) ($body->type ?? '')));
+            $desde = $body->numero_desde ?? null;
+            $hasta = $body->numero_hasta ?? null;
+            $venc = trim((string) ($body->fecha_vencimiento ?? ''));
+            if ($type === '' || !is_numeric($desde) || !is_numeric($hasta) || $venc === '') {
+                echo json_encode(['status' => false, 'error' => 'type, numero_desde, numero_hasta y fecha_vencimiento son requeridos']);
+                http_response_code(422);
+                break;
+            }
+            $result = $ncfModel->registerRange(
+                $type,
+                (int) $desde,
+                (int) $hasta,
+                $venc,
+                isset($body->no_solicitud) ? trim((string) $body->no_solicitud) : null,
+                isset($body->no_autorizacion) ? trim((string) $body->no_autorizacion) : null
+            );
+            if ($result[0] === 'success') {
+                echo json_encode(['status' => true, 'data' => $result[1]]);
+            } else {
+                echo json_encode(['status' => false, 'error' => $result[1]]);
+                http_response_code(422);
+            }
+            break;
+        }
+        echo json_encode(['status' => false, 'error' => 'Ruta POST no soportada. Use /api/ncf/rangos']);
+        http_response_code(404);
         break;
 
     case 'PUT':

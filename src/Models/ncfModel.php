@@ -69,34 +69,65 @@ class ncfModel
     }
 
     /**
-     * Reserves and returns the next e-NCF for an electronic type (E31..E47).
-     * Atomic: uses UPDATE with arithmetic so no two concurrent calls return the same number.
-     * Format: E + 2-digit type + 10-digit sequence = 13 chars (e.g. E310000000001).
+     * Reserves the next e-NCF for an electronic type (E31..E47) from the ACTIVE
+     * authorized range (DGII model: ranges with numero_desde/hasta + vencimiento).
+     *
+     * Active range = lowest numero_desde with remaining capacity
+     * (numero_hasta NULL = unlimited/legacy) and not expired. The increment is
+     * atomic AND bounded by numero_hasta, so concurrent calls never exceed the
+     * authorization. If a range is exhausted between SELECT and UPDATE, retries
+     * with the next range once.
+     *
+     * @return array|null ['e_ncf','valor','fecha_vencimiento','numero_hasta','restantes'] o null si
+     *                    NO hay rango disponible (agotado/vencido: registrar uno nuevo).
      */
-    public function dispenseNextECF(string $type, ?string $ambiente = null): ?string
+    public function dispenseNextECF(string $type, ?string $ambiente = null): ?array
     {
         if (!preg_match('/^E\d{2}$/', $type)) {
             return null;
         }
         $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
         try {
-            $upd = $this->conexion->prepare(
-                'UPDATE ncf_sequences SET current_value = current_value + 1 WHERE type = :type AND ambiente = :ambiente'
-            );
-            $upd->execute([':type' => $type, ':ambiente' => $amb]);
-            if ($upd->rowCount() === 0) {
-                return null;
+            for ($intento = 0; $intento < 3; $intento++) {
+                $sel = $this->conexion->prepare(
+                    'SELECT id, numero_hasta, fecha_vencimiento FROM ncf_sequences
+                     WHERE type = :type AND ambiente = :ambiente
+                       AND (numero_hasta IS NULL OR current_value < numero_hasta)
+                       AND (fecha_vencimiento IS NULL OR fecha_vencimiento >= CURDATE())
+                     ORDER BY numero_desde ASC LIMIT 1'
+                );
+                $sel->execute([':type' => $type, ':ambiente' => $amb]);
+                $rango = $sel->fetch(PDO::FETCH_ASSOC);
+                if (!$rango) {
+                    return null; // sin rango con capacidad vigente
+                }
+
+                // Incremento atomico ACOTADO: si otra emision agoto el rango entre
+                // el SELECT y este UPDATE, rowCount=0 y se intenta el siguiente.
+                $upd = $this->conexion->prepare(
+                    'UPDATE ncf_sequences SET current_value = current_value + 1
+                     WHERE id = :id AND (numero_hasta IS NULL OR current_value < numero_hasta)'
+                );
+                $upd->execute([':id' => $rango['id']]);
+                if ($upd->rowCount() === 0) {
+                    continue;
+                }
+
+                $val = $this->conexion->prepare('SELECT current_value FROM ncf_sequences WHERE id = :id');
+                $val->execute([':id' => $rango['id']]);
+                $current = (int) $val->fetchColumn();
+
+                return [
+                    'e_ncf' => $type . str_pad((string) $current, 10, '0', STR_PAD_LEFT),
+                    'valor' => $current,
+                    'fecha_vencimiento' => $rango['fecha_vencimiento'] ?: null,
+                    'numero_hasta' => $rango['numero_hasta'] !== null ? (int) $rango['numero_hasta'] : null,
+                    'restantes' => $rango['numero_hasta'] !== null
+                        ? max(0, (int) $rango['numero_hasta'] - $current)
+                        : null,
+                ];
             }
-            $sel = $this->conexion->prepare(
-                'SELECT current_value FROM ncf_sequences WHERE type = :type AND ambiente = :ambiente'
-            );
-            $sel->execute([':type' => $type, ':ambiente' => $amb]);
-            $row = $sel->fetch(PDO::FETCH_ASSOC);
-            if (!$row) {
-                return null;
-            }
-            $sequenceDigits = str_pad((string) $row['current_value'], 10, '0', STR_PAD_LEFT);
-            return $type . $sequenceDigits;
+            return null;
         } catch (PDOException $e) {
             return null;
         }
@@ -125,6 +156,166 @@ class ncfModel
             return $upd->rowCount() > 0;
         } catch (PDOException $e) {
             return false;
+        }
+    }
+
+    /**
+     * Lista los rangos e-NCF del ambiente con uso/restantes/estado calculados.
+     * estado: activo (dispensando) | pendiente (rango futuro) | agotado | vencido | sin_limite.
+     */
+    public function listRanges(?string $ambiente = null, ?string $type = null): array
+    {
+        $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+        try {
+            $sql = "SELECT id, type, prefix, description, ambiente, current_value,
+                           numero_desde, numero_hasta, fecha_vencimiento, no_solicitud, no_autorizacion,
+                           created_at, updated_at
+                    FROM ncf_sequences
+                    WHERE type LIKE 'E%' AND ambiente = :amb" . ($type !== null ? ' AND type = :type' : '') . '
+                    ORDER BY type, numero_desde';
+            $stmt = $this->conexion->prepare($sql);
+            $params = [':amb' => $amb];
+            if ($type !== null) {
+                $params[':type'] = $type;
+            }
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $hoy = date('Y-m-d');
+            $activoPorTipo = [];
+            foreach ($rows as &$r) {
+                $cv = (int) $r['current_value'];
+                $desde = (int) $r['numero_desde'];
+                $hasta = $r['numero_hasta'] !== null ? (int) $r['numero_hasta'] : null;
+                $vencido = $r['fecha_vencimiento'] !== null && $r['fecha_vencimiento'] < $hoy;
+                $agotado = $hasta !== null && $cv >= $hasta;
+
+                $r['usados'] = max(0, $cv - ($desde - 1));
+                $r['restantes'] = $hasta !== null ? max(0, $hasta - $cv) : null;
+
+                if ($vencido) {
+                    $r['estado'] = 'vencido';
+                } elseif ($agotado) {
+                    $r['estado'] = 'agotado';
+                } elseif (!isset($activoPorTipo[$r['type']])) {
+                    // primer rango con capacidad vigente = el que dispensa ahora
+                    $activoPorTipo[$r['type']] = true;
+                    $r['estado'] = $hasta === null ? 'sin_limite' : 'activo';
+                } else {
+                    $r['estado'] = 'pendiente';
+                }
+            }
+            unset($r);
+            return $rows;
+        } catch (PDOException $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Registra un rango autorizado por DGII para un tipo e-CF.
+     * Reglas: numero_desde > todo numero ya usado/autorizado del tipo+ambiente
+     * (los rangos DGII son consecutivos hacia adelante). Si existia una fila
+     * "sin limite" (legacy, numero_hasta NULL) se CIERRA en su consumo actual
+     * para que el nuevo rango pase a dispensar.
+     *
+     * @return array ['success', rango] | ['error', mensaje]
+     */
+    public function registerRange(
+        string $type,
+        int $numeroDesde,
+        int $numeroHasta,
+        string $fechaVencimiento,
+        ?string $noSolicitud = null,
+        ?string $noAutorizacion = null,
+        ?string $ambiente = null
+    ): array {
+        if (!preg_match('/^E\d{2}$/', $type)) {
+            return ['error', 'type invalido: use E31..E47'];
+        }
+        if ($numeroDesde < 1 || $numeroHasta < $numeroDesde) {
+            return ['error', 'Rango invalido: numero_desde >= 1 y numero_hasta >= numero_desde'];
+        }
+        $venc = DateTime::createFromFormat('Y-m-d', $fechaVencimiento);
+        if (!$venc || $venc->format('Y-m-d') !== $fechaVencimiento) {
+            return ['error', 'fecha_vencimiento invalida: use formato YYYY-MM-DD'];
+        }
+        $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+
+        try {
+            $this->conexion->beginTransaction();
+
+            // Tope ya comprometido del tipo: numeros usados (current_value) y
+            // autorizados (numero_hasta) no pueden solaparse con el rango nuevo.
+            $stmt = $this->conexion->prepare(
+                'SELECT id, current_value, numero_hasta FROM ncf_sequences
+                 WHERE type = :type AND ambiente = :amb FOR UPDATE'
+            );
+            $stmt->execute([':type' => $type, ':amb' => $amb]);
+            $existentes = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+            $tope = 0;
+            $sinLimite = null;
+            foreach ($existentes as $e) {
+                $tope = max($tope, (int) $e['current_value'], (int) ($e['numero_hasta'] ?? 0));
+                if ($e['numero_hasta'] === null) {
+                    $sinLimite = $e;
+                }
+            }
+            if ($numeroDesde <= $tope) {
+                $this->conexion->rollBack();
+                return ['error', "numero_desde debe ser mayor que {$tope} (ultimo numero usado/autorizado de {$type} en {$amb})"];
+            }
+
+            // Cerrar la fila legacy sin limite en su consumo actual.
+            if ($sinLimite !== null) {
+                $cerrar = $this->conexion->prepare(
+                    'UPDATE ncf_sequences SET numero_hasta = GREATEST(current_value, numero_desde - 1) WHERE id = :id'
+                );
+                $cerrar->execute([':id' => $sinLimite['id']]);
+            }
+
+            $ins = $this->conexion->prepare(
+                'INSERT INTO ncf_sequences
+                    (type, prefix, current_value, numero_desde, numero_hasta, fecha_vencimiento,
+                     no_solicitud, no_autorizacion, description, ambiente)
+                 VALUES
+                    (:type, :type2, :cv, :desde, :hasta, :venc, :sol, :aut, :descr, :amb)'
+            );
+            $ins->execute([
+                ':type' => $type,
+                ':type2' => $type,
+                ':cv' => $numeroDesde - 1, // ultimo dispensado = ninguno aun
+                ':desde' => $numeroDesde,
+                ':hasta' => $numeroHasta,
+                ':venc' => $fechaVencimiento,
+                ':sol' => $noSolicitud !== null && $noSolicitud !== '' ? $noSolicitud : null,
+                ':aut' => $noAutorizacion !== null && $noAutorizacion !== '' ? $noAutorizacion : null,
+                ':descr' => 'Rango autorizado DGII',
+                ':amb' => $amb,
+            ]);
+            $id = (int) $this->conexion->lastInsertId();
+            $this->conexion->commit();
+
+            return ['success', [
+                'id' => $id,
+                'type' => $type,
+                'ambiente' => $amb,
+                'numero_desde' => $numeroDesde,
+                'numero_hasta' => $numeroHasta,
+                'fecha_vencimiento' => $fechaVencimiento,
+                'no_solicitud' => $noSolicitud,
+                'no_autorizacion' => $noAutorizacion,
+                'restantes' => $numeroHasta - ($numeroDesde - 1),
+            ]];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            if ($e->getCode() === '23000') {
+                return ['error', 'Ya existe un rango de ' . $type . ' que inicia en ' . $numeroDesde . ' para ' . $amb];
+            }
+            return ['error', 'No se pudo registrar el rango'];
         }
     }
 }
