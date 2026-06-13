@@ -57,7 +57,7 @@ tenant. Respuesta (envoltorio `{success,...}`, distinto al `{status,...}` del re
 |-------|---------|-------------|
 | `page` | `1` | Página |
 | `pageSize` | `10` | Resultados por página |
-| `query` | — | Filtro por e-NCF, nombre, etc. |
+| `query` | — | Busca en e-NCF, nº factura, cliente (nombre/razón social/RNC/correo/teléfono) y **descripción de los ítems** |
 | `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`) o `todos` |
 | `tipo_ecf` | — | Filtra por tipo: `E31`, `E32`, … `E47` (también acepta `31`, `32`, …) |
 
