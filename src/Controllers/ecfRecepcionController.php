@@ -262,6 +262,7 @@ function handleListarRecibidos(): void
  */
 function ecfRecepcionRequireReadAuth(): bool
 {
+    // Integracion / app con X-API-KEY explicito: AuthMiddleware valida la credencial.
     if (isset($_SERVER['HTTP_X_API_KEY']) && trim($_SERVER['HTTP_X_API_KEY']) !== '') {
         $validation = (new AuthMiddleware())->validateRequest();
         if ($validation['valid']) {
@@ -271,6 +272,14 @@ function ecfRecepcionRequireReadAuth(): bool
         return false;
     }
 
+    // App (frontend logueado): Authorization: Bearer <token de sesion>. AuthMiddleware
+    // valida el token de login (mismo esquema que el resto de /api/*). Si pasa, listo.
+    $validation = (new AuthMiddleware())->validateRequest();
+    if ($validation['valid']) {
+        return true;
+    }
+
+    // Fallback: Bearer del flujo semilla DGII (no es un token de sesion de app).
     return ecfRecepcionRequireBearer()['ok'];
 }
 
