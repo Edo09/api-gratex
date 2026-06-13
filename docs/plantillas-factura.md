@@ -40,7 +40,7 @@ del texto sobre el acento lo decide `BrandingResolver::contrastText()`
 | PUT | `/api/branding` | `{template?, accent_color?}` | 422 si plantilla desconocida o hex inválido. `accent_color: null` limpia. |
 | POST | `/api/branding/logo` | multipart `logo` | PNG/JPG real (getimagesize), máx 2 MB. Guarda `logos/<tenant_id>.<ext>`. |
 | DELETE | `/api/branding/logo` | — | Borra el logo; vuelve al global. |
-| POST | `/api/branding/preview` | `{template?, accent_color?, no_electronica?}` | PDF de muestra base64 (`?format=download`), **sin persistir**. |
+| POST | `/api/branding/preview` | `{template?, accent_color?, no_electronica?, grid?}` | PDF de muestra base64 (`?format=download`), **sin persistir**. `grid:true` superpone una rejilla de calibración (ver replicación abajo). |
 
 La herramienta de operaciones `public/upload_logo.php` (token propio) sigue
 funcionando y puede fijar el logo de cualquier tenant (útil en onboarding de
@@ -53,10 +53,12 @@ lockup horizontal): ver `docs/logo-guia.md`.
 
 Cuando un cliente pide su propio formato de factura:
 
-1. **Copiar la base:** `src/Utils/Pdf/Custom/EjemploTemplate.php` →
-   `src/Utils/Pdf/Custom/Tenant<id>Template.php` con clase
-   `Tenant<id>Template`. Convención de nombre: `custom:tenant<id>` →
-   `Tenant<id>Template.php` (snake_case → StudlyCaps + `Template`).
+1. **Generar el andamiaje:** `php tools/new_custom_template.php <id>` crea
+   `src/Utils/Pdf/Custom/Tenant<id>Template.php` (clase `Tenant<id>Template`,
+   anotada y lista para personalizar; rehúsa sobrescribir). Convención de
+   nombre: `custom:tenant<id>` → `Tenant<id>Template.php` (snake_case →
+   StudlyCaps + `Template`). La base manual es
+   `src/Utils/Pdf/Custom/EjemploTemplate.php` si prefieres copiar a mano.
 2. **Diseñar** sobreescribiendo los hooks:
    - `drawCompanyHeader($pdf, $emisor, $logoPath, $variant)` — identidad del
      emisor (corre en cada página; `$variant` es `factura` o `cotizacion`).
@@ -78,6 +80,61 @@ Cuando un cliente pide su propio formato de factura:
 
 Si el archivo custom falta o la clase no extiende `FacturaTemplate`, el motor
 cae a `clasico` — una factura siempre se puede imprimir.
+
+## Replicar el formato existente de un cliente (PDF/escaneo)
+
+Caso típico: el cliente ya tiene su factura impresa y quiere que su
+Representación Impresa se vea igual. No es una capacidad nueva del motor — es
+una plantilla `custom:tenant<id>` que **calca** su diseño. Lo que se reproduce
+es lo **visual**; el contenido obligatorio DGII lo sigue poniendo el motor (ver
+"Reglas duras").
+
+**Lo que se puede calcar vs. lo que es fijo**
+
+| Se puede calcar (visual) | Fijo por norma (no se mueve/cubre/quita) |
+|---|---|
+| Logo y su posición/tamaño | QR del timbre (y≈205, x=8, 30 mm) |
+| Colores (acento) y tipografías core | Cuadro de totales (anclado a y=-40) |
+| Disposición del encabezado y del pie | Las 6 columnas obligatorias de items |
+| Firmas/sello, reglas, banda de tabla | Paginación "Página X de Y" |
+| Fuentes/interlineado (`style()`), márgenes verticales (`layout()`) | Etiquetas y orden de columnas/totales (los fija el motor) |
+
+Si el formato del cliente choca con un elemento fijo, **gana la norma**: se le
+explica el límite, no se fuerza.
+
+**Pasos**
+
+1. **Intake.** Conseguir el formato del cliente — lo usual es un **PDF** de una
+   factura ya impresa o un **escaneo/imagen**. Identificar: logo, paleta de
+   colores (en hex), tipografías (se mapean a las core de FPDF), y los bloques
+   (encabezado, tabla, totales, pie, firmas, notas).
+2. **Medir.** La página es **Letter = 215.9 × 279.4 mm**, origen (0,0)
+   arriba-izquierda, todo en mm.
+   - De un **PDF**: medir posiciones y márgenes en mm directamente (visor con
+     regla, o exportar a imagen a 300 dpi: 1 mm ≈ 11.81 px).
+   - De un **escaneo/imagen** (sin medidas exactas): encender la **rejilla de
+     calibración** (abajo), superponer la vista previa sobre la imagen del
+     cliente y leer las coordenadas a ojo; se afina iterando.
+3. **Generar.** `php tools/new_custom_template.php <id>` crea
+   `src/Utils/Pdf/Custom/Tenant<id>Template.php` (extiende `ClasicoTemplate`, ya
+   imprime; cada hook trae un ejemplo comentado). Rellenar hook por hook:
+   `drawCompanyHeader` (¡ambas variantes, `factura` **y** `cotizacion`!),
+   `drawFooter`, `drawItemsTableHeader`, `drawTotals`, `style()`, `layout()`.
+   Recordar: solo fuentes core + Arial Narrow con guard; color sobre acento
+   siempre con `textOver()`.
+4. **Rejilla de calibración.**
+   `POST /api/branding/preview {"template":"custom:tenant<id>","grid":true}`
+   superpone una rejilla cada 10 mm con números en cm. Imprescindible para el
+   caso escaneo/imagen; quitar `"grid"` para ver el resultado limpio. La rejilla
+   **nunca** aparece en una factura real (solo cuando el preview la pide).
+5. **Activar.** `UPDATE tenants SET pdf_template='custom:tenant<id>' WHERE id=<id>;`
+   o `PUT /api/branding {"template":"custom:tenant<id>"}`, o el cliente hace
+   clic en la tarjeta **"A la medida"** en Configuración → Plantillas PDF.
+6. **Verificar.** Vista previa sin rejilla + el **checklist DGII** (emisor,
+   e-NCF/fechas, receptor, 6 columnas, totales, QR + código de seguridad +
+   fecha firma, NCF Modificado en notas, "Página X de Y"). Confirmar que la
+   **cotización** del mismo tenant también se ve bien (usa la misma plantilla,
+   variante `cotizacion`).
 
 ## Reglas duras (no negociables)
 

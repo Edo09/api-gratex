@@ -245,15 +245,19 @@ class facturaModel
             $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
                 ? (float) $raw['subtotal']
                 : round($quantity * $amount, 2);
+            $indicador = (int) ($raw['indicador_facturacion'] ?? 1);
+            // Si el front no envia itbis_amount, se calcula desde el indicador
+            // (1=18%, 2=16%, resto=0). Antes caia a 0.0 y dejaba en cero el ITBIS
+            // de lineas gravadas (ver backfill tools/backfill_itbis_simples.php).
             $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
                 ? (float) $raw['itbis_amount']
-                : 0.0;
+                : round($subtotal * ($indicador === 1 ? 0.18 : ($indicador === 2 ? 0.16 : 0.0)), 2);
             $normalized[] = [
                 'description' => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
                 'amount' => $amount,
                 'quantity' => $quantity,
                 'subtotal' => $subtotal,
-                'indicador_facturacion' => (int) ($raw['indicador_facturacion'] ?? 1),
+                'indicador_facturacion' => $indicador,
                 'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 1),
                 'unidad_medida' => (string) ($raw['unidad_medida'] ?? '43'),
                 'itbis_amount' => $itbis,

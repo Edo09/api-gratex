@@ -40,6 +40,10 @@ class FacturaPdfGenerator extends FPDF
     // todo lo propio del e-CF (titulo "Comprobante Fiscal Electronico", etiqueta
     // e-NCF, fecha de vencimiento y QR de timbre DGII).
     private $noElectronica = false;
+    // true => superpone una rejilla de calibracion (lineas cada 10 mm + etiquetas
+    // en cm) sobre cada pagina. SOLO para disenar plantillas a la medida via
+    // /api/branding/preview; jamas se activa en una factura real.
+    private $debugGrid = false;
 
     /**
      * Datos del emisor desde emisor_config (cacheados: Header() se invoca por
@@ -119,6 +123,17 @@ class FacturaPdfGenerator extends FPDF
     public function setNoElectronica(bool $v = true)
     {
         $this->noElectronica = $v;
+    }
+
+    /**
+     * Activa la rejilla de calibracion (10 mm + etiquetas en cm) sobre cada
+     * pagina. Herramienta de diseno para plantillas a la medida (replicar el
+     * formato impreso de un cliente desde su PDF/escaneo): permite medir y
+     * alinear. Ver docs/plantillas-factura.md. No usar en facturas reales.
+     */
+    public function setDebugGrid(bool $v = true)
+    {
+        $this->debugGrid = $v;
     }
 
     /**
@@ -307,6 +322,45 @@ class FacturaPdfGenerator extends FPDF
         $this->SetY(-8);
         $this->SetFont('Arial', '', 7);
         $this->Cell(0, 4, $this->convertEncoding('Página ' . $this->PageNo() . ' de {nb}'), 0, 0, 'C');
+
+        // Rejilla de calibracion al final (encima de todo) si esta activada.
+        if ($this->debugGrid) {
+            $this->drawDebugGrid();
+        }
+    }
+
+    /**
+     * Rejilla de calibracion: lineas cada 10 mm con etiquetas en cm sobre toda
+     * la pagina. Sirve para replicar el formato impreso de un cliente —
+     * superponer la vista previa sobre su PDF/escaneo y leer las coordenadas
+     * (mm) de cada bloque. Se dibuja al final del Footer, asi queda sobre el
+     * contenido. Solo se invoca cuando setDebugGrid(true) (preview de diseno).
+     */
+    private function drawDebugGrid(): void
+    {
+        $w = $this->GetPageWidth();
+        $h = $this->GetPageHeight();
+        // Lineas tenues cada 10 mm; las multiplos de 50 mm un poco mas marcadas.
+        for ($x = 0; $x <= $w; $x += 10) {
+            $this->SetDrawColor(($x % 50 === 0) ? 150 : 205, 205, 235);
+            $this->Line($x, 0, $x, $h);
+        }
+        for ($y = 0; $y <= $h; $y += 10) {
+            $this->SetDrawColor(($y % 50 === 0) ? 150 : 205, 205, 235);
+            $this->Line(0, $y, $w, $y);
+        }
+        // Etiquetas en cm (cada 10 mm) en el borde superior e izquierdo.
+        $this->SetFont('Arial', '', 5);
+        $this->SetTextColor(120, 130, 170);
+        for ($x = 10; $x < $w; $x += 10) {
+            $this->Text($x + 0.4, 3, (string) ((int) ($x / 10)));
+        }
+        for ($y = 10; $y < $h; $y += 10) {
+            $this->Text(0.5, $y - 0.6, (string) ((int) ($y / 10)));
+        }
+        // Restaurar estado de dibujo/texto para no afectar otras paginas.
+        $this->SetDrawColor(0, 0, 0);
+        $this->SetTextColor(0, 0, 0);
     }
 
     /**
@@ -756,8 +810,20 @@ class FacturaPdfGenerator extends FPDF
                     $motivoPendiente = '';
                 }
                 $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
-                $itbis = $item['itbis_amount'] ?? ($unitario * 0.18);
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
+                // ITBIS de la linea: usa el valor guardado; si no viene o viene en
+                // 0 sobre una linea gravada (indicador 1=18%, 2=16%), lo calcula
+                // desde el subtotal y la tasa del indicador (exento/0% se quedan en
+                // 0 — nunca un 18% ciego). Necesario para facturas simples viejas
+                // que guardaron itbis_amount=0; las recientes ya traen el valor.
+                $indItem = (int) ($item['indicador_facturacion'] ?? 1);
+                $itbisBD = $item['itbis_amount'] ?? null;
+                if ($itbisBD === null || ((float) $itbisBD == 0.0 && in_array($indItem, [1, 2], true))) {
+                    $tasa = $indItem === 1 ? 0.18 : ($indItem === 2 ? 0.16 : 0.0);
+                    $itbis = round((float) $lineSubtotal * $tasa, 2);
+                } else {
+                    $itbis = (float) $itbisBD;
+                }
                 $unidad = $this->unidadMedidaSigla($item['unidad_medida'] ?? '');
                 $subtotal += (float) $lineSubtotal;
                 $itbisLineSum += (float) $itbis;
