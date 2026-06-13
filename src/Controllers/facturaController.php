@@ -151,6 +151,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         respond(false, 'items debe ser un arreglo con al menos un elemento', 422);
         return;
     }
+    assertUnidadesMedida($items);
 
     $client = null;
     if ($clientId) {
@@ -261,6 +262,8 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
                 'subtotal' => $item['monto_item'] ?? 0,
                 'indicador_facturacion' => $item['indicador_facturacion'] ?? 1,
                 'indicador_bien_servicio' => $item['indicador_bien_servicio'] ?? 2,
+                // Código DGII de unidad de medida (id del catálogo; 43 = Unidad).
+                'unidad_medida' => $item['unidad_medida'] ?? '43',
                 'itbis_amount' => $item['itbis_amount'] ?? 0,
             ];
         }, mapItemsForXml($items)),
@@ -491,6 +494,7 @@ function handlePreview(clientModel $clientModel): void
         respond(false, 'items debe ser un arreglo con al menos un elemento', 422);
         return;
     }
+    assertUnidadesMedida($items);
 
     $clients = $clientModel->getClients($clientId);
     if (empty($clients)) {
@@ -695,6 +699,31 @@ function computeTotales(array $items): array
     ];
 }
 
+/**
+ * Valida que la unidad_medida de cada item sea un código DGII del catálogo
+ * (unidades_medida.id). Vacío/ausente se permite (toma el default 43 luego).
+ * Responde 422 y corta si alguno es inválido.
+ */
+function assertUnidadesMedida(array $items): void
+{
+    require_once __DIR__ . '/../Models/unidadMedidaModel.php';
+    static $model = null;
+    if ($model === null) {
+        $model = new unidadMedidaModel();
+    }
+    foreach (array_values($items) as $i => $it) {
+        $it = (array) $it;
+        $u = $it['unidad_medida'] ?? null;
+        if ($u === null || $u === '') {
+            continue;
+        }
+        if (!$model->isValid($u)) {
+            respond(false, 'Item ' . ($i + 1) . ': unidad_medida invalida (' . $u
+                . '). Use un código DGII del catálogo (/api/unidades-medida).', 422);
+        }
+    }
+}
+
 function mapItemsForXml(array $items): array
 {
     $mapped = [];
@@ -718,7 +747,10 @@ function mapItemsForXml(array $items): array
             'descripcion' => (string) ($raw['descripcion'] ?? $raw['description'] ?? ''),
             'cantidad' => $cantidad,
             'cantidad_raw' => $raw['cantidad_raw'] ?? null,
-            'unidad_medida' => isset($raw['unidad_medida']) ? (string) $raw['unidad_medida'] : '',
+            // Código DGII de unidad de medida (id del catálogo). Default 43 (Unidad)
+            // para que <UnidadMedida> nunca salga vacío.
+            'unidad_medida' => isset($raw['unidad_medida']) && (string) $raw['unidad_medida'] !== ''
+                ? (string) $raw['unidad_medida'] : '43',
             'cantidad_referencia' => $raw['cantidad_referencia'] ?? null,
             'unidad_referencia' => $raw['unidad_referencia'] ?? null,
             'subcantidades' => is_array($raw['subcantidades'] ?? null) ? $raw['subcantidades'] : [],

@@ -227,6 +227,7 @@ X-API-KEY: <key>
 | `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes (`?page,?pageSize,?query` para listado) |
 | `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query`) |
 | `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
+| `GET` | `/api/unidades-medida` | Catálogo DGII de unidades de medida (solo lectura) — ver nota abajo |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver `docs/gastos-module.md` |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
@@ -287,6 +288,28 @@ cierra en su consumo actual y el rango nuevo pasa a dispensar al agotarse el act
 
 > `GET /api/facturas/stats` y `/api/gastos/stats` ahora incluyen por secuencia
 > `restantes` (capacidad vigente; `null` = sin rango con límite) y `vencimiento`.
+
+---
+
+### Unidades de medida — `GET /api/unidades-medida`
+
+Catálogo DGII compartido (vive en el DB master). Cada ítem de un e-CF lleva
+`unidad_medida` = **código numérico DGII** = el `id` de este catálogo
+(43 = Unidad por defecto, 21 = KG, 24 = Litro…). `codigo`/`descripcion` son solo
+para mostrar; **no** se envían al XML.
+
+```json
+{ "status": true, "data": [
+  { "id": 21, "codigo": "KG", "descripcion": "Kilogramo" },
+  { "id": 43, "codigo": "UND", "descripcion": "Unidad" }
+]}
+```
+
+- En `POST /api/facturas` y `POST /api/gastos`, cada `items[].unidad_medida` debe
+  ser un `id` válido del catálogo (si se omite/queda vacío, default `43`). Un
+  código fuera del catálogo devuelve **422**.
+- Aplica también a la auto-emisión de gastos (E41/E43/E47) y se persiste en
+  `factura_items.unidad_medida` / `gasto_items.unidad_medida`.
 
 ---
 

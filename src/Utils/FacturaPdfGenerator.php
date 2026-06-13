@@ -539,13 +539,23 @@ class FacturaPdfGenerator extends FPDF
         if ($value === '') {
             return 'UND';
         }
+        // Valores no numéricos: ya son siglas, se imprimen tal cual.
         if (!ctype_digit($value)) {
             return strtoupper($value);
         }
-        $siglas = [
-            '43' => 'UND',
-        ];
-        return $siglas[$value] ?? $value;
+        // Código DGII (numérico) -> sigla del catálogo unidades_medida (DB master).
+        // Cache estático por request; fallback al número si no se halla.
+        static $map = null;
+        if ($map === null) {
+            $map = [];
+            try {
+                require_once __DIR__ . '/../Models/unidadMedidaModel.php';
+                $map = (new unidadMedidaModel())->codigoMap();
+            } catch (Throwable $e) {
+                $map = [];
+            }
+        }
+        return $map[(int) $value] ?? $value;
     }
 
     /**

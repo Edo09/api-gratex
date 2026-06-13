@@ -434,6 +434,8 @@ CREATE TABLE IF NOT EXISTS gasto_items (
     COMMENT '1=ITBIS 18% | 2=ITBIS 16% | 3=ITBIS 0% | 4=Exento | 0=No facturable',
   indicador_bien_servicio TINYINT NOT NULL DEFAULT 2
     COMMENT '1=Bien | 2=Servicio',
+  unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
+    COMMENT 'Codigo DGII de unidad de medida (id del catalogo unidades_medida; 43 = Unidad)',
   PRIMARY KEY (id),
   KEY idx_gasto_id (gasto_id),
   CONSTRAINT gasto_items_ibfk_1 FOREIGN KEY (gasto_id) REFERENCES gastos (id) ON DELETE CASCADE
