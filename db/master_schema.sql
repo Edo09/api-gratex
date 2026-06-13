@@ -239,6 +239,23 @@ CREATE TABLE IF NOT EXISTS aprobaciones_comerciales (
   CONSTRAINT fk_apc_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------------------------
+-- Catalogo DGII de unidades de medida (compartido por todos los tenants).
+-- CLAVE: el `id` ES el codigo numerico DGII que va en <UnidadMedida> del e-CF
+-- (id 43 = Unidad, 21 = KG, 24 = Litro...). `codigo` (UND/KG/CM) y `descripcion`
+-- son solo para mostrar. Ver samples/e-CF 31 v.1.0.xsd (UnidadMedidaType).
+-- Lo consume GET /api/unidades-medida y los selectores de unidad al crear e-CF.
+-- (Seed de las 62 filas DGII ya cargado en produccion.)
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS unidades_medida (
+  id          INT(11)      NOT NULL,
+  codigo      VARCHAR(20)  NOT NULL COMMENT 'Sigla DGII (UND, KG, CM...) - solo display',
+  descripcion VARCHAR(100) NOT NULL,
+  activo      TINYINT(1)   NOT NULL DEFAULT 1,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_codigo (codigo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- MIGRACION GRATEX = TENANT #1  (ejecutar tras crear el schema)
 -- ----------------------------------------------------------------------------

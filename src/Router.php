@@ -94,6 +94,11 @@ switch ($route) {
         require_once 'src/Controllers/proveedorController.php';
         break;
 
+    case 'unidades-medida':
+        // Catálogo DGII de unidades de medida (solo lectura) - token required
+        require_once 'src/Controllers/unidadMedidaController.php';
+        break;
+
     case 'cotizaciones':
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';

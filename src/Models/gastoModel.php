@@ -77,7 +77,7 @@ class gastoModel
     {
         try {
             $sql = 'SELECT id, description, amount, quantity, subtotal, itbis_amount,
-                           indicador_facturacion, indicador_bien_servicio
+                           indicador_facturacion, indicador_bien_servicio, unidad_medida
                     FROM gasto_items WHERE gasto_id = :id ORDER BY id ASC';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':id' => $gastoId]);
@@ -620,7 +620,7 @@ class gastoModel
                 'indicador_bien_servicio' => (int) $it['indicador_bien_servicio'],
                 'descripcion' => (string) $it['description'],
                 'cantidad' => (float) $it['quantity'],
-                'unidad_medida' => '',
+                'unidad_medida' => (string) ($it['unidad_medida'] ?? '43'),
                 'precio_unitario' => (float) $it['amount'],
                 'monto_item' => (float) $it['subtotal'],
                 'itbis_amount' => (float) $it['itbis_amount'],
@@ -800,6 +800,8 @@ class gastoModel
                 'itbis_amount' => $itbis,
                 'indicador_facturacion' => $indFact,
                 'indicador_bien_servicio' => $indBien,
+                // Código DGII de unidad de medida (id del catálogo; 43 = Unidad).
+                'unidad_medida' => (string) ($raw['unidad_medida'] ?? '43'),
             ];
         }
         return $normalized;
@@ -809,10 +811,10 @@ class gastoModel
     {
         $sql = 'INSERT INTO gasto_items
                 (gasto_id, description, amount, quantity, subtotal, itbis_amount,
-                 indicador_facturacion, indicador_bien_servicio)
+                 indicador_facturacion, indicador_bien_servicio, unidad_medida)
                 VALUES
                 (:gasto_id, :description, :amount, :quantity, :subtotal, :itbis_amount,
-                 :indicador_facturacion, :indicador_bien_servicio)';
+                 :indicador_facturacion, :indicador_bien_servicio, :unidad_medida)';
         $stmt = $this->conexion->prepare($sql);
         foreach ($items as $it) {
             $stmt->execute([
@@ -824,6 +826,7 @@ class gastoModel
                 ':itbis_amount' => $it['itbis_amount'],
                 ':indicador_facturacion' => $it['indicador_facturacion'],
                 ':indicador_bien_servicio' => $it['indicador_bien_servicio'],
+                ':unidad_medida' => $it['unidad_medida'] ?? '43',
             ]);
         }
     }
