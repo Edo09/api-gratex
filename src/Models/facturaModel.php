@@ -406,7 +406,7 @@ class facturaModel
             $conditions = ['f.tipo_ecf IS NULL'];
             $params = [];
             if ($query) {
-                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query)';
+                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query OR EXISTS (SELECT 1 FROM factura_items fi WHERE fi.factura_id = f.id AND fi.description LIKE :query))';
                 $params[':query'] = "%{$query}%";
             }
             $whereClause = 'WHERE ' . implode(' AND ', $conditions);
@@ -438,7 +438,7 @@ class facturaModel
             $conditions = ['f.tipo_ecf IS NULL'];
             $params = [];
             if ($query) {
-                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query)';
+                $conditions[] = '(f.no_factura LIKE :query OR f.NCF LIKE :query OR f.client_name LIKE :query OR cl.company_name LIKE :query OR EXISTS (SELECT 1 FROM factura_items fi WHERE fi.factura_id = f.id AND fi.description LIKE :query))';
                 $params[':query'] = "%{$query}%";
             }
             $whereClause = 'WHERE ' . implode(' AND ', $conditions);
@@ -559,7 +559,7 @@ class facturaModel
             $params = [];
 
             if ($query) {
-                $conditions[] = "(f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
+                $conditions[] = "(f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query OR EXISTS (SELECT 1 FROM factura_items fi WHERE fi.factura_id = f.id AND fi.description LIKE :query))";
                 $params[':query'] = "%{$query}%";
             }
             if ($ambiente !== null) {
@@ -595,7 +595,7 @@ class facturaModel
             $params = [];
 
             if ($query) {
-                $conditions[] = "(f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query)";
+                $conditions[] = "(f.no_factura LIKE :query OR cl.client_name LIKE :query OR f.NCF LIKE :query OR cl.rnc LIKE :query OR cl.company_name LIKE :query OR cl.phone_number LIKE :query OR cl.email LIKE :query OR EXISTS (SELECT 1 FROM factura_items fi WHERE fi.factura_id = f.id AND fi.description LIKE :query))";
                 $params[':query'] = "%{$query}%";
             }
             if ($ambiente !== null) {
