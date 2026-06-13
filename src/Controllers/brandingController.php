@@ -6,9 +6,10 @@
 //   PUT    /api/branding          -> {template?, accent_color?} (422 si invalido)
 //   POST   /api/branding/logo     -> multipart campo "logo" (png/jpg, max 2 MB)
 //   DELETE /api/branding/logo     -> elimina el logo (vuelve al global)
-//   POST   /api/branding/preview  -> {template?, accent_color?, no_electronica?}
+//   POST   /api/branding/preview  -> {template?, accent_color?, no_electronica?, grid?}
 //                                    PDF de muestra base64 (?format=download),
-//                                    SIN persistir nada
+//                                    SIN persistir nada. grid=true superpone una
+//                                    rejilla de calibracion (disenar a la medida).
 //
 // Requiere modo multi-tenant: el branding vive en master.tenants
 // (pdf_template, pdf_accent_color, logo_path). En single-tenant responde 409.
@@ -175,6 +176,12 @@ function brHandlePreview(int $tenantId): void
     $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
     if (!empty($body['no_electronica'])) {
         $pdf->setNoElectronica(true);
+    }
+    // {"grid":true}: superpone una rejilla de calibracion (10 mm / cm) para
+    // disenar plantillas a la medida replicando el formato de un cliente.
+    // Ver docs/plantillas-factura.md ("Replicar el formato existente").
+    if (!empty($body['grid'])) {
+        $pdf->setDebugGrid(true);
     }
     $pdf->setFactura($factura);
     $pdf->setClientData([
