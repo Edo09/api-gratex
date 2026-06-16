@@ -51,6 +51,41 @@ $advertencias = $data['advertencias'];
 $rncEmisor = preg_replace('/\D/', '', (string) $emisor['rnc']);
 $cantidad  = count($registros);
 
+// --- Preview estructurado para el front (GET /api/reportes/606/preview) ---
+// Devuelve los registros como objetos + totales, para revisar/pintar tabla
+// ANTES de descargar el TXT. No genera archivo.
+$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if (preg_match('#/reportes/606/preview#i', (string) $path)) {
+    $totales = [
+        'monto_servicios' => 0.0,
+        'monto_bienes'    => 0.0,
+        'total_facturado' => 0.0,
+        'itbis_facturado' => 0.0,
+        'itbis_retenido'  => 0.0,
+        'retencion_renta' => 0.0,
+    ];
+    foreach ($registros as $r) {
+        foreach ($totales as $k => $_) {
+            $totales[$k] += (float) ($r[$k] ?? 0);
+        }
+    }
+    $totales = array_map(static fn ($v) => round($v, 2), $totales);
+
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode([
+        'status' => true,
+        'data' => [
+            'periodo'      => $periodo,
+            'rnc_emisor'   => $rncEmisor,
+            'cantidad'     => $cantidad,
+            'totales'      => $totales,
+            'advertencias' => $advertencias,
+            'registros'    => $registros,
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+    return;
+}
+
 // --- Helpers de formato 606 (decimales con punto, 2 dec) ---
 $money = static function ($v): string {
     return number_format((float) $v, 2, '.', '');

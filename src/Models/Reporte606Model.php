@@ -138,6 +138,10 @@ class Reporte606Model
         $this->validarNcf((string) $g['ncf'], $rnc, $advertencias);
 
         return [
+            // Campos display (no van al TXT; el builder solo lee las claves del 606).
+            'razon_social'           => (string) ($g['nombre_proveedor'] ?? ''),
+            'origen'                 => 'gasto',
+            'tipo_comprobante'       => (string) $g['tipo_gasto'],
             'rnc'                    => $rnc,                                // 1
             'tipo_id'                => $this->tipoIdentificacion($rnc),     // 2
             'tipo_bienes_serv'       => self::TIPO_BIENES_SERVICIOS_DEFAULT, // 3
@@ -194,6 +198,10 @@ class Reporte606Model
         $totalFacturado = ($bienes + $servicios) > 0 ? ($bienes + $servicios) : $total;
 
         return [
+            // Campos display (no van al TXT; el builder solo lee las claves del 606).
+            'razon_social'           => (string) ($r['razon_social_emisor'] ?? ''),
+            'origen'                 => 'ecf_recibido',
+            'tipo_comprobante'       => 'E' . (string) ($r['tipo_ecf'] ?? ''),
             'rnc'                    => $rnc,                                // 1
             'tipo_id'                => $this->tipoIdentificacion($rnc),     // 2
             'tipo_bienes_serv'       => self::TIPO_BIENES_SERVICIOS_DEFAULT, // 3
