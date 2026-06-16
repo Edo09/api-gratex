@@ -185,12 +185,15 @@ switch ($route) {
     case 'reportes':
         // Reportes fiscales DGII (TXT descargable) - token required (X-API-KEY)
         //   /api/reportes/606?periodo=AAAAMM -> Formato 606 (compras de bienes/servicios)
+        //   /api/reportes/607?periodo=AAAAMM -> Formato 607 (ventas)
         $sub = strtolower($route_segments[1] ?? '');
         if ($sub === '606') {
             require_once 'src/Controllers/Reporte606Controller.php';
+        } elseif ($sub === '607') {
+            require_once 'src/Controllers/Reporte607Controller.php';
         } else {
             http_response_code(404);
-            echo json_encode(['status' => false, 'error' => 'Reporte no encontrado. Use 606.']);
+            echo json_encode(['status' => false, 'error' => 'Reporte no encontrado. Use 606 o 607.']);
         }
         break;
 
