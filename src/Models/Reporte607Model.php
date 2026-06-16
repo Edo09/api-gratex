@@ -103,6 +103,7 @@ class Reporte607Model
 
         $x = $this->extractFromXml((string) ($f['xml_firmado'] ?? ''));
         $formas = $this->resolverFormas($x, $esEcf, $totalConItbis);
+        $r2 = static fn ($v) => round((float) $v, 2); // limpia ruido de float en el preview JSON
 
         // Advertencias.
         if ($ncf === '') {
@@ -134,22 +135,22 @@ class Reporte607Model
             'tipo_ingreso'      => self::TIPO_INGRESO_DEFAULT,                      // 5
             'fecha_comprobante' => $this->fechaDgii($f['date']),                    // 6
             'fecha_retencion'   => $x['fecha_retencion'],                          // 7
-            'monto_facturado'   => $monto,                                         // 8
-            'itbis_facturado'   => $itbis,                                         // 9
-            'itbis_retenido'    => $x['itbis_retenido'],                           // 10
+            'monto_facturado'   => $r2($monto),                                    // 8
+            'itbis_facturado'   => $r2($itbis),                                    // 9
+            'itbis_retenido'    => $r2($x['itbis_retenido']),                      // 10
             'itbis_percibido'   => 0.0,                                            // 11
-            'retencion_renta'   => $x['retencion_renta'],                          // 12
+            'retencion_renta'   => $r2($x['retencion_renta']),                     // 12
             'isr_percibido'     => 0.0,                                            // 13
-            'isc'               => $x['isc'],                                      // 14
-            'otros_impuestos'   => $x['otros_impuestos'],                          // 15
-            'propina_legal'     => $x['propina'],                                  // 16
-            'efectivo'          => $formas['efectivo'],                            // 17
-            'cheque_transf'     => $formas['cheque_transf'],                       // 18
-            'tarjeta'           => $formas['tarjeta'],                             // 19
-            'credito'           => $formas['credito'],                             // 20
-            'bonos'             => $formas['bonos'],                               // 21
-            'permuta'           => $formas['permuta'],                             // 22
-            'otras'             => $formas['otras'],                               // 23
+            'isc'               => $r2($x['isc']),                                 // 14
+            'otros_impuestos'   => $r2($x['otros_impuestos']),                     // 15
+            'propina_legal'     => $r2($x['propina']),                             // 16
+            'efectivo'          => $r2($formas['efectivo']),                       // 17
+            'cheque_transf'     => $r2($formas['cheque_transf']),                  // 18
+            'tarjeta'           => $r2($formas['tarjeta']),                        // 19
+            'credito'           => $r2($formas['credito']),                        // 20
+            'bonos'             => $r2($formas['bonos']),                          // 21
+            'permuta'           => $r2($formas['permuta']),                        // 22
+            'otras'             => $r2($formas['otras']),                          // 23
         ];
     }
 
