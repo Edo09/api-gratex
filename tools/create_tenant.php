@@ -262,6 +262,26 @@ $ins->execute();
 $tenantId = (int) $master->lastInsertId();
 
 // =============================================================================
+// Roles de sistema (RBAC): admin + user. Definidos en config/permissions.php.
+// =============================================================================
+echo "-> Sembrando roles de sistema (admin/user) ...\n";
+$permCfg  = require __DIR__ . '/../config/permissions.php';
+$defaults = $permCfg['defaults'] ?? ['admin' => ['*'], 'user' => []];
+$roleDesc = [
+    'admin' => 'Acceso total dentro del tenant',
+    'user'  => 'Operacion (sin gestion de usuarios, roles ni configuracion)',
+];
+$roleIns = $master->prepare('INSERT INTO roles (tenant_id, name, description, is_system) VALUES (:t, :n, :d, 1)');
+$permIns = $master->prepare('INSERT INTO role_permissions (role_id, permission) VALUES (:r, :p)');
+foreach ($defaults as $rname => $rperms) {
+    $roleIns->execute([':t' => $tenantId, ':n' => $rname, ':d' => $roleDesc[$rname] ?? null]);
+    $rid = (int) $master->lastInsertId();
+    foreach (array_unique($rperms) as $perm) {
+        $permIns->execute([':r' => $rid, ':p' => $perm]);
+    }
+}
+
+// =============================================================================
 // Usuario admin (solo app, opcional)
 // =============================================================================
 if ($createAdmin) {

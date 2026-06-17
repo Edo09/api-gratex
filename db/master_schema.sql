@@ -256,6 +256,32 @@ CREATE TABLE IF NOT EXISTS unidades_medida (
   UNIQUE KEY uq_codigo (codigo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------------------------
+-- roles / role_permissions — RBAC per-tenant (ver db/master_migrations/003).
+-- users.role guarda el NOMBRE del rol; se resuelve a permisos por (tenant_id,
+-- name). El catalogo de permisos validos y el mapa ruta->permiso viven en
+-- config/permissions.php. create_tenant.php siembra admin/user en cada alta.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS roles (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   INT          NOT NULL,
+  name        VARCHAR(40)  NOT NULL,
+  description VARCHAR(150) NULL,
+  is_system   TINYINT(1)   NOT NULL DEFAULT 0 COMMENT 'admin/user de sistema: no borrables',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_role_tenant_name (tenant_id, name),
+  KEY idx_roles_tenant (tenant_id),
+  CONSTRAINT fk_roles_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  role_id    INT         NOT NULL,
+  permission VARCHAR(60) NOT NULL COMMENT "modulo ('facturas','gastos',...) o '*' (todos)",
+  UNIQUE KEY uq_role_perm (role_id, permission),
+  CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- MIGRACION GRATEX = TENANT #1  (ejecutar tras crear el schema)
 -- ----------------------------------------------------------------------------

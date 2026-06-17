@@ -89,6 +89,7 @@ class AuthMiddleware
                 'valid' => true,
                 'user_id' => $validation['user_id'],
                 'tenant_id' => $validation['tenant_id'] ?? null,
+                'role' => $validation['role'] ?? null,
                 'message' => 'Token validated'
             ];
         }
@@ -145,5 +146,57 @@ class AuthMiddleware
         http_response_code(401);
         echo json_encode(['status' => false, 'error' => $message]);
         exit;
+    }
+
+    /**
+     * Send forbidden response and exit (authenticated but not permitted).
+     */
+    public function sendForbidden($message = 'Forbidden')
+    {
+        http_response_code(403);
+        echo json_encode(['status' => false, 'error' => $message]);
+        exit;
+    }
+
+    private static function permissionsEnforced(): bool
+    {
+        return filter_var(
+            getenv('PERMISSIONS_ENFORCE') ?: ($_ENV['PERMISSIONS_ENFORCE'] ?? false),
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
+
+    /**
+     * Defense-in-depth helper for controllers needing a finer per-action check
+     * than the central PermissionGate. Validates the request, resolves the
+     * user's role permissions, and enforces $perm. Honors PERMISSIONS_ENFORCE:
+     * in shadow mode it logs the would-be denial and allows.
+     *
+     * @return array The validation result (valid user).
+     */
+    public function requirePermission(string $perm): array
+    {
+        require_once __DIR__ . '/../Models/RoleModel.php';
+        require_once __DIR__ . '/../PermissionGate.php';
+
+        $v = $this->validateRequest();
+        if (empty($v['valid'])) {
+            $this->sendUnauthorized($v['message'] ?? 'Unauthorized');
+        }
+        if (($v['user_id'] ?? null) === null) {
+            if (self::permissionsEnforced()) {
+                $this->sendForbidden('Esta ruta requiere una sesion de usuario.');
+            }
+            error_log("[AuthMiddleware][SHADOW] requirePermission({$perm}): principal no-usuario");
+            return $v;
+        }
+        $perms = (new RoleModel())->getPermissionsForRole($v['tenant_id'] ?? null, (string) ($v['role'] ?? ''));
+        if (!PermissionGate::permMatches($perms, $perm)) {
+            if (self::permissionsEnforced()) {
+                $this->sendForbidden('No tiene permiso para esta accion.');
+            }
+            error_log("[AuthMiddleware][SHADOW] requirePermission({$perm}): rol sin permiso");
+        }
+        return $v;
     }
 }

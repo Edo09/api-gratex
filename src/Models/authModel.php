@@ -87,9 +87,15 @@ class authModel
     {
         try {
             $token_hash = TokenGenerator::hashToken($token);
+            // JOIN a users para traer el rol (RBAC). users vive en la misma
+            // conexion que api_tokens (master en MT, tenant DB en single).
             $sql = self::multiTenant()
-                ? "SELECT user_id, tenant_id, is_active FROM api_tokens WHERE token_hash = :token_hash LIMIT 1"
-                : "SELECT user_id, is_active FROM api_tokens WHERE token_hash = :token_hash LIMIT 1";
+                ? "SELECT t.user_id, t.tenant_id, t.is_active, u.role
+                     FROM api_tokens t JOIN users u ON u.id = t.user_id
+                    WHERE t.token_hash = :token_hash LIMIT 1"
+                : "SELECT t.user_id, t.is_active, u.role
+                     FROM api_tokens t JOIN users u ON u.id = t.user_id
+                    WHERE t.token_hash = :token_hash LIMIT 1";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':token_hash' => $token_hash]);
             $row = $stmt->fetch();
@@ -99,9 +105,10 @@ class authModel
                     'valid' => true,
                     'user_id' => (int)$row['user_id'],
                     'tenant_id' => isset($row['tenant_id']) ? (int)$row['tenant_id'] : null,
+                    'role' => $row['role'] ?? null,
                 ];
             }
-            return ['valid' => false, 'user_id' => null, 'tenant_id' => null];
+            return ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'role' => null];
         } catch (PDOException $e) {
             return ['valid' => false, 'user_id' => null];
         }
@@ -281,12 +288,15 @@ class authModel
      * @param string $username Username
      * @return array ['success', user_data] or ['error', message]
      */
-    public function registerUser($email, $password, $name, $username, $tenant_id = null)
+    public function registerUser($email, $password, $name, $username, $tenant_id = null, $role = 'user')
     {
         try {
             if (self::multiTenant() && $tenant_id === null) {
                 return ['error', 'tenant_id es requerido en modo multi-tenant'];
             }
+            // El rol es server-side; default 'user'. El llamador (admin) puede
+            // pasar otro nombre de rol existente del tenant.
+            $role = (is_string($role) && trim($role) !== '') ? trim($role) : 'user';
 
             // Check if email already exists (email is globally unique across tenants)
             $sql = "SELECT id FROM users WHERE email = :email LIMIT 1";
@@ -329,7 +339,7 @@ class authModel
                     ':email' => $email,
                     ':username' => $username,
                     ':password' => $password_hash,
-                    ':role' => 'user'
+                    ':role' => $role
                 ]);
             } else {
                 $sql = "INSERT INTO users (name, last_name, email, username, password, role) VALUES (:name, :last_name, :email, :username, :password, :role)";
@@ -340,7 +350,7 @@ class authModel
                     ':email' => $email,
                     ':username' => $username,
                     ':password' => $password_hash,
-                    ':role' => 'user'
+                    ':role' => $role
                 ]);
             }
 
@@ -351,7 +361,7 @@ class authModel
                 'email' => $email,
                 'username' => $username,
                 'name' => trim($first_name . ' ' . $last_name),
-                'role' => 'user'
+                'role' => $role
             ];
 
             return ['success', $user_data];

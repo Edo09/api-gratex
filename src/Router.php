@@ -52,19 +52,20 @@ $route_part = $apiPos !== false ? substr($endpoint, $apiPos + 5) : ltrim($endpoi
 $route_segments = explode('/', ltrim($route_part, '/'));
 $route = $route_segments[0] ?? 'default';
 
-// Multi-tenant: pre-resolver el tenant ANTES de incluir el controller. Muchos
-// controllers instancian sus models en el tope del archivo (antes de su propio
-// validateRequest) y el model fija la conexion en el constructor; si el tenant
-// no esta resuelto aun, el model quedaria atado a la DB default. Esto lo evita.
-// Best-effort: si no hay credenciales validas no resuelve nada (el AuthMiddleware
-// del controller respondera 401). No corta el flujo aqui.
-if (filter_var(getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false), FILTER_VALIDATE_BOOLEAN)) {
-    require_once __DIR__ . '/Middleware/AuthMiddleware.php';
-    try {
-        (new AuthMiddleware())->validateRequest();
-    } catch (Throwable $e) {
-        error_log('[Router] pre-resolucion tenant fallo: ' . $e->getMessage());
-    }
+// Control de acceso central (RBAC) + pre-resolucion de tenant. El gate:
+//  - resuelve el tenant ANTES de incluir el controller (como la pre-resolucion
+//    previa) para que los models se aten a la DB correcta. Muchos controllers
+//    instancian sus models en el tope del archivo (antes de su propio
+//    validateRequest) y el model fija la conexion en el constructor.
+//  - aplica permisos por ruta+metodo (fail-closed) cuando PERMISSIONS_ENFORCE=true;
+//    en modo sombra (default) solo registra en error_log lo que se denegaria.
+// En deny+enforce el gate responde y corta (exit). Errores inesperados se
+// loguean y NO rompen el ruteo (el controller hara su propia validacion).
+require_once __DIR__ . '/PermissionGate.php';
+try {
+    PermissionGate::enforce($route, $request_method);
+} catch (Throwable $e) {
+    error_log('[Router] PermissionGate fallo: ' . $e->getMessage());
 }
 
 // Route to appropriate controller
@@ -201,6 +202,13 @@ switch ($route) {
         // Branding de la Representacion Impresa por tenant (plantilla, color,
         // logo) - token required, solo multi-tenant
         require_once 'src/Controllers/brandingController.php';
+        break;
+
+    case 'roles':
+        // Gestion de roles y permisos (RBAC) - admin del tenant (roles.manage)
+        //   GET /api/roles · POST /api/roles · PUT/DELETE /api/roles/{id}
+        //   PUT /api/roles/assign {user_id, role}
+        require_once 'src/Controllers/roleController.php';
         break;
 
     case 'landing':

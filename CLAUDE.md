@@ -13,7 +13,8 @@ new tenants onboard as `app` (own DB) or `integracion` (JSON→XML, no DB). Gate
 `MULTI_TENANT_ENABLED`.
 
 Shipped modules beyond core emission: gastos, reportes 606/607, products, proveedores,
-unidades-medida, branding/plantillas PDF, integración.
+unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, gated by
+`PERMISSIONS_ENFORCE`; see `docs/modules/roles-permisos.md`).
 
 **Docs:** start at `docs/README.md`. Architecture: `docs/architecture.md`. DGII flows:
 `docs/integrations/dgii-ecf.md`. Multi-tenant onboarding: `docs/integrations/multi-tenant-onboarding.md`.

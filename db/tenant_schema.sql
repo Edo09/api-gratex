@@ -592,3 +592,52 @@ ON DUPLICATE KEY UPDATE
 
 -- Buscar por descripción (LIKE):
 -- SELECT * FROM unidades_medida WHERE descripcion LIKE '%metro%';
+
+-- =============================================================================
+-- roles / role_permissions — RBAC (FALLBACK single-tenant).
+-- En modo multi-tenant los roles viven en el MASTER (gratex_master). Estas
+-- tablas solo se usan cuando MULTI_TENANT_ENABLED=false (todo en una DB).
+-- tenant_id = 0 = el unico tenant logico del modo single-tenant.
+-- =============================================================================
+CREATE TABLE IF NOT EXISTS roles (
+  id          INT AUTO_INCREMENT PRIMARY KEY,
+  tenant_id   INT          NOT NULL DEFAULT 0,
+  name        VARCHAR(40)  NOT NULL,
+  description VARCHAR(150) NULL,
+  is_system   TINYINT(1)   NOT NULL DEFAULT 0,
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_role_tenant_name (tenant_id, name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS role_permissions (
+  id         INT AUTO_INCREMENT PRIMARY KEY,
+  role_id    INT         NOT NULL,
+  permission VARCHAR(60) NOT NULL,
+  UNIQUE KEY uq_role_perm (role_id, permission),
+  CONSTRAINT fk_rp_role_t FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO roles (tenant_id, name, description, is_system)
+SELECT 0, 'admin', 'Acceso total', 1
+WHERE NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = 0 AND name = 'admin');
+INSERT INTO roles (tenant_id, name, description, is_system)
+SELECT 0, 'user', 'Operacion (sin administracion)', 1
+WHERE NOT EXISTS (SELECT 1 FROM roles WHERE tenant_id = 0 AND name = 'user');
+
+INSERT INTO role_permissions (role_id, permission)
+SELECT r.id, '*' FROM roles r
+WHERE r.tenant_id = 0 AND r.name = 'admin'
+  AND NOT EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role_id = r.id AND rp.permission = '*');
+
+INSERT INTO role_permissions (role_id, permission)
+SELECT r.id, p.perm
+FROM roles r
+JOIN (
+  SELECT 'facturas' AS perm UNION ALL SELECT 'facturas-simples'
+  UNION ALL SELECT 'gastos' UNION ALL SELECT 'clients'
+  UNION ALL SELECT 'products' UNION ALL SELECT 'proveedores'
+  UNION ALL SELECT 'cotizaciones' UNION ALL SELECT 'aprobaciones'
+  UNION ALL SELECT 'reportes' UNION ALL SELECT 'ncf' UNION ALL SELECT 'unidades'
+) p
+WHERE r.tenant_id = 0 AND r.name = 'user'
+  AND NOT EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role_id = r.id AND rp.permission = p.perm);
