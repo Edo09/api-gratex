@@ -1,45 +1,60 @@
-# DGII e-CF Certification — Complete Reference
+# Integración DGII e-CF — Referencia completa
 
-Certification completed: **2026-06-01**. All phases passed. System live in `ecf` production ambiente.
+Certificación DGII completada: **2026-06-01**. Todas las fases pasadas. Gratex (tenant #1)
+opera en producción (`ecf`). Cada tenant nuevo certifica por su cuenta y se promueve a `ecf`
+(ver [multi-tenant-onboarding.md](multi-tenant-onboarding.md)).
+
+Esta página documenta los flujos DGII (entrante y saliente), el formato de acuse (ARECF),
+la autenticación y los bugs críticos resueltos durante la certificación.
 
 ---
 
-## Production service URLs (registered with DGII)
+## URLs de servicio (registradas en DGII)
 
-| Service | Base URL |
+Todos los tenants registran las **mismas** URLs (el sistema resuelve de quién es cada
+documento por el RNC del XML):
+
+| Servicio | URL base |
 |---|---|
 | Autenticación | `https://gratex.net/api/ecf/autenticacion` |
 | Recepción | `https://gratex.net/api/ecf/recepcion` |
 | Aprobación Comercial | `https://gratex.net/api/ecf/aprobacion-comercial` |
 
-DGII appends fixed suffixes when calling us:
-- Auth: `/fe/autenticacion/api/semilla` (GET) and `/fe/autenticacion/api/ValidacionCertificado` (POST)
+DGII agrega sufijos fijos al llamarnos:
+- Auth: `/fe/autenticacion/api/semilla` (GET) y `/fe/autenticacion/api/ValidacionCertificado` (POST)
 - Recepción: `/fe/recepcion/api/ecf` (POST)
 - Aprobación: `/fe/aprobacioncomercial/api/ecf` (POST)
 
 ---
 
-## Incoming e-CF flow (DGII → us)
+## Flujo e-CF entrante (DGII → nosotros)
 
-1. `GET .../semilla` → return XML seed, store in `auth_seeds`
-2. `POST .../ValidacionCertificado` with signed seed XML → validate signature, return flat JSON token
-3. `POST .../fe/recepcion/api/ecf` with Bearer + signed ECF → validate, store in `ecf_recibidos`, return signed `ARECF` XML
-4. `POST .../fe/aprobacioncomercial/api/ecf` with Bearer + signed ACECF → validate, store in `aprobaciones_comerciales`, return signed `ARECF` XML
+1. `GET .../semilla` → devolver XML semilla, guardar en `auth_seeds`.
+2. `POST .../ValidacionCertificado` con la semilla firmada → validar firma, devolver token JSON plano.
+3. `POST .../fe/recepcion/api/ecf` con Bearer + e-CF firmado → validar, guardar en
+   `ecf_recibidos`, devolver `ARECF` firmado.
+4. `POST .../fe/aprobacioncomercial/api/ecf` con Bearer + ACECF firmado → validar, guardar
+   en `aprobaciones_comerciales`, devolver `ARECF` firmado.
+
+> **Recepción abierta:** `POST /api/ecf/recepcion` y `/aprobacion-comercial` aceptan el
+> documento con **Bearer DGII válido** *o* con **firma XMLDSig válida** (sin completar el
+> handshake de semilla). La firma es el gate de integridad; no valida la cadena de CAs, así
+> que el e-CF entra como `RECIBIDO`/pendiente y el RNC destino debe ser un tenant registrado.
 
 ---
 
-## ARECF acknowledgment format
+## Formato del acuse ARECF
 
-Required response for both recepción and aprobación comercial. Must be signed with our certificate.
+Respuesta requerida para recepción y aprobación comercial. Debe firmarse con nuestro certificado.
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <ARECF>
   <DetalleAcusedeRecibo>
     <Version>1.0</Version>
-    <RNCEmisor>{rncEmisor from incoming XML}</RNCEmisor>
-    <RNCComprador>{our RNC from emisor_config}</RNCComprador>
-    <eNCF>{eNCF from incoming XML}</eNCF>
+    <RNCEmisor>{rncEmisor del XML entrante}</RNCEmisor>
+    <RNCComprador>{nuestro RNC de emisor_config}</RNCComprador>
+    <eNCF>{eNCF del XML entrante}</eNCF>
     <Estado>0</Estado>
     <FechaHoraAcuseRecibo>dd-MM-YYYY HH:mm:ss</FechaHoraAcuseRecibo>
   </DetalleAcusedeRecibo>
@@ -47,15 +62,16 @@ Required response for both recepción and aprobación comercial. Must be signed 
 </ARECF>
 ```
 
-- `Estado`: 0=Recibido, 1=NoRecibido
-- `DetalleAcusedeRecibo` — lowercase `d` in `de` (exact casing required by XSD)
-- XSD: `samples/ARECF v1.0.xsd`
+- `Estado`: 0=Recibido, 1=NoRecibido.
+- `DetalleAcusedeRecibo` — `d` minúscula en `de` (casing exacto exigido por el XSD).
+- XSD: `samples/ARECF v1.0.xsd`.
 
 ---
 
-## Auth token response format
+## Formato del token de autenticación
 
-DGII reads `response['token']` directly. Must be flat JSON — NOT wrapped:
+DGII lee `response['token']` directamente. Debe ser JSON **plano** — NO envuelto en
+`{"status":true,"data":{...}}`:
 
 ```json
 {"token": "...", "expira": "2026-06-01T16:00:00", "expedido": "2026-06-01T15:00:00"}
@@ -63,40 +79,85 @@ DGII reads `response['token']` directly. Must be flat JSON — NOT wrapped:
 
 ---
 
-## Critical bugs fixed during certification
+## Autenticación saliente (nosotros → DGII)
 
-### Router — double `/api/` in DGII callback URLs
-DGII appends `/fe/.../api/ecf` to our base URL, creating two `/api/` segments.
-Old: `end(explode('/api/', $endpoint))` → grabbed last segment → 404.
-Fix: `strpos($endpoint, '/api/')` → first occurrence only. File: `src/Router.php`.
+Para llamar a DGII (recepción, consulta de estado) el backend obtiene primero un token
+Bearer: semilla → firmar con el `.p12` → enviar a `ValidarSemilla` → recibir `token`.
+Lo implementa `src/Utils/FacturacionElectronica/DgiiAuthService.php`
+(`consultarEndpointAutenticado()` agrega `Authorization: Bearer` y descarta headers internos).
+
+Endpoints internos (token de API propio vía `X-API-KEY`), útiles para diagnóstico:
+
+| Método | Endpoint | Uso |
+|---|---|---|
+| GET | `/api/facturacion-electronica/autenticacion/semilla` | Devuelve el XML de semilla de DGII |
+| POST | `/api/facturacion-electronica/autenticacion/token` | Ejecuta el flujo completo, devuelve el token DGII |
+| POST | `/api/facturacion-electronica/autenticacion/validar-semilla` | Firma (o recibe firmada) y valida la semilla |
+
+> El cert por tenant lo resuelve `src/CertResolver.php` (cae al cert global del `.env` si no
+> hay tenant). Variables `.env`: `DGII_ECF_ENVIRONMENT`, `DGII_ECF_CERT_PATH`,
+> `DGII_ECF_CERT_PASSWORD`, `OPENSSL_CONF`, `OPENSSL_MODULES`. Ver [../setup.md](../setup.md).
+
+---
+
+## e-CF saliente (nosotros → DGII)
+
+Referencia completa de payloads: [../api/facturas.md](../api/facturas.md). Datos clave:
+
+- E32 < 250k → flujo RFCE (`fc.dgii.gov.do`), sin `track_id`, el XML se sube manual al portal.
+- E33/E34: `RNCOtroContribuyente` debe ir null (no el RNC del comprador) o DGII devuelve error 614.
+- URL QR `ConsultaTimbre`: incluir `&RncComprador=` para todos los tipos EXCEPTO E43 y E47.
+- `CodigoSeguridad`: primeros 6 caracteres crudos de `SignatureValue` — solo quitar
+  espacios, nunca `+`/`/`/`=`.
+- `FechaHoraFirma` del XML debe coincidir con `fecha_emision_dgii` en la BD — capturar el
+  timestamp antes de construir el XML.
+
+---
+
+## Bugs críticos resueltos en certificación
+
+### Router — doble `/api/` en las URLs de callback DGII
+
+DGII agrega `/fe/.../api/ecf` a nuestra base, creando dos segmentos `/api/`.
+Antes: `end(explode('/api/', $endpoint))` → tomaba el último segmento → 404.
+Fix: `strpos($endpoint, '/api/')` → solo la primera ocurrencia. Archivo: `src/Router.php`.
 
 ### IncomingXmlValidator — digest mismatch
-Was cloning root element into new DOMDocument for C14N. importNode changes namespace context → digest mismatch.
-Fix: remove Signature from original document, C14N root, reattach Signature. File: `src/Utils/FacturacionElectronica/IncomingXmlValidator.php`.
 
-### .htaccess — `<If>` directive not supported
-`SecRuleEngine Off` inside `<If>` breaks Apache on this shared host — returns 500 for all requests.
-Never use `<If>` in `.htaccess`. ModSecurity was not actually the issue.
+Clonaba el root a un nuevo DOMDocument para C14N; `importNode` cambia el contexto de
+namespaces → digest mismatch. Fix: quitar la `Signature` del documento original, C14N del
+root, reinsertar la `Signature`. Archivo: `src/Utils/FacturacionElectronica/IncomingXmlValidator.php`.
+
+### .htaccess — directiva `<If>` no soportada
+
+`SecRuleEngine Off` dentro de `<If>` rompe Apache en este hosting compartido (500 en todo).
+**Nunca** usar `<If>` en `.htaccess`. ModSecurity no era el problema real.
+
+### Nombre de archivo en multipart
+
+DGII valida que el nombre sea `{RNCEmisor}{eNCF}.xml` (ej. `131256432E310000000001.xml`).
+Nombres genéricos (`ecf.xml`) → rechazo código 3243. Lo construye
+`DgiiReceptionService::buildDgiiFilename()`.
+
+### El cert `.p12` debe ser AES-256/PBKDF2
+
+OpenSSL 3.x no carga `.p12` cifrados con 3DES/RC2 (legacy). Re-cifrar:
+
+```bash
+openssl pkcs12 -legacy -in old.p12 -out temp.pem -nodes
+openssl pkcs12 -export -in temp.pem -out new.p12 \
+  -keypbe AES-256-CBC -certpbe AES-256-CBC -macalg SHA256
+```
 
 ---
 
-## Outgoing e-CF (us → DGII)
+## Ambiente / secuencias NCF
 
-See `docs/ecf-api-payloads.md` for full API reference.
+`DGII_ECF_ENVIRONMENT` (fallback single-tenant) y `tenants.ambiente` (per-tenant, prioritario):
+- `certecf` → certificación (las facturas se ocultan del frontend).
+- `ecf` → producción.
 
-Key facts:
-- E32 < 250k → RFCE flow (`fc.dgii.gov.do`), no `track_id`, manual XML upload to DGII portal
-- E33/E34: `RNCOtroContribuyente` must be null (not the comprador RNC) or DGII returns error 614
-- QR `ConsultaTimbre` URL: include `&RncComprador=` for all types EXCEPT E43 and E47
-- `CodigoSeguridad`: first 6 raw chars of SignatureValue — only strip whitespace, never strip `+`/`/`/`=`
-- `FechaHoraFirma` in XML must match `fecha_emision_dgii` in DB — capture timestamp before building XML
-
----
-
-## Environment / NCF sequences
-
-`DGII_ECF_ENVIRONMENT` in `.env`:
-- `certecf` → certification testing (facturas hidden from frontend)
-- `ecf` → production
-
-NCF sequences are per-ambiente. After running `tools/migration_ncf_ambiente.sql`, the `ncf_sequences` table has separate rows for `certecf` and `ecf` per e-CF type. Production starts from sequence 0.
+Las secuencias e-NCF son **per-ambiente** (filas separadas por `certecf`/`ecf` en
+`ncf_sequences`). Producción arranca en 0. Ver [../database/schema.md](../database/schema.md)
+y los runners de certificación en
+[../../pasos_certificacion_dgii/README.md](../../pasos_certificacion_dgii/README.md).

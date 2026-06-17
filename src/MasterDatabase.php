@@ -6,7 +6,7 @@ require_once(__DIR__ . '/Utils/TokenGenerator.php');
  *
  * The master DB holds the tenant registry plus centralized auth (users +
  * api_tokens), so a request can be routed to the correct tenant DB before any
- * business query runs. See docs/multi-emisor-master-db-prd.md.
+ * business query runs. See docs/architecture.md.
  */
 class MasterDatabase
 {

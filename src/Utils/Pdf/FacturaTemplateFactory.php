@@ -10,7 +10,7 @@ require_once __DIR__ . '/CompactoTemplate.php';
  *
  * Sin argumentos usa el branding del tenant resuelto (BrandingResolver).
  * Nombres 'custom:<nombre>' cargan src/Utils/Pdf/Custom/<Nombre>Template.php
- * (disenos a la medida; ver docs/plantillas-factura.md). Nombre desconocido
+ * (disenos a la medida; ver docs/modules/branding-plantillas.md). Nombre desconocido
  * o archivo custom ausente caen a ClasicoTemplate — nunca fatal: una factura
  * siempre debe poder imprimirse.
  */

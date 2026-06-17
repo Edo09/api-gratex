@@ -3,8 +3,9 @@
 Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
-  `db/tenant_schema.sql`, que es el snapshot completo consolidado (base +
-  migraciones 001–011 ya incluidas).
+  `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
+  migraciones ya incluidas, hasta la 016). Las migraciones sueltas activas (012–016)
+  son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
      tenant existentes (Gratex, etc.).

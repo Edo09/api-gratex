@@ -11,7 +11,7 @@ require_once(__DIR__ . '/Database.php');
  *   - resolveByRnc     -> DGII incoming (recepcion / aprobacion comercial)
  *
  * On success, Database::setCredentials() is set so all existing models/queries
- * transparently hit the tenant DB. See docs/multi-emisor-master-db-prd.md.
+ * transparently hit the tenant DB. See docs/architecture.md.
  */
 class TenantResolver
 {

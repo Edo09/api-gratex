@@ -1,121 +1,145 @@
-# Gratex API — Database Structure
+# Gratex API — Estructura de Base de Datos
 
-MySQL / MariaDB (InnoDB). Accessed via PDO singleton (`src/Database.php`).
+MySQL / MariaDB (InnoDB), accedido por el singleton PDO `src/Database.php` (negocio del
+tenant) y `src/MasterDatabase.php` (master / routing).
 
-- **Server DB:** `mtldtmte_new_gratexdb` (NOT old `mtldtmte_gratexdb`)
-- **Charset:** base tables `latin1`; e-CF tables `utf8mb4` (`utf8mb4_unicode_ci`)
-- **Schema source:** `db/database.sql` (base) + `db/migrations/001`–`006` (additive)
+El sistema es **multi-tenant (DB-per-tenant)** en producción. Hay **dos clases de base**:
 
----
+- **Master (`gratex_master`)** — directorio de tenants + autenticación + datos globales.
+  Cero datos de negocio. Esquema: `db/master_schema.sql` (+ `db/master_migrations/`).
+- **DB del tenant** (ej. la de Gratex: `mtldtmte_new_gratexdb`) — datos de negocio de
+  **una** empresa: facturas, clientes, NCF, e-CF, gastos, etc. Esquema:
+  `db/tenant_schema.sql` (+ `db/migrations/`).
 
-## Table Overview
+> **Modo single-tenant (fallback):** con `MULTI_TENANT_ENABLED=false`, todo vive en una
+> sola DB (la del tenant incluye también `users`/`api_tokens`/`landing_*`/`auth_*`). El
+> esquema `tenant_schema.sql` por eso incluye esas tablas — sirven al fallback. En
+> multi-tenant, la fuente de verdad de esas tablas es el master.
 
-| Table | Domain | Added by |
-|---|---|---|
-| `users` | app users / auth | base |
-| `api_tokens` | API key tokens (our clients) | base |
-| `clients` | customers (+ fiscal data for e-CF) | base + 001 |
-| `cotizaciones` | quotes | base |
-| `cotizacion_items` | quote line items | base |
-| `facturas` | invoices (+ full e-CF tracking) | base + 001/003/005/006 |
-| `factura_items` | invoice line items (+ fiscal class) | base + 001 |
-| `ncf_sequences` | NCF + e-NCF sequence counters | base + 001 |
-| `emisor_config` | issuer fiscal config (single row) | 001 |
-| `ecf_recibidos` | incoming e-CF from other issuers | 002 |
-| `aprobaciones_comerciales` | commercial approvals received (ACECF) | 002 |
-| `auth_seeds` | auth seeds issued (DGII semilla flow) | 002 |
-| `auth_tokens_emitidos` | Bearer tokens issued to consumers | 002 |
-| `landing_carousel` | landing page carousel | base |
-| `landing_services` | landing page services | base |
+- **Charset:** tablas base `latin1`; tablas e-CF `utf8mb4` (`utf8mb4_unicode_ci`).
+- Detalle de la arquitectura multi-tenant: [../architecture.md](../architecture.md).
 
 ---
 
-## Relationships
+## Master DB (`gratex_master`)
 
-```
-users 1───* api_tokens          (FK user_id, ON DELETE CASCADE)
-users 1───* facturas            (user_id, nullable — no FK constraint)
+Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
-clients 1───* cotizaciones      (client_id, nullable)
-clients 1───* facturas          (client_id, nullable)
+| Tabla | Para qué |
+|---|---|
+| `tenants` | Registro de cada empresa: `tipo` (app/integración), key+secret, credenciales DB cifradas, cert, ambiente, branding |
+| `users` | Usuarios de login (+ `tenant_id`); email único global |
+| `api_tokens` | Tokens de sesión (+ `tenant_id`); FK a `users` |
+| `landing_carousel` / `landing_services` | Contenido de marketing (global) |
+| `auth_seeds` / `auth_tokens_emitidos` | Flujo semilla/token DGII entrante (global, antes de resolver tenant) |
+| `ecf_integracion_backup` | Respaldo de e-CF emitidos por tenants `integracion` (sin DB propia) |
+| `ecf_recibidos` (+ `tenant_id`) | Espejo: e-CF recibidos de tenants `integracion` |
+| `aprobaciones_comerciales` (+ `tenant_id`) | Espejo: aprobaciones de tenants `integracion` |
+| `unidades_medida` | Catálogo DGII de unidades de medida (compartido por todos los tenants) |
 
-cotizaciones 1───* cotizacion_items   (FK cotizacion_id, ON DELETE CASCADE)
-facturas     1───* factura_items      (FK factura_id,    ON DELETE CASCADE)
-
-facturas 1───* aprobaciones_comerciales   (factura_id, nullable — soft link via e_ncf)
-
-ncf_sequences   — standalone counters (B01/B02/B14/B15 + E31..E47)
-emisor_config   — single row (id=1)
-ecf_recibidos / auth_seeds / auth_tokens_emitidos — standalone (DGII receiver role)
-```
-
----
-
-## Core Tables
-
-### `users`
-| Column | Type | Notes |
+### `tenants`
+| Columna | Tipo | Notas |
 |---|---|---|
 | `id` | int PK AI | |
-| `name` | varchar(70) | |
-| `last_name` | varchar(70) | |
-| `email` | varchar(300) | |
-| `username` | varchar(50) | UNIQUE |
-| `password` | varchar(255) | bcrypt hash |
-| `role` | varchar(20) | default `user` |
+| `nombre` | varchar(100) | |
+| `rnc` | varchar(11) | UNIQUE |
+| `api_key` | varchar(64) | UNIQUE — identificador público (integración) |
+| `api_secret_hash` | varchar(64) | sha256 del `api_secret` (se muestra el secret una sola vez) |
+| `tipo` | varchar(12) | `app` \| `integracion` |
+| `db_host`/`db_name`/`db_user` | varchar | Solo `app`; `db_name` UNIQUE |
+| `db_pass_encrypted` | varbinary | AES-256-GCM: `iv(12)‖tag(16)‖ct` |
+| `cert_path` | varchar(255) | `.p12` del tenant (`certificado_dgii/<rnc>/cert.p12`) |
+| `cert_pass_encrypted` | varbinary | AES-256-GCM |
+| `ambiente` | varchar(20) | `certecf` mientras certifica → `ecf` en producción (per-tenant) |
+| `pdf_template` | varchar | `clasico`/`moderno`/`compacto`/`custom:tenant<id>` (master_migration 002) |
+| `pdf_accent_color` | varchar(7) | `#RRGGBB` opcional |
+| `logo_path` | varchar | `logos/<tenant_id>.<ext>` |
+| `webhook_url`/`webhook_secret_encrypted` | varchar/varbinary | Push de documentos entrantes (integración) |
+| `activo` | tinyint(1) | |
+| `created_at` | datetime | |
 
-### `api_tokens`
-| Column | Type | Notes |
+`users` y `api_tokens` conservan su forma (ver abajo) + columna `tenant_id`.
+
+---
+
+## DB del tenant — Tablas de negocio
+
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–016).
+
+| Tabla | Dominio |
+|---|---|
+| `clients` | Clientes (+ datos fiscales para e-CF) |
+| `cotizaciones` / `cotizacion_items` | Cotizaciones |
+| `facturas` / `factura_items` | Facturas (+ tracking e-CF completo) |
+| `ncf_sequences` | Secuencias NCF / e-NCF como **rangos autorizados** por DGII |
+| `emisor_config` | Config fiscal del emisor (fila única) |
+| `ecf_recibidos` | e-CF entrantes de otros emisores (rol receptor) |
+| `aprobaciones_comerciales` | Aprobaciones comerciales (ACECF) recibidas |
+| `gastos` / `gasto_items` | Gastos menores y facturas de proveedores |
+| `products` | Catálogo de productos/servicios (migración 012) |
+| `proveedores` | Directorio de proveedores (migración 013) |
+| `auth_seeds` / `auth_tokens_emitidos` | Auth DGII (solo fallback single-tenant) |
+
+---
+
+## Tablas de autenticación
+
+### `users` (master)
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | int PK AI | |
+| `name` / `last_name` | varchar(70) | |
+| `email` | varchar(300) | único **global** (resuelve el tenant en el login) |
+| `username` | varchar(50) | único por tenant |
+| `password` | varchar(255) | hash bcrypt |
+| `role` | varchar(20) | default `user` |
+| `tenant_id` | int | tenant al que pertenece |
+
+### `api_tokens` (master)
+| Columna | Tipo | Notas |
 |---|---|---|
 | `id` | int PK AI | |
 | `user_id` | int | FK → users(id) CASCADE |
-| `token_hash` | varchar(64) | UNIQUE, sha256 of token |
-| `created_at` | datetime | |
-| `last_used` | datetime | updated each validate |
+| `token_hash` | varchar(64) | UNIQUE, sha256 del token |
+| `created_at` / `last_used` | datetime | `last_used` se actualiza en cada validación |
 | `is_active` | tinyint(1) | default 1 |
-
-### `clients`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `email` | varchar(100) | |
-| `client_name` | varchar(100) | |
-| `company_name` | varchar(100) | |
-| `phone_number` | varchar(20) | |
-| `rnc` | varchar(11) | (001) fiscal ID — required E31 |
-| `razon_social` | varchar(150) | (001) |
-| `direccion` | varchar(100) | (001) |
-| `municipio` | varchar(50) | (001) |
-| `provincia` | varchar(50) | (001) |
-
-### `cotizaciones`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `code` | varchar(50) | |
-| `date` | datetime | default CURRENT_TIMESTAMP |
-| `client_id` | int | nullable |
-| `client_name` | varchar(100) | |
-| `total` | decimal(10,2) | default 0.00 |
-
-### `cotizacion_items`
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `cotizacion_id` | int | FK → cotizaciones(id) CASCADE |
-| `description` | text | |
-| `amount` | decimal(10,2) | unit price |
-| `quantity` | int | default 1 |
-| `subtotal` | decimal(10,2) | |
+| `tenant_id` | int | tenant del token (sin huevo-gallina) |
 
 ---
 
-## Invoice Tables (e-CF core)
+## Tablas comerciales (DB del tenant)
+
+### `clients`
+| Columna | Tipo | Notas |
+|---|---|---|
+| `id` | int PK AI | |
+| `email` / `client_name` / `company_name` / `phone_number` | varchar | |
+| `rnc` | varchar(11) | ID fiscal — requerido para E31 |
+| `razon_social` | varchar(150) | |
+| `direccion` / `municipio` / `provincia` | varchar | datos fiscales |
+
+### `cotizaciones` / `cotizacion_items`
+`cotizaciones`: `id`, `code`, `date`, `client_id` (nullable), `client_name`, `total`.
+`cotizacion_items`: `id`, `cotizacion_id` (FK CASCADE), `description`, `amount`, `quantity`, `subtotal`.
+
+### `products` (migración 012)
+Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
+`unidad_medida` (código DGII), `indicador_facturacion` (1=ITBIS18, 4=Exento, 2=16%,
+3=Tasa cero, 0=No facturable), `indicador_bien_servicio`, `activo`, timestamps.
+
+### `proveedores` (migración 013)
+Directorio para autocompletar/gestionar proveedores: `id`, `rnc`, `nombre`, contacto…
+Los gastos siguen guardando `rnc_proveedor`/`nombre_proveedor` inline (desnormalizado);
+esta tabla es solo el directorio. El listado deriva `compras` desde `gastos`.
+
+---
+
+## Tablas de factura (núcleo e-CF)
 
 ### `facturas`
-Base columns + e-CF tracking (migrations 001/003/005/006).
+Columnas base + tracking e-CF (migraciones 001/003/005/006).
 
-| Column | Type | Notes |
+| Columna | Tipo | Notas |
 |---|---|---|
 | `id` | int PK AI | |
 | `no_factura` | varchar(50) | |
@@ -123,169 +147,143 @@ Base columns + e-CF tracking (migrations 001/003/005/006).
 | `client_id` | int | nullable |
 | `client_name` | varchar(100) | |
 | `total` | decimal(10,2) | |
-| `NCF` | varchar(50) | nullable after 001 |
-| `user_id` | int | nullable |
+| `NCF` | varchar(50) | nullable tras 001 (facturas simples) |
+| `user_id` | int | nullable (referencia a `master.users.id`, sin FK cross-DB) |
 | **e-CF (001)** | | |
 | `tipo_ecf` | varchar(2) | 31,32,33,34,41,43,44,45,46,47 |
 | `e_ncf` | varchar(13) | UNIQUE (`uk_e_ncf`) |
-| `track_id` | varchar(60) | DGII TrackId — INDEX |
+| `track_id` | varchar(60) | TrackId DGII — INDEX |
 | `estado_dgii` | varchar(20) | PENDIENTE/ENVIADO/ACEPTADO/ACEPTADO_CONDICIONAL/RECHAZADO/ERROR — INDEX |
-| `codigo_seguridad` | varchar(10) | for QR / printed rep |
-| `fecha_emision_dgii` | datetime | |
+| `codigo_seguridad` | varchar(10) | para QR / RI |
+| `fecha_emision_dgii` | datetime | debe coincidir con `FechaHoraFirma` del XML |
 | `ambiente_dgii` | varchar(20) | testecf/certecf/ecf |
-| `xml_firmado` | mediumtext | signed XML sent |
-| `respuesta_dgii` | text | last DGII response (JSON) |
-| **RFCE (003)** | | |
-| `rfce_xml` | mediumtext | resumen XML (E32 < 250k) |
-| `rfce_track_id` | varchar(60) | INDEX |
-| `rfce_estado` | varchar(30) | |
-| `rfce_respuesta` | text | |
-| **Status (005)** | | |
-| `secuencia_utilizada` | tinyint(1) | DGII: false=reusable e-NCF |
-| **Note ref (006)** | | E33/E34 |
-| `ncf_modificado` | varchar(19) | e-NCF the note modifies |
+| `xml_firmado` | mediumtext | XML firmado enviado |
+| `respuesta_dgii` | text | última respuesta DGII (JSON) |
+| **RFCE (003)** | | E32 < 250k |
+| `rfce_xml` / `rfce_track_id` / `rfce_estado` / `rfce_respuesta` | | resumen |
+| **Estado (005)** | | |
+| `secuencia_utilizada` | tinyint(1) | DGII: false = e-NCF reutilizable |
+| **Ref. nota (006)** | | E33/E34 |
+| `ncf_modificado` | varchar(19) | e-NCF que modifica la nota |
 | `fecha_ncf_modificado` | date | |
 | `codigo_modificacion` | varchar(2) | 1=Anula 2=Texto 3=Montos 4=Contingencia 5=Ref consumo |
-| `razon_modificacion` | varchar(90) | shown on printed rep |
+| `razon_modificacion` | varchar(90) | sale en la RI |
 
 ### `factura_items`
-| Column | Type | Notes |
+| Columna | Tipo | Notas |
 |---|---|---|
 | `id` | int PK AI | |
 | `factura_id` | int | FK → facturas(id) CASCADE |
 | `description` | text | |
-| `amount` | decimal(10,2) | unit price |
+| `amount` | decimal(10,2) | precio unitario |
 | `quantity` | int | default 1 |
 | `subtotal` | decimal(10,2) | |
 | `indicador_facturacion` | tinyint | (001) 0=No fact 1=ITBIS18 2=ITBIS16 3=ITBIS0 4=Exento |
 | `indicador_bien_servicio` | tinyint | (001) 1=Bien 2=Servicio |
-| `unidad_medida` | varchar(10) | (014) código DGII (43 = unidad); columna "Und. Medida" de la RI |
+| `unidad_medida` | varchar(10) | (014) código DGII (43 = Unidad); columna "Und. Medida" de la RI |
 | `itbis_amount` | decimal(18,2) | (001) |
 
-### `ncf_sequences`
-Counters; `current_value` = last used (next = +1). UNIQUE on `type`.
+### `ncf_sequences` — rangos autorizados (migración 014)
+Cada fila representa **un rango autorizado** por DGII para un tipo y ambiente.
 
-| Column | Type | Notes |
+| Columna | Tipo | Notas |
 |---|---|---|
 | `id` | int PK AI | |
-| `type` | varchar(10) | UNIQUE |
+| `type` | varchar(10) | tipo de comprobante |
 | `prefix` | varchar(10) | |
-| `current_value` | int | default 0 |
+| `current_value` | int | último número usado (próximo = +1) |
+| `numero_desde` / `numero_hasta` | int | límites del rango (`numero_hasta` NULL = sin límite, fila legacy) |
+| `no_solicitud` / `no_autorizacion` | varchar | identificadores DGII del rango |
+| `fecha_vencimiento` | date | vencimiento del rango |
+| `ambiente` | varchar(20) | secuencias **per-ambiente** (testecf/certecf/ecf) |
 | `description` | varchar(100) | |
-| `created_at` / `updated_at` | datetime | auto |
+| `created_at` / `updated_at` | datetime | |
 
-Seeded types: `B01` Crédito Fiscal, `B02` Consumidor Final, `B14` Reg. Especiales, `B15` Gubernamental.
-e-NCF (001): `E31` Crédito Fiscal, `E32` Consumo, `E33` Nota Débito, `E34` Nota Crédito, `E41` Compras, `E43` Gastos Menores, `E44` Reg. Especiales, `E45` Gubernamental, `E46` Exportaciones, `E47` Pagos al Exterior.
+La emisión dispensa del rango ACTIVO (con capacidad y no vencido); al agotarse, falla con
+error claro hasta registrar el siguiente rango. Ver `POST /api/ncf/rangos` en
+[../api/facturas.md](../api/facturas.md).
 
-> Note: NCF sequences are **per-ambiente** on the server (`tools/migration_ncf_ambiente.sql`).
+Tipos B (legacy): `B01` Crédito Fiscal, `B02` Consumidor Final, `B14` Reg. Especiales, `B15` Gubernamental.
+Tipos e-NCF: `E31` Crédito Fiscal, `E32` Consumo, `E33` Nota Débito, `E34` Nota Crédito,
+`E41` Compras, `E43` Gastos Menores, `E44` Reg. Especiales, `E45` Gubernamental,
+`E46` Exportaciones, `E47` Pagos al Exterior.
 
 ### `emisor_config`
-Single row (`id=1`), issuer fiscal data.
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | always 1 |
-| `rnc` | varchar(11) | |
-| `razon_social` | varchar(150) | |
-| `nombre_comercial` | varchar(150) | |
-| `sucursal` | varchar(20) | |
-| `direccion` | varchar(100) | |
-| `municipio` / `provincia` | varchar(50) | |
-| `telefono` | varchar(12) | 999-999-9999 |
-| `correo` | varchar(80) | |
-| `website` | varchar(50) | |
-| `actividad_economica` | varchar(100) | |
-| `fecha_vencimiento_secuencia` | date | DGII auth seq expiry |
+Fila única (`id=1`) con los datos fiscales del emisor: `rnc`, `razon_social`,
+`nombre_comercial`, `sucursal`, `direccion`, `municipio`, `provincia`, `telefono`,
+`correo`, `website`, `actividad_economica`, `fecha_vencimiento_secuencia`.
 
 ---
 
-## e-CF Receiver Tables (we act as receiver)
+## Tablas de receptor e-CF (rol receptor)
 
 ### `ecf_recibidos`
-Incoming e-CFs from other issuers (DGII recepción URL).
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `track_id` | varchar(60) | UNIQUE |
-| `tipo_ecf` | varchar(2) | |
-| `e_ncf` | varchar(13) | UNIQUE with rnc_emisor |
-| `rnc_emisor` | varchar(11) | |
-| `razon_social_emisor` | varchar(150) | |
-| `rnc_comprador` | varchar(11) | must match emisor_config |
-| `monto_total` | decimal(18,2) | |
-| `fecha_emision` | date | |
-| `fecha_recepcion` | datetime | default now — INDEX |
-| `estado` | varchar(30) | RECIBIDO/EN_PROCESO/ACEPTADO/RECHAZADO/ERROR_FIRMA/ERROR_XSD — INDEX |
-| `codigo_resultado` | int | 1=Aceptado 2=Rechazado |
-| `mensaje_resultado` | varchar(500) | |
-| `xml_firmado` | mediumtext | |
-| `validacion_firma` | varchar(20) | OK/INVALIDA/NO_VERIFICADA |
-| `created_at` | datetime | |
+e-CF entrantes de otros emisores (URL de recepción DGII). Columnas clave: `track_id`
+(UNIQUE), `tipo_ecf`, `e_ncf`, `rnc_emisor`, `razon_social_emisor`, `rnc_comprador`
+(debe coincidir con el emisor_config), `monto_total`, `fecha_emision`, `fecha_recepcion`,
+`estado` (RECIBIDO/EN_PROCESO/ACEPTADO/RECHAZADO/ERROR_FIRMA/ERROR_XSD), `codigo_resultado`,
+`mensaje_resultado`, `xml_firmado`, `validacion_firma` (OK/INVALIDA/NO_VERIFICADA),
+`ambiente` (migración 010), `origen` (migración 011), y las columnas salientes
+`aprobacion_comercial*` (migración 009: tu decisión sobre cada e-CF recibido).
 
 ### `aprobaciones_comerciales`
-Commercial approvals/rejections (ACECF) buyers send for our invoices.
+Aprobaciones/rechazos (ACECF) que los compradores envían sobre **tus** facturas:
+`factura_id` (nullable, soft link por `e_ncf`), `e_ncf`, `rnc_emisor` (tu RNC),
+`rnc_comprador`, `estado_comercial`, `detalle_motivo`, `xml_firmado`, `validacion_firma`,
+`ambiente`, `fecha_recepcion`.
 
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `factura_id` | int | nullable, soft link via e_ncf — INDEX |
-| `e_ncf` | varchar(13) | INDEX |
-| `rnc_emisor` | varchar(11) | our RNC |
-| `rnc_comprador` | varchar(11) | buyer — INDEX |
-| `estado_comercial` | varchar(30) | ACEPTADO/ACEPTADO_CONDICIONAL/RECHAZADO |
-| `detalle_motivo` | varchar(500) | |
-| `xml_firmado` | mediumtext | |
-| `validacion_firma` | varchar(20) | |
-| `fecha_recepcion` | datetime | default now |
+> La diferencia entre `ecf_recibidos` y `aprobaciones_comerciales` (roles opuestos) está
+> explicada en [../api/recepcion-aprobacion.md](../api/recepcion-aprobacion.md).
 
-### `auth_seeds`
-Seeds issued by our autenticación URL (DGII semilla flow).
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `seed_value` | varchar(64) | UNIQUE |
-| `xml_emitido` | text | |
-| `created_at` | datetime | |
-| `expira_at` | datetime | default +5 min — INDEX |
-| `consumida_at` | datetime | NULL = unused |
-| `rnc_consumidor` | varchar(11) | from cert on validate |
-| `token_emitido` | varchar(2048) | |
-
-### `auth_tokens_emitidos`
-Bearer tokens issued to authenticated consumers (DGII calls).
-
-| Column | Type | Notes |
-|---|---|---|
-| `id` | int PK AI | |
-| `token` | varchar(2048) | INDEX on first 64 chars |
-| `rnc_consumidor` | varchar(11) | INDEX |
-| `expedido_at` | datetime | default now |
-| `expira_at` | datetime | INDEX |
-| `revocado_at` | datetime | NULL = active |
+### `auth_seeds` / `auth_tokens_emitidos`
+Semillas y tokens Bearer emitidos a consumidores autenticados (flujo DGII semilla→token).
+En multi-tenant viven en el master; en el tenant existen para el fallback single-tenant.
 
 ---
 
-## Landing Tables
+## Tablas de gastos
 
-### `landing_carousel`
-`id` PK AI, `title` varchar(255), `subtitle` varchar(255) null, `image_path` varchar(500), `created_at` datetime.
+### `gastos` (migraciones 007 + 008)
+`id`, `categoria` (`gastos_menores`/`facturas_proveedores`), `tipo_gasto`, `ncf`,
+`rnc_proveedor`, `nombre_proveedor`, `fecha`, `subtotal`, `itbis`, `total`,
+`es_auto_emision`, `ambiente`, `user_id`, timestamps + (008) `estado_dgii`, `track_id`,
+`codigo_seguridad`, `fecha_emision_dgii`, `xml_firmado`, `respuesta_dgii`,
+`secuencia_utilizada`. UNIQUE `(rnc_proveedor, ncf)`.
 
-### `landing_services`
-`id` PK AI, `title` varchar(255), `description` text null, `image_path` varchar(500), `created_at` datetime.
+### `gasto_items` (007 + 008/016)
+`id`, `gasto_id` (FK CASCADE), `description`, `amount`, `quantity`, `subtotal`,
+`itbis_amount` + (008) `indicador_facturacion`, `indicador_bien_servicio` + (016)
+`unidad_medida`.
+
+Detalle del módulo: [../modules/gastos.md](../modules/gastos.md).
 
 ---
 
-## Migrations (`db/migrations/`)
+## Relaciones (DB del tenant)
 
-| File | What it adds |
+```
+clients      1───* cotizaciones / facturas        (client_id, nullable)
+cotizaciones 1───* cotizacion_items               (FK CASCADE)
+facturas     1───* factura_items                  (FK CASCADE)
+facturas     1───* aprobaciones_comerciales        (factura_id, soft link por e_ncf)
+gastos       1───* gasto_items                     (FK CASCADE)
+ncf_sequences / emisor_config / ecf_recibidos / proveedores / products — standalone
+```
+
+En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado por `tenant_id`
+(int suelto, sin FK cross-DB).
+
+---
+
+## Fuentes de esquema y migraciones
+
+| Artefacto | Para qué |
 |---|---|
-| `001_add_ecf_module.sql` | client fiscal cols, factura e-CF cols, factura_items fiscal cols, E31–E47 sequences, `emisor_config` |
-| `002_add_ecf_reception.sql` | `ecf_recibidos`, `aprobaciones_comerciales`, `auth_seeds`, `auth_tokens_emitidos` |
-| `003_add_rfce_tracking.sql` | factura RFCE cols |
-| `004_fase2_setup.sql` | data: cert test issuer/clients (Fase 2) |
-| `005_add_secuencia_utilizada.sql` | factura `secuencia_utilizada` |
-| `006_add_nota_referencia.sql` | factura note-reference cols (E33/E34) |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–016). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–016 |
+| `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
+| `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 
-All migrations are **additive**. 003/005/006 omit transactions (DDL auto-commit, MySQL 8).
+Reglas de migración: ver [../../db/migrations/README.md](../../db/migrations/README.md).
+Todas las migraciones son **aditivas**; las de DDL puro omiten transacción (auto-commit en MySQL 8).

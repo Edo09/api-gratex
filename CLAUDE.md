@@ -5,10 +5,18 @@
 PHP REST API for electronic invoicing (e-CF) in the Dominican Republic.
 Stack: PHP 8+, MySQL, Apache. No Composer. Single entry point `index.php` → `src/Router.php`.
 
-## Status (2026-06-01)
+## Status
 
-**DGII e-CF certification complete.** System is live in `ecf` (production) ambiente.
-Full details: `docs/dgii-certification.md`
+**DGII e-CF certification complete** (2026-06-01) — Gratex live in `ecf` production.
+**Multi-tenant (DB-per-tenant) live in production** since 2026-06-08 — Gratex is tenant #1;
+new tenants onboard as `app` (own DB) or `integracion` (JSON→XML, no DB). Gated by
+`MULTI_TENANT_ENABLED`.
+
+Shipped modules beyond core emission: gastos, reportes 606/607, products, proveedores,
+unidades-medida, branding/plantillas PDF, integración.
+
+**Docs:** start at `docs/README.md`. Architecture: `docs/architecture.md`. DGII flows:
+`docs/integrations/dgii-ecf.md`. Multi-tenant onboarding: `docs/integrations/multi-tenant-onboarding.md`.
 
 ## Critical facts
 

@@ -14,7 +14,7 @@ require_once __DIR__ . '/BrandingResolver.php';
  *
  * Para un diseno a la medida de un cliente: subclasear esta clase en
  * src/Utils/Pdf/Custom/<Nombre>Template.php y apuntar tenants.pdf_template a
- * 'custom:<nombre>'. Ver docs/plantillas-factura.md.
+ * 'custom:<nombre>'. Ver docs/modules/branding-plantillas.md.
  */
 abstract class FacturaTemplate
 {

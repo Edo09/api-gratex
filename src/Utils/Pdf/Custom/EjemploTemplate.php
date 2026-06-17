@@ -3,7 +3,7 @@ require_once __DIR__ . '/../ClasicoTemplate.php';
 
 /**
  * Plantilla custom de EJEMPLO ('custom:ejemplo') — base de copia para el
- * primer diseno a la medida de un cliente. Ver docs/plantillas-factura.md.
+ * primer diseno a la medida de un cliente. Ver docs/modules/branding-plantillas.md.
  *
  * Flujo para un cliente real:
  *   1. Copiar este archivo a Tenant<id>Template.php (clase Tenant<id>Template).

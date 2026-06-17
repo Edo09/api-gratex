@@ -18,7 +18,7 @@
  *               (o PUT /api/branding {"template":"custom:tenant<id>"}).
  *   3. Verifica: POST /api/branding/preview {"template":"custom:tenant<id>","grid":true}
  *
- * Guia completa: docs/plantillas-factura.md ("Replicar el formato existente").
+ * Guia completa: docs/modules/branding-plantillas.md ("Replicar el formato existente").
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -186,5 +186,5 @@ echo "       UPDATE tenants SET pdf_template='custom:tenant{$id}' WHERE id={$id}
 echo "       (o PUT /api/branding {\"template\":\"custom:tenant{$id}\"} con el token del tenant)\n";
 echo "  3. Verifica con la rejilla:\n";
 echo "       POST /api/branding/preview {\"template\":\"custom:tenant{$id}\",\"grid\":true}\n\n";
-echo "Guia: docs/plantillas-factura.md (\"Replicar el formato existente de un cliente\").\n";
+echo "Guia: docs/modules/branding-plantillas.md (\"Replicar el formato existente de un cliente\").\n";
 exit(0);

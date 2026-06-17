@@ -229,9 +229,9 @@ X-API-KEY: <key>
 | `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
 | `GET` | `/api/unidades-medida` | Catálogo DGII de unidades de medida (solo lectura) — ver nota abajo |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
-| `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver `docs/gastos-module.md` |
+| `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver [../modules/gastos.md](../modules/gastos.md) |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
-| `GET/POST/PUT/DELETE` | `/api/facturas-simples` | Facturas NO electrónicas — ver `docs/facturas-simples-api.md` |
+| `GET/POST/PUT/DELETE` | `/api/facturas-simples` | Facturas NO electrónicas — ver [facturas-simples.md](facturas-simples.md) |
 | `GET/POST` | `/api/ncf/rangos` | Rangos e-NCF autorizados por DGII (listar / registrar) — ver sección abajo |
 | `GET/PUT` | `/api/ncf` | Gestión legacy de secuencias NCF (B01) |
 | `POST` | `/api/aprobaciones-comerciales` | Enviar ACECF a DGII (aprobación comercial saliente) |
