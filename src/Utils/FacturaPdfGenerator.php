@@ -129,7 +129,7 @@ class FacturaPdfGenerator extends FPDF
      * Activa la rejilla de calibracion (10 mm + etiquetas en cm) sobre cada
      * pagina. Herramienta de diseno para plantillas a la medida (replicar el
      * formato impreso de un cliente desde su PDF/escaneo): permite medir y
-     * alinear. Ver docs/plantillas-factura.md. No usar en facturas reales.
+     * alinear. Ver docs/modules/branding-plantillas.md. No usar en facturas reales.
      */
     public function setDebugGrid(bool $v = true)
     {

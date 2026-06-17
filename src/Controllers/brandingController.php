@@ -179,7 +179,7 @@ function brHandlePreview(int $tenantId): void
     }
     // {"grid":true}: superpone una rejilla de calibracion (10 mm / cm) para
     // disenar plantillas a la medida replicando el formato de un cliente.
-    // Ver docs/plantillas-factura.md ("Replicar el formato existente").
+    // Ver docs/modules/branding-plantillas.md ("Replicar el formato existente").
     if (!empty($body['grid'])) {
         $pdf->setDebugGrid(true);
     }

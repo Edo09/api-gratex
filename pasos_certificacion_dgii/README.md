@@ -3,7 +3,8 @@
 Scripts y archivos usados para pasar cada fase de certificación de DGII para
 facturación electrónica (e-CF). Recopilados aquí para **automatizar el proceso
 y ofrecer certificación-como-servicio** a otras empresas (ver
-[../docs/multi-emisor-migration-plan.md](../docs/multi-emisor-migration-plan.md)).
+[../docs/architecture.md](../docs/architecture.md) y
+[../docs/integrations/multi-tenant-onboarding.md](../docs/integrations/multi-tenant-onboarding.md)).
 
 > Estos son **copias** de los runners en `tools/`. Los originales siguen ahí.
 > Cada carpeta de fase es autocontenida (el runner incluye su parser

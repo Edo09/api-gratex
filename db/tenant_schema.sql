@@ -14,7 +14,7 @@
 -- SIN users / api_tokens / landing_* (viven en gratex_master). NO incluye
 -- CREATE DATABASE / USE: el onboarding crea el DB y selecciona su conexion.
 --
--- Ver: docs/multi-emisor-master-db-prd.md
+-- Ver: docs/architecture.md
 -- ============================================================================
 
 -- ----------------------------------------------------------------------------

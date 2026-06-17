@@ -2,7 +2,7 @@
 ### Branding de la Representacion Impresa por tenant -> /api/branding
 ### Plantilla (clasico | moderno | compacto | custom:tenant<id>), color de
 ### acento (#RRGGBB) y logo. Requiere modo multi-tenant (el tenant sale del
-### token). Ver docs/plantillas-factura.md.
+### token). Ver docs/modules/branding-plantillas.md.
 ### ============================================================================
 
 ### Branding actual + plantillas disponibles

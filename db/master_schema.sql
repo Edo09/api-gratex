@@ -4,7 +4,7 @@
 -- Enruta cada peticion al DB del tenant correcto y centraliza auth (users +
 -- api_tokens) para resolver el tenant sin problema huevo-gallina en el login.
 --
--- Ver: docs/multi-emisor-master-db-prd.md
+-- Ver: docs/architecture.md
 --
 -- Ejecutar UNA vez para crear la master DB. La migracion de datos de Gratex
 -- (tenant #1) esta al final, comentada (ajustar nombres de DB segun entorno).

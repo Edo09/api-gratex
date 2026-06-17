@@ -44,7 +44,7 @@ class Database
             // Implicacion: para un 2do tenant tipo "app" con DB distinta hace falta
             // resolver el tenant ANTES de instanciar models (o conexion lazy).
             // Gratex (tenant #1) no se ve afectado: su DB == la default del .env.
-            // Integracion no usa la DB de tenant. Ver docs/multi-emisor-master-db-prd.md.
+            // Integracion no usa la DB de tenant. Ver docs/architecture.md.
             $host = $_ENV['DB_HOST'] ?? 'sh00032.hostgator.com';
             $port = $_ENV['DB_PORT'] ?? '3306';
             $name = $_ENV['DB_NAME'] ?? 'mtldtmte_new_gratexdb';

@@ -11,7 +11,7 @@
  *                   El cliente manda el eNCF en el JSON y maneja sus facturas en su sistema.
  *
  * Imprime API KEY + API SECRET (el secret se muestra UNA sola vez).
- * Ver: docs/multi-emisor-master-db-prd.md
+ * Ver: docs/architecture.md
  *
  * Uso integracion (PowerShell):
  *   php tools/create_tenant.php --tipo=integracion `
