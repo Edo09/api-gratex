@@ -36,6 +36,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `ecf_recibidos` (+ `tenant_id`) | Espejo: e-CF recibidos de tenants `integracion` |
 | `aprobaciones_comerciales` (+ `tenant_id`) | Espejo: aprobaciones de tenants `integracion` |
 | `unidades_medida` | Catálogo DGII de unidades de medida (compartido por todos los tenants) |
+| `roles` / `role_permissions` | RBAC per-tenant: roles del tenant + sus permisos (ver [../modules/roles-permisos.md](../modules/roles-permisos.md)) |
 
 ### `tenants`
 | Columna | Tipo | Notas |

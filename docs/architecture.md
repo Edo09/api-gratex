@@ -90,6 +90,7 @@ api-gratex/
 | `facturacion-electronica` | `facturacionElectronicaController.php` | token | flujo de autenticación DGII (diagnóstico) |
 | `aprobaciones-comerciales` | `aprobacionComercialOutgoingController.php` | token | enviar ACECF (rol comprador) |
 | `branding` | `brandingController.php` | token | plantilla/color/logo PDF por tenant |
+| `roles` | `roleController.php` | token (admin) | gestión de roles y permisos (RBAC) |
 | `emisor` | `emisorController.php` | token | datos fiscales del emisor / tenant |
 | `landing` | `landingController.php` | token | config de landing |
 | `integracion` | `integracionEcf/Aprobacion/Consulta...` | key+secret | modo integración (JSON→XML, sin DB propia) |
@@ -180,6 +181,11 @@ Onboarding paso a paso (app/integración, demo, certificación): [integrations/m
 - Rutas DGII entrantes (`/api/ecf/*`): Bearer del flujo de auth DGII **o** firma XMLDSig válida
   (recepción abierta — ver [integrations/dgii-ecf.md](integrations/dgii-ecf.md)).
 - `sendUnauthorized()` → 401 JSON.
+
+### Autorización (RBAC)
+Sobre la autenticación, `src/PermissionGate.php` (invocado en el Router antes del controller)
+aplica permisos por **rol del usuario**, con roles **per-tenant** en el master. Gated por
+`PERMISSIONS_ENFORCE` (sombra → enforce). Detalle: [modules/roles-permisos.md](modules/roles-permisos.md).
 
 ---
 
