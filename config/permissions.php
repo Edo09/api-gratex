@@ -36,7 +36,8 @@ $USER_MODULES = [
     'reportes',
     'ncf',
     'unidades',
-    'inventory',
+    'categories',
+    'warehouses',
 ];
 
 // Modulos solo-admin (configuracion / administracion).
@@ -62,8 +63,8 @@ return [
         'products'                 => 'products',
         'proveedores'              => 'proveedores',
         'unidades-medida'          => 'unidades',
-        'categories'               => 'inventory',
-        'warehouses'               => 'inventory',
+        'categories'               => 'categories',
+        'warehouses'               => 'warehouses',
         'cotizaciones'             => 'cotizaciones',
         'facturas'                 => 'facturas',
         'facturas-simples'         => 'facturas-simples',

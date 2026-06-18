@@ -79,8 +79,8 @@ api-gratex/
 | `users` | `userController.php` | token | CRUD usuarios |
 | `clients` | `clientController.php` | token | CRUD clientes |
 | `products` | `productController.php` | token | catálogo de productos/servicios |
-| `categories` | `categoryController.php` | token (`inventory`) | categorías de inventario |
-| `warehouses` | `warehouseController.php` | token (`inventory`) | almacenes de inventario |
+| `categories` | `categoryController.php` | token (`categories`) | categorías de inventario |
+| `warehouses` | `warehouseController.php` | token (`warehouses`) | almacenes de inventario |
 | `proveedores` | `proveedorController.php` | token | directorio de proveedores (+ compras) |
 | `unidades-medida` | `unidadMedidaController.php` | token | catálogo DGII de unidades (solo lectura) |
 | `cotizaciones` | `cotizacionController.php` | token | cotizaciones + PDF |

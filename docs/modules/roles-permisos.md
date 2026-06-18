@@ -32,7 +32,7 @@ módulo = acceso completo a ese módulo; no tenerlo = no se ve.
 
 Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`, `gastos`,
 `clients`, `products`, `proveedores`, `cotizaciones`, `aprobaciones`, `reportes`, `ncf`,
-`unidades`, `inventory`. **Solo admin** (excluidos de `user`): `emisor`, `branding`, `landing`,
+`unidades`, `categories`, `warehouses`. **Solo admin** (excluidos de `user`): `emisor`, `branding`, `landing`,
 `users`, `roles`. (Si un `user` necesita un módulo admin, crear/ajustar un rol con `/api/roles`.)
 
 ## Aplicación — `PermissionGate` (Router)

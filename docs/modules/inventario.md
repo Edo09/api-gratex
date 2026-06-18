@@ -25,8 +25,9 @@ se migró a `categories` y se eliminó (migración `017_add_inventory.sql`).
 
 ## API
 
-Ambas rutas requieren token y el módulo RBAC **`inventory`** (el rol `user` ya lo tiene; ver
-[roles-permisos.md](roles-permisos.md)). Mismo contrato que `/api/products`.
+Cada ruta requiere token y su propio módulo RBAC — **`categories`** y **`warehouses`** (módulos
+separados: un rol puede tener uno sin el otro). El rol `user` trae ambos por defecto; ver
+[roles-permisos.md](roles-permisos.md). Mismo contrato que `/api/products`.
 
 | Método | Ruta | Acción |
 |---|---|---|
@@ -49,5 +50,5 @@ productos) y [../database/schema.md](../database/schema.md).
 `db/migrations/017_add_inventory.sql`, `db/master_migrations/004_add_inventory_permission.sql`,
 `src/Models/categoryModel.php`, `src/Models/warehouseModel.php`,
 `src/Controllers/categoryController.php`, `src/Controllers/warehouseController.php`,
-`config/permissions.php` (módulo `inventory`), `src/Router.php`, `src/Models/productModel.php`,
+`config/permissions.php` (módulos `categories` + `warehouses`), `src/Router.php`, `src/Models/productModel.php`,
 `src/Controllers/productController.php`, `db/tenant_schema.sql`.
