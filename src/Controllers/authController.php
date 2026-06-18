@@ -149,6 +149,26 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'GET':
+        $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+        // Perfil del usuario actual + sus modulos (para que el front arme el menu
+        // y muestre/oculte paginas). Cualquier usuario autenticado puede pedir el
+        // SUYO; refleja cambios de rol sin re-login (validateRequest lee el rol vivo).
+        if (preg_match('#/api/auth/me/?$#', $endpoint)) {
+            $v = $auth->validateRequest();
+            if (empty($v['valid']) || ($v['user_id'] ?? null) === null) {
+                http_response_code(401);
+                echo json_encode(['success' => false, 'error' => $v['message'] ?? 'Unauthorized']);
+                break;
+            }
+            $profile = $authModel->getUserProfile($v['user_id']);
+            if (!$profile) {
+                http_response_code(404);
+                echo json_encode(['success' => false, 'error' => 'Usuario no encontrado']);
+                break;
+            }
+            echo json_encode(['success' => true, 'data' => ['user' => $profile]]);
+            break;
+        }
         // List tokens for a user
         if (isset($_GET['user_id'])) {
             $user_id = $_GET['user_id'];

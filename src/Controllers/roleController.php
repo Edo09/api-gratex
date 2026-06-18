@@ -11,8 +11,9 @@ require_once(__DIR__ . '/../PermissionGate.php');
 $auth = new AuthMiddleware();
 $roleModel = new RoleModel();
 
-// Gestion de roles = vector de escalada de privilegios. Se exige 'roles.manage'
-// (admin) SIEMPRE, independiente de PERMISSIONS_ENFORCE (no se deja en sombra).
+// Gestion de roles = vector de escalada de privilegios. Se exige el modulo
+// 'roles' (lo tiene admin via '*'; o un rol custom al que se le otorgue) SIEMPRE,
+// independiente de PERMISSIONS_ENFORCE (no se deja en sombra).
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $v = $auth->validateRequest();
     if (empty($v['valid'])) {
@@ -22,8 +23,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
         $auth->sendForbidden('Esta ruta requiere una sesion de usuario.');
     }
     $myPerms = $roleModel->getPermissionsForRole($v['tenant_id'] ?? null, (string) ($v['role'] ?? ''));
-    if (!PermissionGate::permMatches($myPerms, 'roles.manage')) {
-        $auth->sendForbidden('Solo un administrador puede gestionar roles.');
+    if (!PermissionGate::permMatches($myPerms, 'roles')) {
+        $auth->sendForbidden('No tiene permiso para gestionar roles.');
     }
 }
 
