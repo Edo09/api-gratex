@@ -15,8 +15,9 @@ por un **gate central** en el Router, con despliegue en **sombra** antes de bloq
 - **`users.role`** guarda el **nombre** del rol (string). Se resuelve a permisos por
   `(tenant_id, name)` — backward-compatible: los `'user'`/`'admin'` existentes siguen funcionando.
 - Cada tenant se siembra con dos **roles de sistema** (`is_system=1`, no borrables):
-  - `admin` → permiso `*` (todo).
-  - `user` → operación sin administración (sin `*.manage` de admin).
+  - `admin` → permiso `*` (todos los módulos).
+  - `user` → módulos operativos, sin los de administración (`emisor`, `branding`,
+    `landing`, `users`, `roles`).
 
 ## Permisos = acceso a módulo
 
@@ -47,11 +48,14 @@ valor del mapa de rutas:
 | `'<módulo>'` (o por método) | ruta de usuario-app: exige token válido + acceso a ese módulo |
 
 Reglas:
-- **Fail-closed:** ruta sin entrada en el mapa, sin rol, o sin el permiso → 403.
+- **Ruta de app sin el módulo (o sin rol):** → 403 en `enforce` (en sombra solo se registra).
+- **Ruta sin entrada en el mapa:** el gate la registra (`[PermissionGate] ruta sin mapeo`) y la
+  **deja pasar** — el controller hace su propia validación de token igual. Toda ruta real de la
+  app ya está en el mapa; un hueco se ve en el log.
 - El rol se lee **server-side** del usuario del token (`authModel::validateToken` lo trae con un
   JOIN a `users`), **nunca** del request.
 - Los controllers conservan su propio `validateRequest()` (defensa en profundidad). El gate
-  también puede usarse fino con `AuthMiddleware::requirePermission('x.y')`.
+  también puede usarse fino con `AuthMiddleware::requirePermission('facturas')`.
 
 ### Despliegue en sombra — `PERMISSIONS_ENFORCE`
 Flag en `.env` (patrón de `MULTI_TENANT_ENABLED`):
@@ -62,7 +66,7 @@ Flag en `.env` (patrón de `MULTI_TENANT_ENABLED`):
 **Excepción:** la gestión de roles (`/api/roles`) se exige **siempre** (admin), aun en sombra —
 es un vector de escalada de privilegios.
 
-## API — `/api/roles` (admin, `roles.manage`)
+## API — `/api/roles` (módulo `roles`; admin via `*`)
 
 | Método | Ruta | Acción |
 |---|---|---|
@@ -75,6 +79,26 @@ es un vector de escalada de privilegios.
 
 Permisos validados contra el catálogo. `assignUserRole` valida que el rol pertenezca al tenant
 del usuario (no se puede referenciar un rol de otro tenant).
+
+## Frontend — menú y páginas
+
+El front decide qué páginas/menú mostrar con la **lista de módulos** del usuario:
+
+- `POST /api/auth/login` devuelve `data.user.permissions` = los módulos del rol
+  (ej. `["facturas","gastos","reportes",...]` o `["*"]` para admin).
+- `GET /api/auth/me` (cualquier usuario autenticado, sobre sí mismo) devuelve
+  `data.user` con `role` + `permissions`. Úsalo para **refrescar** los módulos sin
+  re-login cuando un admin cambia el rol (el backend lee el rol vivo en cada request).
+
+El front muestra/oculta por módulo: `perms.includes('*') || perms.includes('facturas')`.
+
+Si los ids de vista del front no coinciden con los nombres de módulo (ej. `clientes`→`clients`,
+`productos`→`products`, `compras`→`gastos`, `ecf`→`facturas`, `aprobar-ecf`→`aprobaciones`),
+mantener un mapa `vista → módulo(s)` y mostrar con *any-of*. Vistas sin API (dashboard,
+tesorería) no se gatean (no hay 403 que dar).
+
+> El front-gating es solo UX. El **backend igual aplica** (PermissionGate): aunque el
+> front muestre la página, la API responde 403 si el rol no tiene el módulo.
 
 ## Onboarding / usuarios
 

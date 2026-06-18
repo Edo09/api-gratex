@@ -265,18 +265,59 @@ class authModel
                 ]);
             }
 
-            // Prepare user data response (without password)
+            // Prepare user data response (without password). Incluye los modulos
+            // a los que el rol da acceso, para que el front muestre/oculte paginas.
             $user_data = [
                 'id' => (int)$user['id'],
                 'email' => $user['email'],
                 'username' => $user['username'],
                 'name' => $user['name'] . ' ' . $user['last_name'],
-                'role' => $user['role']
+                'role' => $user['role'],
+                'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role']),
             ];
 
             return ['success', ['token' => $token, 'user' => $user_data]];
         } catch (PDOException $e) {
             return ['error', 'Database error: ' . $e->getMessage()];
+        }
+    }
+
+    /**
+     * Modulos (permisos) a los que da acceso un rol. Vacio si no resuelve.
+     */
+    private function permissionsForUser($tenant_id, $role): array
+    {
+        require_once __DIR__ . '/RoleModel.php';
+        return (new RoleModel())->getPermissionsForRole(
+            $tenant_id !== null ? (int) $tenant_id : null,
+            (string) $role
+        );
+    }
+
+    /**
+     * Perfil del usuario actual + sus modulos (para GET /api/auth/me).
+     * @return array|null
+     */
+    public function getUserProfile($user_id)
+    {
+        try {
+            $cols = 'id, email, username, name, last_name, role' . (self::multiTenant() ? ', tenant_id' : '');
+            $stmt = $this->conexion->prepare("SELECT {$cols} FROM users WHERE id = :id LIMIT 1");
+            $stmt->execute([':id' => $user_id]);
+            $u = $stmt->fetch();
+            if (!$u) {
+                return null;
+            }
+            return [
+                'id' => (int) $u['id'],
+                'email' => $u['email'],
+                'username' => $u['username'],
+                'name' => trim(($u['name'] ?? '') . ' ' . ($u['last_name'] ?? '')),
+                'role' => $u['role'],
+                'permissions' => $this->permissionsForUser($u['tenant_id'] ?? null, $u['role']),
+            ];
+        } catch (PDOException $e) {
+            return null;
         }
     }
 

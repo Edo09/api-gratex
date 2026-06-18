@@ -42,10 +42,13 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 -- ---------------------------------------------------------------------------
 -- Seed: rol admin por tenant
 -- ---------------------------------------------------------------------------
+-- Solo tenants tipo "app": el RBAC aplica a usuarios de la app (login). Los
+-- tenants "integracion" no tienen usuarios (auth por key+secret), no se siembran.
 INSERT INTO roles (tenant_id, name, description, is_system)
 SELECT t.id, 'admin', 'Acceso total dentro del tenant', 1
 FROM tenants t
-WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.name = 'admin');
+WHERE t.tipo = 'app'
+  AND NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.name = 'admin');
 
 INSERT INTO role_permissions (role_id, permission)
 SELECT r.id, '*'
@@ -59,7 +62,8 @@ WHERE r.name = 'admin'
 INSERT INTO roles (tenant_id, name, description, is_system)
 SELECT t.id, 'user', 'Operacion (sin gestion de usuarios, roles ni configuracion)', 1
 FROM tenants t
-WHERE NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.name = 'user');
+WHERE t.tipo = 'app'
+  AND NOT EXISTS (SELECT 1 FROM roles r WHERE r.tenant_id = t.id AND r.name = 'user');
 
 INSERT INTO role_permissions (role_id, permission)
 SELECT r.id, p.perm
