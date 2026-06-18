@@ -442,16 +442,52 @@ CREATE TABLE IF NOT EXISTS gasto_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
+-- 10b) Inventario: Categorias + Almacenes (DB del tenant = empresa; sin company_id).
+--      Ver db/migrations/017_add_inventory.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS categories (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  nombre VARCHAR(100) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cat_nombre (nombre),
+  KEY idx_cat_estado (estado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS warehouses (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  nombre VARCHAR(100) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_wh_nombre (nombre),
+  KEY idx_wh_estado (estado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Almacen por defecto de la empresa (los productos sin almacen caen aqui).
+INSERT INTO warehouses (nombre, descripcion)
+SELECT 'Almacén Principal', 'Almacén por defecto de la empresa'
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE nombre = 'Almacén Principal');
+
+-- ----------------------------------------------------------------------------
 -- 11) Catalogo de productos/servicios (para la facturacion). `indicador_facturacion`
 --     define el gravamen ITBIS igual que en factura_items (1=18% gravado, 4=Exento).
---     Ver db/migrations/012_add_products.sql.
+--     category_id (FK categories, opcional) + warehouse_id (FK warehouses, obligatorio).
+--     Ver db/migrations/012_add_products.sql y 017_add_inventory.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS products (
   id INT(11) NOT NULL AUTO_INCREMENT,
   sku VARCHAR(50) NULL,
   nombre VARCHAR(150) NOT NULL,
   descripcion VARCHAR(255) NULL,
-  categoria VARCHAR(50) NULL,
+  category_id INT(11) NULL,
+  warehouse_id INT(11) NOT NULL,
   indicador_bien_servicio TINYINT NOT NULL DEFAULT 1
     COMMENT '1=Bien | 2=Servicio',
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
@@ -467,8 +503,11 @@ CREATE TABLE IF NOT EXISTS products (
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_sku (sku),
-  KEY idx_categoria (categoria),
-  KEY idx_activo (activo)
+  KEY idx_products_category (category_id),
+  KEY idx_products_warehouse (warehouse_id),
+  KEY idx_activo (activo),
+  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL,
+  CONSTRAINT fk_products_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
@@ -638,6 +677,7 @@ JOIN (
   UNION ALL SELECT 'products' UNION ALL SELECT 'proveedores'
   UNION ALL SELECT 'cotizaciones' UNION ALL SELECT 'aprobaciones'
   UNION ALL SELECT 'reportes' UNION ALL SELECT 'ncf' UNION ALL SELECT 'unidades'
+  UNION ALL SELECT 'inventory'
 ) p
 WHERE r.tenant_id = 0 AND r.name = 'user'
   AND NOT EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role_id = r.id AND rp.permission = p.perm);

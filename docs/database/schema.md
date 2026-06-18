@@ -77,8 +77,10 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 | `ecf_recibidos` | e-CF entrantes de otros emisores (rol receptor) |
 | `aprobaciones_comerciales` | Aprobaciones comerciales (ACECF) recibidas |
 | `gastos` / `gasto_items` | Gastos menores y facturas de proveedores |
-| `products` | Catálogo de productos/servicios (migración 012) |
+| `products` | Catálogo de productos/servicios (migración 012; + `category_id`/`warehouse_id` en 017) |
 | `proveedores` | Directorio de proveedores (migración 013) |
+| `categories` | Categorías de inventario (migración 017) |
+| `warehouses` | Almacenes de inventario; default `Almacén Principal` (migración 017) |
 | `auth_seeds` / `auth_tokens_emitidos` | Auth DGII (solo fallback single-tenant) |
 
 ---
@@ -132,6 +134,13 @@ Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `pre
 Directorio para autocompletar/gestionar proveedores: `id`, `rnc`, `nombre`, contacto…
 Los gastos siguen guardando `rnc_proveedor`/`nombre_proveedor` inline (desnormalizado);
 esta tabla es solo el directorio. El listado deriva `compras` desde `gastos`.
+
+### `categories` / `warehouses` (migración 017 — Inventario)
+`id`, `nombre` (UNIQUE), `descripcion?`, `estado` (1/0), `created_at`, `updated_at`. `products`
+gana `category_id` (FK `categories` `ON DELETE SET NULL`, opcional) y `warehouse_id` (FK
+`warehouses` `ON DELETE RESTRICT`, obligatorio). El texto libre `products.categoria` se migró a
+`categories` y se eliminó. Cada empresa tiene un `Almacén Principal` por defecto. Detalle:
+[../modules/inventario.md](../modules/inventario.md).
 
 ---
 

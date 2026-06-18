@@ -39,6 +39,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/gastos.md](modules/gastos.md) | Módulo de gastos (menores + facturas de proveedores), auto-emisión |
 | [modules/branding-plantillas.md](modules/branding-plantillas.md) | Plantillas de Representación Impresa por tenant, branding, logo, diseños a la medida |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |
+| [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos |
 
 ### `business-rules/`
 | Doc | Para qué |

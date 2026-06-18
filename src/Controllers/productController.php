@@ -38,6 +38,16 @@ function validateProduct($p): ?string
     if (isset($p->indicador_bien_servicio) && !in_array((int) $p->indicador_bien_servicio, [1, 2], true)) {
         return 'indicador_bien_servicio must be 1 (Bien) or 2 (Servicio)';
     }
+    // Inventario: category_id opcional (nullable), warehouse_id opcional (el modelo
+    // asigna "Almacén Principal" si no se envia). Si vienen, deben ser enteros > 0.
+    if (isset($p->category_id) && $p->category_id !== null && $p->category_id !== ''
+        && (!is_numeric($p->category_id) || (int) $p->category_id <= 0)) {
+        return 'category_id must be a positive integer';
+    }
+    if (isset($p->warehouse_id) && $p->warehouse_id !== null && $p->warehouse_id !== ''
+        && (!is_numeric($p->warehouse_id) || (int) $p->warehouse_id <= 0)) {
+        return 'warehouse_id must be a positive integer';
+    }
     return null;
 }
 
