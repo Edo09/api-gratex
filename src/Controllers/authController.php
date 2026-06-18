@@ -14,45 +14,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
         $_POST = json_decode(file_get_contents('php://input', true));
         
-        // Handle register endpoint
         $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-        if (preg_match('/\/api\/auth\/register/', $endpoint)) {
-            // Validate required fields
-            if (!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email))) {
-                $respuesta = ['success' => false, 'error' => 'Email is required'];
-            } else if (!filter_var($_POST->email, FILTER_VALIDATE_EMAIL)) {
-                $respuesta = ['success' => false, 'error' => 'Invalid email format'];
-            } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
-                $respuesta = ['success' => false, 'error' => 'Password is required'];
-            } else if (strlen($_POST->password) < 4) {
-                $respuesta = ['success' => false, 'error' => 'Password must be at least 4 characters'];
-            } else if (!isset($_POST->name) || is_null($_POST->name) || empty(trim($_POST->name))) {
-                $respuesta = ['success' => false, 'error' => 'Name is required'];
-            } else if (!isset($_POST->username) || is_null($_POST->username) || empty(trim($_POST->username))) {
-                $respuesta = ['success' => false, 'error' => 'Username is required'];
-            } else if (strlen($_POST->username) < 3) {
-                $respuesta = ['success' => false, 'error' => 'Username must be at least 3 characters'];
-            } else {
-                $register_result = $authModel->registerUser($_POST->email, $_POST->password, $_POST->name, $_POST->username);
-                
-                if ($register_result[0] === 'success') {
-                    $respuesta = [
-                        'success' => true,
-                        'data' => $register_result[1],
-                        'message' => 'User registered successfully'
-                    ];
-                } else {
-                    $respuesta = [
-                        'success' => false,
-                        'error' => $register_result[1]
-                    ];
-                    http_response_code(400);
-                }
-            }
-            echo json_encode($respuesta);
-        }
+        // Alta de usuarios: usar POST /api/users (admin del tenant, modulo 'users').
+        // El antiguo /api/auth/register se quito (no pasaba tenant_id en multi-tenant).
+
         // Handle login endpoint
-        else if (preg_match('/\/api\/auth\/login/', $endpoint)) {
+        if (preg_match('/\/api\/auth\/login/', $endpoint)) {
             if (!isset($_POST->emailOrUsername) || is_null($_POST->emailOrUsername) || empty(trim($_POST->emailOrUsername))) {
                 $respuesta = ['success' => false, 'error' => 'Email or username is required'];
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
@@ -135,16 +102,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
             echo json_encode($respuesta);
         }
-        // Generate token for a user (existing endpoint)
-        else if (isset($_POST->action) && $_POST->action == 'generate_token') {
-            if (!isset($_POST->user_id) || is_null($_POST->user_id) || empty(trim($_POST->user_id))) {
-                $respuesta = ['success' => false, 'error' => 'User ID is required'];
-            } else {
-                $respuesta = $authModel->createToken($_POST->user_id);
-            }
-            echo json_encode($respuesta);
-        } else {
-            echo json_encode(['success' => false, 'error' => 'Invalid action']);
+        else {
+            echo json_encode(['success' => false, 'error' => 'Invalid endpoint']);
         }
         break;
 
@@ -169,26 +128,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
             echo json_encode(['success' => true, 'data' => ['user' => $profile]]);
             break;
         }
-        // List tokens for a user
-        if (isset($_GET['user_id'])) {
-            $user_id = $_GET['user_id'];
-            $tokens = $authModel->getUserTokens($user_id);
-            echo json_encode(['success' => true, 'data' => $tokens]);
-        } else {
-            echo json_encode(['success' => false, 'error' => 'User ID is required']);
-        }
-        break;
-
-    case 'DELETE':
-        $_DELETE = json_decode(file_get_contents('php://input', true));
-        
-        // Revoke a token
-        if (!isset($_DELETE->token_id) || is_null($_DELETE->token_id) || empty(trim($_DELETE->token_id))) {
-            $respuesta = ['success' => false, 'error' => 'Token ID is required'];
-        } else {
-            $respuesta = $authModel->revokeToken($_DELETE->token_id);
-        }
-        echo json_encode($respuesta);
+        // Solo GET /api/auth/me esta soportado.
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Endpoint no encontrado. Use GET /api/auth/me.']);
         break;
 
     default:

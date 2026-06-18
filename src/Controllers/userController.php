@@ -1,93 +1,139 @@
 <?php
 header('Access-Control-Allow-Origin: *');
-header("Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method");
+header("Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method");
 header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
-header("Allow: GET, POST, OPTIONS, PUT, DELETE");
 header('content-type: application/json; charset=utf-8');
+
 require_once(__DIR__ . '/../Models/userModel.php');
+require_once(__DIR__ . '/../Models/authModel.php');
+require_once(__DIR__ . '/../Models/RoleModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
+require_once(__DIR__ . '/../PermissionGate.php');
 
 $userModel = new userModel();
+$authModel = new authModel();
+$roleModel = new RoleModel();
 $auth = new AuthMiddleware();
 
-// Validate token for all requests except OPTIONS
+// Gestion de usuarios = vector de escalada de privilegios (crear usuarios,
+// asignar roles). Se exige el modulo 'users' (admin via '*') SIEMPRE, aun en
+// modo sombra (no se deja sin proteger durante el rollout).
+$me = null;
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
-    $validation = $auth->validateRequest();
-    if (!$validation['valid']) {
-        $auth->sendUnauthorized($validation['message']);
+    $me = $auth->validateRequest();
+    if (empty($me['valid'])) {
+        $auth->sendUnauthorized($me['message'] ?? 'Unauthorized');
+    }
+    if (($me['user_id'] ?? null) === null) {
+        $auth->sendForbidden('Esta ruta requiere una sesion de usuario.');
+    }
+    $myPerms = $roleModel->getPermissionsForRole($me['tenant_id'] ?? null, (string) ($me['role'] ?? ''));
+    if (!PermissionGate::permMatches($myPerms, 'users')) {
+        $auth->sendForbidden('No tiene permiso para gestionar usuarios.');
     }
 }
 
-switch($_SERVER['REQUEST_METHOD']){
+$tenantId = $me['tenant_id'] ?? null;
+
+// Sub-ruta despues de /api/users/ -> {id}
+$uriPath = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$apiPos = strpos($uriPath, '/api/');
+$rest = $apiPos !== false ? substr($uriPath, $apiPos + 5) : ltrim($uriPath, '/');
+$segs = explode('/', trim($rest, '/'));
+$sub = $segs[1] ?? null;
+
+$body = json_decode(file_get_contents('php://input'), true);
+if (!is_array($body)) {
+    $body = [];
+}
+
+function users_respond($payload, int $code = 200): void
+{
+    http_response_code($code);
+    echo json_encode($payload);
+    exit;
+}
+
+/** Nombres de rol validos para este tenant. */
+function tenant_role_names(RoleModel $roleModel, ?int $tenantId): array
+{
+    return array_map(fn($r) => $r['name'], $roleModel->listRoles($tenantId));
+}
+
+switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
-        $users = (!isset($_GET['id'])) ? $userModel->getUsers() : $userModel->getUsers($_GET['id']);
-        $respuesta = [
-            'status' => true,
-            'data' => $users
-        ];
-        echo json_encode($respuesta);
-    break;
+        if ($sub !== null && ctype_digit((string) $sub)) {
+            $u = $userModel->getUser($tenantId, (int) $sub);
+            if (!$u) {
+                users_respond(['status' => false, 'error' => 'Usuario no encontrado'], 404);
+            }
+            users_respond(['status' => true, 'data' => $u]);
+        }
+        users_respond(['status' => true, 'data' => $userModel->listUsers($tenantId)]);
+        break;
 
     case 'POST':
-        $_POST= json_decode(file_get_contents('php://input',true));
-        if(!isset($_POST->name) || is_null($_POST->name) || empty(trim($_POST->name)) || strlen($_POST->name) > 80){
-            $respuesta= ['status' => false, 'error','Name must not be empty and no more than 80 characters'];
+        $email    = trim((string) ($body['email'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
+        $name     = trim((string) ($body['name'] ?? ''));
+        $username = trim((string) ($body['username'] ?? ''));
+        $role     = isset($body['role']) ? trim((string) $body['role']) : 'user';
+
+        if ($email === '' || $password === '' || $name === '' || $username === '') {
+            users_respond(['status' => false, 'error' => 'Se requieren email, password, name y username'], 422);
         }
-        else if(!isset($_POST->last_name) || is_null($_POST->last_name) || empty(trim($_POST->last_name)) || strlen($_POST->last_name) > 80){
-            $respuesta= ['status' => false, 'error','Last Name must not be empty and no more than 100 characters'];
+        if (strlen($password) < 4) {
+            users_respond(['status' => false, 'error' => 'El password debe tener al menos 4 caracteres'], 422);
         }
-        else if(!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email)) ||!filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 50){
-            $respuesta= ['status' => false, 'error','Email must not be empty, must be a valid email and no more than 20 characters'];
+        if (!in_array($role, tenant_role_names($roleModel, $tenantId), true)) {
+            users_respond(['status' => false, 'error' => "El rol '{$role}' no existe en este tenant."], 422);
         }
-        else{
-            $result = $userModel->saveUser($_POST->name,$_POST->last_name,$_POST->email);
-            if($result[0] === 'success'){
-                $respuesta = ['status' => true, 'data' => $result[1]];
-            } else {
-                $respuesta = ['status' => false, 'error' => $result[1]];
-            }
+
+        // tenant_id viene del TOKEN (no del body): no se crean usuarios en otro tenant.
+        $res = $authModel->registerUser($email, $password, $name, $username, $tenantId, $role);
+        if ($res[0] === 'success') {
+            users_respond(['status' => true, 'data' => $res[1]], 201);
         }
-        echo json_encode($respuesta);
-    break;
+        users_respond(['status' => false, 'error' => $res[1]], 400);
+        break;
 
     case 'PUT':
-        $_PUT= json_decode(file_get_contents('php://input',true));
-        if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
-            $respuesta= ['status' => false, 'error','User ID is empty'];
+        $id = $sub !== null && ctype_digit((string) $sub) ? (int) $sub : (int) ($body['id'] ?? 0);
+        if ($id <= 0) {
+            users_respond(['status' => false, 'error' => 'Falta el id del usuario'], 422);
         }
-        else if(!isset($_PUT->name) || is_null($_PUT->name) || empty(trim($_PUT->name)) || strlen($_PUT->name) > 80){
-            $respuesta= ['status' => false, 'error','name must not be empty and no more than 80 characters'];
+        // Si se cambia el rol, validar que exista en el tenant.
+        if (isset($body['role']) && !in_array(trim((string) $body['role']), tenant_role_names($roleModel, $tenantId), true)) {
+            users_respond(['status' => false, 'error' => "El rol '{$body['role']}' no existe en este tenant."], 422);
         }
-        else if(!isset($_PUT->last_name) || is_null($_PUT->last_name) || empty(trim($_PUT->last_name)) || strlen($_PUT->last_name) > 100){
-            $respuesta= ['status' => false, 'error','Last Name must not be empty and no more than 100 characters'];
-        }
-        else if(!isset($_PUT->email) || is_null($_PUT->email) || empty(trim($_PUT->email)) || !filter_var($_PUT->email, FILTER_VALIDATE_EMAIL) || strlen($_PUT->email) > 20){
-            $respuesta= ['status' => false, 'error','Email must not be empty, must be a valid email and no more than 20 characters'];
-        }
-        else{
-            $result = $userModel->updateUser($_PUT->id,$_PUT->name,$_PUT->last_name,$_PUT->email);
-            if($result[0] === 'success'){
-                $respuesta = ['status' => true, 'data' => $result[1]];
-            } else {
-                $respuesta = ['status' => false, 'error' => $result[1]];
+        $fields = [];
+        foreach (['name', 'last_name', 'email', 'username', 'role', 'password'] as $f) {
+            if (array_key_exists($f, $body)) {
+                $fields[$f] = $body[$f];
             }
         }
-        echo json_encode($respuesta);
-    break;
+        $res = $userModel->updateUser($tenantId, $id, $fields);
+        if ($res[0] === 'success') {
+            users_respond(['status' => true, 'data' => $userModel->getUser($tenantId, $id)]);
+        }
+        users_respond(['status' => false, 'error' => $res[1]], 400);
+        break;
 
     case 'DELETE':
-        $_DELETE= json_decode(file_get_contents('php://input',true));
-        if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
-            $respuesta= ['status' => false, 'error','User ID is empty'];
+        $id = $sub !== null && ctype_digit((string) $sub) ? (int) $sub : (int) ($body['id'] ?? 0);
+        if ($id <= 0) {
+            users_respond(['status' => false, 'error' => 'Falta el id del usuario'], 422);
         }
-        else{
-            $result = $userModel->deleteUser($_DELETE->id);
-            if($result[0] === 'success'){
-                $respuesta = ['status' => true, 'data' => $result[1]];
-            } else {
-                $respuesta = ['status' => false, 'error' => $result[1]];
-            }
+        if ($id === (int) ($me['user_id'] ?? 0)) {
+            users_respond(['status' => false, 'error' => 'No puedes borrar tu propio usuario.'], 400);
         }
-        echo json_encode($respuesta);
-    break;
+        $res = $userModel->deleteUser($tenantId, $id);
+        if ($res[0] === 'success') {
+            users_respond(['status' => true, 'data' => 'Usuario eliminado']);
+        }
+        users_respond(['status' => false, 'error' => $res[1]], 400);
+        break;
+
+    default:
+        users_respond(['status' => false, 'error' => 'Metodo no soportado'], 405);
 }
