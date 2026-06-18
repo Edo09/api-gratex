@@ -91,12 +91,12 @@ switch ($route) {
         break;
 
     case 'categories':
-        // Inventario: categorias CRUD - token required (modulo 'inventory')
+        // Inventario: categorias CRUD - token required (modulo 'categories')
         require_once 'src/Controllers/categoryController.php';
         break;
 
     case 'warehouses':
-        // Inventario: almacenes CRUD - token required (modulo 'inventory')
+        // Inventario: almacenes CRUD - token required (modulo 'warehouses')
         require_once 'src/Controllers/warehouseController.php';
         break;
 

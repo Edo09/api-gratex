@@ -677,7 +677,7 @@ JOIN (
   UNION ALL SELECT 'products' UNION ALL SELECT 'proveedores'
   UNION ALL SELECT 'cotizaciones' UNION ALL SELECT 'aprobaciones'
   UNION ALL SELECT 'reportes' UNION ALL SELECT 'ncf' UNION ALL SELECT 'unidades'
-  UNION ALL SELECT 'inventory'
+  UNION ALL SELECT 'categories' UNION ALL SELECT 'warehouses'
 ) p
 WHERE r.tenant_id = 0 AND r.name = 'user'
   AND NOT EXISTS (SELECT 1 FROM role_permissions rp WHERE rp.role_id = r.id AND rp.permission = p.perm);

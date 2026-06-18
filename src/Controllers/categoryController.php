@@ -13,7 +13,7 @@ $categoryModel = new categoryModel();
 $auth = new AuthMiddleware();
 
 // Token requerido (en multi-tenant resuelve el tenant DB). El acceso al modulo
-// 'inventory' lo aplica el PermissionGate central (Router).
+// 'categories' lo aplica el PermissionGate central (Router).
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $validation = $auth->validateRequest();
     if (!$validation['valid']) {
