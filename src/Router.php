@@ -90,6 +90,16 @@ switch ($route) {
         require_once 'src/Controllers/productController.php';
         break;
 
+    case 'categories':
+        // Inventario: categorias CRUD - token required (modulo 'inventory')
+        require_once 'src/Controllers/categoryController.php';
+        break;
+
+    case 'warehouses':
+        // Inventario: almacenes CRUD - token required (modulo 'inventory')
+        require_once 'src/Controllers/warehouseController.php';
+        break;
+
     case 'proveedores':
         // Supplier directory CRUD endpoints - token required
         require_once 'src/Controllers/proveedorController.php';
