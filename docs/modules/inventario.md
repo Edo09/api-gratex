@@ -3,6 +3,9 @@
 Primera fase del módulo de Inventario: **categorías** y **almacenes (warehouses)**, integrados al
 catálogo de productos. Backend.
 
+> **Frontend:** la guía de integración (contratos request/response, errores, flujo de UI) está en
+> [../api/inventario.md](../api/inventario.md).
+
 > Multi-tenant: cada empresa es un tenant con su **propia DB**, así que estas tablas viven en la
 > DB del tenant y el aislamiento es **inherente** — no llevan `company_id`. Sin soft-deletes: hay
 > un flag `estado` (1=activo/0=inactivo) para desactivar, y borrado físico con guardas por FK.
