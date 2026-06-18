@@ -80,6 +80,26 @@ es un vector de escalada de privilegios.
 Permisos validados contra el catálogo. `assignUserRole` valida que el rol pertenezca al tenant
 del usuario (no se puede referenciar un rol de otro tenant).
 
+## API — `/api/users` (módulo `users`; admin via `*`)
+
+Gestión de usuarios **del tenant del que está logueado el admin** (el `tenant_id` sale del
+token, nunca del body — no se pueden crear usuarios en otro tenant). Hard-gated por el módulo
+`users` (como `/api/roles`).
+
+| Método | Ruta | Acción |
+|---|---|---|
+| GET | `/api/users` | listar usuarios del tenant (sin password) |
+| GET | `/api/users/{id}` | un usuario |
+| POST | `/api/users` | crear `{email, password, name, username, role?}` (rol validado contra los roles del tenant; default `user`) |
+| PUT | `/api/users/{id}` | actualizar `{name?, last_name?, email?, username?, role?, password?}` |
+| DELETE | `/api/users/{id}` | borrar (no puedes borrar tu propio usuario) |
+
+Crear reusa `authModel::registerUser` (email único global, username único por tenant, hash bcrypt).
+
+> Quitados: `POST /api/auth/register` (no pasaba `tenant_id`, roto en multi-tenant) y el viejo
+> `userController`/`userModel` legacy (pre-multitenant, sin rol/tenant). La alta por
+> herramienta admin sigue disponible en `public/create_user.php`.
+
 ## Frontend — menú y páginas
 
 El front decide qué páginas/menú mostrar con la **lista de módulos** del usuario:

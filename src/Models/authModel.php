@@ -27,58 +27,6 @@ class authModel
     }
 
     /**
-     * @return int|null tenant_id of a user, or null if none (multi-tenant only).
-     */
-    private function tenantIdForUser(int $user_id): ?int
-    {
-        $stmt = $this->conexion->prepare("SELECT tenant_id FROM users WHERE id = :id LIMIT 1");
-        $stmt->execute([':id' => $user_id]);
-        $row = $stmt->fetch();
-        return $row && $row['tenant_id'] !== null ? (int)$row['tenant_id'] : null;
-    }
-
-    /**
-     * Generate a new API token for a user
-     * @param int $user_id User ID
-     * @return array ['success', token] or ['error', message]
-     */
-    public function createToken($user_id)
-    {
-        try {
-            $token = TokenGenerator::generateApiToken();
-            $token_hash = TokenGenerator::hashToken($token);
-            $created_at = date('Y-m-d H:i:s');
-
-            if (self::multiTenant()) {
-                $tenant_id = $this->tenantIdForUser((int)$user_id);
-                if ($tenant_id === null) {
-                    return ['error', 'Usuario sin tenant asociado'];
-                }
-                $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([
-                    ':user_id' => $user_id,
-                    ':tenant_id' => $tenant_id,
-                    ':token_hash' => $token_hash,
-                    ':created_at' => $created_at
-                ]);
-            } else {
-                $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([
-                    ':user_id' => $user_id,
-                    ':token_hash' => $token_hash,
-                    ':created_at' => $created_at
-                ]);
-            }
-
-            return ['success', $token];
-        } catch (PDOException $e) {
-            return ['error', 'Failed to create token'];
-        }
-    }
-
-    /**
      * Validate an API token
      * @param string $token Raw token from request
      * @return array [user_id] if valid or [null] if invalid
@@ -111,40 +59,6 @@ class authModel
             return ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'role' => null];
         } catch (PDOException $e) {
             return ['valid' => false, 'user_id' => null];
-        }
-    }
-
-    /**
-     * List all tokens for a user
-     * @param int $user_id User ID
-     * @return array Array of token records
-     */
-    public function getUserTokens($user_id)
-    {
-        try {
-            $sql = "SELECT id, created_at, last_used, is_active FROM api_tokens WHERE user_id = :user_id ORDER BY created_at DESC";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([':user_id' => $user_id]);
-            return $stmt->fetchAll();
-        } catch (PDOException $e) {
-            return [];
-        }
-    }
-
-    /**
-     * Revoke (deactivate) a token
-     * @param int $token_id Token ID
-     * @return array ['success'/'error', message]
-     */
-    public function revokeToken($token_id)
-    {
-        try {
-            $sql = "UPDATE api_tokens SET is_active = 0 WHERE id = :token_id";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([':token_id' => $token_id]);
-            return ['success', 'Token revoked'];
-        } catch (PDOException $e) {
-            return ['error', 'Failed to revoke token'];
         }
     }
 
