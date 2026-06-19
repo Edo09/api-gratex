@@ -77,6 +77,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             if ($result[0] === 'success') {
                 http_response_code(201);
                 $respuesta = ['status' => true, 'data' => ['id' => $result[2] ?? null, 'message' => $result[1]]];
+                AuditLogger::log([
+                    'module' => 'warehouses', 'action' => 'CREATE',
+                    'entity_type' => 'warehouse', 'entity_id' => $result[2] ?? null,
+                    'new_values' => $_POST, 'description' => 'Almacen creado.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];
@@ -94,9 +99,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
         } else {
+            $oldWarehouse = $warehouseModel->getAll($_PUT->id)[0] ?? null;
             $result = $warehouseModel->update($_PUT->id, $_PUT);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
+                AuditLogger::log([
+                    'module' => 'warehouses', 'action' => 'UPDATE',
+                    'entity_type' => 'warehouse', 'entity_id' => $_PUT->id,
+                    'old_values' => $oldWarehouse, 'new_values' => $_PUT,
+                    'description' => 'Almacen actualizado.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];
@@ -111,9 +123,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => 'Falta el id del almacen'];
         } else {
+            $oldWarehouse = $warehouseModel->getAll($_DELETE->id)[0] ?? null;
             $result = $warehouseModel->delete($_DELETE->id);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
+                AuditLogger::log([
+                    'module' => 'warehouses', 'action' => 'DELETE',
+                    'entity_type' => 'warehouse', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldWarehouse, 'description' => 'Almacen eliminado.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];

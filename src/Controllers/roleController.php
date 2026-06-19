@@ -70,6 +70,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         $res = $roleModel->createRole($tenantId, $name, $desc, $perms);
         if ($res[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'roles', 'action' => 'CREATE',
+                'entity_type' => 'role', 'entity_id' => $res[1],
+                'new_values' => ['name' => $name, 'description' => $desc, 'permissions' => $perms],
+                'description' => 'Rol creado.',
+            ]);
             roles_respond(['status' => true, 'data' => $roleModel->getRoleById($tenantId, (int) $res[1])], 201);
         }
         roles_respond(['status' => false, 'error' => $res[1]], 400);
@@ -85,6 +91,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
             $res = $roleModel->assignUserRole($tenantId, $userId, $roleName);
             if ($res[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'roles', 'action' => 'ASSIGN',
+                    'entity_type' => 'user_role', 'entity_id' => $userId,
+                    'new_values' => ['user_id' => $userId, 'role' => $roleName],
+                    'description' => 'Rol asignado a usuario.',
+                ]);
                 roles_respond(['status' => true, 'data' => ['user_id' => $userId, 'role' => $roleName]]);
             }
             roles_respond(['status' => false, 'error' => $res[1]], 400);
@@ -95,9 +107,17 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         $desc = array_key_exists('description', $body) ? (string) $body['description'] : null;
         $perms = isset($body['permissions']) && is_array($body['permissions']) ? $body['permissions'] : null;
+        $oldRole = $roleModel->getRoleById($tenantId, (int) $sub);
         $res = $roleModel->updateRole($tenantId, (int) $sub, $desc, $perms);
         if ($res[0] === 'success') {
-            roles_respond(['status' => true, 'data' => $roleModel->getRoleById($tenantId, (int) $sub)]);
+            $newRole = $roleModel->getRoleById($tenantId, (int) $sub);
+            AuditLogger::log([
+                'module' => 'roles', 'action' => 'UPDATE',
+                'entity_type' => 'role', 'entity_id' => $sub,
+                'old_values' => $oldRole, 'new_values' => $newRole,
+                'description' => 'Rol actualizado.',
+            ]);
+            roles_respond(['status' => true, 'data' => $newRole]);
         }
         roles_respond(['status' => false, 'error' => $res[1]], 400);
         break;
@@ -106,8 +126,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($sub === null || !ctype_digit((string) $sub)) {
             roles_respond(['status' => false, 'error' => 'Falta el id del rol'], 422);
         }
+        $oldRole = $roleModel->getRoleById($tenantId, (int) $sub);
         $res = $roleModel->deleteRole($tenantId, (int) $sub);
         if ($res[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'roles', 'action' => 'DELETE',
+                'entity_type' => 'role', 'entity_id' => $sub,
+                'old_values' => $oldRole, 'description' => 'Rol eliminado.',
+            ]);
             roles_respond(['status' => true, 'data' => 'Rol eliminado']);
         }
         roles_respond(['status' => false, 'error' => $res[1]], 400);

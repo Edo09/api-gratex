@@ -54,6 +54,13 @@ switch ($method) {
                 }
 
                 if ($result[0] === 'success') {
+                    AuditLogger::log([
+                        'module' => 'landing', 'action' => 'CREATE',
+                        'entity_type' => strpos($request_uri, 'carousel') !== false ? 'landing_carousel' : 'landing_service',
+                        'entity_id' => $result[2] ?? null,
+                        'new_values' => ['title' => $title ?? null, 'image_path' => $imagePath],
+                        'description' => 'Elemento de landing creado.',
+                    ]);
                     echo json_encode(['success' => true, 'message' => $result[1], 'id' => $result[2]]);
                 } else {
                     http_response_code(500);
@@ -93,6 +100,12 @@ switch ($method) {
                 if (file_exists($filePath)) {
                     unlink($filePath);
                 }
+                AuditLogger::log([
+                    'module' => 'landing', 'action' => 'DELETE',
+                    'entity_type' => strpos($request_uri, 'carousel') !== false ? 'landing_carousel' : 'landing_service',
+                    'entity_id' => $id,
+                    'description' => 'Elemento de landing eliminado.',
+                ]);
                 echo json_encode(['success' => true, 'message' => $result[1]]);
             } else {
                 http_response_code(500);

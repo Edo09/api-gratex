@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Models/authModel.php');
 require_once(__DIR__ . '/../TenantResolver.php');
+require_once(__DIR__ . '/../RequestContext.php');
 
 class AuthMiddleware
 {
@@ -44,12 +45,14 @@ class AuthMiddleware
                 ];
             }
             $tenant = TenantResolver::current();
-            return [
+            $result = [
                 'valid' => true,
                 'user_id' => null,
                 'tenant_id' => (int) $tenant['id'],
                 'message' => 'Integration tenant validated'
             ];
+            RequestContext::fromAuth($result, null); // principal maquina (sin user)
+            return $result;
         }
 
         // --- App session token (X-API-KEY or Bearer) ---
@@ -85,13 +88,16 @@ class AuthMiddleware
             $token_hash = hash('sha256', $token);
             $this->authModel->updateLastUsed($token_hash);
 
-            return [
+            $result = [
                 'valid' => true,
                 'user_id' => $validation['user_id'],
                 'tenant_id' => $validation['tenant_id'] ?? null,
                 'role' => $validation['role'] ?? null,
                 'message' => 'Token validated'
             ];
+            // Contexto de auditoria: identidad + hash del token de sesion (nunca el token).
+            RequestContext::fromAuth($result, $token);
+            return $result;
         }
 
         return [

@@ -84,6 +84,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $result = $proveedorModel->saveProveedor($_POST);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => ['id' => $result[2] ?? null, 'message' => $result[1]]];
+                AuditLogger::log([
+                    'module' => 'proveedores', 'action' => 'CREATE',
+                    'entity_type' => 'proveedor', 'entity_id' => $result[2] ?? null,
+                    'new_values' => $_POST, 'description' => 'Proveedor creado.',
+                ]);
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
@@ -98,10 +103,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } else if (($error = validateProveedor($_PUT)) !== null) {
             $respuesta = ['status' => false, 'error' => $error];
         } else {
+            $oldProveedor = $proveedorModel->getProveedores($_PUT->id)[0] ?? null;
             $result = $proveedorModel->updateProveedor($_PUT->id, $_PUT);
             $respuesta = $result[0] === 'success'
                 ? ['status' => true, 'data' => $result[1]]
                 : ['status' => false, 'error' => $result[1]];
+            if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'proveedores', 'action' => 'UPDATE',
+                    'entity_type' => 'proveedor', 'entity_id' => $_PUT->id,
+                    'old_values' => $oldProveedor, 'new_values' => $_PUT,
+                    'description' => 'Proveedor actualizado.',
+                ]);
+            }
         }
         echo json_encode($respuesta);
         break;
@@ -111,10 +125,18 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             $respuesta = ['status' => false, 'error' => 'Proveedor ID is empty'];
         } else {
+            $oldProveedor = $proveedorModel->getProveedores($_DELETE->id)[0] ?? null;
             $result = $proveedorModel->deleteProveedor($_DELETE->id);
             $respuesta = $result[0] === 'success'
                 ? ['status' => true, 'data' => $result[1]]
                 : ['status' => false, 'error' => $result[1]];
+            if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'proveedores', 'action' => 'DELETE',
+                    'entity_type' => 'proveedor', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldProveedor, 'description' => 'Proveedor eliminado.',
+                ]);
+            }
         }
         echo json_encode($respuesta);
         break;

@@ -77,6 +77,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             if ($result[0] === 'success') {
                 http_response_code(201);
                 $respuesta = ['status' => true, 'data' => ['id' => $result[2] ?? null, 'message' => $result[1]]];
+                AuditLogger::log([
+                    'module' => 'categories', 'action' => 'CREATE',
+                    'entity_type' => 'category', 'entity_id' => $result[2] ?? null,
+                    'new_values' => $_POST, 'description' => 'Categoria creada.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];
@@ -94,9 +99,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
         } else {
+            $oldCategory = $categoryModel->getAll($_PUT->id)[0] ?? null;
             $result = $categoryModel->update($_PUT->id, $_PUT);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
+                AuditLogger::log([
+                    'module' => 'categories', 'action' => 'UPDATE',
+                    'entity_type' => 'category', 'entity_id' => $_PUT->id,
+                    'old_values' => $oldCategory, 'new_values' => $_PUT,
+                    'description' => 'Categoria actualizada.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];
@@ -111,9 +123,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => 'Falta el id de la categoria'];
         } else {
+            $oldCategory = $categoryModel->getAll($_DELETE->id)[0] ?? null;
             $result = $categoryModel->delete($_DELETE->id);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
+                AuditLogger::log([
+                    'module' => 'categories', 'action' => 'DELETE',
+                    'entity_type' => 'category', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldCategory, 'description' => 'Categoria eliminada.',
+                ]);
             } else {
                 http_response_code(400);
                 $respuesta = ['status' => false, 'error' => $result[1]];

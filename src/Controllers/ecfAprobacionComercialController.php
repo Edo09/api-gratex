@@ -129,6 +129,19 @@ function handleAprobacionComercial(): void
         $model->save($aprData);
     }
 
+    AuditLogger::log([
+        'module' => 'ecf', 'action' => 'ACECF_RECEIVED',
+        'entity_type' => 'aprobacion_comercial', 'entity_id' => $eNcf,
+        'tenant_id' => $tenantId,
+        'new_values' => [
+            'rnc_emisor' => $rncEmisor, 'rnc_comprador' => $rncComprador,
+            'estado_comercial' => $estadoNormalizado, 'detalle_motivo' => $detalle,
+            'validacion_firma' => $validation['firma'] ?? null,
+        ],
+        'success' => ($validation['firma'] ?? '') === 'OK',
+        'description' => 'Aprobacion comercial recibida del comprador (' . $estadoNormalizado . ').',
+    ]);
+
     http_response_code(200);
     header('Content-Type: text/xml; charset=utf-8');
     echo buildSignedARCF($rncEmisor, $emisor['rnc'], $eNcf);

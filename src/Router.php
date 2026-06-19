@@ -68,6 +68,17 @@ try {
     error_log('[Router] PermissionGate fallo: ' . $e->getMessage());
 }
 
+// Auditoria: AuditLogger queda disponible para TODOS los controllers (incluido
+// una sola vez aqui, asi ninguno necesita su propio require). AuditMiddleware
+// deja el contexto del request listo (no-op perezoso). Nunca rompe el ruteo.
+require_once __DIR__ . '/AuditLogger.php';
+require_once __DIR__ . '/Middleware/AuditMiddleware.php';
+try {
+    AuditMiddleware::boot();
+} catch (Throwable $e) {
+    error_log('[Router] AuditMiddleware fallo: ' . $e->getMessage());
+}
+
 // Route to appropriate controller
 switch ($route) {
     case 'auth':
@@ -225,7 +236,13 @@ switch ($route) {
         // Landing page configuration endpoints
         require_once 'src/Controllers/landingController.php';
         break;
-    
+
+    case 'audit-logs':
+        // Bitacora de auditoria (solo lectura, admin del tenant: modulo 'audit')
+        //   GET /api/audit-logs?user_id=&module=&action=&from=&to=&page=&pageSize=
+        require_once 'src/Controllers/auditLogController.php';
+        break;
+
     default:
         // Handle default and 404 cases
         if ($is_root) {

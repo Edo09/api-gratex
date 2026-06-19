@@ -154,7 +154,16 @@ function handleGastoEstado(int $gastoId, gastoModel $gastoModel): void
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $gastoModel->updateEcfEstado($gastoId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
-            
+            if ($estadoAnterior !== $estadoNuevo) {
+                AuditLogger::log([
+                    'module' => 'gastos', 'action' => 'STATUS_CHANGE', 'entity_type' => 'gasto',
+                    'entity_id' => $ecf['ncf'] ?? $gastoId,
+                    'old_values' => ['estado_dgii' => $estadoAnterior],
+                    'new_values' => ['estado_dgii' => $estadoNuevo],
+                    'description' => 'Transicion de estado e-CF gasto: ' . $estadoAnterior . ' -> ' . $estadoNuevo . '.',
+                ]);
+            }
+
             // Si el e-CF es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizadaGasto($consulta['data']['secuenciaUtilizada'] ?? null);
             if (($estadoNuevo === 'RECHAZADO' || $estadoNuevo === 'NO_ENCONTRADO') && 
@@ -306,6 +315,17 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body['user_id'] = $authUserId ?? ($body['user_id'] ?? null);
 
         $result = $gastoModel->createGasto($body);
+        if ($result[0] === 'success') {
+            $auto = in_array(strtoupper(trim((string) ($body['tipo_gasto'] ?? ''))), ['E41', 'E43', 'E47'], true);
+            AuditLogger::log([
+                'module' => 'gastos', 'action' => $auto ? 'EMIT' : 'CREATE',
+                'entity_type' => 'gasto',
+                'entity_id' => is_array($result[1]) ? ($result[1]['id'] ?? null) : null,
+                'new_values' => is_array($result[1]) ? $result[1] : $body,
+                'description' => ($auto ? 'Gasto emitido como e-CF ' : 'Gasto registrado ')
+                    . (string) ($body['tipo_gasto'] ?? '') . '.',
+            ]);
+        }
         gastoRespond($result[0] === 'success', $result[1], $result[0] === 'success' ? 201 : 400);
         break;
 
