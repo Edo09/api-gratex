@@ -189,6 +189,19 @@ function handleRecepcionEcf(): void
         $store->save($recData);
     }
 
+    AuditLogger::log([
+        'module' => 'ecf', 'action' => 'ECF_RECEIVED',
+        'entity_type' => 'ecf_recibido', 'entity_id' => $trackId,
+        'tenant_id' => $tenantId,
+        'new_values' => [
+            'tipo_ecf' => $tipoEcf, 'e_ncf' => $eNcf, 'rnc_emisor' => $rncEmisor,
+            'rnc_comprador' => $rncComprador, 'monto_total' => $montoTotal,
+            'estado' => $estado, 'validacion_firma' => $validation['firma'] ?? null,
+        ],
+        'success' => ($validation['firma'] ?? '') === 'OK',
+        'description' => 'e-CF recibido del emisor ' . $rncEmisor . '.',
+    ]);
+
     $nuestroRnc = $emisor['rnc'] ?? '';
     $estadoAecf = $validation['firma'] === 'OK' ? 0 : 1;
     $motivoAecf = $estadoAecf === 1 ? 2 : null; // 2 = Error de Firma Digital

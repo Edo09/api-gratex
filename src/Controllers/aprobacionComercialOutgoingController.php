@@ -77,6 +77,13 @@ function handleEnvioACECF(): void
             'aprobacion_comercial_mensaje_dgii' => $dgii['mensaje'],
             'aprobacion_comercial_procesada' => 0,
         ]);
+        AuditLogger::log([
+            'module' => 'aprobaciones', 'action' => 'ACECF_SENT',
+            'entity_type' => 'aprobacion_comercial', 'entity_id' => $input['e_ncf'] ?? null,
+            'new_values' => ['rnc_emisor' => $input['rnc_emisor'] ?? null, 'decision' => $decision, 'dgii' => $dgii],
+            'success' => false, 'error_message' => $e->getMessage(),
+            'description' => 'Fallo enviando aprobacion comercial (ACECF) a DGII.',
+        ]);
         respondACECF(false, 'Fallo enviando ACECF a DGII: ' . $e->getMessage(), 502);
         return;
     }
@@ -98,6 +105,17 @@ function handleEnvioACECF(): void
         'aprobacion_comercial_estado_dgii' => $estadoDgii,
         'aprobacion_comercial_mensaje_dgii' => $mensajeDgii,
         'aprobacion_comercial_procesada' => $procesada,
+    ]);
+
+    AuditLogger::log([
+        'module' => 'aprobaciones', 'action' => 'ACECF_SENT',
+        'entity_type' => 'aprobacion_comercial', 'entity_id' => $input['e_ncf'] ?? null,
+        'new_values' => [
+            'rnc_emisor' => $input['rnc_emisor'] ?? null, 'decision' => $decision,
+            'codigo_dgii' => $codigoDgii, 'estado_dgii' => $estadoDgii, 'track_id' => $result['track_id'] ?? null,
+        ],
+        'success' => $procesada === 1,
+        'description' => 'Aprobacion comercial (ACECF) ' . $decision . ' enviada a DGII.',
     ]);
 
     echo json_encode([

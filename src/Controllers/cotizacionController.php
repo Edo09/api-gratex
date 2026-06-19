@@ -186,6 +186,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total, $user_id, $send_email);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
+                    AuditLogger::log([
+                        'module' => 'cotizaciones', 'action' => 'CREATE',
+                        'entity_type' => 'cotizacion',
+                        'entity_id' => is_array($result[1]) ? ($result[1]['id'] ?? null) : null,
+                        'new_values' => $_POST, 'description' => 'Cotizacion creada.',
+                    ]);
                 } else {
                     $respuesta = ['status' => false, 'error' => $result[1]];
                 }
@@ -232,9 +238,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
                 $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
                 $send_email = isset($_PUT->sent_email) && $_PUT->sent_email === true;
+                $oldCotizacion = $cotizacionModel->getCotizaciones($_PUT->id)[0] ?? null;
                 $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total, $user_id, $send_email);
                 if ($result[0] === 'success') {
                     $respuesta = ['status' => true, 'data' => $result[1]];
+                    AuditLogger::log([
+                        'module' => 'cotizaciones', 'action' => 'UPDATE',
+                        'entity_type' => 'cotizacion', 'entity_id' => $_PUT->id,
+                        'old_values' => $oldCotizacion, 'new_values' => $_PUT,
+                        'description' => 'Cotizacion actualizada.',
+                    ]);
                 } else {
                     $respuesta = ['status' => false, 'error' => $result[1]];
                 }
@@ -248,9 +261,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (!isset($_DELETE->id) || is_null($_DELETE->id)) {
             $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
         } else {
+            $oldCotizacion = $cotizacionModel->getCotizaciones($_DELETE->id)[0] ?? null;
             $result = $cotizacionModel->deleteCotizacion($_DELETE->id);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
+                AuditLogger::log([
+                    'module' => 'cotizaciones', 'action' => 'DELETE',
+                    'entity_type' => 'cotizacion', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldCotizacion, 'description' => 'Cotizacion eliminada.',
+                ]);
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }

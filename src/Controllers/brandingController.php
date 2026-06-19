@@ -225,7 +225,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (!$fields) {
             brRespond(false, 'Nada que actualizar: envia template y/o accent_color.', 422);
         }
+        $oldBranding = brCurrent($tenantId);
         MasterDatabase::getInstance()->updateTenantBranding($tenantId, $fields);
+        AuditLogger::log([
+            'module' => 'branding', 'action' => 'UPDATE',
+            'entity_type' => 'tenant_branding', 'entity_id' => $tenantId,
+            'old_values' => $oldBranding, 'new_values' => $fields,
+            'description' => 'Branding de la representacion impresa actualizado.',
+        ]);
         // Responder con lo recien escrito (TenantResolver::$current queda
         // obsoleto dentro de este request; no re-resolver).
         brRespond(true, brCurrent($tenantId));
@@ -245,6 +252,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
             brRespond(false, $result['error'], $result['code'] ?? 422);
         }
         MasterDatabase::getInstance()->updateTenantBranding($tenantId, ['logo_path' => $result['logo_path']]);
+        AuditLogger::log([
+            'module' => 'branding', 'action' => 'LOGO_UPLOAD',
+            'entity_type' => 'tenant_branding', 'entity_id' => $tenantId,
+            'new_values' => ['logo_path' => $result['logo_path']],
+            'description' => 'Logo de branding actualizado.',
+        ]);
         brRespond(true, ['logo_path' => $result['logo_path']]);
         break;
 
@@ -254,6 +267,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         LogoStorage::removeFiles($tenantId);
         MasterDatabase::getInstance()->updateTenantBranding($tenantId, ['logo_path' => null]);
+        AuditLogger::log([
+            'module' => 'branding', 'action' => 'LOGO_DELETE',
+            'entity_type' => 'tenant_branding', 'entity_id' => $tenantId,
+            'description' => 'Logo de branding eliminado (vuelve al global).',
+        ]);
         brRespond(true, ['logo_path' => null, 'message' => 'Logo eliminado; se usara el logo global.']);
         break;
 

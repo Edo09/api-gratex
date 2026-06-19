@@ -282,6 +282,44 @@ CREATE TABLE IF NOT EXISTS role_permissions (
   CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ----------------------------------------------------------------------------
+-- audit_logs — bitacora de auditoria centralizada (ver db/master_migrations/006).
+-- Registro de "quien hizo que, cuando" (mutaciones, ciclo e-CF, auth). Aislada
+-- por tenant_id. old_values/new_values son JSON redactado (sin passwords/secrets/
+-- tokens). Escritura via src/AuditLogger.php (tolerante a fallos).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id                 BIGINT       NOT NULL AUTO_INCREMENT,
+  tenant_id          INT          NULL,
+  user_id            INT          NULL,
+  username           VARCHAR(100) NULL,
+  email              VARCHAR(150) NULL,
+  module             VARCHAR(40)  NOT NULL,
+  entity_type        VARCHAR(60)  NULL,
+  entity_id          VARCHAR(64)  NULL,
+  action             VARCHAR(40)  NOT NULL,
+  http_method        VARCHAR(10)  NULL,
+  endpoint           VARCHAR(255) NULL,
+  ip_address         VARCHAR(45)  NULL,
+  user_agent         VARCHAR(255) NULL,
+  browser            VARCHAR(60)  NULL,
+  os                 VARCHAR(60)  NULL,
+  device_type        VARCHAR(20)  NULL,
+  session_token_hash VARCHAR(64)  NULL,
+  old_values         MEDIUMTEXT   NULL,
+  new_values         MEDIUMTEXT   NULL,
+  description        VARCHAR(255) NULL,
+  success            TINYINT(1)   NOT NULL DEFAULT 1,
+  error_message      VARCHAR(500) NULL,
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_audit_tenant_created (tenant_id, created_at),
+  KEY idx_audit_tenant_module  (tenant_id, module),
+  KEY idx_audit_tenant_user    (tenant_id, user_id),
+  KEY idx_audit_entity         (entity_type, entity_id),
+  KEY idx_audit_action         (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- MIGRACION GRATEX = TENANT #1  (ejecutar tras crear el schema)
 -- ----------------------------------------------------------------------------

@@ -236,6 +236,13 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         $service = new ECFEmissionService();
         $result = $service->emitir($payload);
     } catch (Throwable $e) {
+        AuditLogger::log([
+            'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+            'entity_id' => $input['e_ncf'] ?? null,
+            'new_values' => ['tipo_ecf' => $tipoEcf, 'client_id' => $clientId],
+            'success' => false, 'error_message' => $e->getMessage(),
+            'description' => 'Fallo en emision e-CF a DGII.',
+        ]);
         respond(false, 'Fallo en emision DGII: ' . $e->getMessage(), 502);
         return;
     }
@@ -293,6 +300,13 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     $estadoFinal = (string) ($result['estado'] ?? '');
     $rechazado = in_array($estadoFinal, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO', 'ERROR'], true);
     if ($rechazado) {
+        AuditLogger::log([
+            'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+            'entity_id' => $result['e_ncf'] ?? null,
+            'new_values' => $data, 'success' => false,
+            'error_message' => dgiiMensajeRechazo($dgiiResp, $estadoFinal),
+            'description' => 'e-CF ' . $estadoFinal . ' por DGII.',
+        ]);
         http_response_code(422);
         echo json_encode([
             'status' => false,
@@ -302,6 +316,12 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
+    AuditLogger::log([
+        'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+        'entity_id' => $result['e_ncf'] ?? null,
+        'new_values' => $data,
+        'description' => 'e-CF ' . ($result['tipo_ecf'] ?? '') . ' emitido (' . $estadoFinal . ').',
+    ]);
     echo json_encode([
         'status' => true,
         'data' => $data,
@@ -367,7 +387,16 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
-            
+            if ($estadoAnterior !== $estadoNuevo) {
+                AuditLogger::log([
+                    'module' => 'facturas', 'action' => 'STATUS_CHANGE', 'entity_type' => 'factura',
+                    'entity_id' => $ecf['e_ncf'] ?? $facturaId,
+                    'old_values' => ['estado_dgii' => $estadoAnterior],
+                    'new_values' => ['estado_dgii' => $estadoNuevo],
+                    'description' => 'Transicion de estado e-CF: ' . $estadoAnterior . ' -> ' . $estadoNuevo . '.',
+                ]);
+            }
+
             // Si el e-CF es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
             if (($estadoNuevo === 'RECHAZADO' || $estadoNuevo === 'NO_ENCONTRADO') && 
@@ -434,7 +463,16 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
-            
+            if ($estadoAnterior !== $estadoNuevo) {
+                AuditLogger::log([
+                    'module' => 'facturas', 'action' => 'STATUS_CHANGE', 'entity_type' => 'factura',
+                    'entity_id' => $ecf['e_ncf'] ?? $facturaId,
+                    'old_values' => ['estado_dgii' => $estadoAnterior],
+                    'new_values' => ['estado_dgii' => $estadoNuevo],
+                    'description' => 'Transicion de estado RFCE: ' . $estadoAnterior . ' -> ' . $estadoNuevo . '.',
+                ]);
+            }
+
             // Si el RFCE es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
             if (($estadoNuevo === 'RFCE_RECHAZADO' || $estadoNuevo === 'RFCE_NO_ENCONTRADO') && 

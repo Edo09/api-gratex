@@ -92,6 +92,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // tenant_id viene del TOKEN (no del body): no se crean usuarios en otro tenant.
         $res = $authModel->registerUser($email, $password, $name, $username, $tenantId, $role);
         if ($res[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'users', 'action' => 'CREATE',
+                'entity_type' => 'user', 'entity_id' => $res[1]['id'] ?? null,
+                'new_values' => ['email' => $email, 'name' => $name, 'username' => $username, 'role' => $role],
+                'description' => 'Usuario creado.',
+            ]);
             users_respond(['status' => true, 'data' => $res[1]], 201);
         }
         users_respond(['status' => false, 'error' => $res[1]], 400);
@@ -112,9 +118,17 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $fields[$f] = $body[$f];
             }
         }
+        $oldUser = $userModel->getUser($tenantId, $id);
         $res = $userModel->updateUser($tenantId, $id, $fields);
         if ($res[0] === 'success') {
-            users_respond(['status' => true, 'data' => $userModel->getUser($tenantId, $id)]);
+            $newUser = $userModel->getUser($tenantId, $id);
+            AuditLogger::log([
+                'module' => 'users', 'action' => 'UPDATE',
+                'entity_type' => 'user', 'entity_id' => $id,
+                'old_values' => $oldUser, 'new_values' => $newUser,
+                'description' => 'Usuario actualizado.',
+            ]);
+            users_respond(['status' => true, 'data' => $newUser]);
         }
         users_respond(['status' => false, 'error' => $res[1]], 400);
         break;
@@ -127,8 +141,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($id === (int) ($me['user_id'] ?? 0)) {
             users_respond(['status' => false, 'error' => 'No puedes borrar tu propio usuario.'], 400);
         }
+        $oldUser = $userModel->getUser($tenantId, $id);
         $res = $userModel->deleteUser($tenantId, $id);
         if ($res[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'users', 'action' => 'DELETE',
+                'entity_type' => 'user', 'entity_id' => $id,
+                'old_values' => $oldUser, 'description' => 'Usuario eliminado.',
+            ]);
             users_respond(['status' => true, 'data' => 'Usuario eliminado']);
         }
         users_respond(['status' => false, 'error' => $res[1]], 400);

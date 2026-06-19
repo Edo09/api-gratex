@@ -115,6 +115,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 isset($body->no_autorizacion) ? trim((string) $body->no_autorizacion) : null
             );
             if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'ncf', 'action' => 'NCF_RANGE_REGISTER',
+                    'entity_type' => 'ncf_rango', 'entity_id' => $type,
+                    'new_values' => [
+                        'type' => $type, 'numero_desde' => (int) $desde,
+                        'numero_hasta' => (int) $hasta, 'fecha_vencimiento' => $venc,
+                    ],
+                    'description' => 'Rango NCF autorizado por DGII registrado.',
+                ]);
                 echo json_encode(['status' => true, 'data' => $result[1]]);
             } else {
                 http_response_code(422);
@@ -132,6 +141,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $_PUT = json_decode(file_get_contents('php://input', true));
             if (isset($_PUT->current_value)) {
                 $result = $ncfModel->setSequence('B01', $_PUT->current_value);
+                if ($result) {
+                    AuditLogger::log([
+                        'module' => 'ncf', 'action' => 'NCF_SEQUENCE_UPDATE',
+                        'entity_type' => 'ncf_sequence', 'entity_id' => 'B01',
+                        'new_values' => ['current_value' => $_PUT->current_value],
+                        'description' => 'Secuencia NCF actualizada.',
+                    ]);
+                }
                 echo json_encode(['status' => $result]);
             } else {
                 echo json_encode(['status' => false, 'error' => 'Missing current_value']);
@@ -156,6 +173,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $result = $facturaModel->updateNCF($_PUT->id, $_PUT->NCF);
 
             if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'ncf', 'action' => 'UPDATE',
+                    'entity_type' => 'factura_ncf', 'entity_id' => $_PUT->id,
+                    'new_values' => ['NCF' => $_PUT->NCF],
+                    'description' => 'NCF de factura actualizado.',
+                ]);
                 $respuesta = [
                     'status' => true,
                     'message' => 'NCF updated successfully',

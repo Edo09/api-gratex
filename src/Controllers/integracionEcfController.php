@@ -79,6 +79,14 @@ function handleEmitirIntegracion(): void
         $result = (new ECFEmissionService())->emitir($payload);
     } catch (Throwable $e) {
         error_log('[integracionEcf] emision fallo (tenant ' . ($tenant['id'] ?? '?') . '): ' . $e->getMessage());
+        AuditLogger::log([
+            'module' => 'integracion', 'action' => 'INTEGRACION_EMIT',
+            'entity_type' => 'ecf', 'entity_id' => $input['e_ncf'] ?? null,
+            'tenant_id' => (int) $tenant['id'],
+            'new_values' => ['tipo_ecf' => $input['tipo_ecf'] ?? null, 'rnc_emisor' => $emisor['rnc']],
+            'success' => false, 'error_message' => $e->getMessage(),
+            'description' => 'Fallo emitiendo e-CF por integracion.',
+        ]);
         respondIntegracionEcf(false, 'Fallo emitiendo e-CF: ' . $e->getMessage(), 502);
         return;
     }
@@ -98,6 +106,18 @@ function handleEmitirIntegracion(): void
     } catch (Throwable $e) {
         error_log('[integracionEcf] no se pudo guardar respaldo: ' . $e->getMessage());
     }
+
+    AuditLogger::log([
+        'module' => 'integracion', 'action' => 'INTEGRACION_EMIT',
+        'entity_type' => 'ecf', 'entity_id' => $result['e_ncf'] ?? ($input['e_ncf'] ?? null),
+        'tenant_id' => (int) $tenant['id'],
+        'new_values' => [
+            'tipo_ecf' => $result['tipo_ecf'] ?? null, 'estado' => $result['estado'] ?? null,
+            'track_id' => $result['track_id'] ?? null, 'ambiente' => $result['ambiente'] ?? null,
+            'rnc_comprador' => $input['comprador']['rnc'] ?? null,
+        ],
+        'description' => 'e-CF emitido por integracion (' . (string) ($result['estado'] ?? '') . ').',
+    ]);
 
     echo json_encode([
         'status' => true,

@@ -83,6 +83,12 @@ switch($_SERVER['REQUEST_METHOD']){
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
 
+                AuditLogger::log([
+                    'module' => 'clients', 'action' => 'CREATE',
+                    'entity_type' => 'client', 'entity_id' => $result[2] ?? null,
+                    'new_values' => $_POST, 'description' => 'Cliente creado.',
+                ]);
+
                 $shouldSendWelcomeEmail = isset($_POST->sent_mail) && filter_var($_POST->sent_mail, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
                 if ($shouldSendWelcomeEmail) {
                     $mailResult = sendClientWelcomeEmail([
@@ -121,9 +127,17 @@ switch($_SERVER['REQUEST_METHOD']){
             $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
         }
         else{
+            $oldClient = $clientModel->getClients($_PUT->id)[0] ?? null;
             $result = $clientModel->updateClient($_PUT->id,$_PUT->email,$_PUT->client_name,$_PUT->company_name,$_PUT->phone_number,$_PUT->rnc ?? null);
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
+
+                AuditLogger::log([
+                    'module' => 'clients', 'action' => 'UPDATE',
+                    'entity_type' => 'client', 'entity_id' => $_PUT->id,
+                    'old_values' => $oldClient, 'new_values' => $_PUT,
+                    'description' => 'Cliente actualizado.',
+                ]);
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
@@ -137,9 +151,16 @@ switch($_SERVER['REQUEST_METHOD']){
             $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
         }
         else{
+            $oldClient = $clientModel->getClients($_DELETE->id)[0] ?? null;
             $result = $clientModel->deleteClient($_DELETE->id);
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
+
+                AuditLogger::log([
+                    'module' => 'clients', 'action' => 'DELETE',
+                    'entity_type' => 'client', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldClient, 'description' => 'Cliente eliminado.',
+                ]);
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }

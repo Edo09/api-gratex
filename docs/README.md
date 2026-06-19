@@ -41,6 +41,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/branding-plantillas.md](modules/branding-plantillas.md) | Plantillas de Representación Impresa por tenant, branding, logo, diseños a la medida |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |
 | [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos |
+| [modules/auditoria.md](modules/auditoria.md) | Bitácora de auditoría (`audit_logs`): quién hizo qué y cuándo, `AuditLogger`, `GET /api/audit-logs` |
 
 ### `business-rules/`
 | Doc | Para qué |

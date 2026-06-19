@@ -93,6 +93,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $result = $productModel->saveProduct($_POST);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => ['id' => $result[2] ?? null, 'message' => $result[1]]];
+                AuditLogger::log([
+                    'module' => 'products', 'action' => 'CREATE',
+                    'entity_type' => 'product', 'entity_id' => $result[2] ?? null,
+                    'new_values' => $_POST, 'description' => 'Producto creado.',
+                ]);
             } else {
                 $respuesta = ['status' => false, 'error' => $result[1]];
             }
@@ -107,10 +112,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } else if (($error = validateProduct($_PUT)) !== null) {
             $respuesta = ['status' => false, 'error' => $error];
         } else {
+            $oldProduct = $productModel->getProducts($_PUT->id)[0] ?? null;
             $result = $productModel->updateProduct($_PUT->id, $_PUT);
             $respuesta = $result[0] === 'success'
                 ? ['status' => true, 'data' => $result[1]]
                 : ['status' => false, 'error' => $result[1]];
+            if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'products', 'action' => 'UPDATE',
+                    'entity_type' => 'product', 'entity_id' => $_PUT->id,
+                    'old_values' => $oldProduct, 'new_values' => $_PUT,
+                    'description' => 'Producto actualizado.',
+                ]);
+            }
         }
         echo json_encode($respuesta);
         break;
@@ -120,10 +134,18 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             $respuesta = ['status' => false, 'error' => 'Product ID is empty'];
         } else {
+            $oldProduct = $productModel->getProducts($_DELETE->id)[0] ?? null;
             $result = $productModel->deleteProduct($_DELETE->id);
             $respuesta = $result[0] === 'success'
                 ? ['status' => true, 'data' => $result[1]]
                 : ['status' => false, 'error' => $result[1]];
+            if ($result[0] === 'success') {
+                AuditLogger::log([
+                    'module' => 'products', 'action' => 'DELETE',
+                    'entity_type' => 'product', 'entity_id' => $_DELETE->id,
+                    'old_values' => $oldProduct, 'description' => 'Producto eliminado.',
+                ]);
+            }
         }
         echo json_encode($respuesta);
         break;

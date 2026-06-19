@@ -47,6 +47,7 @@ $ADMIN_MODULES = [
     'landing',
     'users',
     'roles',
+    'audit',
 ];
 
 return [
@@ -77,6 +78,7 @@ return [
         'branding'                 => 'branding',
         'users'                    => 'users',
         'roles'                    => 'roles',
+        'audit-logs'               => 'audit',
 
         // Mixta: GET = listado de recibidos/aprobaciones para la app; POST = e-CF
         // entrante de DGII (firma/Bearer, lo valida el controller).

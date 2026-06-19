@@ -30,17 +30,38 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 $tenantId = $_POST->tenant_id ?? null;
                 $login_result = $authModel->loginUser($_POST->emailOrUsername, $_POST->password, $tenantId);
 
+                $isEmail = filter_var($_POST->emailOrUsername, FILTER_VALIDATE_EMAIL) !== false;
                 if ($login_result[0] === 'success') {
                     $respuesta = [
                         'success' => true,
                         'data' => $login_result[1]
                     ];
+                    $u = $login_result[1]['user'] ?? [];
+                    AuditLogger::authEvent([
+                        'action'             => 'LOGIN_SUCCESS',
+                        'user_id'            => $u['id'] ?? null,
+                        'username'           => $u['username'] ?? null,
+                        'email'              => $u['email'] ?? null,
+                        'tenant_id'          => $tenantId !== null ? (int) $tenantId : null,
+                        'session_token_hash' => isset($login_result[1]['token']) ? hash('sha256', $login_result[1]['token']) : null,
+                        'success'            => true,
+                        'description'        => 'Inicio de sesion exitoso.',
+                    ]);
                 } else {
                     $respuesta = [
                         'success' => false,
                         'error' => $login_result[1]
                     ];
                     http_response_code(401);
+                    AuditLogger::authEvent([
+                        'action'        => 'LOGIN_FAILED',
+                        'username'      => $isEmail ? null : $_POST->emailOrUsername,
+                        'email'         => $isEmail ? $_POST->emailOrUsername : null,
+                        'tenant_id'     => $tenantId !== null ? (int) $tenantId : null,
+                        'success'       => false,
+                        'error_message' => $login_result[1],
+                        'description'   => 'Intento de inicio de sesion fallido.',
+                    ]);
                 }
             }
             echo json_encode($respuesta);
@@ -91,6 +112,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
                             'success' => true,
                             'message' => $respuesta_revoke[1]
                         ];
+                        AuditLogger::authEvent([
+                            'action'             => 'LOGOUT',
+                            'user_id'            => $validation['user_id'] ?? null,
+                            'tenant_id'          => $validation['tenant_id'] ?? null,
+                            'session_token_hash' => $token_hash,
+                            'success'            => true,
+                            'description'        => 'Cierre de sesion (token revocado).',
+                        ]);
                     } else {
                         $respuesta = ['success' => false, 'error' => $respuesta_revoke[1]];
                         http_response_code(500);
