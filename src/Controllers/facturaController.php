@@ -523,8 +523,12 @@ function handlePreview(clientModel $clientModel): void
 
     $clientId = $input['client_id'] ?? null;
     $items    = $input['items'] ?? null;
+    $tipoEcf  = (string) ($input['tipo_ecf'] ?? '');
 
-    if (!$clientId) {
+    // E32 (Consumo) y E43 (Gastos Menores) pueden previsualizarse sin comprador
+    // (consumidor final), igual que en la emisión (ver handleEmisionECF).
+    $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true);
+    if (!$clientId && !$permiteSinCliente) {
         respond(false, 'client_id requerido', 422);
         return;
     }
@@ -534,12 +538,15 @@ function handlePreview(clientModel $clientModel): void
     }
     assertUnidadesMedida($items);
 
-    $clients = $clientModel->getClients($clientId);
-    if (empty($clients)) {
-        respond(false, 'Cliente no encontrado', 404);
-        return;
+    $client = null;
+    if ($clientId) {
+        $clients = $clientModel->getClients($clientId);
+        if (empty($clients)) {
+            respond(false, 'Cliente no encontrado', 404);
+            return;
+        }
+        $client = $clients[0];
     }
-    $client = $clients[0];
 
     $totales = computeTotales($items);
 
@@ -561,7 +568,7 @@ function handlePreview(clientModel $clientModel): void
     require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
     $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
     $pdf->setFactura($factura);
-    $pdf->setClientData($client);
+    $pdf->setClientData($client ?? []);
     $pdfContent = $pdf->generatePdf();
 
     $filenameBase = $input['ncf'] ?? 'preview';
