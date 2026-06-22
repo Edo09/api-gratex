@@ -1,3 +1,6 @@
 certificado_dgii
 .ignore
 .env
+certificados/
+*.p12
+*.pfx
