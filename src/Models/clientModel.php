@@ -107,15 +107,18 @@ class clientModel
         return $digits === '' ? null : $digits;
     }
 
+    // Duplicate check intentionally ignores rnc and company_name: multiple
+    // clients may share the same RNC or company_name (e.g. several contacts of
+    // the same company). Only an exact email + client_name + phone match counts
+    // as a duplicate, to guard against accidental re-submission.
     public function validateClients($email, $client_name, $company_name, $phone_number)
     {
         try {
-            $sql = "SELECT * FROM clients WHERE email = :email AND client_name = :client_name AND company_name = :company_name AND phone_number = :phone_number";
+            $sql = "SELECT * FROM clients WHERE email = :email AND client_name = :client_name AND phone_number = :phone_number";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':email' => $email,
                 ':client_name' => $client_name,
-                ':company_name' => $company_name,
                 ':phone_number' => $phone_number
             ]);
             return $stmt->fetchAll();
