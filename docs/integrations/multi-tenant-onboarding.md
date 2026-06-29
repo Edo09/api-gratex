@@ -95,8 +95,7 @@ HostGator/cPanel → MySQL Databases:
 2. Aplica **`db/tenant_schema.sql`** (esquema completo consolidado — ya no se
    corren migraciones una por una).
 3. `UPDATE emisor_config` con los datos reales del tenant.
-4. Crea el usuario admin en `master.users` (email único global, username único
-   por tenant).
+4. Crea el usuario admin en `master.users` (email y username únicos globales).
 5. Guarda cert y logo.
 6. **Imprime el resumen** — guardar de aquí:
    - `tenant_id`
@@ -105,8 +104,7 @@ HostGator/cPanel → MySQL Databases:
 ### 4. Login y verificación
 ```
 POST /api/auth/login
-{"emailOrUsername":"<email>","password":"..."}            ← email (único global)
-{"emailOrUsername":"<username>","password":"...","tenant_id":N}  ← username (por tenant)
+{"emailOrUsername":"<email|username>","password":"..."}   ← email o username (ambos únicos globales, sin tenant_id)
 ```
 Devuelve el token de sesión → header `X-API-KEY` para todo el API.
 Smoke: `GET /api/clients` debe devolver solo los clientes de SU DB (los 2 de

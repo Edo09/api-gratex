@@ -7,8 +7,8 @@
  *
  *   https://gratex.net/api/public/create_user.php
  *
- * Edita CREATE_USER_TOKEN antes de usar. El email es UNICO global; el username
- * es unico por tenant. Recomendado loguear por EMAIL (ver multi-tenant).
+ * Edita CREATE_USER_TOKEN antes de usar. email y username son UNICOS globales,
+ * asi que el login (por email o username) no necesita tenant_id (ver multi-tenant).
  */
 
 const CREATE_USER_TOKEN = 'gratextoken.';
