@@ -12,7 +12,7 @@ la autenticación y los bugs críticos resueltos durante la certificación.
 ## URLs de servicio (registradas en DGII)
 
 Todos los tenants registran las **mismas** URLs (el sistema resuelve de quién es cada
-documento por el RNC del XML):
+documento por el RNC del XML).:
 
 | Servicio | URL base |
 |---|---|
