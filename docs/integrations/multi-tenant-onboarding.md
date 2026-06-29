@@ -105,8 +105,7 @@ HostGator/cPanel → MySQL Databases:
 ### 4. Login y verificación
 ```
 POST /api/auth/login
-{"emailOrUsername":"<email>","password":"..."}            ← email (único global)
-{"emailOrUsername":"<username>","password":"...","tenant_id":N}  ← username (por tenant)
+{"emailOrUsername":"<email|username>","password":"..."}   ← email o username (ambos únicos globales, sin tenant_id)
 ```
 Devuelve el token de sesión → header `X-API-KEY` para todo el API.
 Smoke: `GET /api/clients` debe devolver solo los clientes de SU DB (los 2 de
@@ -280,7 +279,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 
 | Endpoint | Auth | Uso |
 |---|---|---|
-| `POST /api/auth/login` | — | Obtener token del tenant. Email (global) o `username` + `tenant_id` |
+| `POST /api/auth/login` | — | Obtener token del tenant. Email o `username` (ambos únicos globales, sin `tenant_id`) |
 | `POST /api/facturas` | `X-API-KEY` (token) | Emitir e-CF (tenant **app**) |
 | `GET /api/facturas/{id}/pdf` | `X-API-KEY` | Representación Impresa (PDF con QR DGII) |
 | `GET /api/facturas/{id}/xml` | `X-API-KEY` | XML firmado |

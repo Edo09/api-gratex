@@ -94,7 +94,7 @@ token, nunca del body — no se pueden crear usuarios en otro tenant). Hard-gate
 | PUT | `/api/users/{id}` | actualizar `{name?, last_name?, email?, username?, role?, password?}` |
 | DELETE | `/api/users/{id}` | borrar (no puedes borrar tu propio usuario) |
 
-Crear reusa `authModel::registerUser` (email único global, username único por tenant, hash bcrypt).
+Crear reusa `authModel::registerUser` (email y username únicos globales, hash bcrypt).
 
 > Quitados: `POST /api/auth/register` (no pasaba `tenant_id`, roto en multi-tenant) y el viejo
 > `userController`/`userModel` legacy (pre-multitenant, sin rol/tenant). La alta por

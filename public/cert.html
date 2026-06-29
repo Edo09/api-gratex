@@ -224,7 +224,7 @@ function wireLogin() {
     try {
       const body = { emailOrUsername: email, password: pass };
       const tid = tenantIdEl.value.trim();
-      if (tid) body.tenant_id = tid; // permite login por username (acotado al tenant)
+      if (tid) body.tenant_id = tid; // opcional/ignorado: email y username son unicos globales
       const res = await fetch(`${API}/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
