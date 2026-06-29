@@ -55,8 +55,9 @@ CREATE TABLE IF NOT EXISTS tenants (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- users — auth centralizada. email UNIQUE global (login resuelve tenant por
--- email sin pedir codigo de empresa). username UNIQUE por tenant.
+-- users — auth centralizada. email y username UNIQUE global (el login resuelve
+-- el tenant por cualquiera de los dos, sin pedir codigo de empresa / tenant_id).
+-- Consecuencia: un username solo puede existir en UN tenant en todo el sistema.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
   id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS users (
   role       VARCHAR(20)  DEFAULT 'user',
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_users_email (email),
-  UNIQUE KEY uq_users_tenant_username (tenant_id, username),
+  UNIQUE KEY uq_users_username (username),
   KEY idx_users_tenant (tenant_id),
   CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

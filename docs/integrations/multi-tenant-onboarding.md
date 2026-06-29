@@ -278,7 +278,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 
 | Endpoint | Auth | Uso |
 |---|---|---|
-| `POST /api/auth/login` | — | Obtener token del tenant. Email (global) o `username` + `tenant_id` |
+| `POST /api/auth/login` | — | Obtener token del tenant. Email o `username` (ambos únicos globales, sin `tenant_id`) |
 | `POST /api/facturas` | `X-API-KEY` (token) | Emitir e-CF (tenant **app**) |
 | `GET /api/facturas/{id}/pdf` | `X-API-KEY` | Representación Impresa (PDF con QR DGII) |
 | `GET /api/facturas/{id}/xml` | `X-API-KEY` | XML firmado |

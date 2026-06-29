@@ -93,7 +93,7 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 | `id` | int PK AI | |
 | `name` / `last_name` | varchar(70) | |
 | `email` | varchar(300) | único **global** (resuelve el tenant en el login) |
-| `username` | varchar(50) | único por tenant |
+| `username` | varchar(50) | único **global** (login resuelve el tenant sin tenant_id; un username vive en un solo tenant) |
 | `password` | varchar(255) | hash bcrypt |
 | `role` | varchar(20) | default `user` |
 | `tenant_id` | int | tenant al que pertenece |

@@ -14,12 +14,13 @@ Todos los endpoints (salvo `/api/auth/login`) requieren credenciales. Dos esquem
 ### Login — `POST /api/auth/login`
 
 ```json
-{ "emailOrUsername": "ana@empresa.do", "password": "...", "tenant_id": 1 }
+{ "emailOrUsername": "ana@empresa.do", "password": "..." }
 ```
 
-`tenant_id` es opcional para login por **email** (único global); para login por
-**username** sin `tenant_id` solo funciona si el username existe en un único
-tenant. Respuesta (envoltorio `{success,...}`, distinto al `{status,...}` del resto):
+`emailOrUsername` acepta email o username; **ambos son únicos globales**, así
+que el login resuelve el tenant sin `tenant_id`. (`tenant_id` se sigue aceptando
+por compatibilidad, pero se ignora.) Respuesta (envoltorio `{success,...}`,
+distinto al `{status,...}` del resto):
 
 ```json
 {
