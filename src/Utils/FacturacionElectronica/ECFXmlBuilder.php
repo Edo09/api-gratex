@@ -421,10 +421,23 @@ class ECFXmlBuilder
             $itemEl->appendChild($doc->createElement('NumeroLinea', (string) ($item['numero_linea'] ?? ($i + 1))));
             $itemEl->appendChild($doc->createElement('IndicadorFacturacion', (string) ($item['indicador_facturacion'] ?? 1)));
             $this->appendRetencionIfNeeded($doc, $itemEl, $item, $tipoEcf);
-            $itemEl->appendChild($this->el($doc, 'NombreItem', (string) ($item['nombre_item'] ?? '')));
+            $nombreItem = (string) ($item['nombre_item'] ?? '');
+            $descripcionItem = (string) ($item['descripcion'] ?? '');
+            if (mb_strlen($nombreItem) > 80) {
+                // NombreItem es AlfNum80Type (max 80). Conservar el texto completo en
+                // DescripcionItem (AlfNum1000Type) cuando no haya descripcion propia.
+                if ($descripcionItem === '') {
+                    $descripcionItem = $nombreItem;
+                }
+                $nombreItem = mb_substr($nombreItem, 0, 80);
+            }
+            if (mb_strlen($descripcionItem) > 1000) {
+                $descripcionItem = mb_substr($descripcionItem, 0, 1000);
+            }
+            $itemEl->appendChild($this->el($doc, 'NombreItem', $nombreItem));
             $indicadorBienServicio = $tipoEcf === '47' ? 2 : ($item['indicador_bien_servicio'] ?? 2);
             $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) $indicadorBienServicio));
-            $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
+            $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $descripcionItem);
             $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad_raw'] ?? $item['cantidad'] ?? 1)));
             $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
             $this->appendNumberIfSet($doc, $itemEl, 'CantidadReferencia', $item['cantidad_referencia'] ?? null);
