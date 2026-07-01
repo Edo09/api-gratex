@@ -229,6 +229,7 @@ X-API-KEY: <key>
 | `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query`) |
 | `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
 | `GET` | `/api/unidades-medida` | Catálogo DGII de unidades de medida (solo lectura) — ver nota abajo |
+| `GET` | `/api/provincias-municipios` | Catálogo DGII de provincias/municipios/distritos (solo lectura) — ver nota abajo |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver [../modules/gastos.md](../modules/gastos.md) |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
@@ -311,6 +312,32 @@ para mostrar; **no** se envían al XML.
   código fuera del catálogo devuelve **422**.
 - Aplica también a la auto-emisión de gastos (E41/E43/E47) y se persiste en
   `factura_items.unidad_medida` / `gasto_items.unidad_medida`.
+
+---
+
+### Provincias / municipios — `GET /api/provincias-municipios`
+
+Catálogo DGII compartido (vive en el DB master, tabla `dgii_provincia_municipio`,
+582 códigos). El **`codigo` de 6 dígitos** (`PPMMDD`) es lo que va en
+`<Municipio>`/`<Provincia>` (y `<MunicipioComprador>`/`<ProvinciaComprador>`) del
+XML — es el valor `ProvinciaMunicipioType` que exige el XSD. `descripcion`/`tipo`
+son para mostrar/agrupar.
+
+Filtros opcionales: `?tipo=PROVINCIA|MUNICIPIO|DISTRITO` y `?provincia=25` (código
+de 2 dígitos).
+
+```json
+{ "status": true, "data": [
+  { "codigo": "250000", "provincia_codigo": "25", "descripcion": "PROVINCIA SANTIAGO", "tipo": "PROVINCIA" },
+  { "codigo": "250100", "provincia_codigo": "25", "descripcion": "MUNICIPIO SANTIAGO", "tipo": "MUNICIPIO" }
+]}
+```
+
+- En la emisión, `emisor.municipio/provincia` y `comprador.municipio/provincia` se
+  **resuelven al código** contra este catálogo: si el valor ya es un código válido
+  se usa tal cual; si es un nombre (`"Santiago"`) se sustituye por su código; si no
+  hay match se deja intacto (**fail-open** — la validación final la hace el XSD DGII).
+  No devuelve 422 (a diferencia de `unidad_medida`).
 
 ---
 

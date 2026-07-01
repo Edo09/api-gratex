@@ -121,6 +121,11 @@ switch ($route) {
         require_once 'src/Controllers/unidadMedidaController.php';
         break;
 
+    case 'provincias-municipios':
+        // Catálogo DGII de provincias/municipios/distritos (solo lectura) - token required
+        require_once 'src/Controllers/provinciaMunicipioController.php';
+        break;
+
     case 'cotizaciones':
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';

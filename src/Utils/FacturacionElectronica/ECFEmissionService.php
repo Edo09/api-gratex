@@ -8,6 +8,7 @@ require_once __DIR__ . '/RFCEXmlBuilder.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
+require_once __DIR__ . '/../../Models/provinciaMunicipioModel.php';
 
 /**
  * Orchestrates the full e-CF emission flow:
@@ -39,6 +40,26 @@ class ECFEmissionService
         $this->rfceBuilder = new RFCEXmlBuilder();
         $this->emisorModel = new EmisorConfigModel();
         $this->ncfModel = new ncfModel();
+    }
+
+    /**
+     * Resuelve municipio/provincia de emisor y comprador al código DGII de 6
+     * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
+     */
+    private function resolveUbicaciones(array &$xmlData): void
+    {
+        $cat = new provinciaMunicipioModel();
+        foreach (['emisor', 'comprador'] as $parte) {
+            if (!is_array($xmlData[$parte] ?? null)) {
+                continue;
+            }
+            if (isset($xmlData[$parte]['municipio']) && $xmlData[$parte]['municipio'] !== '') {
+                $xmlData[$parte]['municipio'] = $cat->resolve($xmlData[$parte]['municipio'], 'MUNICIPIO');
+            }
+            if (isset($xmlData[$parte]['provincia']) && $xmlData[$parte]['provincia'] !== '') {
+                $xmlData[$parte]['provincia'] = $cat->resolve($xmlData[$parte]['provincia'], 'PROVINCIA');
+            }
+        }
     }
 
     /**
@@ -150,6 +171,12 @@ class ECFEmissionService
             'informacion_referencia' => $payload['informacion_referencia'] ?? null,
             'fecha_hora_firma' => $payload['fecha_hora_firma'] ?? date('d-m-Y H:i:s'),
         ];
+
+        // <Municipio>/<Provincia> del XML deben ser el código DGII de 6 dígitos
+        // (ProvinciaMunicipioType). Los datos guardados suelen ser nombres libres
+        // ("Santiago"); se resuelven al código del catálogo. Fail-open: si no hay
+        // match se deja el valor tal cual (lo valida el XSD de la DGII).
+        $this->resolveUbicaciones($xmlData);
 
         $fechaEmisionDgii = DateTime::createFromFormat('d-m-Y H:i:s', $xmlData['fecha_hora_firma'])->format('Y-m-d H:i:s');
 

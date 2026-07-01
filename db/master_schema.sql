@@ -258,6 +258,25 @@ CREATE TABLE IF NOT EXISTS unidades_medida (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
+-- Catalogo DGII de provincias/municipios/distritos (compartido por todos los
+-- tenants). CLAVE: el `codigo` de 6 digitos (PPMMDD) ES lo que va en
+-- <Municipio>/<Provincia> del e-CF (ProvinciaMunicipioType). `descripcion`/`tipo`
+-- son para mostrar/agrupar. Ver samples/e-CF 31 v.1.0.xsd.
+-- Lo consume GET /api/provincias-municipios y la resolucion nombre->codigo en la
+-- emision (provinciaMunicipioModel::resolve). Seed: tools/migration_provincia_municipio.sql
+-- (582 filas).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dgii_provincia_municipio (
+  codigo           CHAR(6)      NOT NULL,
+  provincia_codigo CHAR(2)      NOT NULL,
+  descripcion      VARCHAR(120) NOT NULL,
+  tipo             ENUM('PROVINCIA','MUNICIPIO','DISTRITO') NOT NULL,
+  PRIMARY KEY (codigo),
+  KEY idx_provincia (provincia_codigo),
+  KEY idx_tipo (tipo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
 -- roles / role_permissions — RBAC per-tenant (ver db/master_migrations/003).
 -- users.role guarda el NOMBRE del rol; se resuelve a permisos por (tenant_id,
 -- name). El catalogo de permisos validos y el mapa ruta->permiso viven en
