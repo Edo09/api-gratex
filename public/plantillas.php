@@ -19,16 +19,17 @@
  * docs/modules/branding-plantillas.md ("Diseños a la medida" y "Replicar el
  * formato existente de un cliente").
  *
- * Edita PLANTILLAS_TOKEN antes de usar.
+ * El token se lee de PLANTILLAS_TOKEN en el .env del server (nunca hardcodeado
+ * en el repo).
  */
 
-// === Token (editar antes de usar) ==========================================
-const PLANTILLAS_TOKEN = 'gratextoken.';
-// ===========================================================================
-
+require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/MasterDatabase.php';
 require_once __DIR__ . '/../src/TenantResolver.php';
 require_once __DIR__ . '/../src/Utils/Pdf/BrandingResolver.php';
+
+// .env al inicio: el token de operaciones vive en el entorno, no en el codigo.
+Database::loadEnv();
 
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 
@@ -83,10 +84,11 @@ function plFail(int $code, string $msg): void
     exit($msg . "\n");
 }
 
-if (PLANTILLAS_TOKEN === 'CAMBIA_ESTE_TOKEN_PLANTILLAS') {
-    plFail(403, 'Configura PLANTILLAS_TOKEN en el archivo antes de usarlo.');
+$expectedToken = (string) (getenv('PLANTILLAS_TOKEN') ?: ($_ENV['PLANTILLAS_TOKEN'] ?? ''));
+if ($expectedToken === '') {
+    plFail(403, 'PLANTILLAS_TOKEN no configurado en el .env del server.');
 }
-if (!hash_equals(PLANTILLAS_TOKEN, (string) ($_POST['token'] ?? ''))) {
+if (!hash_equals($expectedToken, (string) ($_POST['token'] ?? ''))) {
     plFail(403, 'Token invalido.');
 }
 
