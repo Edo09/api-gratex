@@ -46,6 +46,14 @@ La herramienta de operaciones `public/upload_logo.php` (token propio) sigue
 funcionando y puede fijar el logo de cualquier tenant (útil en onboarding de
 integración). Ambas vías comparten `src/Utils/LogoStorage.php`.
 
+Para plantilla/acento existe la herramienta hermana `public/plantillas.php`
+(token de operaciones propio, sin token del tenant): ver el branding actual,
+previsualizar cualquier plantilla (incl. rejilla de calibración) y activarla
+para cualquier tenant — el equivalente de operaciones de `/api/branding`.
+Su UI web es `public/plantillas.html` (mismo patrón que `onboard.html` →
+`create_tenant.php`): tarjetas de plantilla, selector de color y vista previa
+del PDF embebida en la página.
+
 Dimensiones y composición del logo (cajas por plantilla, proporción ~3:1,
 lockup horizontal): ver la sección [Guía del logo del tenant](#guía-del-logo-del-tenant) abajo.
 
