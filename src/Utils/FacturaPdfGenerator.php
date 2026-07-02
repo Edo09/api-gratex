@@ -270,7 +270,7 @@ class FacturaPdfGenerator extends FPDF
         if ($descripcion !== '') {
             $parts[] = $descripcion;
         }
-        return implode(' ', $parts);
+        return implode("\n", $parts);
     }
 
     /**
