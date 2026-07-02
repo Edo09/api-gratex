@@ -48,7 +48,14 @@ class Reporte607Model
 
     private function fetchFacturas(string $ini, string $finExcl, ?string $ambiente): array
     {
-        // Todas las ventas del periodo: e-CF (cualquier estado) + simples (tipo_ecf NULL).
+        // Ventas del periodo. Al 607 solo van comprobantes fiscales validos:
+        //  - e-CF ACEPTADOS por DGII: estado_dgii LIKE '%ACEPTADO%' cubre ACEPTADO,
+        //    ACEPTADO_CONDICIONAL y RFCE_ACEPTADO.
+        //  - facturas simples (tipo_ecf IS NULL): siempre, no pasan por DGII.
+        // Se EXCLUYEN los e-CF no confirmados/invalidos: RECHAZADO, RFCE_RECHAZADO,
+        // EN_PROCESO, NO_ENCONTRADO, ERROR (un e-CF aceptado tarde aparece cuando su
+        // estado se actualiza). El guard por tipo_ecf (no por estado) conserva las
+        // simples aunque su estado_dgii sea '' o NULL.
         // 'date' es DATETIME -> rango [ini, primer dia del mes siguiente).
         $sql = "SELECT f.id, f.tipo_ecf, f.e_ncf, f.NCF, f.client_id, f.client_name,
                        f.date, f.total, f.estado_dgii, f.ambiente_dgii,
@@ -56,7 +63,8 @@ class Reporte607Model
                        c.rnc AS cliente_rnc, c.razon_social AS cliente_razon
                 FROM facturas f
                 LEFT JOIN clients c ON f.client_id = c.id
-                WHERE f.date >= :ini AND f.date < :finExcl";
+                WHERE f.date >= :ini AND f.date < :finExcl
+                  AND (f.tipo_ecf IS NULL OR f.estado_dgii LIKE '%ACEPTADO%')";
         if ($ambiente !== null) {
             // e-CF llevan ambiente_dgii; las simples lo tienen NULL -> incluirlas.
             $sql .= ' AND (f.ambiente_dgii = :ambiente OR f.ambiente_dgii IS NULL)';
