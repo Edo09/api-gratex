@@ -639,7 +639,9 @@ class ECFXmlBuilder
         // Sin CR (\r): DOM lo serializa como &#13; y el validador de DGII lo
         // pierde al re-serializar, rompiendo el digest de la firma
         // ("La firma del XML no es valida"). LF literal si es estable.
+        // El resto de caracteres de control ni siquiera es valido en XML 1.0.
         $value = str_replace(["\r\n", "\r"], "\n", $value);
+        $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value);
         $node = $doc->createElement($name);
         $node->appendChild($doc->createTextNode($value));
         return $node;

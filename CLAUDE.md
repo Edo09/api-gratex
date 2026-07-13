@@ -36,6 +36,10 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 
 ## DO NOT
 
+- Do not let carriage returns (`\r` → `&#13;`) reach e-CF XML text nodes — DGII's validator
+  drops them when re-serializing and rejects with "La firma del XML no es válida" even though
+  the signature is valid. Builders normalize `\r` → `\n` in their `el()` helpers, and
+  `DgiiReceptionService::assertSinCarriageReturn()` blocks any signed XML that slips through.
 - Do not use `<If>` directive in `.htaccess` — server does not support it (breaks all routes)
 - Do not wrap DGII auth token response in `{"status":true,"data":{...}}` — must be flat `{"token":"...","expira":"...","expedido":"..."}`
 - Do not use `end(explode('/api/', $endpoint))` for routing — DGII URLs have two `/api/` segments

@@ -51,7 +51,7 @@ function handleIntegracionAprobacion(): void
     $tenant = TenantResolver::current();
     $tenantId = (int) $tenant['id'];
 
-    $input = json_decode(file_get_contents('php://input'), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respondIntegracionApc(false, 'JSON body invalido.', 400);
         return;

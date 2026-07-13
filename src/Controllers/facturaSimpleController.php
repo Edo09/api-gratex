@@ -46,7 +46,7 @@ $isPdf = (bool) preg_match('#/facturas-simples/\d+/pdf$#', $path);
 
 function fsBody(): array
 {
-    $data = json_decode(file_get_contents('php://input'), true);
+    $data = InputSanitizer::jsonInput();
     return is_array($data) ? $data : [];
 }
 

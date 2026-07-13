@@ -125,7 +125,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
 function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel): void
 {
-    $input = json_decode(file_get_contents('php://input', true), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respond(false, 'JSON body invalido', 400);
         return;
@@ -515,7 +515,7 @@ function handleReenviar(int $facturaId, facturaModel $facturaModel): void
 
 function handlePreview(clientModel $clientModel): void
 {
-    $input = json_decode(file_get_contents('php://input'), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respond(false, 'JSON body invalido', 400);
         return;

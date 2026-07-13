@@ -12,7 +12,7 @@ $auth = new AuthMiddleware();
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
-        $_POST = json_decode(file_get_contents('php://input', true));
+        $_POST = InputSanitizer::jsonInput(false);
         
         $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
         // Alta de usuarios: usar POST /api/users (admin del tenant, modulo 'users').

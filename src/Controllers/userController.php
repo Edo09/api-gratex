@@ -42,7 +42,7 @@ $rest = $apiPos !== false ? substr($uriPath, $apiPos + 5) : ltrim($uriPath, '/')
 $segs = explode('/', trim($rest, '/'));
 $sub = $segs[1] ?? null;
 
-$body = json_decode(file_get_contents('php://input'), true);
+$body = InputSanitizer::jsonInput();
 if (!is_array($body)) {
     $body = [];
 }

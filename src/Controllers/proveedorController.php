@@ -76,7 +76,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'POST':
-        $_POST = json_decode(file_get_contents('php://input', true));
+        $_POST = InputSanitizer::jsonInput(false);
         $error = validateProveedor($_POST);
         if ($error !== null) {
             $respuesta = ['status' => false, 'error' => $error];
@@ -97,7 +97,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'PUT':
-        $_PUT = json_decode(file_get_contents('php://input', true));
+        $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
             $respuesta = ['status' => false, 'error' => 'Proveedor ID is empty'];
         } else if (($error = validateProveedor($_PUT)) !== null) {
@@ -121,7 +121,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'DELETE':
-        $_DELETE = json_decode(file_get_contents('php://input', true));
+        $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             $respuesta = ['status' => false, 'error' => 'Proveedor ID is empty'];
         } else {

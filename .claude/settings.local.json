@@ -89,7 +89,23 @@
       "Read(//c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e//**)",
       "Read(//c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex//**)",
       "PowerShell($sp = \"C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-edgarcia-Documents-grat-api-gratex\\\\6e349a02-bc70-4c1e-a8aa-a3271eeb472e\\\\scratchpad\"; foreach \\($id in 1330,1331,1333\\) { $f = Join-Path $sp \"factura$id.xml\"; Invoke-WebRequest -Uri \"https://gratex.net/api/facturas/$id/xml?format=raw\" -Headers @{\"X-API-KEY\"=\"af4e17f46918964019683e7cf374ead7\"} -OutFile $f | Out-Null; $raw = [IO.File]::ReadAllText\\($f\\); $cr = \\([regex]::Matches\\($raw, '&#13;'\\)\\).Count; $litcr = \\([regex]::Matches\\($raw, \"`r\"\\)\\).Count; \"{0}: {1} bytes, CR-entities={2}, literal-CR={3}\" -f $id, $raw.Length, $cr, $litcr })",
-      "Bash(php -d extension_dir=C:/php/ext -d extension=openssl -r ' *)"
+      "Bash(php -d extension_dir=C:/php/ext -d extension=openssl -r ' *)",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas/1333/estado\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas?query=E310000000014&pageSize=10\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas/1334/xml?format=raw\" -o \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/factura1334.xml\")",
+      "Bash(php -l src/Utils/FacturacionElectronica/DgiiReceptionService.php)",
+      "Bash(php -l src/Utils/FacturacionElectronica/ECFXmlBuilder.php)",
+      "Bash(php -l src/Utils/FacturacionElectronica/RFCEXmlBuilder.php)",
+      "Bash(php -l src/Utils/FacturacionElectronica/ACECFXmlBuilder.php)",
+      "Bash(php -d extension_dir=C:/php/ext -d extension=openssl \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/test_guards.php\")",
+      "Bash(php -l src/Controllers/facturacionElectronicaController.php)",
+      "Bash(printf '{\"desc\":\"linea1\\\\\\\\r\\\\\\\\nlinea2\\\\\\\\rlinea3\",\"tab\":\"a\\\\\\\\tb\",\"ctrl\":\"x\\\\\\\\u0000y\\\\\\\\u000bz\",\"num\":5,\"items\":[{\"d\":\"a\\\\\\\\rb\"}]}')",
+      "Bash(php -r \"require 'src/Utils/InputSanitizer.php'; var_export\\(InputSanitizer::jsonInput\\(\\)\\);\")",
+      "Bash(printf '{\"client_name\":\"Foo\\\\\\\\r\\\\\\\\nBar\",\"nested\":{\"x\":\"a\\\\\\\\rb\"}}')",
+      "Bash(php -r 'require '\\\\''src/Utils/InputSanitizer.php'\\\\''; $o = InputSanitizer::jsonInput\\(false\\); var_export\\($o\\);')",
+      "Bash(php -r \"var_dump\\(file_get_contents\\('php://input'\\)\\);\")",
+      "Bash(php -r \"var_dump\\(stream_get_contents\\(STDIN\\)\\);\")",
+      "Bash(php -r ' *)"
     ]
   }
 }

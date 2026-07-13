@@ -28,6 +28,7 @@ class DgiiReceptionService
      */
     public function recibir(string $signedXml, string $bearerToken, array $options = []): array
     {
+        $this->assertSinCarriageReturn($signedXml);
         $environment = $this->resolveEnvironment($options);
         $path = sprintf('%s/Recepcion/api/FacturasElectronicas', $environment);
 
@@ -68,6 +69,7 @@ class DgiiReceptionService
      */
     public function recibirResumen(string $signedXml, string $bearerToken, array $options = []): array
     {
+        $this->assertSinCarriageReturn($signedXml);
         $environment = $this->resolveEnvironment($options);
         $baseUrl = rtrim((string) ($options['fc_base_url'] ?? getenv('DGII_FC_BASE_URL') ?: self::DEFAULT_FC_BASE_URL), '/');
         $url = sprintf('%s/%s/RecepcionFC/api/recepcion/ecf', $baseUrl, $environment);
@@ -107,6 +109,7 @@ class DgiiReceptionService
      */
     public function enviarAprobacionComercial(string $signedXml, string $bearerToken, array $options = []): array
     {
+        $this->assertSinCarriageReturn($signedXml);
         $environment = $this->resolveEnvironment($options);
         $path = sprintf('%s/AprobacionComercial/api/AprobacionComercial', $environment);
 
@@ -248,5 +251,26 @@ class DgiiReceptionService
             return $rnc . $eNcf . '.xml';
         }
         return $fallback;
+    }
+
+    /**
+     * DGII pierde los CR (&#13;/&#xD;) al re-serializar el XML durante la
+     * validacion de firma, lo que rompe el digest y produce el rechazo
+     * "La firma del XML no es valida" aunque la firma sea correcta
+     * (visto en produccion 2026-07-13, E310000000014). Los builders ya
+     * normalizan \r -> \n; este guard corta cualquier via nueva que se
+     * salte esa normalizacion, fallando local con un error accionable en
+     * vez de un rechazo criptico de DGII.
+     */
+    private function assertSinCarriageReturn(string $signedXml): void
+    {
+        if (strpos($signedXml, '&#13;') !== false
+            || stripos($signedXml, '&#xd;') !== false
+            || strpos($signedXml, "\r") !== false) {
+            throw new RuntimeException(
+                'El XML firmado contiene retornos de carro (CR/&#13;): DGII los pierde al validar la firma '
+                . 'y rechazaria el documento. Normaliza los saltos de linea a \n antes de construir el XML.'
+            );
+        }
     }
 }

@@ -48,7 +48,7 @@ handleEmitirIntegracion();
 function handleEmitirIntegracion(): void
 {
     $tenant = TenantResolver::current();
-    $input = json_decode(file_get_contents('php://input'), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respondIntegracionEcf(false, 'JSON body invalido.', 400);
         return;
