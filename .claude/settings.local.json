@@ -70,7 +70,26 @@
       "PowerShell(php C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\test_reclamar.php)",
       "PowerShell(php -l src/Models/Reporte607Model.php)",
       "PowerShell(php -l src/Controllers/Reporte607Controller.php)",
-      "PowerShell(php -l src/Router.php)"
+      "PowerShell(php -l src/Router.php)",
+      "Bash(grep -E \"===|OBJECT\" \"/c/Users/edgarcia/.claude/projects/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/tool-results/b6lm82nd6.txt\" | sort | uniq -c | sort -rn | head; echo ---; grep -E \"===\" -A200 \"/c/Users/edgarcia/.claude/projects/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/tool-results/b6lm82nd6.txt\" | grep -E \"===|OBJECT\")",
+      "Bash(openssl asn1parse *)",
+      "Bash(php -v)",
+      "Bash(php -r \"echo OPENSSL_VERSION_TEXT;\")",
+      "Bash(openssl version *)",
+      "Bash(php -m)",
+      "Read(//c/Program Files/**)",
+      "Bash(where.exe php *)",
+      "Bash(bash \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/check_certs.sh\" \"dummy_wrong_password\")",
+      "Bash(bash \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/check_certs.sh\" \"Gratexdgii2025\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas?query=E310000000014&pageSize=5\")",
+      "Read(//c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/**)",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas/1332/xml?format=raw\" -o factura1332.xml)",
+      "Bash(openssl sha256 *)",
+      "Bash(php -d extension_dir=C:/php/ext -d extension=openssl \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/verify_sig.php\")",
+      "Read(//c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e//**)",
+      "Read(//c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex//**)",
+      "PowerShell($sp = \"C:\\\\Users\\\\edgarcia\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-edgarcia-Documents-grat-api-gratex\\\\6e349a02-bc70-4c1e-a8aa-a3271eeb472e\\\\scratchpad\"; foreach \\($id in 1330,1331,1333\\) { $f = Join-Path $sp \"factura$id.xml\"; Invoke-WebRequest -Uri \"https://gratex.net/api/facturas/$id/xml?format=raw\" -Headers @{\"X-API-KEY\"=\"af4e17f46918964019683e7cf374ead7\"} -OutFile $f | Out-Null; $raw = [IO.File]::ReadAllText\\($f\\); $cr = \\([regex]::Matches\\($raw, '&#13;'\\)\\).Count; $litcr = \\([regex]::Matches\\($raw, \"`r\"\\)\\).Count; \"{0}: {1} bytes, CR-entities={2}, literal-CR={3}\" -f $id, $raw.Length, $cr, $litcr })",
+      "Bash(php -d extension_dir=C:/php/ext -d extension=openssl -r ' *)"
     ]
   }
 }

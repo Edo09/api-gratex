@@ -150,6 +150,9 @@ class RFCEXmlBuilder
 
     private function el(DOMDocument $doc, string $name, string $value): DOMElement
     {
+        // Sin CR (\r): DOM lo serializa como &#13; y el validador de DGII lo
+        // pierde al re-serializar, rompiendo el digest de la firma.
+        $value = str_replace(["\r\n", "\r"], "\n", $value);
         $node = $doc->createElement($name);
         $node->appendChild($doc->createTextNode($value));
         return $node;

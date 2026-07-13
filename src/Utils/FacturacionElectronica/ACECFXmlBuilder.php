@@ -53,8 +53,11 @@ class ACECFXmlBuilder
         $detalle->appendChild($document->createElement('Estado', $estado));
 
         if ($estado === '2' && !empty($data['detalle_motivo'])) {
+            // Sin CR (\r): DOM lo serializa como &#13; y el validador de DGII lo
+            // pierde al re-serializar, rompiendo el digest de la firma.
+            $motivo = str_replace(["\r\n", "\r"], "\n", (string) $data['detalle_motivo']);
             $el = $document->createElement('DetalleMotivoRechazo');
-            $el->appendChild($document->createTextNode((string) $data['detalle_motivo']));
+            $el->appendChild($document->createTextNode($motivo));
             $detalle->appendChild($el);
         }
 
