@@ -85,6 +85,15 @@ class ECFXmlBuilder
         }
 
         $ref = is_array($data['informacion_referencia'] ?? null) ? $data['informacion_referencia'] : [];
+        // Sanear espacios: DGII rechaza p.ej. "<NCFModificado> E31…</NCFModificado>".
+        foreach ($ref as $k => $v) {
+            if (is_string($v)) {
+                $ref[$k] = trim($v);
+            }
+        }
+        if (isset($ref['ncf_modificado']) && is_string($ref['ncf_modificado'])) {
+            $ref['ncf_modificado'] = preg_replace('/\s+/', '', $ref['ncf_modificado']);
+        }
         foreach (['ncf_modificado', 'fecha_ncf_modificado', 'codigo_modificacion'] as $key) {
             if (($ref[$key] ?? '') === '') {
                 throw new RuntimeException('InformacionReferencia.' . $key . ' es requerido para e-CF tipo ' . $tipoEcf . '.');
@@ -141,7 +150,7 @@ class ECFXmlBuilder
 
         $idDoc = $doc->createElement('IdDoc');
         $idDoc->appendChild($doc->createElement('TipoeCF', $tipoEcfStr));
-        $idDoc->appendChild($doc->createElement('eNCF', (string) $data['e_ncf']));
+        $idDoc->appendChild($doc->createElement('eNCF', preg_replace('/\s+/', '', (string) $data['e_ncf'])));
 
         if ($cfg['fecha_vence']) {
             $idDoc->appendChild($doc->createElement(
@@ -606,7 +615,8 @@ class ECFXmlBuilder
 
     private function appendIfNotEmpty(DOMDocument $doc, DOMElement $parent, string $name, $value): void
     {
-        $value = (string) $value;
+        // trim: espacios al inicio/fin invalidan campos ante DGII (patrones XSD).
+        $value = trim((string) $value);
         if ($value === '') {
             return;
         }
