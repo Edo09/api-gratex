@@ -3,7 +3,7 @@
 Cómo levantar la **Gratex API** en local. Stack: PHP 8+, MySQL, Apache, **sin Composer**
 (las dependencias están vendorizadas en `vendor/`: fpdf, phpqrcode).
 
-> La DB de producción (`mtldtmte_new_gratexdb`) **no es accesible localmente**. Para probar
+> La DB de producción (`smhynzte_new_gratexdb`) **no es accesible localmente**. Para probar
 > la lógica de DB en local hay que crear una DB con los esquemas de `db/`.
 
 ---

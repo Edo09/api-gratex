@@ -23,9 +23,12 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 
 - `DGII_ECF_ENVIRONMENT=ecf` on server → filters certecf test data from all list/stats endpoints
 - NCF sequences are per-ambiente (migration `tools/migration_ncf_ambiente.sql` already run on server)
-- DB: `mtldtmte_new_gratexdb` on server (NOT `mtldtmte_gratexdb` which is old)
-- Server path: `/home1/mtldtmte/public_html/api/`
-- PHP error log: `/home1/mtldtmte/public_html/api/error_log`
+- DB: `smhynzte_new_gratexdb` on server
+- Server path: `/home1/smhynzte/public_html/api/`
+- PHP error log: `/home1/smhynzte/public_html/api/error_log`
+- cPanel account migrated `mtldtmte` → `smhynzte` (2026-08). Anything still naming
+  `mtldtmte_*` is pre-migration. After such a move `tenants.db_*` keeps pointing at the old
+  server (login works via master, business endpoints fail) — fix with `tools/update_tenant_db.php`
 
 ## Key architecture
 

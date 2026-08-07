@@ -173,7 +173,7 @@ Notas:
   guarda. Si la DB falla (ej. migration 009 sin correr), solo se loguea — no
   rompe la respuesta ni el envío a DGII.
 
-> **Antes de usar en server:** correr en `mtldtmte_new_gratexdb`:
+> **Antes de usar en server:** correr en `smhynzte_new_gratexdb`:
 > `db/migrations/009_add_aprobacion_comercial_tracking.sql` y
 > `db/migrations/010_add_ambiente_recepcion.sql`.
 

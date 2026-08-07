@@ -146,7 +146,7 @@ explica el límite, no se fuerza.
 
 > **Loop operativo (la máquina local no tiene BD):** la vista previa corre contra
 > el **server**. El ciclo es: editar `Tenant<id>Template.php` → desplegar **ese
-> único archivo** a `/home1/mtldtmte/public_html/api/src/Utils/Pdf/Custom/` →
+> único archivo** a `/home1/smhynzte/public_html/api/src/Utils/Pdf/Custom/` →
 > previsualizar con rejilla (`curl -X POST ".../api/branding/preview?format=download"
 > -H "Authorization: Bearer <tenant-token>" -d '{"template":"custom:tenant<id>","grid":true}'`)
 > → superponer sobre la muestra del cliente → ajustar y repetir. No hace falta

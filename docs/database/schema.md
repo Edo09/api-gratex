@@ -7,7 +7,7 @@ El sistema es **multi-tenant (DB-per-tenant)** en producción. Hay **dos clases 
 
 - **Master (`gratex_master`)** — directorio de tenants + autenticación + datos globales.
   Cero datos de negocio. Esquema: `db/master_schema.sql` (+ `db/master_migrations/`).
-- **DB del tenant** (ej. la de Gratex: `mtldtmte_new_gratexdb`) — datos de negocio de
+- **DB del tenant** (ej. la de Gratex: `smhynzte_new_gratexdb`) — datos de negocio de
   **una** empresa: facturas, clientes, NCF, e-CF, gastos, etc. Esquema:
   `db/tenant_schema.sql` (+ `db/migrations/`).
 
