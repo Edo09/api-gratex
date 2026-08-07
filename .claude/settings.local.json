@@ -105,7 +105,27 @@
       "Bash(php -r 'require '\\\\''src/Utils/InputSanitizer.php'\\\\''; $o = InputSanitizer::jsonInput\\(false\\); var_export\\($o\\);')",
       "Bash(php -r \"var_dump\\(file_get_contents\\('php://input'\\)\\);\")",
       "Bash(php -r \"var_dump\\(stream_get_contents\\(STDIN\\)\\);\")",
-      "Bash(php -r ' *)"
+      "Bash(php -r ' *)",
+      "Bash(php \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/pdf_extract.php\" \"/c/Users/edgarcia/Downloads/factura-E310000000028.pdf\")",
+      "Bash(php -d extension_dir=C:/php/ext -d extension=mbstring \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/pdf_extract.php\" \"/c/Users/edgarcia/Downloads/factura-E310000000028.pdf\")",
+      "Bash(php -d extension_dir=C:/php/ext -d extension=mbstring \"/c/Users/edgarcia/AppData/Local/Temp/claude/C--Users-edgarcia-Documents-grat-api-gratex/6e349a02-bc70-4c1e-a8aa-a3271eeb472e/scratchpad/pdf_extract.php\" \"/c/Users/edgarcia/Downloads/factura-E310000000029.pdf\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas?query=E3100000000&pageSize=30\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/clients?query=132755448\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/clients?query=131766218\")",
+      "Bash(curl -s -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas?query=E31&pageSize=100\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/clients\")",
+      "Bash(curl -s -m 30 -w \"\\\\nHTTP:%{http_code}\\\\n\" -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\" \"https://gratex.net/api/facturas?query=E310000000&pageSize=5\")",
+      "Bash(curl -sv -m 20 \"https://gratex.net/api/facturas?pageSize=1\" -H \"X-API-KEY: af4e17f46918964019683e7cf374ead7\")",
+      "Bash(curl -s -m 30 -H \"X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0\" \"https://gratex.net/api/facturas?query=E31&pageSize=100\")",
+      "Bash(curl -s -m 30 -H \"X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0\" \"https://gratex.net/api/facturas?query=E310000000028\")",
+      "Bash(curl -s -m 30 -H \"X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0\" \"https://gratex.net/api/facturas?query=E310000000029\")",
+      "Bash(curl -s -m 30 -H 'X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0' https://gratex.net/api/facturas?query=E310000000027)",
+      "Bash(curl -s -m 30 -H 'X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0' 'https://gratex.net/api/facturas?query=E31&pageSize=200')",
+      "Bash(curl -s -m 30 -H \"X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0\" \"https://gratex.net/api/ncf/rangos?type=E31\")",
+      "Bash(curl -s -m 30 -H \"X-API-KEY: 6955592eb3a45d9f5ad7748c78b26ba0\" \"https://gratex.net/api/facturas?query=E310000000026\")",
+      "Bash(where.exe mysql *)",
+      "Bash(where.exe sqlite3 *)",
+      "Bash(grep -o '\"secuencia_utilizada\":[^,}]*\\\\|\"respuesta_dgii\":\"[^\"]\\\\{0,60\\\\}')"
     ]
   }
 }
