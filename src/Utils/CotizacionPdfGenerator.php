@@ -42,7 +42,7 @@ class CotizacionPdfGenerator extends FPDF
             $nb = max($nb, $this->NbLines($width, $data[$i]));
         }
         $h = $this->lineHeight * $nb;
-        $this->CheckPageBreak($h);
+        $this->CheckPageBreak($h + 2); // +2 = el Ln($h + 2) del cierre de fila
         for ($i = 0; $i < count($data); $i++) {
             $w = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
             $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
@@ -57,6 +57,15 @@ class CotizacionPdfGenerator extends FPDF
     private $widths;
     private $aligns;
     private $lineHeight;
+
+    /**
+     * Banda inferior reservada (mm) para el bloque fijo de cierre:
+     * condiciones/forma de pago (SetY(-92)) + totales + firmas del Footer.
+     * El auto page break se configura con este margen para que las filas de
+     * items corten antes de invadirlo (antes se solapaban: el detalle llegaba
+     * hasta y=277 mientras el cierre se dibuja desde y=205).
+     */
+    private const CIERRE_RESERVADO = 95;
     /** @var FacturaTemplate|null Plantilla del tenant (encabezado de identidad). */
     private $template = null;
     private $emisorConfig = null;
@@ -309,12 +318,16 @@ class CotizacionPdfGenerator extends FPDF
     {
         $this->AliasNbPages();
         $this->SetMargins(5, 10, 5);
+        // Reservar la banda inferior fija (cierre + firmas) para que el
+        // detalle de items nunca se solape con ella.
+        $this->SetAutoPageBreak(true, self::CIERRE_RESERVADO);
         $this->AddPage();
 
         // Fetch client data from DB if client_id is present
         $contacto = '';
         $telefono = '';
         $email = '';
+        $cliente = $this->cotizacion['client_name'] ?? ''; // sin fila de clients quedaba indefinida
         if (!empty($this->cotizacion['client_id'])) {
             try {
                 $db = Database::getInstance()->getConnection();
@@ -407,6 +420,10 @@ class CotizacionPdfGenerator extends FPDF
         $itbistotal = $subtotal * 0.18;
         $this->SetX(7);
 
+        // El bloque de cierre se dibuja con coordenadas absolutas dentro de la
+        // banda reservada, que queda por debajo del PageBreakTrigger: sin
+        // apagar el auto page break cada Cell/MultiCell abriria una pagina.
+        $this->SetAutoPageBreak(false);
         // Subtotal, Descuento, ITBIS, Total
         $this->SetFont('Arial', 'B', 9);
         $this->SetY(-90);
