@@ -66,6 +66,13 @@ class CotizacionPdfGenerator extends FPDF
      * hasta y=277 mientras el cierre se dibuja desde y=205).
      */
     private const CIERRE_RESERVADO = 95;
+
+    /**
+     * Datos ya resueltos de la banda de cliente (cliente, telefono, correo,
+     * contacto, condiciones). Se guardan para poder repetir la banda en las
+     * paginas de continuacion desde Header().
+     */
+    private $clienteBanda = null;
     /** @var FacturaTemplate|null Plantilla del tenant (encabezado de identidad). */
     private $template = null;
     private $emisorConfig = null;
@@ -273,6 +280,8 @@ class CotizacionPdfGenerator extends FPDF
         // Bloque propio de la cotizacion (titulo, numero, descargo): se
         // mantiene en el generador. max(30, Y) por si la plantilla deja el
         // cursor mas abajo (p.ej. banda del moderno).
+        $continuacion = $this->PageNo() > 1;
+
         $this->SetY(max(30, $this->GetY() + 1));
         $this->SetFont('Arial', 'B', 12);
         $this->Cell(30, 4, $this->convertEncoding('Cotización/Factura Proforma'), 0, 1, 'L');
@@ -280,9 +289,83 @@ class CotizacionPdfGenerator extends FPDF
         $this->SetFont('Arial', '', 14);
         $this->Cell(22, 5, '#' . ($this->cotizacion['code'] ?? ''), 0, 1, 'L');
         $this->Ln(1);
+
+        if ($continuacion) {
+            // Marca de continuacion: mismo encabezado que la pagina 1, pero
+            // dejando claro que no es el inicio del documento. {nb} lo
+            // sustituye AliasNbPages() al cerrar el PDF.
+            $this->SetFont('Arial', 'B', 10);
+            $this->Cell(0, 5, $this->convertEncoding('Continuación · Página ') . $this->PageNo() . ' de {nb}', 0, 1, 'L');
+            $this->Ln(1);
+        }
+
+        if (!$continuacion) {
+            // El descargo legal solo en la primera pagina: repetirlo en las de
+            // continuacion roba altura util y deja una sola fila por pagina.
+            $this->SetFont('Arial', '', 9);
+            $this->MultiCell(200, 3.6, $this->convertEncoding('Esta cotización/factura proforma es para uso provisional. Al momento de la entrega del pedido se emitirá una factura válida para crédito fiscal.'), 0, 'L');
+        }
+        $this->Ln(3);
+
+        if ($continuacion) {
+            // Repetir las bandas para que las filas de la pagina 2+ conserven
+            // el contexto (a quien se cotiza y que significa cada columna).
+            $this->drawClienteBanda();
+            $this->drawItemsBanda();
+        }
+    }
+
+    /**
+     * Banda de cliente (encabezado oscuro + valores). Usa los datos ya
+     * resueltos en generatePdf(); no hace nada si aun no se han cargado.
+     */
+    private function drawClienteBanda(): void
+    {
+        if ($this->clienteBanda === null) {
+            return;
+        }
+        $d = $this->clienteBanda;
+        [$bandFill, $bandText] = $this->bandColors();
+        $this->SetFont('Arial', 'B', 10);
+        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
+        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
+        $this->Cell(40, 6, 'Cliente', 0, 0, 'L', 1);
+        $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
+        $this->Cell(55, 6, 'Correo Electronico', 0, 0, 'L', 1);
+        $this->Cell(30, 6, 'Contacto', 0, 0, 'L', 1);
+        $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
         $this->SetFont('Arial', '', 10);
-        $this->MultiCell(200, 4, $this->convertEncoding('Esta cotización/factura proforma es para uso provisional. Al momento de la entrega del pedido se emitirá una factura válida para crédito fiscal.'), 0, 'L');
-        $this->Ln(5);
+        $this->SetTextColor(0, 0, 0);
+        $rowHeight = 5;
+        $startY = $this->GetY();
+        $startX = $this->GetX();
+        $this->MultiCell(40, $rowHeight, $this->convertEncoding($d['cliente']), 0, 'L');
+        $this->SetXY($startX + 40, $startY);
+        $this->MultiCell(40, $rowHeight, $this->convertEncoding($d['telefono']), 0, 'L');
+        $this->SetXY($startX + 40 + 40, $startY);
+        $this->MultiCell(55, $rowHeight, $this->convertEncoding($d['email']), 0, 'L');
+        $this->SetXY($startX + 40 + 40 + 55, $startY);
+        $this->MultiCell(30, $rowHeight, $this->convertEncoding($d['contacto']), 0, 'L');
+        $this->SetXY($startX + 40 + 40 + 55 + 30, $startY);
+        $this->MultiCell(40, $rowHeight, $this->convertEncoding($d['condiciones']), 0, 'L');
+        $this->Ln(2);
+    }
+
+    /** Banda de columnas del detalle (Fecha, Cantidad, Descripcion, ITBIS, Valor Unit). */
+    private function drawItemsBanda(): void
+    {
+        [$bandFill, $bandText] = $this->bandColors();
+        $this->SetFont('Arial', 'B', 10);
+        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
+        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
+        $this->Cell(25, 6, 'Fecha', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'Cantidad', 0, 0, 'L', 1);
+        $this->Cell(105, 6, 'Descripcion Producto', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'ITBIS', 0, 0, 'L', 1);
+        $this->Cell(25, 6, 'Valor Unit', 0, 1, 'L', 1);
+        $this->Ln(1);
+        $this->SetTextColor(0, 0, 0);
+        $this->SetFont('Arial', '', 11);
     }
 
     /**
@@ -350,51 +433,25 @@ class CotizacionPdfGenerator extends FPDF
 
         // Client info section styled as a table row (like products).
         // Bandas en el acento del tenant (negro si no hay) + texto de contraste.
-        [$bandFill, $bandText] = $this->bandColors();
-        $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
-        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
-        $this->Cell(40, 6, 'Cliente', 0, 0, 'L', 1);
-        $this->Cell(40, 6, 'Telefono/Celular', 0, 0, 'L', 1);
-        $this->Cell(55, 6, 'Correo Electronico', 0, 0, 'L', 1);
-        $this->Cell(30, 6, 'Contacto', 0, 0, 'L', 1);
-        $this->Cell(40, 6, 'Condiciones de Pago', 0, 1, 'L', 1);
-        $this->SetFont('Arial', '', 10);
-        $this->SetTextColor(0, 0, 0);
-        $rowHeight = 5;
-        $startY = $this->GetY();
-        $startX = $this->GetX();
-        // Cliente (wrap)
-        $this->MultiCell(40, $rowHeight, $this->convertEncoding($cliente), 0, 'L');
-        $this->SetXY($startX + 40, $startY);
-        // Telefono/Celular
-        $this->MultiCell(40, $rowHeight, $this->convertEncoding($fulltelandcel), 0, 'L');
-        $this->SetXY($startX + 40 + 40, $startY);
-        // Correo Electronico (wrap)
-        $this->MultiCell(55, $rowHeight, $this->convertEncoding($email), 0, 'L');
-        $this->SetXY($startX + 40 + 40 + 55, $startY);
-        // Contacto (wrap)
-        $this->MultiCell(30, $rowHeight, $this->convertEncoding($contacto), 0, 'L');
-        $this->SetXY($startX + 40 + 40 + 55 + 30, $startY);
-        // Condiciones de Pago (wrap)
-        $this->MultiCell(40, 5, $this->convertEncoding($condiciones), 0, 'L');
-        $this->Ln(2);
+        // Se guardan los datos para repetir la banda en paginas de continuacion.
+        $this->clienteBanda = [
+            'cliente'     => $cliente,
+            'telefono'    => $fulltelandcel,
+            'email'       => $email,
+            'contacto'    => $contacto,
+            'condiciones' => $condiciones,
+        ];
+        $this->drawClienteBanda();
 
-        // Second header row: Fecha, Cliente, Cliente#, Cantidad, Descripcion Producto, ITBIS, Valor Unit
-        $this->SetFont('Arial', 'B', 10);
-        $this->SetFillColor($bandFill[0], $bandFill[1], $bandFill[2]);
-        $this->SetTextColor($bandText[0], $bandText[1], $bandText[2]);
-        $this->Cell(25, 6, 'Fecha', 0, 0, 'L', 1);
-        $this->Cell(25, 6, 'Cantidad', 0, 0, 'L', 1);
-        $this->Cell(105, 6, 'Descripcion Producto', 0, 0, 'L', 1);
-        $this->Cell(25, 6, 'ITBIS', 0, 0, 'L', 1);
-        $this->Cell(25, 6, 'Valor Unit', 0, 0, 'L', 1);
-        $this->Ln(7);
+        // Second header row: Fecha, Cantidad, Descripcion Producto, ITBIS, Valor Unit
+        $this->drawItemsBanda();
 
         $this->SetWidths([25, 25, 105, 25, 25]);
-        $this->SetLineHeight(5.5);
-        $this->SetTextColor(0, 0, 0);
-        $this->SetFont('Arial', '', 11);
+        // Interlineado del detalle: 4.8 en vez de 5.5. Las descripciones de
+        // estas cotizaciones traen ~10 lineas por item; con 5.5 dos items
+        // largos ya rozaban el corte de pagina (y=198 vs corte 202) y se
+        // partian en cuanto el encabezado real (logo + emisor) crecia.
+        $this->SetLineHeight(4.8);
 
         $fecha = isset($this->cotizacion['date']) ? date('d/m/Y', strtotime($this->cotizacion['date'])) : date('d/m/Y');
         $codcliente = $this->cotizacion['client_id'] ?? '';
