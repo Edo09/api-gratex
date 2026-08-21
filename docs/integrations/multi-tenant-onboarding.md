@@ -63,6 +63,11 @@ El sistema sabe de quién es cada documento por el RNC del XML. La recepción es
 2. El certificado digital `.p12` del cliente + su contraseña.
 3. El RNC del cliente (9-11 dígitos).
 4. `ONBOARD_TOKEN` (const en `tools/create_tenant.php`).
+5. Que exista y sea escribible por PHP la carpeta de certificados en la raíz del
+   API — por defecto `certificado_dgii/` (está en `.gitignore`, así que un deploy
+   nuevo no la trae). Si en ese server la carpeta tiene otro nombre, ponlo en el
+   `.env` con `CERT_DIR=<nombre>`; el script guarda el `.p12` ahí y graba esa misma
+   ruta relativa en `tenants.cert_path` (`CertResolver` la resuelve desde la raíz).
 
 ---
 
@@ -86,7 +91,7 @@ HostGator/cPanel → MySQL Databases:
 | razon-social, direccion | Para `emisor_config` |
 | ambiente | **`certecf`** si va a certificar (default `ecf`) |
 | db-name, db-user, db-pass, db-host, db-port | Los del paso 1 (host default `localhost`) |
-| cert (.p12) + cert-pass | Se guarda en `certificado_dgii/<rnc>/cert.p12`, pass cifrada AES-256-GCM |
+| cert (.p12) + cert-pass | Se guarda en `<CERT_DIR>/<rnc>/cert.p12` (default `certificado_dgii/`), pass cifrada AES-256-GCM |
 | logo | Opcional; va a `logos/<tenant_id>.<ext>` + `tenants.logo_path` (sale en la Representación Impresa) |
 | admin-email, admin-pass, admin-name, admin-username | Usuario admin inicial (los 4 o ninguno) |
 
@@ -206,7 +211,7 @@ producción. Útil para demos de venta con flujo completo.
 | Facturas emitidas | `facturas` (su DB) | sistema del cliente + backup en master |
 | e-CF recibidos | `ecf_recibidos` (su DB) | `master.ecf_recibidos` (por tenant_id) |
 | Aprobaciones recibidas | `aprobaciones_comerciales` (su DB) | `master.aprobaciones_comerciales` (por tenant_id) |
-| Certificado | `certificado_dgii/<rnc>/cert.p12` | igual |
+| Certificado | `<CERT_DIR>/<rnc>/cert.p12` (default `certificado_dgii/`) | igual |
 | Logo | `logos/<tenant_id>.<ext>` | igual (si aplica RI) |
 
 ## Troubleshooting rápido

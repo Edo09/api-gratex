@@ -204,16 +204,26 @@ if ($certPathArg !== null && $certPathArg !== '') {
     if (!is_file($certPathArg)) {
         fail("cert-path no existe: {$certPathArg}");
     }
-    $destDir = __DIR__ . '/../certificado_dgii/' . $rnc;
+    // Carpeta raiz de certificados, relativa a la raiz del proyecto. Se puede
+    // sobreescribir con CERT_DIR en el .env cuando el deploy la tiene con otro
+    // nombre; lo que importa es que coincida con lo que se graba en
+    // tenants.cert_path (CertResolver lo resuelve desde la raiz).
+    $certDir = trim((string) (getenv('CERT_DIR') ?: 'certificado_dgii'), '/ ');
+    if ($certDir === '') {
+        $certDir = 'certificado_dgii';
+    }
+    $destDir = __DIR__ . '/../' . $certDir . '/' . $rnc;
     if (!is_dir($destDir) && !mkdir($destDir, 0700, true) && !is_dir($destDir)) {
-        fail("No se pudo crear directorio de certificado: {$destDir}");
+        fail("No se pudo crear directorio de certificado: {$destDir}" . PHP_EOL
+            . "   Crea la carpeta '{$certDir}/' en la raiz del API (o ajusta CERT_DIR en el .env)"
+            . " y dale permiso de escritura al usuario de PHP.");
     }
     $dest = $destDir . '/cert.p12';
     $ok = $certIsUpload ? move_uploaded_file($certPathArg, $dest) : copy($certPathArg, $dest);
     if (!$ok) {
         fail("No se pudo guardar el certificado en {$dest}");
     }
-    $certPathRel = 'certificado_dgii/' . $rnc . '/cert.p12';
+    $certPathRel = $certDir . '/' . $rnc . '/cert.p12';
     echo "   certificado guardado en {$certPathRel}\n";
 }
 
