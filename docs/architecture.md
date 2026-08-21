@@ -83,6 +83,7 @@ api-gratex/
 | `warehouses` | `warehouseController.php` | token (`warehouses`) | almacenes de inventario |
 | `proveedores` | `proveedorController.php` | token | directorio de proveedores (+ compras) |
 | `unidades-medida` | `unidadMedidaController.php` | token | catálogo DGII de unidades (solo lectura) |
+| `provincias-municipios` | `provinciaMunicipioController.php` | token | catálogo DGII de provincias/municipios/distritos (solo lectura) |
 | `cotizaciones` | `cotizacionController.php` | token | cotizaciones + PDF |
 | `facturas` | `facturaController.php` | token | facturas (e-CF) + PDF/XML/estado |
 | `facturas-simples` | `facturaSimpleController.php` | token | facturas NO electrónicas |

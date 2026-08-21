@@ -7,13 +7,16 @@
  *
  *   https://gratex.net/api/public/create_user.php
  *
- * Edita CREATE_USER_TOKEN antes de usar. El email es UNICO global; el username
- * es unico por tenant. Recomendado loguear por EMAIL (ver multi-tenant).
+ * El token se lee de CREATE_USER_TOKEN en el .env del server (nunca hardcodeado
+ * en el repo). email y username son UNICOS globales, asi que el login
+ * (por email o username) no necesita tenant_id (ver multi-tenant).
  */
 
-const CREATE_USER_TOKEN = 'gratextoken.';
-
+require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/MasterDatabase.php';
+
+// .env al inicio: el token de operaciones vive en el entorno, no en el codigo.
+Database::loadEnv();
 
 $isPost = $_SERVER['REQUEST_METHOD'] === 'POST';
 
@@ -36,7 +39,7 @@ if (!$isPost) {
         . '<label>Nombre</label><input name="name" required>'
         . '<label>Apellido</label><input name="last_name">'
         . '<label>Email (login, único global)</label><input name="email" type="email" required>'
-        . '<label>Username (único por tenant)</label><input name="username" required>'
+        . '<label>Username (login, único global)</label><input name="username" required>'
         . '<label>Password</label><input name="password" type="password" autocomplete="off" required>'
         . '<label>Rol</label><select name="role"><option value="user">user</option><option value="admin">admin</option></select>'
         . '<button type="submit">Crear usuario</button>'
@@ -46,11 +49,12 @@ if (!$isPost) {
 
 header('Content-Type: text/plain; charset=utf-8');
 
-if (CREATE_USER_TOKEN === 'CAMBIA_ESTE_TOKEN_USUARIO') {
+$expectedToken = (string) (getenv('CREATE_USER_TOKEN') ?: ($_ENV['CREATE_USER_TOKEN'] ?? ''));
+if ($expectedToken === '') {
     http_response_code(403);
-    exit("Configura CREATE_USER_TOKEN en el archivo antes de usarlo.\n");
+    exit("CREATE_USER_TOKEN no configurado en el .env del server.\n");
 }
-if (!hash_equals(CREATE_USER_TOKEN, (string) ($_POST['token'] ?? ''))) {
+if (!hash_equals($expectedToken, (string) ($_POST['token'] ?? ''))) {
     http_response_code(403);
     exit("Token invalido.\n");
 }
@@ -88,12 +92,12 @@ if ($stmt->fetch()) {
     http_response_code(409);
     exit("Ese email ya esta registrado (debe ser unico global).\n");
 }
-// Username unico por tenant.
-$stmt = $conn->prepare('SELECT id FROM users WHERE username = :u AND tenant_id = :t LIMIT 1');
-$stmt->execute([':u' => $username, ':t' => $tenantId]);
+// Username unico global (igual que el email).
+$stmt = $conn->prepare('SELECT id FROM users WHERE username = :u LIMIT 1');
+$stmt->execute([':u' => $username]);
 if ($stmt->fetch()) {
     http_response_code(409);
-    exit("Ese username ya existe en este tenant.\n");
+    exit("Ese username ya esta en uso (debe ser unico global).\n");
 }
 
 $ins = $conn->prepare(

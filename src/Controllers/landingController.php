@@ -77,7 +77,7 @@ switch ($method) {
         break;
 
     case 'DELETE':
-        $data = json_decode(file_get_contents('php://input'), true);
+        $data = InputSanitizer::jsonInput();
         $id = $data['id'] ?? null;
 
         if (!$id) {

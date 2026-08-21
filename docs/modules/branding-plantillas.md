@@ -46,6 +46,14 @@ La herramienta de operaciones `public/upload_logo.php` (token propio) sigue
 funcionando y puede fijar el logo de cualquier tenant (útil en onboarding de
 integración). Ambas vías comparten `src/Utils/LogoStorage.php`.
 
+Para plantilla/acento existe la herramienta hermana `public/plantillas.php`
+(token de operaciones propio, sin token del tenant): ver el branding actual,
+previsualizar cualquier plantilla (incl. rejilla de calibración) y activarla
+para cualquier tenant — el equivalente de operaciones de `/api/branding`.
+Su UI web es `public/plantillas.html` (mismo patrón que `onboard.html` →
+`create_tenant.php`): tarjetas de plantilla, selector de color y vista previa
+del PDF embebida en la página.
+
 Dimensiones y composición del logo (cajas por plantilla, proporción ~3:1,
 lockup horizontal): ver la sección [Guía del logo del tenant](#guía-del-logo-del-tenant) abajo.
 
@@ -138,7 +146,7 @@ explica el límite, no se fuerza.
 
 > **Loop operativo (la máquina local no tiene BD):** la vista previa corre contra
 > el **server**. El ciclo es: editar `Tenant<id>Template.php` → desplegar **ese
-> único archivo** a `/home1/mtldtmte/public_html/api/src/Utils/Pdf/Custom/` →
+> único archivo** a `/home1/smhynzte/public_html/api/src/Utils/Pdf/Custom/` →
 > previsualizar con rejilla (`curl -X POST ".../api/branding/preview?format=download"
 > -H "Authorization: Bearer <tenant-token>" -d '{"template":"custom:tenant<id>","grid":true}'`)
 > → superponer sobre la muestra del cliente → ajustar y repetir. No hace falta

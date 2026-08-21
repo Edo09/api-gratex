@@ -54,7 +54,7 @@ $isXmlRequest = preg_match('#/gastos/(\d+)/xml#', $path, $xmlM);
 
 function gastoBody(): array
 {
-    $data = json_decode(file_get_contents('php://input'), true);
+    $data = InputSanitizer::jsonInput();
     return is_array($data) ? $data : [];
 }
 

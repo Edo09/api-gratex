@@ -23,11 +23,18 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | Doc | Para qué |
 |---|---|
 | [api/facturas.md](api/facturas.md) | Emisión e-CF: payloads por tipo (E31–E47), estado DGII, stats, rangos NCF, unidades |
+| [api/integracion.md](api/integracion.md) | Modo integración (JSON→XML): contrato de emisión, ACECF, bandejas, webhook — referencia **interna** |
+| [api/guia-cliente-integracion.md](api/guia-cliente-integracion.md) | **Entregable al cliente**: guía autocontenida para que su equipo técnico integre (alta, endpoints, tablas DGII, checklist de go-live) |
 | [api/facturas-simples.md](api/facturas-simples.md) | Facturas NO electrónicas (sin e-CF) |
 | [api/recepcion-aprobacion.md](api/recepcion-aprobacion.md) | e-CF recibidos + aprobación comercial (saliente/entrante); `ecf_recibidos` vs `aprobaciones_comerciales` |
 | [api/ncf.md](api/ncf.md) | Endpoint NCF y secuencia legacy `B01` |
 | [api/reportes-606-607.md](api/reportes-606-607.md) | Formatos 606 (compras) y 607 (ventas) DGII |
 | [api/inventario.md](api/inventario.md) | Inventario (categorías, almacenes) + campos `category_id`/`warehouse_id` de producto — guía frontend |
+
+### `frontend/` — guías para quien consume la API
+| Doc | Para qué |
+|---|---|
+| [frontend/limites-campos-item-dgii.md](frontend/limites-campos-item-dgii.md) | Límites DGII de los campos de ítem (`nombre_item` 80, `descripcion` 1000) y cómo separarlos |
 
 ### `database/`
 | Doc | Para qué |
@@ -53,6 +60,12 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 |---|---|
 | [integrations/dgii-ecf.md](integrations/dgii-ecf.md) | Integración DGII: flujos entrante/saliente, ARECF, auth, bugs resueltos |
 | [integrations/multi-tenant-onboarding.md](integrations/multi-tenant-onboarding.md) | Alta de tenants (app/integración), demo, certificación, rutas públicas admin |
+
+### Otros archivos de `docs/`
+| Archivo | Para qué |
+|---|---|
+| `Gratex_API.postman_collection.json` | Colección Postman del API (importar en Postman/Insomnia) |
+| `proposals/` | Material comercial (propuestas FiscalPoint en HTML/PDF + assets). No es documentación técnica |
 
 ## Documentación co-localizada (junto al código)
 

@@ -64,6 +64,9 @@ return [
         'products'                 => 'products',
         'proveedores'              => 'proveedores',
         'unidades-medida'          => 'unidades',
+        // Catálogo DGII de ubicaciones (solo lectura): comparte el token de
+        // catálogos 'unidades' para no requerir un módulo/seed RBAC nuevo.
+        'provincias-municipios'    => 'unidades',
         'categories'               => 'categories',
         'warehouses'               => 'warehouses',
         'cotizaciones'             => 'cotizaciones',

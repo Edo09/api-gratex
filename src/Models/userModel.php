@@ -70,7 +70,7 @@ class userModel
             return ['error', 'Usuario no encontrado en este tenant.'];
         }
 
-        // Unicidad: email global, username por tenant (excluyendo al propio usuario).
+        // Unicidad: email y username globales (excluyendo al propio usuario).
         if (isset($fields['email']) && $fields['email'] !== $current['email']) {
             if (!filter_var($fields['email'], FILTER_VALIDATE_EMAIL)) {
                 return ['error', 'Email invalido.'];
@@ -82,15 +82,10 @@ class userModel
             }
         }
         if (isset($fields['username']) && $fields['username'] !== $current['username']) {
-            if (self::multiTenant()) {
-                $chk = $this->conexion->prepare('SELECT id FROM users WHERE username = :u AND tenant_id = :tid AND id <> :id LIMIT 1');
-                $chk->execute([':u' => $fields['username'], ':tid' => (int) $tenantId, ':id' => $id]);
-            } else {
-                $chk = $this->conexion->prepare('SELECT id FROM users WHERE username = :u AND id <> :id LIMIT 1');
-                $chk->execute([':u' => $fields['username'], ':id' => $id]);
-            }
+            $chk = $this->conexion->prepare('SELECT id FROM users WHERE username = :u AND id <> :id LIMIT 1');
+            $chk->execute([':u' => $fields['username'], ':id' => $id]);
             if ($chk->fetch()) {
-                return ['error', 'Ese username ya existe en este tenant.'];
+                return ['error', 'Ese username ya esta en uso.'];
             }
         }
 

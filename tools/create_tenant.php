@@ -30,28 +30,27 @@
  * .env, o si faltan MASTER_DB_USER/PASS. En hosting compartido usar --skip-create-db.
  */
 
-// === Token para ejecucion por navegador (editar antes de usar) =============
-const ONBOARD_TOKEN = 'gratextoken.';
-// ===========================================================================
-
 require_once __DIR__ . '/../src/MasterDatabase.php';
 require_once __DIR__ . '/../src/TenantResolver.php';
 require_once __DIR__ . '/../src/Utils/TokenGenerator.php';
 
+// .env primero: el token de onboarding para el navegador vive en ONBOARD_TOKEN
+// del entorno, nunca hardcodeado en el repo.
+loadEnvFile(__DIR__ . '/../.env');
+
 $isCli = PHP_SAPI === 'cli';
 if (!$isCli) {
     header('Content-Type: text/plain; charset=utf-8');
-    if (ONBOARD_TOKEN === 'CAMBIA_ESTE_TOKEN_DE_ONBOARDING') {
+    $onboardToken = (string) (getenv('ONBOARD_TOKEN') ?: ($_ENV['ONBOARD_TOKEN'] ?? ''));
+    if ($onboardToken === '') {
         http_response_code(403);
-        exit("Configura ONBOARD_TOKEN en el archivo antes de usarlo.\n");
+        exit("ONBOARD_TOKEN no configurado en el .env del server.\n");
     }
-    if (!hash_equals(ONBOARD_TOKEN, (string) ($_REQUEST['token'] ?? ''))) {
+    if (!hash_equals($onboardToken, (string) ($_REQUEST['token'] ?? ''))) {
         http_response_code(403);
         exit("Token invalido. Use ?token=...\n");
     }
 }
-
-loadEnvFile(__DIR__ . '/../.env');
 
 // --- Parametros: CLI (--flag) o navegador (?param) ---------------------------
 if ($isCli) {

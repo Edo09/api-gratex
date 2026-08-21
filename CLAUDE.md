@@ -23,9 +23,12 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 
 - `DGII_ECF_ENVIRONMENT=ecf` on server → filters certecf test data from all list/stats endpoints
 - NCF sequences are per-ambiente (migration `tools/migration_ncf_ambiente.sql` already run on server)
-- DB: `mtldtmte_new_gratexdb` on server (NOT `mtldtmte_gratexdb` which is old)
-- Server path: `/home1/mtldtmte/public_html/api/`
-- PHP error log: `/home1/mtldtmte/public_html/api/error_log`
+- DB: `smhynzte_new_gratexdb` on server
+- Server path: `/home1/smhynzte/public_html/api/`
+- PHP error log: `/home1/smhynzte/public_html/api/error_log`
+- cPanel account migrated `mtldtmte` → `smhynzte` (2026-08). Anything still naming
+  `mtldtmte_*` is pre-migration. After such a move `tenants.db_*` keeps pointing at the old
+  server (login works via master, business endpoints fail) — fix with `tools/update_tenant_db.php`
 
 ## Key architecture
 
@@ -36,6 +39,10 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 
 ## DO NOT
 
+- Do not let carriage returns (`\r` → `&#13;`) reach e-CF XML text nodes — DGII's validator
+  drops them when re-serializing and rejects with "La firma del XML no es válida" even though
+  the signature is valid. Builders normalize `\r` → `\n` in their `el()` helpers, and
+  `DgiiReceptionService::assertSinCarriageReturn()` blocks any signed XML that slips through.
 - Do not use `<If>` directive in `.htaccess` — server does not support it (breaks all routes)
 - Do not wrap DGII auth token response in `{"status":true,"data":{...}}` — must be flat `{"token":"...","expira":"...","expedido":"..."}`
 - Do not use `end(explode('/api/', $endpoint))` for routing — DGII URLs have two `/api/` segments

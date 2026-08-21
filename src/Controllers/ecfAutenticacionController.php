@@ -165,11 +165,20 @@ function autenticacionGenerarToken(): string
 
 function autenticacionTokenSecret(): string
 {
-    $env = getenv('ECF_AUTH_TOKEN_SECRET');
+    $env = getenv('ECF_AUTH_TOKEN_SECRET') ?: ($_ENV['ECF_AUTH_TOKEN_SECRET'] ?? '');
     if (is_string($env) && $env !== '') {
         return $env;
     }
-    return 'gratex-default-token-secret-change-me';
+    // Sin secreto configurado NO usar un valor conocido/committeado (seria
+    // forjable): un secreto aleatorio por proceso. El token emitido se valida
+    // por lookup en auth_tokens_emitidos, asi que no necesita ser estable entre
+    // requests. Configura ECF_AUTH_TOKEN_SECRET en el .env para fijarlo.
+    static $ephemeral = null;
+    if ($ephemeral === null) {
+        $ephemeral = bin2hex(random_bytes(32));
+        error_log('[ecfAutenticacion] ECF_AUTH_TOKEN_SECRET no configurado; usando secreto efimero aleatorio.');
+    }
+    return $ephemeral;
 }
 
 function autenticacionResponderError(string $mensaje, int $code): void

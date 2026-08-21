@@ -96,7 +96,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
         // PDF preview endpoint
         if ($isPreviewRequest) {
-            $_POST = json_decode(file_get_contents('php://input'));
+            $_POST = InputSanitizer::jsonInput(false);
             // Validate required fields
             if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
                 $respuesta = ['status' => false, 'error' => 'Client ID is required'];
@@ -148,7 +148,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
 
         // Standard Create Cotizacion
-        $_POST = json_decode(file_get_contents('php://input'));
+        $_POST = InputSanitizer::jsonInput(false);
         if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
             $respuesta = ['status' => false, 'error' => 'Client ID is required'];
         } else if (!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0) {
@@ -201,7 +201,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'PUT':
-        $_PUT = json_decode(file_get_contents('php://input'));
+        $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id)) {
             $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
         } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id)) {
@@ -257,7 +257,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'DELETE':
-        $_DELETE = json_decode(file_get_contents('php://input'));
+        $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id)) {
             $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
         } else {

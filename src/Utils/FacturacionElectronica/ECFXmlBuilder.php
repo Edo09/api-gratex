@@ -85,6 +85,15 @@ class ECFXmlBuilder
         }
 
         $ref = is_array($data['informacion_referencia'] ?? null) ? $data['informacion_referencia'] : [];
+        // Sanear espacios: DGII rechaza p.ej. "<NCFModificado> E31…</NCFModificado>".
+        foreach ($ref as $k => $v) {
+            if (is_string($v)) {
+                $ref[$k] = trim($v);
+            }
+        }
+        if (isset($ref['ncf_modificado']) && is_string($ref['ncf_modificado'])) {
+            $ref['ncf_modificado'] = preg_replace('/\s+/', '', $ref['ncf_modificado']);
+        }
         foreach (['ncf_modificado', 'fecha_ncf_modificado', 'codigo_modificacion'] as $key) {
             if (($ref[$key] ?? '') === '') {
                 throw new RuntimeException('InformacionReferencia.' . $key . ' es requerido para e-CF tipo ' . $tipoEcf . '.');
@@ -141,7 +150,7 @@ class ECFXmlBuilder
 
         $idDoc = $doc->createElement('IdDoc');
         $idDoc->appendChild($doc->createElement('TipoeCF', $tipoEcfStr));
-        $idDoc->appendChild($doc->createElement('eNCF', (string) $data['e_ncf']));
+        $idDoc->appendChild($doc->createElement('eNCF', preg_replace('/\s+/', '', (string) $data['e_ncf'])));
 
         if ($cfg['fecha_vence']) {
             $idDoc->appendChild($doc->createElement(
@@ -421,10 +430,23 @@ class ECFXmlBuilder
             $itemEl->appendChild($doc->createElement('NumeroLinea', (string) ($item['numero_linea'] ?? ($i + 1))));
             $itemEl->appendChild($doc->createElement('IndicadorFacturacion', (string) ($item['indicador_facturacion'] ?? 1)));
             $this->appendRetencionIfNeeded($doc, $itemEl, $item, $tipoEcf);
-            $itemEl->appendChild($this->el($doc, 'NombreItem', (string) ($item['nombre_item'] ?? '')));
+            $nombreItem = (string) ($item['nombre_item'] ?? '');
+            $descripcionItem = (string) ($item['descripcion'] ?? '');
+            if (mb_strlen($nombreItem) > 80) {
+                // NombreItem es AlfNum80Type (max 80). Conservar el texto completo en
+                // DescripcionItem (AlfNum1000Type) cuando no haya descripcion propia.
+                if ($descripcionItem === '') {
+                    $descripcionItem = $nombreItem;
+                }
+                $nombreItem = mb_substr($nombreItem, 0, 80);
+            }
+            if (mb_strlen($descripcionItem) > 1000) {
+                $descripcionItem = mb_substr($descripcionItem, 0, 1000);
+            }
+            $itemEl->appendChild($this->el($doc, 'NombreItem', $nombreItem));
             $indicadorBienServicio = $tipoEcf === '47' ? 2 : ($item['indicador_bien_servicio'] ?? 2);
             $itemEl->appendChild($doc->createElement('IndicadorBienoServicio', (string) $indicadorBienServicio));
-            $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $item['descripcion'] ?? '');
+            $this->appendIfNotEmpty($doc, $itemEl, 'DescripcionItem', $descripcionItem);
             $itemEl->appendChild($doc->createElement('CantidadItem', $this->qty($item['cantidad_raw'] ?? $item['cantidad'] ?? 1)));
             $this->appendIfNotEmpty($doc, $itemEl, 'UnidadMedida', $item['unidad_medida'] ?? '');
             $this->appendNumberIfSet($doc, $itemEl, 'CantidadReferencia', $item['cantidad_referencia'] ?? null);
@@ -593,7 +615,8 @@ class ECFXmlBuilder
 
     private function appendIfNotEmpty(DOMDocument $doc, DOMElement $parent, string $name, $value): void
     {
-        $value = (string) $value;
+        // trim: espacios al inicio/fin invalidan campos ante DGII (patrones XSD).
+        $value = trim((string) $value);
         if ($value === '') {
             return;
         }
@@ -623,6 +646,12 @@ class ECFXmlBuilder
 
     private function el(DOMDocument $doc, string $name, string $value): DOMElement
     {
+        // Sin CR (\r): DOM lo serializa como &#13; y el validador de DGII lo
+        // pierde al re-serializar, rompiendo el digest de la firma
+        // ("La firma del XML no es valida"). LF literal si es estable.
+        // El resto de caracteres de control ni siquiera es valido en XML 1.0.
+        $value = str_replace(["\r\n", "\r"], "\n", $value);
+        $value = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F]/', '', $value);
         $node = $doc->createElement($name);
         $node->appendChild($doc->createTextNode($value));
         return $node;

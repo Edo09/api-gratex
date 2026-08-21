@@ -44,6 +44,8 @@ class FacturaPdfGenerator extends FPDF
     // en cm) sobre cada pagina. SOLO para disenar plantillas a la medida via
     // /api/branding/preview; jamas se activa en una factura real.
     private $debugGrid = false;
+    /** @var array<int,array{nombre_item:string,descripcion:string}>|null */
+    private $itemsDesdeXml = null;
 
     /**
      * Datos del emisor desde emisor_config (cacheados: Header() se invoca por
@@ -113,6 +115,7 @@ class FacturaPdfGenerator extends FPDF
     public function setFactura($factura)
     {
         $this->factura = $factura;
+        $this->itemsDesdeXml = null;
     }
 
     /**
@@ -153,6 +156,121 @@ class FacturaPdfGenerator extends FPDF
     private function convertEncoding($string)
     {
         return mb_convert_encoding($string, 'ISO-8859-1', 'UTF-8');
+    }
+
+    private function firstNonBlank(array $values): string
+    {
+        foreach ($values as $value) {
+            if ($value === null) {
+                continue;
+            }
+            $text = (string) $value;
+            if (trim($text) !== '') {
+                return $text;
+            }
+        }
+        return '';
+    }
+
+    private function sameVisibleText(string $a, string $b): bool
+    {
+        $normalize = static function (string $value): string {
+            return trim((string) preg_replace('/\s+/', ' ', $value));
+        };
+        return $normalize($a) === $normalize($b);
+    }
+
+    private function xmlItemsParaPdf(): array
+    {
+        if ($this->itemsDesdeXml !== null) {
+            return $this->itemsDesdeXml;
+        }
+
+        $this->itemsDesdeXml = [];
+        $xml = (string) ($this->factura['xml_firmado'] ?? '');
+        if ($xml === '' || !class_exists('DOMDocument')) {
+            return $this->itemsDesdeXml;
+        }
+
+        $previous = libxml_use_internal_errors(true);
+        $doc = new DOMDocument();
+        $options = defined('LIBXML_NONET') ? LIBXML_NONET : 0;
+        $loaded = $doc->loadXML($xml, $options);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        if (!$loaded) {
+            return $this->itemsDesdeXml;
+        }
+
+        foreach ($doc->getElementsByTagName('Item') as $itemEl) {
+            $this->itemsDesdeXml[] = [
+                'nombre_item' => $this->childText($itemEl, 'NombreItem'),
+                'descripcion' => $this->childText($itemEl, 'DescripcionItem'),
+            ];
+        }
+
+        return $this->itemsDesdeXml;
+    }
+
+    private function childText($parent, string $tag): string
+    {
+        $nodes = $parent->getElementsByTagName($tag);
+        if ($nodes->length === 0) {
+            return '';
+        }
+        return trim((string) $nodes->item(0)->textContent);
+    }
+
+    private function partesItemParaPdf(array $item, int $index): array
+    {
+        $xmlItem = $this->xmlItemsParaPdf()[$index] ?? [];
+        $nombre = $this->firstNonBlank([
+            $item['nombre_item'] ?? null,
+            $xmlItem['nombre_item'] ?? null,
+        ]);
+        $descripcion = $this->firstNonBlank([
+            $item['descripcion'] ?? null,
+            $xmlItem['descripcion'] ?? null,
+        ]);
+        $legacyDescription = $this->firstNonBlank([$item['description'] ?? null]);
+
+        if ($descripcion === '' && $legacyDescription !== '') {
+            if ($nombre === '' || !$this->sameVisibleText($legacyDescription, $nombre)) {
+                $descripcion = $legacyDescription;
+            }
+        }
+        if ($nombre !== '' && $descripcion !== '' && $this->sameVisibleText($nombre, $descripcion)) {
+            $descripcion = '';
+        }
+
+        return [$nombre, $descripcion];
+    }
+
+    private function itemTieneDescripcionPropiaParaPdf(array $item, int $index): bool
+    {
+        [, $descripcion] = $this->partesItemParaPdf($item, $index);
+        return trim($descripcion) !== '';
+    }
+
+    private function itemDescripcionParaPdf(array $item, int $index, string $descripcionExtra = ''): string
+    {
+        [$nombre, $descripcion] = $this->partesItemParaPdf($item, $index);
+        if ($descripcionExtra !== '') {
+            if ($descripcion === '') {
+                $descripcion = $descripcionExtra;
+            } elseif (!$this->sameVisibleText($descripcion, $descripcionExtra)) {
+                $descripcion .= ' ' . $descripcionExtra;
+            }
+        }
+
+        $parts = [];
+        if ($nombre !== '') {
+            $parts[] = $nombre;
+        }
+        if ($descripcion !== '') {
+            $parts[] = $descripcion;
+        }
+        return implode("\n", $parts);
     }
 
     /**
@@ -790,9 +908,8 @@ class FacturaPdfGenerator extends FPDF
         // el Motivo va en su propia fila al final (norma DGII).
         $anyDescripcion = false;
         if (isset($this->factura['items']) && is_array($this->factura['items'])) {
-            foreach ($this->factura['items'] as $it) {
-                $d = $it['description'] ?? $it['nombre_item'] ?? $it['descripcion'] ?? '';
-                if (trim((string) $d) !== '') { $anyDescripcion = true; break; }
+            foreach (array_values($this->factura['items']) as $i => $it) {
+                if ($this->itemTieneDescripcionPropiaParaPdf((array) $it, $i)) { $anyDescripcion = true; break; }
             }
         }
         $motivoPendiente = $razonNota;
@@ -800,15 +917,17 @@ class FacturaPdfGenerator extends FPDF
         $subtotal = 0;
         $itbisLineSum = 0;
         if (isset($this->factura['items']) && is_array($this->factura['items'])) {
-            foreach ($this->factura['items'] as $item) {
+            foreach (array_values($this->factura['items']) as $i => $item) {
+                $item = (array) $item;
                 $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
-                $descripcion = $item['description'] ?? $item['nombre_item'] ?? $item['descripcion'] ?? '';
+                $descripcionExtra = '';
                 // Linea sin descripcion propia (y ningun item la trae): el Motivo
-                // ocupa la columna Descripcion de esta linea (una sola vez).
-                if (trim((string) $descripcion) === '' && !$anyDescripcion && $motivoPendiente !== '') {
-                    $descripcion = $motivoPendiente;
+                // se agrega despues del NombreItem en la misma columna.
+                if (!$anyDescripcion && $motivoPendiente !== '') {
+                    $descripcionExtra = $motivoPendiente;
                     $motivoPendiente = '';
                 }
+                $descripcion = $this->itemDescripcionParaPdf($item, $i, $descripcionExtra);
                 $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
                 // ITBIS de la linea: usa el valor guardado; si no viene o viene en

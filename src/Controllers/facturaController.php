@@ -125,7 +125,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
 function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel): void
 {
-    $input = json_decode(file_get_contents('php://input', true), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respond(false, 'JSON body invalido', 400);
         return;
@@ -204,9 +204,25 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         }
     }
 
+    // DGII rechaza NCF/campos con espacios accidentales (ej. " E310000000018"
+    // en NCFModificado). Sanear e_ncf y toda informacion_referencia antes de
+    // construir XML y de persistir en BD.
+    $eNcf = isset($input['e_ncf']) && is_string($input['e_ncf'])
+        ? preg_replace('/\s+/', '', $input['e_ncf'])
+        : ($input['e_ncf'] ?? null);
+    $infoReferencia = is_array($input['informacion_referencia'] ?? null)
+        ? array_map(
+            fn($v) => is_string($v) ? trim($v) : $v,
+            $input['informacion_referencia']
+        )
+        : null;
+    if (is_array($infoReferencia) && isset($infoReferencia['ncf_modificado']) && is_string($infoReferencia['ncf_modificado'])) {
+        $infoReferencia['ncf_modificado'] = preg_replace('/\s+/', '', $infoReferencia['ncf_modificado']);
+    }
+
     $payload = [
         'tipo_ecf' => $tipoEcf,
-        'e_ncf' => $input['e_ncf'] ?? null,
+        'e_ncf' => $eNcf,
         'fecha_emision' => $input['fecha_emision'] ?? date('d-m-Y'),
         'fecha_vencimiento_secuencia' => $input['fecha_vencimiento_secuencia'] ?? null,
         'tipo_ingresos' => $input['tipo_ingresos'] ?? '01',
@@ -229,7 +245,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'comprador' => $comprador,
         'items' => mapItemsForXml($items),
         'totales' => $totales,
-        'informacion_referencia' => $input['informacion_referencia'] ?? null,
+        'informacion_referencia' => $infoReferencia,
     ];
 
     try {
@@ -515,7 +531,7 @@ function handleReenviar(int $facturaId, facturaModel $facturaModel): void
 
 function handlePreview(clientModel $clientModel): void
 {
-    $input = json_decode(file_get_contents('php://input'), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respond(false, 'JSON body invalido', 400);
         return;

@@ -67,7 +67,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'POST':
-        $_POST = json_decode(file_get_contents('php://input', true));
+        $_POST = InputSanitizer::jsonInput(false);
         $error = validateCategory($_POST);
         if ($error !== null) {
             http_response_code(422);
@@ -91,7 +91,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'PUT':
-        $_PUT = json_decode(file_get_contents('php://input', true));
+        $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => 'Falta el id de la categoria'];
@@ -118,7 +118,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'DELETE':
-        $_DELETE = json_decode(file_get_contents('php://input', true));
+        $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => 'Falta el id de la categoria'];

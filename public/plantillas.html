@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Plantilla PDF del tenant</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); display:flex; justify-content:center; padding:24px; }
+  .wrap { width:100%; max-width:1100px; display:flex; gap:20px; align-items:flex-start; }
+  .col-form { width:100%; max-width:440px; flex-shrink:0; }
+  .col-prev { flex:1; position:sticky; top:24px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:12px 0 4px; }
+  input, select { width:100%; padding:10px 12px; background:#0b1220; color:var(--txt);
+                  border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:12px; }
+  .chk input { width:auto; }
+  .chk label { margin:0; }
+  button { padding:12px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .btns { display:flex; gap:10px; margin-top:18px; }
+  .btns button { flex:1; }
+  .b-load { width:100%; margin-top:16px; background:#334155; color:var(--txt); }
+  .b-prev { background:var(--accent); color:#06283d; }
+  .b-apply { background:#34d399; color:#052e21; }
+  h2 { font-size:14px; margin:18px 0 0; color:var(--accent); border-top:1px solid var(--line); padding-top:14px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px;
+        white-space:pre-wrap; word-break:break-word; font-size:13px; max-height:260px; overflow:auto; margin:10px 0 0; }
+  .result.ok { border-color:var(--ok); }
+  .result.err { border-color:var(--err); }
+  .hidden { display:none; }
+  /* tarjetas de plantilla */
+  .tpls { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:8px; }
+  .tpl { border:1px solid var(--line); border-radius:10px; padding:12px; cursor:pointer;
+         background:#0b1220; font-size:13px; }
+  .tpl:hover { border-color:var(--accent); }
+  .tpl.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+  .tpl.dis { opacity:.45; cursor:not-allowed; }
+  .tpl b { display:block; font-size:14px; margin-bottom:4px; }
+  .tpl small { color:var(--mut); }
+  .tag { display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px;
+         background:#0b1220; border:1px solid var(--line); color:var(--mut); margin-left:6px; }
+  .tag.cur { border-color:var(--ok); color:var(--ok); }
+  /* acento */
+  .accent-row { display:flex; gap:10px; align-items:center; margin-top:4px; }
+  .accent-row input[type=color] { width:52px; height:42px; padding:2px; cursor:pointer; }
+  .accent-row input[type=text] { flex:1; }
+  .accent-row button { background:#334155; color:var(--txt); padding:10px 14px; }
+  /* preview */
+  .col-prev iframe { width:100%; height:82vh; border:1px solid var(--line); border-radius:12px;
+                     background:#0b1220; }
+  .prev-empty { border:1px dashed var(--line); border-radius:12px; height:82vh; display:flex;
+                align-items:center; justify-content:center; color:var(--mut); font-size:14px; }
+  @media (max-width: 900px) {
+    .wrap { flex-direction:column; }
+    .col-form { max-width:none; }
+    .col-prev { position:static; width:100%; }
+    .col-prev iframe, .prev-empty { height:70vh; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="col-form">
+    <h1>Plantilla PDF del tenant</h1>
+    <p class="sub">Branding de la Representación Impresa: plantilla + color de acento.
+      Previsualiza (con rejilla de calibración para diseños a la medida) y aplica.</p>
+
+    <div class="card">
+      <label>Token de operaciones</label>
+      <input type="password" id="token" autocomplete="off">
+      <div class="hint">El valor de PLANTILLAS_TOKEN configurado en plantillas.php</div>
+      <label>Tenant ID</label>
+      <input id="tenantId" inputmode="numeric">
+      <button class="b-load" id="btnLoad">Cargar branding del tenant</button>
+      <pre id="infoOut" class="result hidden"></pre>
+    </div>
+
+    <div class="card hidden" id="editor">
+      <h2 style="border:none;padding:0;margin:0">Plantilla</h2>
+      <div class="tpls" id="tpls">
+        <div class="tpl" data-v="clasico"><b>Clásico</b><small>Logo izquierda, banda negra, sello + firmas. Default.</small></div>
+        <div class="tpl" data-v="moderno"><b>Moderno</b><small>Banda de acento a todo lo ancho, total en acento.</small></div>
+        <div class="tpl" data-v="compacto"><b>Compacto</b><small>Condensado, más líneas por página.</small></div>
+        <div class="tpl" data-v="custom" id="tplCustom"><b>A la medida</b><small id="customHint">custom:tenant&lt;id&gt;</small></div>
+      </div>
+      <div class="hint hidden" id="customMissing">
+        Este tenant aún no tiene plantilla a la medida. Créala en el server:
+        <code>php tools/new_custom_template.php <span id="cmdId"></span></code>
+        (guía: docs/modules/branding-plantillas.md).
+      </div>
+
+      <h2>Color de acento</h2>
+      <div class="accent-row">
+        <input type="color" id="accentPick" value="#1F6E43">
+        <input type="text" id="accentHex" placeholder="#RRGGBB (vacío = sin acento)">
+        <button type="button" id="accentClear">Sin acento</button>
+      </div>
+
+      <div class="chk"><input type="checkbox" id="grid"><label for="grid">Rejilla de calibración (10&nbsp;mm) en el preview</label></div>
+      <div class="chk"><input type="checkbox" id="noe"><label for="noe">Factura NO electrónica (sin timbre)</label></div>
+
+      <div class="btns">
+        <button class="b-prev" id="btnPrev">Previsualizar →</button>
+        <button class="b-apply" id="btnApply">Aplicar al tenant</button>
+      </div>
+      <div class="hint">Previsualizar no guarda nada. Aplicar escribe plantilla + acento en master.tenants.</div>
+      <pre id="out" class="result hidden"></pre>
+    </div>
+
+    <div class="card">
+      <div class="hint">Logo del tenant: se sube con <a href="upload_logo.php" style="color:var(--accent)">upload_logo.php</a>
+        (el preview usa el logo ya guardado).</div>
+    </div>
+  </div>
+
+  <div class="col-prev">
+    <div class="prev-empty" id="prevEmpty">La vista previa del PDF aparecerá aquí</div>
+    <iframe id="prevFrame" class="hidden" title="Vista previa PDF"></iframe>
+  </div>
+
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const token = $('token'), tenantId = $('tenantId');
+const editor = $('editor'), infoOut = $('infoOut'), out = $('out');
+const tplCustom = $('tplCustom'), customHint = $('customHint'), customMissing = $('customMissing');
+const accentPick = $('accentPick'), accentHex = $('accentHex');
+const prevFrame = $('prevFrame'), prevEmpty = $('prevEmpty');
+
+let selected = 'clasico';   // plantilla elegida en las tarjetas
+let hasCustom = false;
+let prevUrl = null;         // objectURL del último preview (se revoca al reemplazar)
+
+function show(el, msg, cls) {
+  el.textContent = msg;
+  el.classList.remove('hidden', 'ok', 'err');
+  if (cls) el.classList.add(cls);
+}
+
+function fd(action, extra) {
+  const d = new FormData();
+  d.append('token', token.value);
+  d.append('tenant_id', tenantId.value.trim());
+  d.append('action', action);
+  for (const [k, v] of Object.entries(extra || {})) d.append(k, v);
+  return d;
+}
+
+// valor de plantilla que se envía: el select de tarjetas ('custom' lo expande el PHP)
+function templateValue() { return selected; }
+
+function selectTpl(v) {
+  if (v === 'custom' && !hasCustom) return;
+  selected = v;
+  document.querySelectorAll('.tpl').forEach(t => t.classList.toggle('sel', t.dataset.v === v));
+}
+document.querySelectorAll('.tpl').forEach(t => t.addEventListener('click', () => selectTpl(t.dataset.v)));
+
+// sincronía color picker <-> hex
+accentPick.addEventListener('input', () => { accentHex.value = accentPick.value.toUpperCase(); });
+accentHex.addEventListener('input', () => {
+  if (/^#[0-9A-Fa-f]{6}$/.test(accentHex.value.trim())) accentPick.value = accentHex.value.trim();
+});
+$('accentClear').addEventListener('click', () => { accentHex.value = ''; });
+
+// ---- Cargar branding --------------------------------------------------------
+$('btnLoad').addEventListener('click', async () => {
+  infoOut.classList.add('hidden'); out.classList.add('hidden');
+  const btn = $('btnLoad'); btn.disabled = true;
+  try {
+    const res = await fetch('plantillas.php', { method: 'POST', body: fd('info', { json: '1' }) });
+    if (!res.ok) { show(infoOut, await res.text(), 'err'); editor.classList.add('hidden'); return; }
+    const { data } = await res.json();
+
+    hasCustom = data.has_custom;
+    customHint.textContent = data.custom_template;
+    $('cmdId').textContent = data.tenant_id;
+    tplCustom.classList.toggle('dis', !hasCustom);
+    customMissing.classList.toggle('hidden', hasCustom);
+
+    // marcar la actual y preseleccionarla
+    document.querySelectorAll('.tpl .tag').forEach(t => t.remove());
+    const currentCard = data.template.startsWith('custom:') ? 'custom' : data.template;
+    const card = document.querySelector('.tpl[data-v="' + currentCard + '"]');
+    if (card) {
+      const tag = document.createElement('span');
+      tag.className = 'tag cur'; tag.textContent = 'actual';
+      card.querySelector('b').appendChild(tag);
+    }
+    selectTpl(hasCustom || currentCard !== 'custom' ? currentCard : 'clasico');
+
+    accentHex.value = data.accent_color || '';
+    if (data.accent_color) accentPick.value = data.accent_color;
+
+    show(infoOut, data.nombre + ' (RNC ' + data.rnc + ')\n'
+      + 'Plantilla: ' + data.template + '  ·  Acento: ' + (data.accent_color || 'ninguno') + '\n'
+      + 'Logo: ' + (data.logo_path || '(global)'), 'ok');
+    editor.classList.remove('hidden');
+  } catch (e) {
+    show(infoOut, 'Error de red: ' + e.message, 'err');
+  } finally { btn.disabled = false; }
+});
+
+// ---- Previsualizar ----------------------------------------------------------
+$('btnPrev').addEventListener('click', async () => {
+  out.classList.add('hidden');
+  const btn = $('btnPrev'); btn.disabled = true; btn.textContent = 'Generando...';
+  try {
+    const extra = { template: templateValue() };
+    const hex = accentHex.value.trim();
+    if (hex) extra.accent_color = hex;
+    if ($('grid').checked) extra.grid = '1';
+    if ($('noe').checked) extra.no_electronica = '1';
+
+    const res = await fetch('plantillas.php', { method: 'POST', body: fd('preview', extra) });
+    if (!res.ok) { show(out, await res.text(), 'err'); return; }
+    const blob = await res.blob();
+    if (prevUrl) URL.revokeObjectURL(prevUrl);
+    prevUrl = URL.createObjectURL(blob);
+    prevFrame.src = prevUrl;
+    prevFrame.classList.remove('hidden');
+    prevEmpty.classList.add('hidden');
+  } catch (e) {
+    show(out, 'Error de red: ' + e.message, 'err');
+  } finally { btn.disabled = false; btn.textContent = 'Previsualizar →'; }
+});
+
+// ---- Aplicar ----------------------------------------------------------------
+$('btnApply').addEventListener('click', async () => {
+  out.classList.add('hidden');
+  const btn = $('btnApply'); btn.disabled = true; btn.textContent = 'Aplicando...';
+  try {
+    const extra = { template: templateValue() };
+    const hex = accentHex.value.trim();
+    if (hex) extra.accent_color = hex;
+
+    const res = await fetch('plantillas.php', { method: 'POST', body: fd('apply', extra) });
+    const text = await res.text();
+    show(out, text, res.ok ? 'ok' : 'err');
+  } catch (e) {
+    show(out, 'Error de red: ' + e.message, 'err');
+  } finally { btn.disabled = false; btn.textContent = 'Aplicar al tenant'; }
+});
+</script>
+</body>
+</html>

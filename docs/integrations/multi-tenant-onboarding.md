@@ -62,12 +62,7 @@ El sistema sabe de quién es cada documento por el RNC del XML. La recepción es
 1. `MULTI_TENANT_ENABLED=true` en el `.env` del server (ya activo en prod).
 2. El certificado digital `.p12` del cliente + su contraseña.
 3. El RNC del cliente (9-11 dígitos).
-4. `ONBOARD_TOKEN` (const en `tools/create_tenant.php`).
-5. Que exista y sea escribible por PHP la carpeta de certificados en la raíz del
-   API — por defecto `certificado_dgii/` (está en `.gitignore`, así que un deploy
-   nuevo no la trae). Si en ese server la carpeta tiene otro nombre, ponlo en el
-   `.env` con `CERT_DIR=<nombre>`; el script guarda el `.p12` ahí y graba esa misma
-   ruta relativa en `tenants.cert_path` (`CertResolver` la resuelve desde la raíz).
+4. `ONBOARD_TOKEN` (en el `.env` del server).
 
 ---
 
@@ -75,7 +70,7 @@ El sistema sabe de quién es cada documento por el RNC del XML. La recepción es
 
 ### 1. Crear la base de datos (cPanel)
 HostGator/cPanel → MySQL Databases:
-- Crear DB (ej. `mtldtmte_cliente2db`).
+- Crear DB (ej. `smhynzte_cliente2db`).
 - Crear usuario MySQL + contraseña.
 - Dar **todos los privilegios** al usuario sobre la DB.
 - El usuario admin del onboarding (`ADMIN_DB_USER`/`MASTER_DB_USER` del `.env`)
@@ -100,8 +95,7 @@ HostGator/cPanel → MySQL Databases:
 2. Aplica **`db/tenant_schema.sql`** (esquema completo consolidado — ya no se
    corren migraciones una por una).
 3. `UPDATE emisor_config` con los datos reales del tenant.
-4. Crea el usuario admin en `master.users` (email único global, username único
-   por tenant).
+4. Crea el usuario admin en `master.users` (email y username únicos globales).
 5. Guarda cert y logo.
 6. **Imprime el resumen** — guardar de aquí:
    - `tenant_id`
@@ -110,8 +104,7 @@ HostGator/cPanel → MySQL Databases:
 ### 4. Login y verificación
 ```
 POST /api/auth/login
-{"emailOrUsername":"<email>","password":"..."}            ← email (único global)
-{"emailOrUsername":"<username>","password":"...","tenant_id":N}  ← username (por tenant)
+{"emailOrUsername":"<email|username>","password":"..."}   ← email o username (ambos únicos globales, sin tenant_id)
 ```
 Devuelve el token de sesión → header `X-API-KEY` para todo el API.
 Smoke: `GET /api/clients` debe devolver solo los clientes de SU DB (los 2 de
@@ -162,6 +155,11 @@ Headers en todo request: `X-API-KEY: <api_key>` + `X-API-SECRET: <api_secret>`.
 Si configuró webhook: los documentos entrantes también se notifican por POST
 firmado HMAC-SHA256 (header de firma con el `webhook_secret`), con reintentos.
 
+> **Contrato completo** (payloads, tres requisitos duros de la emisión, respuestas,
+> códigos de error, formato del webhook): [../api/integracion.md](../api/integracion.md).
+> Lo mínimo que hay que saber: el `e_ncf` lo manda el cliente, el `emisor` va completo en
+> el payload, y su `rnc` debe coincidir con el del tenant autenticado.
+
 ### 3. Flujo entrante (automático)
 Otro emisor le factura → POST a `gratex.net/api/ecf/recepcion` → el sistema
 resuelve el tenant por RNCComprador → guarda en `master.ecf_recibidos`
@@ -182,7 +180,7 @@ Tenant app normal pero apuntando al ambiente de pruebas libres de DGII
 (`testecf`): emite XML real, firmado y enviado, sin tocar certificación ni
 producción. Útil para demos de venta con flujo completo.
 
-1. cPanel: crear DB (ej. `mtldtmte_demodb`) + usuario + privilegios.
+1. cPanel: crear DB (ej. `smhynzte_demodb`) + usuario + privilegios.
 2. `onboard.html` → tipo **App**:
    - nombre "Empresa Demo", **ambiente = `testecf`**.
    - RNC: uno real distinto al de Gratex (`tenants.rnc` es UNIQUE; no puede
@@ -242,6 +240,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 | `POST /api/public/create_tenant.php` | Handler del onboarding. Crea tenant + (app) DB con `tenant_schema.sql` (esquema completo consolidado) + `emisor_config` + usuario admin + logo | `ONBOARD_TOKEN` |
 | `GET/POST /api/public/create_user.php` | Alta de usuarios extra de un tenant (form + handler) | `CREATE_USER_TOKEN` |
 | `GET/POST /api/public/upload_logo.php` | Subir/cambiar el logo de un tenant | `UPLOAD_LOGO_TOKEN` |
+| `GET /api/public/plantillas.html` → `plantillas.php` | Plantilla PDF y color de acento de cualquier tenant: ver branding, previsualizar (con rejilla de calibración) y activar — sin el token del tenant. Ver [../modules/branding-plantillas.md](../modules/branding-plantillas.md) | `PLANTILLAS_TOKEN` |
 
 ### Certificación DGII
 
@@ -258,10 +257,16 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 
 ### Preexistentes
 
-| Ruta | Qué hace |
-|---|---|
-| `GET /api/public/docs.html` | Documentación del API |
-| `GET /api/public/readlog.php` | Lee el `error_log` del server |
+| Ruta | Qué hace | Token |
+|---|---|---|
+| `GET /api/public/docs.html` | Documentación del API | — |
+| `GET /api/public/readlog.php` | Lee el `error_log` del server (`?lines=N&grep=xxx`) | `READLOG_TOKEN` |
+
+### Temporales — borrar del server después de usar
+
+| Ruta | Qué hace | Token |
+|---|---|---|
+| `GET/POST /api/public/encrypt_credential.php` | Cifra una credencial con la `MASTER_ENCRYPTION_KEY` y devuelve el blob hex + el `UPDATE` para phpMyAdmin. Lista la tabla `tenants`. Para hosting compartido sin CLI (el equivalente CLI es `tools/encrypt_credential.php`). **Trae botón de auto-borrado — úsalo al terminar** | `ENCRYPT_TOKEN` |
 
 > **One-time (ya eliminados tras el setup):** `gen_key.php`, `migrate_gratex.php`.
 > Recuperables de git si hace falta re-migrar.
@@ -272,11 +277,14 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 
 | Token | Dónde |
 |---|---|
-| `ONBOARD_TOKEN` | const en `tools/create_tenant.php` |
-| `CREATE_USER_TOKEN` | const en `public/create_user.php` |
-| `UPLOAD_LOGO_TOKEN` | const en `public/upload_logo.php` |
-| `IMPORT_RECIBIDO_TOKEN` | const en `public/import_recibido.php` |
+| `ONBOARD_TOKEN` | `.env` |
+| `CREATE_USER_TOKEN` | `.env` |
+| `IMPORT_RECIBIDO_TOKEN` | `.env` |
+| `PLANTILLAS_TOKEN` | `.env` |
 | `CERT_RUN_TOKEN` | `.env` |
+| `READLOG_TOKEN` | `.env` |
+| `ENCRYPT_TOKEN` | `.env` (cae a `READLOG_TOKEN` si no está) |
+| `UPLOAD_LOGO_TOKEN` | **const en `public/upload_logo.php`** — el único que sigue hardcodeado; el repo trae un placeholder, hay que editarlo en el server |
 | "Token API del tenant" | no es fijo: sale del login del usuario del tenant (`POST /api/auth/login`) |
 
 ---
@@ -285,7 +293,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 
 | Endpoint | Auth | Uso |
 |---|---|---|
-| `POST /api/auth/login` | — | Obtener token del tenant. Email (global) o `username` + `tenant_id` |
+| `POST /api/auth/login` | — | Obtener token del tenant. Email o `username` (ambos únicos globales, sin `tenant_id`) |
 | `POST /api/facturas` | `X-API-KEY` (token) | Emitir e-CF (tenant **app**) |
 | `GET /api/facturas/{id}/pdf` | `X-API-KEY` | Representación Impresa (PDF con QR DGII) |
 | `GET /api/facturas/{id}/xml` | `X-API-KEY` | XML firmado |

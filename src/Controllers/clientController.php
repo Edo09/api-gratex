@@ -65,7 +65,7 @@ switch($_SERVER['REQUEST_METHOD']){
     break;
 
     case 'POST':
-        $_POST= json_decode(file_get_contents('php://input',true));
+        $_POST= InputSanitizer::jsonInput(false);
         if(!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email)) || !filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 100){
             $respuesta= ['status' => false, 'error' => 'Email must not be empty, must be a valid email and no more than 100 characters'];
         }
@@ -110,7 +110,7 @@ switch($_SERVER['REQUEST_METHOD']){
     break;
 
     case 'PUT':
-        $_PUT= json_decode(file_get_contents('php://input',true));
+        $_PUT= InputSanitizer::jsonInput(false);
         if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
             $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
         }
@@ -146,7 +146,7 @@ switch($_SERVER['REQUEST_METHOD']){
     break;
 
     case 'DELETE':
-        $_DELETE= json_decode(file_get_contents('php://input',true));
+        $_DELETE= InputSanitizer::jsonInput(false);
         if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
             $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
         }

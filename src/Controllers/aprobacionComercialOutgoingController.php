@@ -27,7 +27,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
 function handleEnvioACECF(): void
 {
-    $input = json_decode(file_get_contents('php://input', true), true);
+    $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respondACECF(false, 'JSON body invalido', 400);
         return;

@@ -91,7 +91,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Body: { type, numero_desde, numero_hasta, fecha_vencimiento (YYYY-MM-DD),
         //         no_solicitud?, no_autorizacion? }
         if (strpos($uri, '/api/ncf/rangos') !== false) {
-            $body = json_decode(file_get_contents('php://input', true));
+            $body = InputSanitizer::jsonInput(false);
             if (!is_object($body)) {
                 http_response_code(400);
                 echo json_encode(['status' => false, 'error' => 'JSON body invalido']);
@@ -138,7 +138,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'PUT':
         // Update NCF Sequence
         if (strpos($uri, '/api/ncf/sequence') !== false) {
-            $_PUT = json_decode(file_get_contents('php://input', true));
+            $_PUT = InputSanitizer::jsonInput(false);
             if (isset($_PUT->current_value)) {
                 $result = $ncfModel->setSequence('B01', $_PUT->current_value);
                 if ($result) {
@@ -157,7 +157,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
 
         // Update Invoice NCF (Legacy)
-        $_PUT = json_decode(file_get_contents('php://input', true));
+        $_PUT = InputSanitizer::jsonInput(false);
 
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))) {
             $respuesta = [

@@ -102,53 +102,26 @@ class authModel
      * Login user with email or username and password.
      * @param string $email_or_username User email or username
      * @param string $password User password
-     * @param int|string|null $tenant_id Requerido para login por USERNAME en multi-tenant
-     *        (el username es unico por tenant, no global; el email si es global).
+     * @param int|string|null $tenant_id Vestigial: email y username son unicos
+     *        globales, asi que el tenant se resuelve sin el. Se acepta por
+     *        compatibilidad con clientes viejos, pero ya no se usa.
      * @return array ['success', ['token' => token, 'user' => user_data]] or ['error', message]
      */
     public function loginUser($email_or_username, $password, $tenant_id = null)
     {
         try {
+            // email y username son ambos UNIQUE global -> un solo match posible,
+            // sin ambiguedad y sin necesidad de tenant_id (ver migracion master 007).
             if (self::multiTenant()) {
-                if ($tenant_id !== null && $tenant_id !== '') {
-                    // Con tenant_id: email O username, acotado al tenant -> sin ambiguedad.
-                    $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
-                            FROM users
-                            WHERE (email = :eu OR username = :eu) AND tenant_id = :tid LIMIT 1";
-                    $params = [':eu' => $email_or_username, ':tid' => (int) $tenant_id];
-                } else {
-                    // Sin tenant_id: primero por email (unico global). Si no hay
-                    // match, mas abajo se intenta por username SOLO si es
-                    // inequivoco (un unico tenant lo tiene).
-                    $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
-                            FROM users WHERE email = :eu LIMIT 1";
-                    $params = [':eu' => $email_or_username];
-                }
+                $sql = "SELECT id, tenant_id, email, username, name, last_name, password, role
+                        FROM users WHERE email = :eu OR username = :eu LIMIT 1";
             } else {
                 $sql = "SELECT id, email, username, name, last_name, password, role
                         FROM users WHERE email = :eu OR username = :eu LIMIT 1";
-                $params = [':eu' => $email_or_username];
             }
             $stmt = $this->conexion->prepare($sql);
-            $stmt->execute($params);
+            $stmt->execute([':eu' => $email_or_username]);
             $user = $stmt->fetch();
-
-            // Multi-tenant sin tenant_id: el query anterior solo busca por email.
-            // Fallback por username, pero SOLO si es inequivoco (existe en un
-            // unico tenant). Con duplicados entre tenants no se puede saber a
-            // cual entrar, asi que se mantiene el rechazo generico (el cliente
-            // puede reintentar con su correo o enviando tenant_id).
-            if (!$user && self::multiTenant() && ($tenant_id === null || $tenant_id === '')) {
-                $stmt = $this->conexion->prepare(
-                    "SELECT id, tenant_id, email, username, name, last_name, password, role
-                     FROM users WHERE username = :eu LIMIT 2"
-                );
-                $stmt->execute([':eu' => $email_or_username]);
-                $rows = $stmt->fetchAll();
-                if (count($rows) === 1) {
-                    $user = $rows[0];
-                }
-            }
 
             // Verify user exists and password is correct
             if (!$user || !password_verify($password, $user['password'])) {
@@ -261,16 +234,11 @@ class authModel
                 return ['error', 'Email already registered'];
             }
 
-            // Check if username already exists (scoped per-tenant in multi-tenant mode)
-            if (self::multiTenant()) {
-                $sql = "SELECT id FROM users WHERE username = :username AND tenant_id = :tenant_id LIMIT 1";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([':username' => $username, ':tenant_id' => $tenant_id]);
-            } else {
-                $sql = "SELECT id FROM users WHERE username = :username LIMIT 1";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([':username' => $username]);
-            }
+            // Check if username already exists (username is globally unique across
+            // tenants, like email — so login by username needs no tenant_id).
+            $sql = "SELECT id FROM users WHERE username = :username LIMIT 1";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':username' => $username]);
             if ($stmt->fetch()) {
                 return ['error', 'Username already taken'];
             }

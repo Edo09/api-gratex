@@ -12,7 +12,7 @@ $auth = new AuthMiddleware();
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
-        $_POST = json_decode(file_get_contents('php://input', true));
+        $_POST = InputSanitizer::jsonInput(false);
         
         $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
         // Alta de usuarios: usar POST /api/users (admin del tenant, modulo 'users').
@@ -25,8 +25,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
                 $respuesta = ['success' => false, 'error' => 'Password is required'];
             } else {
-                // tenant_id opcional: requerido para login por USERNAME en multi-tenant
-                // (el username es unico por tenant; el email es unico global).
+                // tenant_id ya no es necesario: email y username son ambos unicos
+                // globales, asi que el login resuelve el tenant sin el. Se sigue
+                // aceptando por compatibilidad, pero loginUser lo ignora.
                 $tenantId = $_POST->tenant_id ?? null;
                 $login_result = $authModel->loginUser($_POST->emailOrUsername, $_POST->password, $tenantId);
 

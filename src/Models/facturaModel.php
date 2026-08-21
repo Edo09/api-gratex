@@ -862,7 +862,7 @@ class facturaModel
                         COALESCE(SUM(total), 0) as monto_total,
                         SUM(CASE WHEN estado_dgii = 'ACEPTADO' THEN 1 ELSE 0 END) as aceptados,
                         SUM(CASE WHEN estado_dgii LIKE 'RFCE_%' THEN 1 ELSE 0 END) as rfce,
-                        SUM(CASE WHEN estado_dgii = 'RECHAZADO' THEN 1 ELSE 0 END) as rechazados,
+                        SUM(CASE WHEN estado_dgii LIKE '%RECHAZADO%' THEN 1 ELSE 0 END) as rechazados,
                         SUM(CASE WHEN estado_dgii = 'ENVIADO' THEN 1 ELSE 0 END) as enviados,
                         MAX(fecha_emision_dgii) as ultimo_emitido
                  FROM facturas WHERE tipo_ecf IS NOT NULL {$ambFilter}
@@ -877,12 +877,17 @@ class facturaModel
                  GROUP BY estado_dgii ORDER BY total DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 
+            // Un comprobante rechazado no es ingreso: se excluye de las ventas por
+            // mes. Cubre RECHAZADO, RECHAZADO_ARCHIVADO y RFCE_RECHAZADO; conserva
+            // NULL/PENDIENTE. (El front usa por_mes.monto_total como "ventas" sin
+            // restar nada, a diferencia de resumen.monto_total.)
+            $notRechazado = "AND (estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%')";
             $porMes = $this->conexion->query(
                 "SELECT DATE_FORMAT(fecha_emision_dgii, '%Y-%m') as mes,
                         COUNT(*) as total,
                         COALESCE(SUM(total), 0) as monto_total
                  FROM facturas
-                 WHERE tipo_ecf IS NOT NULL {$ambFilter}
+                 WHERE tipo_ecf IS NOT NULL {$ambFilter} {$notRechazado}
                    AND fecha_emision_dgii >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
                  GROUP BY mes ORDER BY mes DESC"
             )->fetchAll(PDO::FETCH_ASSOC);

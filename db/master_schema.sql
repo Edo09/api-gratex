@@ -55,8 +55,9 @@ CREATE TABLE IF NOT EXISTS tenants (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- users — auth centralizada. email UNIQUE global (login resuelve tenant por
--- email sin pedir codigo de empresa). username UNIQUE por tenant.
+-- users — auth centralizada. email y username UNIQUE global (el login resuelve
+-- el tenant por cualquiera de los dos, sin pedir codigo de empresa / tenant_id).
+-- Consecuencia: un username solo puede existir en UN tenant en todo el sistema.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS users (
   id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -69,7 +70,7 @@ CREATE TABLE IF NOT EXISTS users (
   role       VARCHAR(20)  DEFAULT 'user',
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_users_email (email),
-  UNIQUE KEY uq_users_tenant_username (tenant_id, username),
+  UNIQUE KEY uq_users_username (username),
   KEY idx_users_tenant (tenant_id),
   CONSTRAINT fk_users_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -254,6 +255,25 @@ CREATE TABLE IF NOT EXISTS unidades_medida (
   activo      TINYINT(1)   NOT NULL DEFAULT 1,
   PRIMARY KEY (id),
   UNIQUE KEY uq_codigo (codigo)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- Catalogo DGII de provincias/municipios/distritos (compartido por todos los
+-- tenants). CLAVE: el `codigo` de 6 digitos (PPMMDD) ES lo que va en
+-- <Municipio>/<Provincia> del e-CF (ProvinciaMunicipioType). `descripcion`/`tipo`
+-- son para mostrar/agrupar. Ver samples/e-CF 31 v.1.0.xsd.
+-- Lo consume GET /api/provincias-municipios y la resolucion nombre->codigo en la
+-- emision (provinciaMunicipioModel::resolve). Seed: tools/migration_provincia_municipio.sql
+-- (582 filas).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS dgii_provincia_municipio (
+  codigo           CHAR(6)      NOT NULL,
+  provincia_codigo CHAR(2)      NOT NULL,
+  descripcion      VARCHAR(120) NOT NULL,
+  tipo             ENUM('PROVINCIA','MUNICIPIO','DISTRITO') NOT NULL,
+  PRIMARY KEY (codigo),
+  KEY idx_provincia (provincia_codigo),
+  KEY idx_tipo (tipo)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------

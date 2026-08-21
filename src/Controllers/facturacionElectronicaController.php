@@ -132,7 +132,9 @@ function facturacionElectronicaJsonPayload(): array
     }
 
     $decoded = json_decode($raw, true);
-    $payload = is_array($decoded) ? $decoded : [];
+    // Sanitizar solo el JSON: el XML crudo (signed_xml/semilla) no se toca
+    // porque alterar un byte de un XML ya firmado invalida su firma.
+    $payload = is_array($decoded) ? InputSanitizer::clean($decoded) : [];
 
     return $payload;
 }

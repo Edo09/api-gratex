@@ -16,10 +16,9 @@
  * Multi-tenant: el e-CF se guarda en la DB del tenant cuyo RNC == RNCComprador
  * del XML (debe existir en master.tenants, activo). Token-gated + usar HTTPS.
  *
- * Edita IMPORT_RECIBIDO_TOKEN antes de usar.
+ * El token se lee de IMPORT_RECIBIDO_TOKEN en el .env del server (nunca
+ * hardcodeado en el repo).
  */
-
-const IMPORT_RECIBIDO_TOKEN = 'gratextoken.';
 
 require_once __DIR__ . '/../src/Database.php';
 require_once __DIR__ . '/../src/Models/ecfRecibidoModel.php';
@@ -63,7 +62,12 @@ if (!$isPost) {
 
 header('Content-Type: text/plain; charset=utf-8');
 
-if (!hash_equals(IMPORT_RECIBIDO_TOKEN, (string) ($_POST['token'] ?? ''))) {
+$expectedToken = (string) (getenv('IMPORT_RECIBIDO_TOKEN') ?: ($_ENV['IMPORT_RECIBIDO_TOKEN'] ?? ''));
+if ($expectedToken === '') {
+    http_response_code(403);
+    exit("IMPORT_RECIBIDO_TOKEN no configurado en el .env del server.\n");
+}
+if (!hash_equals($expectedToken, (string) ($_POST['token'] ?? ''))) {
     http_response_code(403);
     exit("Token invalido.\n");
 }

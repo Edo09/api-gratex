@@ -13,6 +13,16 @@
 require_once __DIR__ . '/Database.php';
 Database::loadEnv();
 
+// Sanitizar entrada del cliente (CR y caracteres de control) ANTES de los
+// controllers: dato sucio en DB termina como &#13; en el XML e-CF y DGII lo
+// rechaza con "La firma del XML no es valida" (ver InputSanitizer).
+// Los bodies JSON se limpian en InputSanitizer::jsonInput() en cada controller;
+// el XML crudo de recepcion DGII NO se toca (IncomingXmlExtractor lee el body).
+require_once __DIR__ . '/Utils/InputSanitizer.php';
+$_GET = InputSanitizer::clean($_GET);
+$_POST = InputSanitizer::clean($_POST);
+$_REQUEST = InputSanitizer::clean($_REQUEST);
+
 // Handle CORS at the router level FIRST, before any other logic
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
@@ -119,6 +129,11 @@ switch ($route) {
     case 'unidades-medida':
         // Catálogo DGII de unidades de medida (solo lectura) - token required
         require_once 'src/Controllers/unidadMedidaController.php';
+        break;
+
+    case 'provincias-municipios':
+        // Catálogo DGII de provincias/municipios/distritos (solo lectura) - token required
+        require_once 'src/Controllers/provinciaMunicipioController.php';
         break;
 
     case 'cotizaciones':
