@@ -108,13 +108,19 @@ class CotizacionPdfGenerator extends FPDF
             $this->emisorConfigLoaded = true;
         }
         $emisor = $this->emisorConfig;
+        // Los valores de Gratex solo aplican cuando NO hay tenant resuelto (preview
+        // sin BD / single-tenant). Con un tenant resuelto se deja vacio: imprimir el
+        // telefono, el correo o el RNC de Gratex en la factura de otro contribuyente
+        // es peor que no imprimir nada, y DGII valida la representacion impresa.
+        $sinTenant = !class_exists('TenantResolver') || TenantResolver::current() === null;
+        $fb = fn(string $valor) => $sinTenant ? $valor : '';
         return [
             'razon_social' => $emisor['nombre_comercial'] ?? $emisor['razon_social'] ?? '',
-            'direccion'    => $emisor['direccion'] ?? 'Calle José Nicolás Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.',
-            'telefono'     => $emisor['telefono'] ?? '809-681-5141',
-            'correo'       => $emisor['correo'] ?? 'info@gratex.net',
-            'rnc'          => $emisor['rnc'] ?? '131256432',
-            'website'      => $emisor['website'] ?? 'www.gratex.net',
+            'direccion'    => $emisor['direccion'] ?? $fb('Calle Jose Nicolas Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.'),
+            'telefono'     => $emisor['telefono'] ?? $fb('809-681-5141'),
+            'correo'       => $emisor['correo'] ?? $fb('info@gratex.net'),
+            'rnc'          => $emisor['rnc'] ?? $fb('131256432'),
+            'website'      => $emisor['website'] ?? $fb('www.gratex.net'),
         ];
     }
 

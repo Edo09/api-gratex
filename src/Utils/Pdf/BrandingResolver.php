@@ -87,6 +87,13 @@ class BrandingResolver
                 }
             }
         }
+        // logo2020.png es el logo de Gratex y viaja en el repo, asi que estaba
+        // saliendo en la representacion impresa de CUALQUIER tenant sin logo propio.
+        // Solo aplica cuando no hay tenant resuelto (preview / single-tenant): la
+        // marca de otra empresa en una factura fiscal es peor que no poner logo.
+        if (class_exists('TenantResolver') && TenantResolver::current() !== null) {
+            return null;
+        }
         $global = $root . '/logo2020.png';
         return is_file($global) ? $global : null;
     }
