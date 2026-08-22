@@ -88,7 +88,7 @@ HostGator/cPanel → MySQL Databases:
 | db-name, db-user, db-pass, db-host, db-port | Los del paso 1 (host default `localhost`) |
 | cert (.p12) + cert-pass | Se guarda en `<CERT_DIR>/<rnc>/cert.p12` (default `certificado_dgii/`), pass cifrada AES-256-GCM |
 | logo | Opcional; va a `logos/<tenant_id>.<ext>` + `tenants.logo_path` (sale en la Representación Impresa) |
-| admin-email, admin-pass, admin-name, admin-username | Usuario admin inicial (los 4 o ninguno) |
+| admin-email, admin-pass, admin-name, admin-username | Usuario admin inicial (los 4 o ninguno). **email y username son UNIQUE globales** — no se pueden repetir con los de otro tenant |
 
 ### 3. Qué hace el handler (`create_tenant.php`)
 1. Inserta el tenant en `master.tenants` (credenciales DB cifradas).

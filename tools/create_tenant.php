@@ -140,6 +140,36 @@ if ($createAdmin) {
 
 echo "== Onboarding tenant ({$tipo}): {$nombre} (RNC {$rnc}) ==\n";
 
+// =============================================================================
+// Pre-flight: choques contra los UNIQUE del master ANTES de crear nada. Sin
+// esto el fallo salta a mitad de camino (schema ya aplicado, tenant ya
+// insertado) y deja el onboarding a medias. Mismos chequeos que
+// public/create_user.php.
+// =============================================================================
+$masterPdo = MasterDatabase::getInstance()->getConnection();
+
+$chk = $masterPdo->prepare('SELECT id, nombre FROM tenants WHERE rnc = :rnc LIMIT 1');
+$chk->execute([':rnc' => $rnc]);
+if ($dup = $chk->fetch()) {
+    fail("Ya existe un tenant con RNC {$rnc}: #{$dup['id']} '{$dup['nombre']}' (tenants.rnc es UNIQUE)."
+        . PHP_EOL . "   Para agregarle usuarios usa public/create_user.php; para rehacerlo, borra ese tenant primero.");
+}
+
+if ($createAdmin) {
+    $chk = $masterPdo->prepare('SELECT id, tenant_id FROM users WHERE email = :e LIMIT 1');
+    $chk->execute([':e' => $adminEmail]);
+    if ($dup = $chk->fetch()) {
+        fail("El email '{$adminEmail}' ya esta registrado (users.email es UNIQUE global):"
+            . " usuario #{$dup['id']} del tenant {$dup['tenant_id']}.");
+    }
+    $chk = $masterPdo->prepare('SELECT id, tenant_id FROM users WHERE username = :u LIMIT 1');
+    $chk->execute([':u' => $adminUser]);
+    if ($dup = $chk->fetch()) {
+        fail("El username '{$adminUser}' ya esta en uso (users.username es UNIQUE global):"
+            . " usuario #{$dup['id']} del tenant {$dup['tenant_id']}.");
+    }
+}
+
 // id del cliente de prueba (RNC 131880681) para el wizard de cert; se llena en app.
 $certClientId = null;
 
@@ -308,10 +338,19 @@ if ($createAdmin) {
         'INSERT INTO users (tenant_id, name, last_name, email, username, password, role)
          VALUES (:tenant_id, :name, :last_name, :email, :username, :password, :role)'
     );
-    $uins->execute([
-        ':tenant_id' => $tenantId, ':name' => $firstName, ':last_name' => $lastName,
-        ':email' => $adminEmail, ':username' => $adminUser, ':password' => $pwdHash, ':role' => 'admin',
-    ]);
+    try {
+        $uins->execute([
+            ':tenant_id' => $tenantId, ':name' => $firstName, ':last_name' => $lastName,
+            ':email' => $adminEmail, ':username' => $adminUser, ':password' => $pwdHash, ':role' => 'admin',
+        ]);
+    } catch (PDOException $e) {
+        // El tenant ya existe a estas alturas: no lo tumbamos por el usuario.
+        echo PHP_EOL . "!! El tenant #{$tenantId} SI quedo creado, pero el usuario admin NO." . PHP_EOL;
+        echo "   Motivo: " . $e->getMessage() . PHP_EOL;
+        echo "   Crealo aparte en public/create_user.php con tenant_id={$tenantId}" . PHP_EOL;
+        echo "   (email y username deben ser unicos globales)." . PHP_EOL;
+        $createAdmin = false; // que el resumen no mienta
+    }
 }
 
 // =============================================================================
