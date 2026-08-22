@@ -100,7 +100,9 @@ class ECFXmlBuilder
             }
         }
 
-        if (($ref['razon_modificacion'] ?? '') === '') {
+        // En modo estricto (set de pruebas) no se inventa la razon: el XSD la
+        // tiene minOccurs=0 y appendIfNotEmpty la omite sola.
+        if (empty($data['strict_input']) && ($ref['razon_modificacion'] ?? '') === '') {
             $ref['razon_modificacion'] = $tipoEcf === '34'
                 ? 'Nota de credito por ajuste de monto'
                 : 'Nota de debito por ajuste de monto';
@@ -167,14 +169,16 @@ class ECFXmlBuilder
         }
 
         if ($cfg['ind_monto_gravado']) {
-            $indicadorMontoGravado = $data['indicador_monto_gravado'] ?? '0';
-            if ($indicadorMontoGravado === null || $indicadorMontoGravado === '') {
-                $indicadorMontoGravado = '0';
+            $indicadorMontoGravado = $data['indicador_monto_gravado'] ?? null;
+            $vacio = $indicadorMontoGravado === null || $indicadorMontoGravado === '';
+            // XSD: minOccurs=0. En modo estricto se omite si el set lo trae vacio;
+            // fuera de modo estricto se conserva el default historico '0'.
+            if (!$vacio || empty($data['strict_input'])) {
+                $idDoc->appendChild($doc->createElement(
+                    'IndicadorMontoGravado',
+                    (string) ($vacio ? '0' : $indicadorMontoGravado)
+                ));
             }
-            $idDoc->appendChild($doc->createElement(
-                'IndicadorMontoGravado',
-                (string) $indicadorMontoGravado
-            ));
         }
 
         if ($cfg['tipo_ingresos']) {
@@ -402,6 +406,9 @@ class ECFXmlBuilder
         $this->appendImpuestosAdicionales($doc, $node, $totales['impuestos_adicionales'] ?? []);
 
         $node->appendChild($doc->createElement('MontoTotal', $this->money($totales['monto_total'] ?? 0)));
+
+        // MontoNoFacturable va justo despues de MontoTotal (XSD, minOccurs=0).
+        $this->appendMoneyIfSet($doc, $node, 'MontoNoFacturable', $totales['monto_no_facturable'] ?? null);
 
         $allowedExtras = self::TOTALES_EXTRA_CONFIG[$tipoEcf] ?? [];
         $extraMap = [

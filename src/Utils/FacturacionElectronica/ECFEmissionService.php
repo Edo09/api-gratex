@@ -164,6 +164,9 @@ class ECFEmissionService
             'total_paginas' => $payload['total_paginas'] ?? null,
             'indicador_monto_gravado' => $payload['indicador_monto_gravado'] ?? null,
             'indicador_nota_credito' => $payload['indicador_nota_credito'] ?? null,
+            // Modo set de pruebas DGII: el builder no debe rellenar campos que
+            // el set entrega vacios (los compara uno a uno y rechaza el set entero).
+            'strict_input' => $strictInput,
             'emisor' => $emisorMerged,
             'comprador' => $payload['comprador'] ?? [],
             'items' => $payload['items'] ?? [],

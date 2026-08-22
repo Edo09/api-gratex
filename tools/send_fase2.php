@@ -413,6 +413,7 @@ function extractTotales(array $row): array
         'TotalITBIS2' => 'total_itbis2',
         'TotalITBIS3' => 'total_itbis3',
         'MontoTotal' => 'monto_total',
+        'MontoNoFacturable' => 'monto_no_facturable',
         'MontoPeriodo' => 'monto_periodo',
         'SaldoAnterior' => 'saldo_anterior',
         'MontoAvancePago' => 'monto_avance_pago',

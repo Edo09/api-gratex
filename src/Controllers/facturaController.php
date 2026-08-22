@@ -243,7 +243,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'rfce_emisor_override' => is_array($input['rfce_emisor'] ?? null) ? $input['rfce_emisor'] : null,
         'rfce_comprador_override' => is_array($input['rfce_comprador'] ?? null) ? $input['rfce_comprador'] : null,
         'comprador' => $comprador,
-        'items' => mapItemsForXml($items),
+        'items' => mapItemsForXml($items, $strictInput),
         'totales' => $totales,
         'informacion_referencia' => $infoReferencia,
     ];
@@ -785,7 +785,7 @@ function assertUnidadesMedida(array $items): void
     }
 }
 
-function mapItemsForXml(array $items): array
+function mapItemsForXml(array $items, bool $strict = false): array
 {
     $mapped = [];
     foreach ($items as $i => $raw) {
@@ -808,10 +808,12 @@ function mapItemsForXml(array $items): array
             'descripcion' => (string) ($raw['descripcion'] ?? $raw['description'] ?? ''),
             'cantidad' => $cantidad,
             'cantidad_raw' => $raw['cantidad_raw'] ?? null,
-            // Código DGII de unidad de medida (id del catálogo). Default 43 (Unidad)
-            // para que <UnidadMedida> nunca salga vacío.
+            // Codigo DGII de unidad de medida (id del catalogo). Default 43 (Unidad)
+            // para que <UnidadMedida> nunca salga vacio. En modo estricto (set de
+            // pruebas DGII) NO se rellena: si el set trae la celda vacia el elemento
+            // debe omitirse (XSD minOccurs=0) o DGII rechaza el set completo.
             'unidad_medida' => isset($raw['unidad_medida']) && (string) $raw['unidad_medida'] !== ''
-                ? (string) $raw['unidad_medida'] : '43',
+                ? (string) $raw['unidad_medida'] : ($strict ? null : '43'),
             'cantidad_referencia' => $raw['cantidad_referencia'] ?? null,
             'unidad_referencia' => $raw['unidad_referencia'] ?? null,
             'subcantidades' => is_array($raw['subcantidades'] ?? null) ? $raw['subcantidades'] : [],
