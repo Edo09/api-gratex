@@ -14,7 +14,20 @@ class DgiiXmlSigner
         $this->ensureExtensions();
 
         if (!openssl_pkcs12_read($certificateContent, $certificates, $password)) {
-            throw new RuntimeException("Unable to read certificate. Verify the password or OpenSSL legacy configuration.");
+            // El motivo real lo dice OpenSSL, no nosotros: "mac verify failure"
+            // = password incorrecta o vacia; "unsupported" (error:0308010C) = .p12
+            // cifrado con algoritmos legacy que OpenSSL 3 no habilita por default.
+            // Sin esto el mensaje es ambiguo y no se puede diagnosticar en prod.
+            $errores = [];
+            while (($e = openssl_error_string()) !== false) {
+                $errores[] = $e;
+            }
+            throw new RuntimeException(
+                "Unable to read certificate. Verify the password or OpenSSL legacy configuration."
+                . ($errores ? " OpenSSL: " . implode(" | ", $errores) : "")
+                . " [cert: " . strlen($certificateContent) . " bytes, password: "
+                . ($password === "" ? "VACIA" : strlen($password) . " chars") . "]"
+            );
         }
 
         if (empty($certificates['cert']) || empty($certificates['pkey'])) {
