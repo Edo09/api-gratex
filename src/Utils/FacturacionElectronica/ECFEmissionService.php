@@ -46,6 +46,30 @@ class ECFEmissionService
      * Resuelve municipio/provincia de emisor y comprador al código DGII de 6
      * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
      */
+    /**
+     * true si el e-NCF ya lo ocupa una factura que NO se puede re-emitir.
+     * Mismos estados reintentables que facturaModel::saveFacturaConECF, para que
+     * los dos chequeos no puedan discrepar. Fail-open: ante un error de consulta
+     * devuelve false y deja que el chequeo del modelo siga siendo la red.
+     */
+    private function eNcfYaUsado(string $eNcf): bool
+    {
+        try {
+            $stmt = Database::getInstance()->getConnection()
+                ->prepare('SELECT estado_dgii FROM facturas WHERE e_ncf = :e LIMIT 1');
+            $stmt->execute([':e' => $eNcf]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return false;
+            }
+            $reintentables = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
+            return !in_array((string) ($row['estado_dgii'] ?? ''), $reintentables, true);
+        } catch (Throwable $e) {
+            error_log('[ECF] eNcfYaUsado fallo: ' . $e->getMessage());
+            return false;
+        }
+    }
+
     private function resolveUbicaciones(array &$xmlData): void
     {
         $cat = new provinciaMunicipioModel();
@@ -105,12 +129,31 @@ class ECFEmissionService
             }
             $eNcf = (string) $eNcfOverride;
         } else {
-            $disp = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
-            if ($disp === null) {
+            // El contador puede quedar DETRAS de lo realmente usado: la fase 2 de
+            // certificacion emite con los e-NCF del set, que vienen dados y no
+            // consumen secuencia. Si dispensamos un numero ya ocupado, lo mandamos
+            // a DGII (duplicado) y recien falla al guardar; peor aun, al revertirse
+            // la secuencia el siguiente documento repite el mismo numero y se cicla.
+            // Por eso se salta hacia adelante ANTES de emitir.
+            $intentos = 0;
+            do {
+                $disp = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
+                if ($disp === null) {
+                    throw new RuntimeException(
+                        'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
+                        . ': el rango autorizado esta agotado o vencido. Solicite un nuevo rango a la DGII '
+                        . 'y registrelo en la app (POST /api/ncf/rangos).'
+                    );
+                }
+                $ocupado = $this->eNcfYaUsado((string) $disp['e_ncf']);
+                if ($ocupado) {
+                    error_log('[ECF] e-NCF ' . $disp['e_ncf'] . ' ya usado localmente; se salta al siguiente.');
+                }
+            } while ($ocupado && ++$intentos < 100);
+            if ($ocupado) {
                 throw new RuntimeException(
-                    'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
-                    . ': el rango autorizado esta agotado o vencido. Solicite un nuevo rango a la DGII '
-                    . 'y registrelo en la app (POST /api/ncf/rangos).'
+                    'No se encontro un e-NCF libre para E' . $tipoEcf . ' tras 100 intentos: la secuencia'
+                    . ' esta muy por detras de las facturas ya emitidas. Sincroniza ncf_sequences.current_value.'
                 );
             }
             $eNcf = $disp['e_ncf'];
