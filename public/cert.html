@@ -91,7 +91,7 @@ const STEPS = [
      <p>Emite los 25 casos del set de pruebas que entrega DGII (xlsx) vía <code>POST /api/facturas</code>.</p>
      <div class="panel">
        <label>Archivo del set de pruebas (.xlsx)</label>
-       <input type="file" id="xlsx2" accept=".xlsx">
+       <input type="file" id="xlsx2" accept=".xlsx,.xlsm">
        <label>Filtro (opcional, ej. E31,E32)</label>
        <input type="text" id="filter2" placeholder="vacío = todos">
        <button class="act" data-run="2" data-xlsx="xlsx2" data-filter="filter2">Correr Fase 2</button>
@@ -104,7 +104,7 @@ const STEPS = [
      <p>Envía las Aprobaciones Comerciales (ACECF) de la hoja <code>ACEECF_Generadas</code> del xlsx → <code>POST /api/aprobaciones-comerciales</code>.</p>
      <div class="panel">
        <label>Archivo del set de pruebas (.xlsx)</label>
-       <input type="file" id="xlsx3" accept=".xlsx">
+       <input type="file" id="xlsx3" accept=".xlsx,.xlsm">
        <button class="act" data-run="3" data-xlsx="xlsx3">Correr Fase 3</button>
        <button class="act ghost" data-run="3" data-xlsx="xlsx3" data-dry="1">Dry-run</button>
        <pre class="runout" style="display:none"></pre>
@@ -259,6 +259,7 @@ function wireRunner(btn) {
     const fd = new FormData();
     fd.append('token', certToken);
     fd.append('fase', fase);
+    fd.append('api', API); // el deploy actual, no el default del runner
     fd.append('api_key', apiKey);
     if (clientIdEl.value.trim()) fd.append('client_id', clientIdEl.value.trim());
     if (userIdEl.value.trim()) fd.append('user_id', userIdEl.value.trim());

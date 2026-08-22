@@ -49,6 +49,10 @@ function main(array $argv): int
     $userId = (int) ($opts['user-id'] ?? DEFAULT_USER_ID);
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
     $dryRun = isset($opts['dry-run']);
+    // Override explicito del ambiente DGII (ver send_fase2.php): sin esto el
+    // ambiente sale de tenants.ambiente y un tenant en 'ecf' emitiria la
+    // simulacion como facturas fiscales REALES.
+    $ambiente = isset($opts['ambiente']) ? trim((string) $opts['ambiente']) : null;
 
     if (!$dryRun && $apiKey === '') {
         fwrite(STDERR, "ERROR: --api-key requerido.\n");
@@ -149,6 +153,9 @@ function main(array $argv): int
         $payload = withE41Retencion($payload);
         $payload = withE47Retencion($payload);
         $payload = withDefaultItbisRates($payload);
+        if ($ambiente !== null && $ambiente !== '') {
+            $payload['ambiente'] = $ambiente;
+        }
 
         if ($dryRun) {
             fwrite(STDOUT, "    DRY-RUN " . json_encode($payload, JSON_UNESCAPED_UNICODE) . "\n");

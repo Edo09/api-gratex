@@ -51,7 +51,12 @@ if (!in_array($fase, ['2', '3', '4'], true)) {
     exit("fase invalida (use 2, 3 o 4).\n");
 }
 
-$apiBase = (string) ($_REQUEST['api'] ?? 'https://gratex.net/api');
+// Default: ESTE deploy. Hardcodear gratex.net hacia que cualquier otro server
+// corriera el set de pruebas contra el API de Gratex. SERVER_NAME viene del
+// vhost, no del header Host del request.
+$defaultScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+$defaultHost   = $_SERVER['SERVER_NAME'] ?? ($_SERVER['HTTP_HOST'] ?? 'gratex.net');
+$apiBase = (string) ($_REQUEST['api'] ?? ($defaultScheme . '://' . $defaultHost . '/api'));
 $apiKey  = (string) ($_REQUEST['api_key'] ?? '');
 if ($apiKey === '') {
     http_response_code(422);
@@ -81,6 +86,15 @@ if ($fase === '2' || $fase === '3') {
 
 $argv[] = '--api=' . $apiBase;
 $argv[] = '--api-key=' . $apiKey;
+
+// Toda corrida del wizard es una corrida de CERTIFICACION: forzamos certecf
+// salvo override explicito. Evita que un tenant ya en 'ecf' emita el set de
+// pruebas contra produccion. Fase 3 (aprobaciones) no lo usa todavia.
+if (in_array($fase, ['2', '4'], true)) {
+    $ambiente = (string) ($_REQUEST['ambiente'] ?? 'certecf');
+    $argv[] = '--ambiente=' . $ambiente;
+    echo "== ambiente: {$ambiente} ==" . PHP_EOL;
+}
 foreach (['client-id' => 'client_id', 'user-id' => 'user_id'] as $flag => $key) {
     if (isset($_REQUEST[$key]) && $_REQUEST[$key] !== '') {
         $argv[] = '--' . $flag . '=' . $_REQUEST[$key];

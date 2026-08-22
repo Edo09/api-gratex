@@ -57,6 +57,10 @@ function main(array $argv): int
     $caseFilter = $opts['case'] ?? '';
     $exclude = isset($opts['exclude']) ? array_map('trim', explode(',', $opts['exclude'])) : [];
     $dryRun = isset($opts['dry-run']);
+    // Override explicito del ambiente DGII. Sin esto el ambiente sale de
+    // tenants.ambiente, y un tenant ya promovido a 'ecf' emitiria el set de
+    // pruebas como facturas fiscales REALES en produccion.
+    $ambiente = isset($opts['ambiente']) ? trim((string) $opts['ambiente']) : null;
 
     if (!$dryRun && $apiKey === '') {
         fwrite(STDERR, "ERROR: --api-key es requerido (o usa --dry-run para inspeccionar payloads).\n");
@@ -104,6 +108,9 @@ function main(array $argv): int
         try {
             $rfceRow = $rfceMap[$row['ENCF'] ?? ''] ?? null;
             $payload = mapRowToPayload($row, $clientId, $userId, $rfceRow);
+            if ($ambiente !== null && $ambiente !== '') {
+                $payload['ambiente'] = $ambiente;
+            }
         } catch (Throwable $e) {
             fwrite(STDOUT, "    ! Error mapeando payload: " . $e->getMessage() . "\n");
             $results[] = [
