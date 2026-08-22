@@ -11,7 +11,7 @@
  */
 
 // === Token (editar antes de usar) ==========================================
-const UPLOAD_LOGO_TOKEN = 'CAMBIA_ESTE_TOKEN_LOGO';
+const UPLOAD_LOGO_TOKEN = 'gratextoken.';
 // ===========================================================================
 
 require_once __DIR__ . '/../src/MasterDatabase.php';
