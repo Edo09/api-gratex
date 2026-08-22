@@ -95,6 +95,14 @@ if (in_array($fase, ['2', '4'], true)) {
     $argv[] = '--ambiente=' . $ambiente;
     echo "== ambiente: {$ambiente} ==" . PHP_EOL;
 }
+// client_id/user_id vacios hacen que el runner caiga a SUS defaults, que son los
+// de Gratex (3511/2 en fase 4, 1 en fase 2). En otro tenant eso da 'Cliente no
+// encontrado' en cada caso. Mejor fallar aqui con un mensaje claro.
+if (in_array($fase, ['2', '4'], true) && (string) ($_REQUEST['client_id'] ?? '') === '') {
+    http_response_code(422);
+    exit("client_id requerido: es el id del comprador de prueba (RNC 131880681) en la DB de ESTE tenant." . PHP_EOL);
+}
+
 foreach (['client-id' => 'client_id', 'user-id' => 'user_id'] as $flag => $key) {
     if (isset($_REQUEST[$key]) && $_REQUEST[$key] !== '') {
         $argv[] = '--' . $flag . '=' . $_REQUEST[$key];
