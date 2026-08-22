@@ -53,7 +53,12 @@ function main(array $argv): int
     $clientId = (int) ($opts['client-id'] ?? DEFAULT_CLIENT_ID);
     $userId = isset($opts['user-id']) ? (int) $opts['user-id'] : null;
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
-    $filter = isset($opts['filter']) ? array_map('trim', explode(',', $opts['filter'])) : [];
+    // El xlsx trae TipoeCF como '32'. Aceptamos tambien 'E32' porque es como se
+    // nombra el tipo en todos lados; sin esto el filtro no matchea y la corrida
+    // sale con 0 casos sin decir por que.
+    $filter = isset($opts['filter'])
+        ? array_map(fn($t) => ltrim(trim($t), 'eE'), explode(',', $opts['filter']))
+        : [];
     $caseFilter = $opts['case'] ?? '';
     $exclude = isset($opts['exclude']) ? array_map('trim', explode(',', $opts['exclude'])) : [];
     $dryRun = isset($opts['dry-run']);
