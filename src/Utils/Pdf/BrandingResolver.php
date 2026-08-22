@@ -58,6 +58,29 @@ class BrandingResolver
     }
 
     /**
+     * Ruta del sello a estampar en el pie (plantilla clasica).
+     * Prioridad: convencion sellos/<tenant_id>.png|jpg|jpeg -> sello global
+     * (sello.png) SOLO si no hay tenant resuelto. Igual que con el logo, el
+     * sello de una empresa no puede aparecer en la factura de otra.
+     */
+    public static function selloPath(): ?string
+    {
+        $root = self::projectRoot();
+        $tenant = class_exists('TenantResolver') ? TenantResolver::current() : null;
+        if ($tenant !== null) {
+            foreach (['png', 'jpg', 'jpeg'] as $ext) {
+                $p = $root . '/sellos/' . (int) ($tenant['id'] ?? 0) . '.' . $ext;
+                if (is_file($p)) {
+                    return $p;
+                }
+            }
+            return null;
+        }
+        $global = $root . '/sello.png';
+        return is_file($global) ? $global : null;
+    }
+
+    /**
      * Ruta del logo a usar en la Representacion Impresa.
      * Prioridad: ruta explicita en DB (tenants.logo_path) → convencion
      * logos/<tenant_id>.png|jpg|jpeg → logo global (logo2020.png). Null si

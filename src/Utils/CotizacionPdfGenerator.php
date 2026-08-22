@@ -390,9 +390,12 @@ class CotizacionPdfGenerator extends FPDF
         $this->Line(145, 268, 200, 268);
         $this->SetY(-10);
         $this->SetX(-40);
-        // Sello image (adjust path as needed)
-        $selloPath = __DIR__ . '/../../sello.png';
-        if (file_exists($selloPath)) {
+        // Mismo criterio que la factura: el sello global es el de Gratex, asi que
+        // con un tenant resuelto solo se usa el suyo (sellos/<id>.png) o ninguno.
+        $selloPath = class_exists('BrandingResolver')
+            ? BrandingResolver::selloPath()
+            : (is_file(__DIR__ . '/../../sello.png') ? __DIR__ . '/../../sello.png' : null);
+        if ($selloPath !== null) {
             $this->Image($selloPath, 145, 252, -400);
         }
         $this->SetFont($firmaFont, '', 9);

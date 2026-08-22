@@ -76,6 +76,10 @@ abstract class FacturaTemplate
     public function style(): array
     {
         return [
+            // Familia core de FPDF para TODO el documento (Arial|Times|Courier).
+            // Permite que una plantilla a la medida calque la tipografia del
+            // formato del cliente, no solo los colores.
+            'font_family'     => 'Arial',
             'body_font_size'  => 10,
             'line_height'     => 4,
             'title_font_size' => 11,

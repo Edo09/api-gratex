@@ -71,6 +71,16 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
+     * Familia core de FPDF que pide la plantilla activa (Arial por defecto).
+     * Se valida contra las tres core: un valor raro dejaria el PDF sin fuente.
+     */
+    private function fontFamily(): string
+    {
+        $fam = (string) ($this->template()->style()['font_family'] ?? 'Arial');
+        return in_array($fam, ['Arial', 'Times', 'Courier'], true) ? $fam : 'Arial';
+    }
+
+    /**
      * Plantilla visual activa. Lazy: sin setTemplate() previo usa el branding
      * del tenant resuelto (tenants.pdf_template + pdf_accent_color).
      */
@@ -444,7 +454,7 @@ class FacturaPdfGenerator extends FPDF
 
         $this->SetTextColor(0, 0, 0);
         $this->SetY(-8);
-        $this->SetFont('Arial', '', 7);
+        $this->SetFont($this->fontFamily(), '', 7);
         $this->Cell(0, 4, $this->convertEncoding('Página ' . $this->PageNo() . ' de {nb}'), 0, 0, 'C');
 
         // Rejilla de calibracion al final (encima de todo) si esta activada.
@@ -474,7 +484,7 @@ class FacturaPdfGenerator extends FPDF
             $this->Line(0, $y, $w, $y);
         }
         // Etiquetas en cm (cada 10 mm) en el borde superior e izquierdo.
-        $this->SetFont('Arial', '', 5);
+        $this->SetFont($this->fontFamily(), '', 5);
         $this->SetTextColor(120, 130, 170);
         for ($x = 10; $x < $w; $x += 10) {
             $this->Text($x + 0.4, 3, (string) ((int) ($x / 10)));
@@ -652,16 +662,16 @@ class FacturaPdfGenerator extends FPDF
         $infoX = $qrX + $qrSize + 4;
         $savedY = $this->GetY();
         $this->SetXY($infoX, $qrY + 4);
-        $this->SetFont('Arial', 'B', 8);
+        $this->SetFont($this->fontFamily(), 'B', 8);
         $this->Cell(70, 4, $this->convertEncoding('Código de Seguridad:'), 0, 1, 'L');
         $this->SetX($infoX);
-        $this->SetFont('Arial', '', 9);
+        $this->SetFont($this->fontFamily(), '', 9);
         $this->Cell(70, 4, $codigoSeguridad, 0, 1, 'L');
         $this->SetX($infoX);
-        $this->SetFont('Arial', 'B', 8);
+        $this->SetFont($this->fontFamily(), 'B', 8);
         $this->Cell(70, 4, 'Fecha Firma:', 0, 1, 'L');
         $this->SetX($infoX);
-        $this->SetFont('Arial', '', 9);
+        $this->SetFont($this->fontFamily(), '', 9);
         $this->Cell(70, 4, $fechaFirma !== '' ? $fechaFirma : 'N/D', 0, 1, 'L');
 
         $this->SetXY($this->lMargin, $savedY);
@@ -804,10 +814,10 @@ class FacturaPdfGenerator extends FPDF
         $hasQR = class_exists('QRcode');
         $this->SetY($hasQR ? $docIdY : max(30, $docIdY));
         $this->SetX(-73);
-        $this->SetFont('Arial', 'B', $style['title_font_size'] ?? 11);
+        $this->SetFont($this->fontFamily(), 'B', $style['title_font_size'] ?? 11);
         $this->MultiCell(70, 5, $this->convertEncoding($this->tituloDocumento()), 0, 'L');
         $this->Ln(1);
-        $this->SetFont('Arial', '', 9);
+        $this->SetFont($this->fontFamily(), '', 9);
         if ($this->noElectronica) {
             // Factura NO electronica: numero interno + NCF tradicional (si lo hay).
             // Sin etiqueta "e-NCF" ni fecha de vencimiento (eso es propio del e-CF).
@@ -872,7 +882,7 @@ class FacturaPdfGenerator extends FPDF
             : '';
         if (in_array($tipoEcf, ['33', '34'], true) && $ncfModificado !== '') {
             $this->SetXY($this->lMargin, 48);
-            $this->SetFont('Arial', 'B', 9);
+            $this->SetFont($this->fontFamily(), 'B', 9);
             $fechaMod = $this->formatFechaQr($this->factura['fecha_ncf_modificado'] ?? '');
             $lineNcf = 'NCF Modificado: ' . $ncfModificado;
             if ($fechaMod !== '') {
@@ -903,7 +913,7 @@ class FacturaPdfGenerator extends FPDF
 
         // Table rows
         $this->SetTextColor(0, 0, 0);
-        $this->SetFont('Arial', '', $style['body_font_size'] ?? 10);
+        $this->SetFont($this->fontFamily(), '', $style['body_font_size'] ?? 10);
         $this->SetAligns(array('C', 'L', 'C', 'C', 'C', 'C'));
         $this->SetLineHeight($style['line_height'] ?? 4);
         $this->SetWidths($columnWidths);

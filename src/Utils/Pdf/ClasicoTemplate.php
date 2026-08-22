@@ -48,9 +48,10 @@ class ClasicoTemplate extends FacturaTemplate
 
     public function drawFooter($pdf): void
     {
-        // Sello image
-        $selloPath = __DIR__ . '/../../../sello.png';
-        if (file_exists($selloPath)) {
+        // Sello del tenant (sellos/<id>.png). El sello.png global es el de Gratex:
+        // solo aplica sin tenant resuelto, nunca en la factura de otro emisor.
+        $selloPath = BrandingResolver::selloPath();
+        if ($selloPath !== null) {
             $pdf->Image($selloPath, 8, 246, 40);
         }
         // Firma empresa
