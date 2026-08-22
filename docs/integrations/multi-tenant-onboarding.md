@@ -68,6 +68,10 @@ El sistema sabe de quién es cada documento por el RNC del XML. La recepción es
 
 ## Alta de tenant tipo APP
 
+> Para ejecutarlo paso a paso (con el orden correcto, verificaciones y errores
+> comunes) usa el [runbook de alta de tenant](alta-tenant-runbook.md). Esta seccion
+> es la referencia de que hace cada pieza.
+
 ### 1. Crear la base de datos (cPanel)
 HostGator/cPanel → MySQL Databases:
 - Crear DB (ej. `smhynzte_cliente2db`).
