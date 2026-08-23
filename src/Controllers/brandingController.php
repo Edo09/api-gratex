@@ -73,6 +73,12 @@ function brCurrent(int $tenantId): array
         'accent_color'        => $tenant['pdf_accent_color'] ?? null,
         'logo_path'           => $tenant['logo_path'] ?? null,
         'has_custom_logo'     => !empty($tenant['logo_path']),
+        // El logo vive en logos/<id>.<ext>, fuera de /api/public/, asi que el
+        // .htaccess manda cualquier request a index.php y un <img src> no lo puede
+        // cargar. Tampoco sirve un endpoint aparte: <img> no manda X-API-KEY y el
+        // token no va en la URL. Se devuelve embebido en esta respuesta, que el
+        // front ya pide autenticado.
+        'logo_data_uri'       => brLogoDataUri($tenant['logo_path'] ?? null),
         'available_templates' => BrandingResolver::availableTemplates($tenantId),
     ];
 }
@@ -210,6 +216,31 @@ function brHandlePreview(int $tenantId): void
         'mime_type' => 'application/pdf',
         'template'  => $template ?? BrandingResolver::resolve()['template'],
     ]);
+}
+
+/**
+ * Logo del tenant como data URI listo para <img src>, o null si no tiene.
+ * Lee del disco: logo_path es relativo a la raiz del proyecto.
+ */
+function brLogoDataUri(?string $logoPath): ?string
+{
+    if ($logoPath === null || $logoPath === '') {
+        return null;
+    }
+    $abs = dirname(__DIR__, 2) . '/' . ltrim($logoPath, '/');
+    if (!is_file($abs)) {
+        return null;
+    }
+    $info = @getimagesize($abs);
+    $mime = $info['mime'] ?? null;
+    if ($mime === null || !in_array($mime, ['image/png', 'image/jpeg'], true)) {
+        return null;
+    }
+    $bytes = @file_get_contents($abs);
+    if ($bytes === false) {
+        return null;
+    }
+    return 'data:' . $mime . ';base64,' . base64_encode($bytes);
 }
 
 switch ($_SERVER['REQUEST_METHOD']) {

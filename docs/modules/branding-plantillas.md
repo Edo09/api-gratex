@@ -36,7 +36,7 @@ del texto sobre el acento lo decide `BrandingResolver::contrastText()`
 
 | Método | Ruta | Body | Notas |
 |---|---|---|---|
-| GET | `/api/branding` | — | `{template, accent_color, logo_path, has_custom_logo, available_templates}` |
+| GET | `/api/branding` | — | `{template, accent_color, logo_path, has_custom_logo, logo_data_uri, available_templates}`. `logo_data_uri` es el logo listo para `<img src>`: `logos/` no esta bajo `/api/public/`, asi que el `.htaccess` manda cualquier URL directa a `index.php`, y un `<img>` no puede mandar `X-API-KEY`. Null si el tenant no tiene logo |
 | PUT | `/api/branding` | `{template?, accent_color?}` | 422 si plantilla desconocida o hex inválido. `accent_color: null` limpia. |
 | POST | `/api/branding/logo` | multipart `logo` | PNG/JPG real (getimagesize), máx 2 MB. Guarda `logos/<tenant_id>.<ext>`. |
 | DELETE | `/api/branding/logo` | — | Borra el logo; vuelve al global. |
