@@ -82,9 +82,10 @@ class BrandingResolver
 
     /**
      * Ruta del logo a usar en la Representacion Impresa.
-     * Prioridad: ruta explicita en DB (tenants.logo_path) → convencion
-     * logos/<tenant_id>.png|jpg|jpeg → logo global (logo2020.png). Null si
-     * no hay ninguno.
+     * Prioridad: ruta explicita en DB (tenants.logo_path) -> convencion
+     * logos/<tenant_id>.png|jpg|jpeg. El logo global (logo2020.png) es el de
+     * Gratex y SOLO aplica sin tenant resuelto: un tenant sin logo propio no
+     * imprime ninguno, nunca el de otra empresa. Null si no hay.
      */
     public static function logoPath(): ?string
     {

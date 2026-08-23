@@ -52,8 +52,9 @@ if (!in_array($fase, ['2', '3', '4'], true)) {
 }
 
 // Default: ESTE deploy. Hardcodear gratex.net hacia que cualquier otro server
-// corriera el set de pruebas contra el API de Gratex. SERVER_NAME viene del
-// vhost, no del header Host del request.
+// corriera el set de pruebas contra el API de Gratex. OJO: con UseCanonicalName
+// Off (el default de Apache) SERVER_NAME sale del header Host, asi que este
+// valor NO es de fiar; la proteccion real de este script es CERT_RUN_TOKEN.
 $defaultScheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
 $defaultHost   = $_SERVER['SERVER_NAME'] ?? ($_SERVER['HTTP_HOST'] ?? 'gratex.net');
 $apiBase = (string) ($_REQUEST['api'] ?? ($defaultScheme . '://' . $defaultHost . '/api'));

@@ -30,6 +30,10 @@ X-API-KEY: <tu_api_key>
 
 | Método | Ruta | Descripción |
 |--------|------|-------------|
+> **No son comprobantes fiscales.** Sin e-NCF ni NCF, no se envian a la DGII y
+> **no entran en el reporte 607** (`Reporte607Model` filtra `tipo_ecf IS NOT NULL`).
+> UI: modulo "Facturas simples" del front, separado de Facturacion.
+
 | GET | `/api/facturas-simples` | Lista paginada (`?page`,`?pageSize`,`?query`) |
 | GET | `/api/facturas-simples/{id}` | Una factura con sus líneas |
 | GET | `/api/facturas-simples?id={id}` | Idem (id por query param) |

@@ -281,8 +281,12 @@ totales, **(2)** revisar advertencias, **(3)** descargar el `.TXT` para subirlo 
 | 2 | `GET /reportes/607?periodo=AAAAMM&formato=json` | JSON con el TXT ya armado (string) | Previsualizar archivo crudo |
 | 3 | `GET /reportes/607?periodo=AAAAMM` | Archivo `text/plain` (descarga) | Botón "Descargar 607" |
 
-**Diferencia con el 606:** el 607 son **ventas** (`facturas` e-CF + facturas simples), nombre de
+**Diferencia con el 606:** el 607 son **ventas** (solo e-CF aceptados por la DGII), nombre de
 archivo `DGII_F_607_<RNC>_<PERIODO>.TXT`, y las 23 columnas son las del Formato 607.
+
+> Las **facturas simples** (`tipo_ecf IS NULL`) quedan **fuera** del 607: son documentos
+> internos sin NCF, y el validador las marcaba como "NCF formato no valido" en cada reporte.
+> Ver [facturas-simples.md](facturas-simples.md).
 
 ---
 
@@ -352,7 +356,7 @@ Montos como **números** (redondeados a 2 decimales). Los 3 primeros son auxilia
 |-------|------|-------------|
 | `razon_social` | string | Nombre/razón social del cliente (display) |
 | `tipo_comprobante` | string | `E31`/`E32`/`E33`/`E34` (e-CF) o `NCF` (factura simple) |
-| `estado_dgii` | string | Estado del e-CF (`ACEPTADO`, `PENDIENTE`, ...). Las simples suelen ir `PENDIENTE` |
+| `estado_dgii` | string | Estado del e-CF (`ACEPTADO`, `PENDIENTE`, ...) |
 
 Los 23 campos oficiales del 607, en orden:
 

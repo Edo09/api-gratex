@@ -51,11 +51,12 @@ class Reporte607Model
         // Ventas del periodo. Al 607 solo van comprobantes fiscales validos:
         //  - e-CF ACEPTADOS por DGII: estado_dgii LIKE '%ACEPTADO%' cubre ACEPTADO,
         //    ACEPTADO_CONDICIONAL y RFCE_ACEPTADO.
-        //  - facturas simples (tipo_ecf IS NULL): siempre, no pasan por DGII.
+        //  - las facturas SIMPLES (tipo_ecf IS NULL) quedan FUERA: son documentos
+        //    internos sin valor fiscal, no llevan NCF, y el validador del 607 las
+        //    marcaba como "NCF formato no valido" en cada reporte.
         // Se EXCLUYEN los e-CF no confirmados/invalidos: RECHAZADO, RFCE_RECHAZADO,
         // EN_PROCESO, NO_ENCONTRADO, ERROR (un e-CF aceptado tarde aparece cuando su
-        // estado se actualiza). El guard por tipo_ecf (no por estado) conserva las
-        // simples aunque su estado_dgii sea '' o NULL.
+        // estado se actualiza).
         // 'date' es DATETIME -> rango [ini, primer dia del mes siguiente).
         $sql = "SELECT f.id, f.tipo_ecf, f.e_ncf, f.NCF, f.client_id, f.client_name,
                        f.date, f.total, f.estado_dgii, f.ambiente_dgii,
@@ -64,10 +65,11 @@ class Reporte607Model
                 FROM facturas f
                 LEFT JOIN clients c ON f.client_id = c.id
                 WHERE f.date >= :ini AND f.date < :finExcl
-                  AND (f.tipo_ecf IS NULL OR f.estado_dgii LIKE '%ACEPTADO%')";
+                  AND f.tipo_ecf IS NOT NULL
+                  AND f.estado_dgii LIKE '%ACEPTADO%'";
         if ($ambiente !== null) {
-            // e-CF llevan ambiente_dgii; las simples lo tienen NULL -> incluirlas.
-            $sql .= ' AND (f.ambiente_dgii = :ambiente OR f.ambiente_dgii IS NULL)';
+            // Solo entran e-CF, que siempre llevan ambiente_dgii.
+            $sql .= ' AND f.ambiente_dgii = :ambiente';
         }
         $sql .= ' ORDER BY f.date ASC, f.id ASC';
 
