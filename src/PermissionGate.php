@@ -20,10 +20,10 @@ require_once(__DIR__ . '/Models/RoleModel.php');
  */
 class PermissionGate
 {
-    public static function enforce(string $route, string $method): void
+    public static function enforce(string $route, string $method, string $sub = ''): void
     {
         $cfg = require __DIR__ . '/../config/permissions.php';
-        $required = self::resolveRequirement($cfg['routes'] ?? [], $route, $method);
+        $required = self::resolveRequirement($cfg['routes'] ?? [], $route, $method, $sub);
 
         // Ruta no mapeada: no se aplica RBAC (el controller sigue exigiendo token
         // por su cuenta). Se registra para que se agregue al mapa.
@@ -79,12 +79,18 @@ class PermissionGate
     }
 
     /** Resuelve el permiso/tag requerido para una ruta+metodo. null = sin mapeo. */
-    private static function resolveRequirement(array $routes, string $route, string $method): ?string
+    private static function resolveRequirement(array $routes, string $route, string $method, string $sub = ''): ?string
     {
-        if (!array_key_exists($route, $routes)) {
+        // Una subruta puede tener su propia regla: 'ecf/autenticacion' se resuelve
+        // ANTES que 'ecf'. Sin esto, todas las rutas bajo un recurso comparten
+        // requisito, y el handshake de DGII (un GET) caia en el permiso de app.
+        $clave = $sub !== '' && array_key_exists($route . '/' . $sub, $routes)
+            ? $route . '/' . $sub
+            : $route;
+        if (!array_key_exists($clave, $routes)) {
             return null;
         }
-        $entry = $routes[$route];
+        $entry = $routes[$clave];
         if (is_string($entry)) {
             return $entry;
         }

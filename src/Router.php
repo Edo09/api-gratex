@@ -73,7 +73,7 @@ $route = $route_segments[0] ?? 'default';
 // loguean y NO rompen el ruteo (el controller hara su propia validacion).
 require_once __DIR__ . '/PermissionGate.php';
 try {
-    PermissionGate::enforce($route, $request_method);
+    PermissionGate::enforce($route, $request_method, $route_segments[1] ?? '');
 } catch (Throwable $e) {
     error_log('[Router] PermissionGate fallo: ' . $e->getMessage());
 }

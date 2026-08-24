@@ -83,6 +83,12 @@ return [
         'roles'                    => 'roles',
         'audit-logs'               => 'audit',
 
+        // Handshake de autenticacion de DGII: SIEMPRE principal externo, en
+        // cualquier metodo. La semilla se pide con GET, asi que sin esta entrada
+        // caia en el 'aprobaciones' de abajo y DGII recibia 401 ("fallo en la
+        // comunicacion con su servicio de autenticacion"). El controller valida
+        // la firma del certificado y la vigencia de la semilla por su cuenta.
+        'ecf/autenticacion'        => 'dgii',
         // Mixta: GET = listado de recibidos/aprobaciones para la app; POST = e-CF
         // entrante de DGII (firma/Bearer, lo valida el controller).
         'ecf'                      => ['GET' => 'aprobaciones', '*' => 'dgii'],
