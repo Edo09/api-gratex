@@ -6,14 +6,10 @@
  *   POST /api/integracion/aprobacion-comercial
  *   Headers: X-API-KEY + X-API-SECRET (tenant tipo integracion)
  *   Body JSON: rnc_emisor, e_ncf, fecha_emision, monto_total, estado (1|2),
- *              [detalle_motivo (req si estado=2)], [rnc_comprador]
+ *              [detalle_motivo (req si estado=2)]
  *
  * Construye el ACECF, firma con cert del tenant, lo envia a DGII y persiste la
  * decision en master (ecf_recibidos del tenant).
- *
- * Multi-empresa: con `grupo_id` una credencial aprueba por varias empresas.
- * `rnc_comprador` elige cual aprueba (omitirlo = la dueña de la credencial);
- * de ella salen el certificado que firma el ACECF y el ambiente.
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -53,32 +49,13 @@ handleIntegracionAprobacion();
 function handleIntegracionAprobacion(): void
 {
     $tenant = TenantResolver::current();
+    $tenantId = (int) $tenant['id'];
 
     $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
         respondIntegracionApc(false, 'JSON body invalido.', 400);
         return;
     }
-
-    // Multi-empresa: con `grupo_id`, una credencial aprueba por varias empresas.
-    // `rnc_comprador` elige cual de ellas es la que aprueba; omitirlo mantiene el
-    // comportamiento de siempre (la dueña de la credencial).
-    if (!empty($input['rnc_comprador'])
-        && (string) $input['rnc_comprador'] !== (string) $tenant['rnc']) {
-        if (!TenantResolver::switchToSibling((string) $input['rnc_comprador'])) {
-            respondIntegracionApc(
-                false,
-                'rnc_comprador (' . $input['rnc_comprador'] . ') no corresponde a la credencial'
-                . ' usada ni a una empresa de su grupo.',
-                422
-            );
-            return;
-        }
-        // Cambio el tenant activo: el cert que firma el ACECF y el ambiente
-        // deben ser los de la empresa que aprueba.
-        $tenant = TenantResolver::current();
-    }
-    $tenantId = (int) $tenant['id'];
 
     $required = ['rnc_emisor', 'e_ncf', 'fecha_emision', 'monto_total', 'estado'];
     foreach ($required as $field) {

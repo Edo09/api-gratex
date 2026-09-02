@@ -33,47 +33,9 @@ El master guarda solo el sha256 del secret. Si se pierde, se regenera — no se 
 | `/api/integracion/aprobacion-comercial` | POST | Aprobar/rechazar un e-CF que le emitieron |
 | `/api/integracion/recibidos` | GET | Bandeja de e-CF que le facturaron |
 | `/api/integracion/aprobaciones` | GET | Aprobaciones recibidas sobre lo que emitió |
-| `/api/integracion/empresas` | GET | Empresas que cubre la credencial (grupo) |
-| `/api/integracion/estado` | GET | Estado en DGII de un e-CF que emitió |
 
 Un tenant tipo `app` que llame estos endpoints recibe **403** (`Endpoint solo para tenants
 tipo integracion`), y viceversa.
-
----
-
-## Multi-empresa — una credencial, varios RNC
-
-Un cliente que administra varias empresas en su propio ERP no debería llevar N pares de
-credenciales. Si sus tenants comparten `tenants.grupo_id`, **la credencial de cualquiera de
-ellos actúa por sus hermanos** y el RNC del payload elige la empresa.
-
-| Llamada | Selector de empresa | Si se omite |
-|---|---|---|
-| `POST /ecf` | `emisor.rnc` | (obligatorio) |
-| `POST /aprobacion-comercial` | `rnc_comprador` | la dueña de la credencial |
-| `GET /recibidos` · `/aprobaciones` | `?rnc=` | la dueña de la credencial |
-
-El salto lo hace `TenantResolver::switchToSibling()`, que deniega salvo que: haya tenant
-resuelto, tenga `grupo_id` no nulo, el RNC destino exista **activo y con el mismo
-`grupo_id`**, y sea del **mismo `tipo`** (una credencial de integración nunca alcanza un
-tenant `app`). Al saltar se actualiza también el `tenant_id` del contexto de auditoría, así
-que la bitácora registra la empresa por la que se actuó, no la dueña de la credencial.
-
-Todo lo de aguas abajo ya era per-tenant y sigue igual sin cambios: `CertResolver` toma el
-`.p12` del tenant activo, `AmbienteResolver` su ambiente, e `IntegracionStoreModel` su
-`tenant_id`. Consecuencia útil: **las empresas de un grupo pueden estar en ambientes
-distintos** — una en `ecf` y otra en `certecf` — con la misma credencial.
-
-`grupo_id` NULL (el default, y lo que tienen todos los tenants preexistentes) = aislamiento
-total: el predicado `grupo_id = :g` nunca hace match contra NULL.
-
-> **Regla:** agrupar dos tenants significa que una credencial filtrada expone a ambos.
-> Agrupar SOLO empresas del mismo cliente/operador. Ver `db/master_migrations/008`.
-
-Alta de un grupo: `tools/create_tenant.php --grupo=self` para la primera empresa (queda
-agrupada consigo misma; su `tenant_id` es el `grupo_id`), luego `--grupo=<ese id>` para las
-demás. El script valida que la cabeza exista, esté activa, encabece grupo y sea del mismo
-tipo.
 
 ---
 
@@ -219,53 +181,6 @@ Errores: `422` (campo faltante, `estado` distinto de 1/2, o `detalle_motivo` vac
 
 ---
 
-## GET `/api/integracion/estado` — Estado en DGII de lo emitido
-
-La emisión devuelve el estado con que DGII acusó el recibo; los `EN_PROCESO` se resuelven
-después. Este endpoint consulta el estado actual — el equivalente de
-`GET /facturas/{id}/estado` para tenants sin DB.
-
-```
-GET /api/integracion/estado?e_ncf=E310000000001&track_id=0784f643-...
-GET /api/integracion/estado?e_ncf=E320000000005&codigo_seguridad=RHq/pJ   # RFCE
-GET /api/integracion/estado?e_ncf=E310000000001                           # track_id del respaldo
-```
-
-| Query | Requerido | Notas |
-|---|---|---|
-| `e_ncf` | sí | |
-| `track_id` | no | Si se omite, se busca en `master.ecf_integracion_backup` por (RNC, e-NCF) |
-| `codigo_seguridad` | solo RFCE | Los **E32 <250k** no generan `track_id`: se consultan por código de seguridad en RecepcionFC |
-| `rnc` | no | Empresa del grupo (igual que en `/recibidos`) |
-
-El `ambiente` sale del tenant, igual que en la emisión. **No persiste nada**: el respaldo del
-master no guarda estado y la fuente de verdad es el sistema del cliente.
-
-```json
-{
-  "status": true, "recurso": "estado",
-  "rnc": "131111111", "empresa": "CLIENTE A SRL",
-  "e_ncf": "E310000000001",
-  "track_id": "0784f643-3c19-4377-9104-e0581f0200d6",
-  "flujo": "ECF", "ambiente": "certecf",
-  "estado": "ACEPTADO",
-  "consulta": { }
-}
-```
-
-`estado` normaliza texto y códigos de DGII a: `ACEPTADO`, `ACEPTADO_CONDICIONAL`,
-`EN_PROCESO`, `RECHAZADO`, `NO_ENCONTRADO` (prefijo `RFCE_` en la consulta por código de
-seguridad), o `null` si DGII no devolvió estado reconocible — el detalle crudo queda en
-`consulta`.
-
-| Código | Cuándo |
-|---|---|
-| `404` | No hay respaldo de ese e-NCF para ese RNC, o el respaldo no tiene `track_id` (manda `codigo_seguridad`) |
-| `422` | Falta `e_ncf` |
-| `502` | Falló la consulta a DGII (auth con el cert, servicio caído) |
-
----
-
 ## GET `/api/integracion/recibidos` — Bandeja de entrada
 
 e-CF que otros emisores le facturaron. Se llenan solos cuando DGII/el emisor entrega el
@@ -371,11 +286,7 @@ reemplaza al polling**: el cliente debe reconciliar con `GET /recibidos` periód
 ## Certificación y paso a producción
 
 El tenant arranca en `certecf`. Corre su set de pruebas contra DGII mandando sus e-CF
-normalmente (el ambiente sale de `tenants.ambiente`, no del payload). Si el set lo corremos
-nosotros, los runners `tools/send_fase2.php` · `send_fase3.php` · `send_fase4_simulation.php`
-aceptan `--api-secret` y apuntan a estos endpoints — ver
-[../integrations/multi-tenant-onboarding.md](../integrations/multi-tenant-onboarding.md#correr-las-fases-nosotros-runners).
-Al aprobar DGII:
+normalmente (el ambiente sale de `tenants.ambiente`, no del payload). Al aprobar DGII:
 
 ```sql
 UPDATE gratex_master.tenants SET ambiente = 'ecf' WHERE id = <tenant_id>;

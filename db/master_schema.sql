@@ -28,8 +28,6 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'sha256 hex del api_secret (el secret en claro nunca se guarda)',
   tipo                VARCHAR(12)    NOT NULL DEFAULT 'app'
                         COMMENT 'app = DB-per-tenant propia | integracion = sin DB, solo backup de e-CF',
-  grupo_id            INT            NULL
-                        COMMENT 'Grupo de empresas de un mismo cliente: la credencial de cualquier tenant del grupo puede actuar por sus hermanos (el RNC del payload elige). NULL = aislado. Ver migracion 008.',
   -- Campos db_* solo aplican a tenants tipo "app". En "integracion" son NULL.
   db_host             VARCHAR(100)   NULL DEFAULT 'localhost',
   db_port             VARCHAR(10)    NULL DEFAULT '3306',
@@ -53,8 +51,7 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'Color de acento hex #RRGGBB (NULL = colores por defecto de la plantilla)',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
-  created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX idx_tenants_grupo (grupo_id)
+  created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------

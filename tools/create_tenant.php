@@ -18,20 +18,6 @@
  *     --nombre="Cliente A SRL" --rnc=131111111 `
  *     --cert-path=ruta/al/cert.p12 --cert-pass=claveCert [--ambiente=ecf]
  *
- * Cliente con VARIAS empresas (una sola credencial para todas, --grupo):
- *   # 1a empresa: inicia el grupo (queda agrupada consigo misma)
- *   php tools/create_tenant.php --tipo=integracion --grupo=self `
- *     --nombre="Empresa 1" --rnc=131111111 --cert-path=e1.p12 --cert-pass=...
- *   # -> imprime tenant_id, p.ej. 7. Esa es la credencial que usa el cliente.
- *
- *   # 2a..Na: se unen al grupo 7 (cada una con SU cert; comparten credencial)
- *   php tools/create_tenant.php --tipo=integracion --grupo=7 `
- *     --nombre="Empresa 2" --rnc=131111112 --cert-path=e2.p12 --cert-pass=...
- *
- * El cliente manda siempre la credencial del grupo y elige la empresa por RNC
- * (emisor.rnc al emitir, rnc_comprador al aprobar, ?rnc= al consultar).
- * Agrupa SOLO empresas del mismo cliente: comparten credencial.
- *
  * Uso app:
  *   php tools/create_tenant.php --tipo=app `
  *     --nombre="Cliente B SRL" --rnc=132222222 `
@@ -72,7 +58,7 @@ if ($isCli) {
         'tipo::',
         'nombre:', 'rnc:',
         'db-name::', 'db-user::', 'db-pass::', 'db-host::', 'db-port::',
-        'razon-social::', 'direccion::', 'ambiente::', 'grupo::',
+        'razon-social::', 'direccion::', 'ambiente::',
         'cert-path::', 'cert-pass::',
         'webhook-url::', 'webhook-secret::',
         'admin-email::', 'admin-pass::', 'admin-name::', 'admin-username::',
@@ -104,20 +90,6 @@ $nombre       = (string) $opts['nombre'];
 $rnc          = preg_replace('/\D/', '', (string) $opts['rnc']); // solo digitos
 $ambiente     = (string) ($opts['ambiente'] ?? 'ecf');
 $certPass     = isset($opts['cert-pass']) ? (string) $opts['cert-pass'] : null;
-
-// Grupo de empresas (opcional): un cliente con varios RNC usa UNA credencial
-// para todos. Se pasa el id del tenant "cabeza" del grupo; para la primera
-// empresa se usa --grupo=self y el tenant queda agrupado consigo mismo (su
-// propio id), de modo que las siguientes puedan unirsele. Ver migracion 008.
-$grupoArg = isset($opts['grupo']) ? trim((string) $opts['grupo']) : '';
-$grupoSelf = strtolower($grupoArg) === 'self';
-$grupoId = null;
-if ($grupoArg !== '' && !$grupoSelf) {
-    if (!ctype_digit($grupoArg) || (int) $grupoArg < 1) {
-        fail("--grupo invalido: '{$grupoArg}'. Use el id del tenant cabeza del grupo, o 'self' para iniciar uno.");
-    }
-    $grupoId = (int) $grupoArg;
-}
 
 // Cert: archivo subido (web, $_FILES['cert']) o ruta en el server (cert-path).
 $certUploadTmp = (!$isCli && isset($_FILES['cert']) && is_array($_FILES['cert'])
@@ -181,42 +153,6 @@ $chk->execute([':rnc' => $rnc]);
 if ($dup = $chk->fetch()) {
     fail("Ya existe un tenant con RNC {$rnc}: #{$dup['id']} '{$dup['nombre']}' (tenants.rnc es UNIQUE)."
         . PHP_EOL . "   Para agregarle usuarios usa public/create_user.php; para rehacerlo, borra ese tenant primero.");
-}
-
-// La columna grupo_id la agrega la migracion master 008. Si el server aun no la
-// tiene, el alta normal debe seguir funcionando igual que siempre: solo se exige
-// la migracion cuando de verdad se pide un grupo. Asi el codigo puede desplegarse
-// antes que la migracion sin romper nada.
-$tieneColumnaGrupo = (bool) $masterPdo
-    ->query("SHOW COLUMNS FROM tenants LIKE 'grupo_id'")
-    ->fetch();
-if (!$tieneColumnaGrupo && ($grupoId !== null || $grupoSelf)) {
-    fail('--grupo requiere la migracion master 008 (db/master_migrations/008_add_tenant_grupo.sql).'
-        . PHP_EOL . '   La columna tenants.grupo_id todavia no existe en esta base. Aplicala y reintenta.');
-}
-
-// Grupo: la cabeza debe existir, estar activa y ser del MISMO tipo (una
-// credencial de integracion no puede cubrir un tenant app, y viceversa).
-if ($grupoId !== null) {
-    $chk = $masterPdo->prepare(
-        'SELECT id, nombre, rnc, tipo, grupo_id FROM tenants WHERE id = :id AND activo = 1 LIMIT 1'
-    );
-    $chk->execute([':id' => $grupoId]);
-    $cabeza = $chk->fetch();
-    if (!$cabeza) {
-        fail("--grupo={$grupoId}: no existe un tenant activo con ese id.");
-    }
-    if ((string) $cabeza['tipo'] !== $tipo) {
-        fail("--grupo={$grupoId}: el tenant cabeza '{$cabeza['nombre']}' es tipo '{$cabeza['tipo']}'"
-            . " y este es '{$tipo}'. Un grupo no puede mezclar tipos.");
-    }
-    if ((int) ($cabeza['grupo_id'] ?? 0) !== $grupoId) {
-        fail("--grupo={$grupoId}: el tenant #{$grupoId} '{$cabeza['nombre']}' aun no encabeza un grupo."
-            . PHP_EOL . "   Agrupalo primero:  UPDATE tenants SET grupo_id = {$grupoId} WHERE id = {$grupoId};"
-            . PHP_EOL . "   (o creala con --grupo=self la proxima vez).");
-    }
-    echo "-> Se unira al grupo #{$grupoId} (cabeza: {$cabeza['nombre']}, RNC {$cabeza['rnc']}).\n";
-    echo "   ATENCION: compartiran credencial. Agrupa solo empresas del MISMO cliente.\n";
 }
 
 if ($createAdmin) {
@@ -336,22 +272,16 @@ $apiKey        = TokenGenerator::generateApiToken(32); // identificador publico
 $apiSecret     = TokenGenerator::generateApiToken(64); // secret — se muestra 1 vez
 $apiSecretHash = TenantResolver::hashSecret($apiSecret);
 
-// grupo_id solo entra en el INSERT si la columna existe (migracion 008).
-$colGrupo = $tieneColumnaGrupo ? 'grupo_id, ' : '';
-$valGrupo = $tieneColumnaGrupo ? ':grupo_id, ' : '';
 $ins = $master->prepare(
     'INSERT INTO tenants
-        (nombre, rnc, api_key, api_secret_hash, tipo, ' . $colGrupo . 'db_host, db_port, db_name, db_user,
+        (nombre, rnc, api_key, api_secret_hash, tipo, db_host, db_port, db_name, db_user,
          db_pass_encrypted, cert_path, cert_pass_encrypted, webhook_url, webhook_secret_encrypted,
          ambiente, activo)
      VALUES
-        (:nombre, :rnc, :api_key, :api_secret_hash, :tipo, ' . $valGrupo . ':db_host, :db_port, :db_name, :db_user,
+        (:nombre, :rnc, :api_key, :api_secret_hash, :tipo, :db_host, :db_port, :db_name, :db_user,
          :db_pass_enc, :cert_path, :cert_pass_enc, :webhook_url, :webhook_sec_enc,
          :ambiente, 1)'
 );
-if ($tieneColumnaGrupo) {
-    $ins->bindValue(':grupo_id', $grupoId, $grupoId === null ? PDO::PARAM_NULL : PDO::PARAM_INT);
-}
 $ins->bindValue(':nombre', $nombre);
 $ins->bindValue(':rnc', $rnc);
 $ins->bindValue(':api_key', $apiKey);
@@ -369,15 +299,6 @@ $ins->bindValue(':webhook_sec_enc', $webhookSecEnc, $webhookSecEnc === null ? PD
 $ins->bindValue(':ambiente', $ambiente);
 $ins->execute();
 $tenantId = (int) $master->lastInsertId();
-
-// --grupo=self: la primera empresa del grupo se agrupa consigo misma. Su id pasa
-// a ser el grupo_id que usan las siguientes (--grupo=<ese id>).
-if ($grupoSelf) {
-    $master->prepare('UPDATE tenants SET grupo_id = :g WHERE id = :id')
-        ->execute([':g' => $tenantId, ':id' => $tenantId]);
-    $grupoId = $tenantId;
-    echo "-> Grupo #{$tenantId} iniciado. Las demas empresas del cliente se agregan con --grupo={$tenantId}\n";
-}
 
 // =============================================================================
 // Roles de sistema (RBAC): admin + user. Solo tenants tipo "app": el RBAC aplica
@@ -457,9 +378,6 @@ if ($tipo === 'app') {
     echo "  client_id certificacion (RNC 131880681): "
         . ($certClientId !== null ? $certClientId : 'NO encontrado (revisa que corrio la migracion 004)') . "\n";
 }
-if ($grupoId !== null) {
-    echo "  grupo_id   : {$grupoId}" . ($grupoSelf ? ' (cabeza del grupo)' : '') . "\n";
-}
 echo "  API KEY    : {$apiKey}\n";
 echo "  API SECRET : {$apiSecret}\n";
 if ($webhookUrl !== null && $webhookUrl !== '') {
@@ -470,11 +388,6 @@ if ($webhookUrl !== null && $webhookUrl !== '') {
 echo "  >> Entregar API KEY + API SECRET al cliente.\n";
 echo "  >> El API SECRET se muestra UNA sola vez (se guarda solo su hash).\n";
 echo "     Headers: X-API-KEY: <key>  /  X-API-SECRET: <secret>\n";
-if ($grupoId !== null && !$grupoSelf) {
-    echo "  >> Esta empresa pertenece al grupo #{$grupoId}: el cliente puede seguir usando\n";
-    echo "     la credencial del grupo y elegir esta empresa por su RNC ({$rnc}) en el payload.\n";
-    echo "     La credencial de arriba es la suya propia y tambien sirve — no hace falta entregarla.\n";
-}
 exit(0);
 
 // =============================================================================

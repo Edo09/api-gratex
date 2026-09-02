@@ -17,31 +17,6 @@
  *       --client-id=3511 --user-id=2 \
  *       [--dry-run] [--output=tools/fase4_results.json]
  *
- * Tenant tipo INTEGRACION (--api-secret): apunta a POST /api/integracion/ecf,
- * omite client_id/user_id y **asigna el e-NCF aqui** — ese endpoint no dispensa
- * secuencias (no hay ncf_sequences sin DB), lo pone el cliente. Por eso
- * --encf-start es obligatorio: es el primer numero libre de CADA tipo dentro
- * del rango que DGII te autorizo. Se numera por tipo: E31 0000000007,
- * E31 0000000008, ... Repetir un e-NCF ya usado lo rechaza DGII.
- *
- * Y como no hay emisor_config que leer, el emisor va en cada payload:
- * --emisor-rnc, --emisor-razon-social y --emisor-direccion son obligatorios
- * (opcionales: --emisor-nombre-comercial, --emisor-municipio,
- * --emisor-provincia, --emisor-telefono, --emisor-correo).
- *
- *   php tools/send_fase4_simulation.php \
- *       --api=https://gratex.net/api \
- *       --api-key=<api_key> --api-secret=<api_secret> \
- *       --emisor-rnc=131111111 --emisor-razon-social="CLIENTE A SRL" \
- *       --emisor-direccion="Av. Winston Churchill #45" \
- *       --encf-start=1                        # todos los tipos arrancan en 1
- *       # o por tipo, para retomar una corrida:
- *       --encf-start=E31:7,E32:5,E34:2        # los no listados caen en 1
- *
- * El XML firmado de cada emision se guarda en --xml-dir (default
- * tools/xml_integracion): es la unica copia a mano, y para los E32 <250k es el
- * XML integro que hay que subir al portal DGII.
- *
  *   # Enviar E34 creando los E31 en la misma corrida:
  *   php tools/send_fase4_simulation.php ... \
  *       --counts=E31:2,E32_gte_250k:0,E32_lt_250k:0,E33:0,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0 \
@@ -59,7 +34,6 @@ const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_CLIENT_ID = 3511;
 const DEFAULT_USER_ID = 2;
 const DEFAULT_OUTPUT = __DIR__ . '/fase4_results.json';
-const DEFAULT_XML_DIR = __DIR__ . '/xml_integracion';
 const DEFAULT_TIMEOUT_SECONDS = 60;
 
 function main(array $argv): int
@@ -71,14 +45,9 @@ function main(array $argv): int
     $opts = parseArgs($argv);
     $apiBase = rtrim($opts['api'] ?? DEFAULT_API, '/');
     $apiKey = $opts['api-key'] ?? '';
-    // --api-secret => tenant tipo integracion: otro endpoint, otra auth, sin
-    // client_id/user_id, y el e-NCF lo asigna este runner.
-    $apiSecret = (string) ($opts['api-secret'] ?? '');
-    $integracion = $apiSecret !== '';
     $clientId = (int) ($opts['client-id'] ?? DEFAULT_CLIENT_ID);
     $userId = (int) ($opts['user-id'] ?? DEFAULT_USER_ID);
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
-    $xmlDir = $integracion ? ($opts['xml-dir'] ?? DEFAULT_XML_DIR) : null;
     $dryRun = isset($opts['dry-run']);
     // Override explicito del ambiente DGII (ver send_fase2.php): sin esto el
     // ambiente sale de tenants.ambiente y un tenant en 'ecf' emitiria la
@@ -88,52 +57,6 @@ function main(array $argv): int
     if (!$dryRun && $apiKey === '') {
         fwrite(STDERR, "ERROR: --api-key requerido.\n");
         return 2;
-    }
-    // En integracion el ambiente lo fuerza el servidor desde tenants.ambiente;
-    // aceptar --ambiente aqui haria creer que el set va a pruebas cuando no.
-    if ($integracion && $ambiente !== null && $ambiente !== '') {
-        fwrite(STDERR, "ERROR: --ambiente no aplica en modo integracion (el servidor lo toma de tenants.ambiente).\n"
-            . "   Verifica antes: SELECT ambiente FROM tenants WHERE id=<id>;  -> tiene que decir 'certecf'.\n");
-        return 2;
-    }
-    $secuencias = [];
-    if ($integracion) {
-        if (!isset($opts['encf-start'])) {
-            fwrite(STDERR, "ERROR: --encf-start es requerido en modo integracion (ese endpoint no dispensa e-NCF).\n"
-                . "   Ej: --encf-start=1   o por tipo: --encf-start=E31:7,E32:5\n");
-            return 2;
-        }
-        try {
-            $secuencias = parseEncfStart((string) $opts['encf-start']);
-        } catch (Throwable $e) {
-            fwrite(STDERR, 'ERROR: --encf-start invalido: ' . $e->getMessage() . "\n");
-            return 2;
-        }
-        fwrite(STDOUT, "==> Modo INTEGRACION: POST {$apiBase}/integracion/ecf (e-NCF asignados por el runner)\n");
-    }
-    // Sin DB no hay emisor_config que leer: los datos del emisor viajan en cada
-    // payload y su RNC tiene que ser el del tenant (o una empresa de su grupo).
-    $emisor = [];
-    if ($integracion) {
-        $faltan = array_values(array_filter(
-            ['emisor-rnc', 'emisor-razon-social', 'emisor-direccion'],
-            fn($k) => !isset($opts[$k]) || trim((string) $opts[$k]) === ''
-        ));
-        if ($faltan !== []) {
-            fwrite(STDERR, 'ERROR: en modo integracion faltan: --' . implode(', --', $faltan) . "\n"
-                . "   El emisor va completo en cada payload (no hay emisor_config sin DB).\n");
-            return 2;
-        }
-        $emisor = array_filter([
-            'rnc' => trim((string) $opts['emisor-rnc']),
-            'razon_social' => trim((string) $opts['emisor-razon-social']),
-            'direccion' => trim((string) $opts['emisor-direccion']),
-            'nombre_comercial' => isset($opts['emisor-nombre-comercial']) ? trim((string) $opts['emisor-nombre-comercial']) : null,
-            'municipio' => isset($opts['emisor-municipio']) ? trim((string) $opts['emisor-municipio']) : null,
-            'provincia' => isset($opts['emisor-provincia']) ? trim((string) $opts['emisor-provincia']) : null,
-            'telefono' => isset($opts['emisor-telefono']) ? trim((string) $opts['emisor-telefono']) : null,
-            'correo' => isset($opts['emisor-correo']) ? trim((string) $opts['emisor-correo']) : null,
-        ], fn($v) => $v !== null && $v !== '');
     }
 
     $countsOverride = [];
@@ -173,7 +96,7 @@ function main(array $argv): int
                 sleep($notaDelay);
             }
             if ($notaWaitAccepted > 0 && !$dryRun) {
-                $notaPrereqOk = waitForAcceptedReferences($apiBase, $apiKey, $eNcfsByType['31'] ?? [], $notaWaitAccepted, $notaPoll, $apiSecret);
+                $notaPrereqOk = waitForAcceptedReferences($apiBase, $apiKey, $eNcfsByType['31'] ?? [], $notaWaitAccepted, $notaPoll);
                 if (!$notaPrereqOk) {
                     fwrite(STDOUT, "==> Se omiten las notas para no consumir secuencias mientras los E31 no esten aceptados.\n");
                 }
@@ -219,20 +142,13 @@ function main(array $argv): int
             }
         }
 
-        $payload = $integracion
-            // Integracion: sin clientes ni usuarios en DB, y el e-NCF va en el
-            // body (el servidor no dispensa secuencias para este tipo de tenant).
-            ? array_merge([
-                'e_ncf' => asignarENcf($case['tipo_ecf'], $secuencias),
-                'emisor' => $emisor,
-            ], $case['payload'])
-            : array_merge(
-                [
-                    'client_id' => $clientId,
-                    'user_id' => $userId,
-                ],
-                $case['payload']
-            );
+        $payload = array_merge(
+            [
+                'client_id' => $clientId,
+                'user_id' => $userId,
+            ],
+            $case['payload']
+        );
         $payload = withDefaultIndicadorMontoGravado($payload);
         $payload = withE41Retencion($payload);
         $payload = withE47Retencion($payload);
@@ -247,7 +163,7 @@ function main(array $argv): int
             // Stub e-NCF para que E33/E34 puedan referenciar en dry-run
             if ($case['tipo_ecf'] === '31') {
                 $eNcfsByType['31'][] = [
-                    'e_ncf' => $payload['e_ncf'] ?? ('E31000000000' . count($eNcfsByType['31'] ?? [])),
+                    'e_ncf' => 'E31000000000' . count($eNcfsByType['31'] ?? []),
                     'fecha' => $payload['fecha_emision'] ?? date('d-m-Y'),
                     'rnc_comprador' => $payload['comprador']['rnc'] ?? null,
                     'nombre_comprador' => $payload['comprador']['razon_social'] ?? $payload['comprador']['nombre'] ?? null,
@@ -256,7 +172,7 @@ function main(array $argv): int
             continue;
         }
 
-        $resp = postFactura($apiBase, $apiKey, $payload, $apiSecret);
+        $resp = postFactura($apiBase, $apiKey, $payload);
         $entry = [
             'etiqueta' => $case['etiqueta'],
             'tipo_ecf' => $case['tipo_ecf'],
@@ -267,18 +183,12 @@ function main(array $argv): int
         if ($entry['ok']) {
             $data = $resp['body']['data'] ?? [];
             $entry['factura_id'] = $data['factura_id'] ?? null;
-            $entry['e_ncf'] = $data['e_ncf'] ?? $payload['e_ncf'] ?? null;
+            $entry['e_ncf'] = $data['e_ncf'] ?? null;
             $entry['track_id'] = $data['track_id'] ?? null;
             $entry['rfce_track_id'] = $data['rfce_track_id'] ?? null;
             $entry['estado_dgii'] = $data['estado_dgii'] ?? $data['estado'] ?? null;
             $entry['flujo'] = $data['flujo'] ?? null;
-            if ($integracion) {
-                // No hay GET /facturas/{id}/xml para integracion: el XML integro
-                // (el que se sube al portal para los E32 <250k) solo viene aqui.
-                $entry['xml_file'] = guardarXmlFirmado($xmlDir, (string) ($entry['e_ncf'] ?? ''), $data['xml_firmado'] ?? null);
-                unset($resp['body']['data']['xml_firmado']);
-                $entry['response'] = $resp['body'];
-            } elseif (!empty($case['full_xml_url']) && $entry['factura_id']) {
+            if (!empty($case['full_xml_url']) && $entry['factura_id']) {
                 $entry['xml_url'] = buildFacturaXmlUrl($apiBase, (int) $entry['factura_id']);
             }
 
@@ -286,8 +196,6 @@ function main(array $argv): int
                 $eNcfsByType[$case['tipo_ecf']][] = [
                     'e_ncf' => $entry['e_ncf'],
                     'factura_id' => $entry['factura_id'],
-                    // Integracion consulta por e-NCF + track_id (no hay factura_id).
-                    'track_id' => $entry['track_id'] ?? null,
                     'fecha' => $payload['fecha_emision'] ?? date('d-m-Y'),
                     'rnc_comprador' => $payload['comprador']['rnc'] ?? null,
                     'nombre_comprador' => $payload['comprador']['razon_social'] ?? $payload['comprador']['nombre'] ?? null,
@@ -300,9 +208,6 @@ function main(array $argv): int
             ));
             if (!empty($entry['xml_url'])) {
                 fwrite(STDOUT, "    XML " . $entry['xml_url'] . "\n");
-            }
-            if (!empty($entry['xml_file'])) {
-                fwrite(STDOUT, "    XML " . $entry['xml_file'] . "\n");
             }
         } else {
             $entry['error'] = $resp['body']['error'] ?? ('HTTP ' . $resp['http_status']);
@@ -776,22 +681,18 @@ function normalizeReferenceDate(string $date): string
     return $ts === false ? $date : date('d-m-Y', $ts);
 }
 
-function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds, string $apiSecret = ''): bool
+function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds): bool
 {
-    $integracion = $apiSecret !== '';
-    // App: la consulta cuelga del factura_id. Integracion: no hay factura, se
-    // consulta por e-NCF (+ track_id) contra /api/integracion/estado.
-    $clave = $integracion ? 'e_ncf' : 'factura_id';
     $tracked = [];
     foreach ($refs as $ref) {
-        if (!is_array($ref) || empty($ref[$clave])) {
+        if (!is_array($ref) || empty($ref['factura_id'])) {
             continue;
         }
-        $tracked[(string) $ref[$clave]] = $ref;
+        $tracked[(int) $ref['factura_id']] = $ref;
     }
 
     if ($tracked === []) {
-        fwrite(STDOUT, "==> No hay E31 con {$clave} para consultar antes de notas.\n");
+        fwrite(STDOUT, "==> No hay E31 con factura_id para consultar antes de notas.\n");
         return true;
     }
 
@@ -801,28 +702,25 @@ function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs,
 
     while ($pending !== []) {
         $nextPending = [];
-        foreach ($pending as $id => $ref) {
-            $resp = $integracion
-                ? consultarEstadoIntegracion($apiBase, $apiKey, $apiSecret, (string) $ref['e_ncf'], $ref['track_id'] ?? null)
-                : consultarEstadoFactura($apiBase, $apiKey, (int) $id);
+        foreach ($pending as $facturaId => $ref) {
+            $resp = consultarEstadoFactura($apiBase, $apiKey, (int) $facturaId);
             $estado = extractEstadoDgii($resp);
             $detalle = extractEstadoDetalle($resp);
             fwrite(STDOUT, sprintf(
-                "    E31 %s %s=%s estado=%s%s\n",
+                "    E31 %s factura_id=%d estado=%s%s\n",
                 $ref['e_ncf'] ?? '?',
-                $clave,
-                (string) $id,
+                $facturaId,
                 $estado !== '' ? $estado : '?',
                 $detalle !== '' ? ' :: ' . substr($detalle, 0, 120) : ''
             ));
 
-            if (in_array($estado, ['ACEPTADO', 'ACEPTADO CONDICIONAL', 'ACEPTADO_CONDICIONAL'], true)) {
+            if ($estado === 'ACEPTADO' || $estado === 'ACEPTADO CONDICIONAL') {
                 continue;
             }
             if ($estado === 'RECHAZADO') {
                 return false;
             }
-            $nextPending[$id] = $ref;
+            $nextPending[$facturaId] = $ref;
         }
 
         if ($nextPending === []) {
@@ -838,42 +736,6 @@ function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs,
     }
 
     return true;
-}
-
-/**
- * Estado en DGII para tenants de integracion: no hay factura persistida, se
- * consulta por e-NCF (+ track_id si se tiene) en /api/integracion/estado.
- */
-function consultarEstadoIntegracion(string $apiBase, string $apiKey, string $apiSecret, string $eNcf, ?string $trackId): array
-{
-    $query = ['e_ncf' => $eNcf];
-    if ($trackId !== null && $trackId !== '') {
-        $query['track_id'] = $trackId;
-    }
-    $ch = curl_init($apiBase . '/integracion/estado?' . http_build_query($query));
-    $opts = [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
-        CURLOPT_HTTPHEADER => [
-            'Accept: application/json',
-            'X-API-KEY: ' . $apiKey,
-            'X-API-SECRET: ' . $apiSecret,
-        ],
-    ];
-    if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
-        $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
-    }
-    curl_setopt_array($ch, $opts);
-    $raw = curl_exec($ch);
-    if ($raw === false) {
-        return ['http_status' => 0, 'body' => ['status' => false, 'error' => 'curl: ' . curl_error($ch)]];
-    }
-    $status = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $decoded = json_decode($raw, true);
-    return [
-        'http_status' => $status,
-        'body' => is_array($decoded) ? $decoded : ['status' => false, 'error' => 'no-json: ' . substr($raw, 0, 300)],
-    ];
 }
 
 function consultarEstadoFactura(string $apiBase, string $apiKey, int $facturaId): array
@@ -910,13 +772,12 @@ function extractEstadoDgii(array $resp): string
         return '';
     }
 
-    // Integracion (/integracion/estado) responde plano; app, bajo data.
-    $data = is_array($resp['body']['data'] ?? null) ? $resp['body']['data'] : $resp['body'];
+    $data = $resp['body']['data'] ?? [];
     if (!is_array($data)) {
         return '';
     }
     $consulta = is_array($data['consulta'] ?? null) ? $data['consulta'] : [];
-    return strtoupper(trim((string) ($data['estado_dgii'] ?? $data['estado'] ?? $consulta['estado'] ?? '')));
+    return strtoupper(trim((string) ($data['estado_dgii'] ?? $consulta['estado'] ?? '')));
 }
 
 function extractEstadoDetalle(array $resp): string
@@ -925,7 +786,7 @@ function extractEstadoDetalle(array $resp): string
         return (string) ($resp['body']['error'] ?? ('HTTP ' . ($resp['http_status'] ?? 0)));
     }
 
-    $data = is_array($resp['body']['data'] ?? null) ? $resp['body']['data'] : $resp['body'];
+    $data = $resp['body']['data'] ?? [];
     $consulta = is_array($data['consulta'] ?? null) ? $data['consulta'] : [];
     $mensajes = is_array($consulta['mensajes'] ?? null) ? $consulta['mensajes'] : [];
     if ($mensajes === []) {
@@ -940,77 +801,6 @@ function buildFacturaXmlUrl(string $apiBase, int $facturaId): string
     return rtrim($apiBase, '/') . '/facturas/' . $facturaId . '/xml';
 }
 
-/**
- * Parsea --encf-start. Acepta un numero suelto ("7" = todos los tipos arrancan
- * ahi) o pares por tipo ("E31:7,E32:5"; los tipos no listados arrancan en 1).
- * Devuelve [tipo => proximo numero], p.ej. ['31' => 7, '32' => 5].
- */
-function parseEncfStart(string $spec): array
-{
-    $spec = trim($spec);
-    if ($spec === '') {
-        throw new RuntimeException('vacio');
-    }
-    if (ctype_digit($spec)) {
-        $n = (int) $spec;
-        if ($n < 1) {
-            throw new RuntimeException('el numero inicial debe ser >= 1');
-        }
-        return array_fill_keys(['31', '32', '33', '34', '41', '43', '44', '45', '46', '47'], $n);
-    }
-
-    $seqs = [];
-    foreach (explode(',', $spec) as $pair) {
-        $pair = trim($pair);
-        if ($pair === '') {
-            continue;
-        }
-        [$tipo, $num] = array_pad(explode(':', $pair, 2), 2, '');
-        $tipo = ltrim(trim($tipo), 'eE');
-        if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipo) || !ctype_digit(trim($num)) || (int) $num < 1) {
-            throw new RuntimeException("par invalido '$pair' (esperado E31:7)");
-        }
-        $seqs[$tipo] = (int) $num;
-    }
-    if ($seqs === []) {
-        throw new RuntimeException('no se entendio ningun par tipo:numero');
-    }
-    return $seqs;
-}
-
-/**
- * Toma el proximo e-NCF del tipo y avanza el contador. Formato DGII:
- * 'E' + tipo (2) + secuencia (10 digitos con ceros a la izquierda).
- */
-function asignarENcf(string $tipoEcf, array &$secuencias): string
-{
-    $n = $secuencias[$tipoEcf] ?? 1;
-    $secuencias[$tipoEcf] = $n + 1;
-    return 'E' . $tipoEcf . str_pad((string) $n, 10, '0', STR_PAD_LEFT);
-}
-
-/**
- * Guarda el XML firmado que devuelve /api/integracion/ecf: ese tenant no tiene
- * DB ni endpoint para volver a bajarlo. Devuelve la ruta escrita o null.
- */
-function guardarXmlFirmado(?string $dir, string $eNcf, ?string $xml): ?string
-{
-    if ($dir === null || $xml === null || $xml === '') {
-        return null;
-    }
-    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
-        fwrite(STDOUT, "    ! No se pudo crear el directorio de XML: $dir\n");
-        return null;
-    }
-    $safe = preg_replace('/[^A-Za-z0-9_-]/', '_', $eNcf !== '' ? $eNcf : ('ecf_' . date('His')));
-    $path = rtrim($dir, "/\\") . DIRECTORY_SEPARATOR . $safe . '.xml';
-    if (file_put_contents($path, $xml) === false) {
-        fwrite(STDOUT, "    ! No se pudo escribir el XML: $path\n");
-        return null;
-    }
-    return $path;
-}
-
 function parseArgs(array $argv): array
 {
     $opts = [];
@@ -1023,26 +813,21 @@ function parseArgs(array $argv): array
     return $opts;
 }
 
-function postFactura(string $apiBase, string $apiKey, array $payload, string $apiSecret = ''): array
+function postFactura(string $apiBase, string $apiKey, array $payload): array
 {
-    $integracion = $apiSecret !== '';
-    $url = $apiBase . ($integracion ? '/integracion/ecf' : '/facturas');
+    $url = $apiBase . '/facturas';
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
-    $headers = [
-        'Content-Type: application/json',
-        'Accept: application/json',
-        'X-API-KEY: ' . $apiKey,
-    ];
-    if ($integracion) {
-        $headers[] = 'X-API-SECRET: ' . $apiSecret;
-    }
     $ch = curl_init($url);
     $opts = [
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
-        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-API-KEY: ' . $apiKey,
+        ],
     ];
     if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
         $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;

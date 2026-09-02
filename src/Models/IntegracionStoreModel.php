@@ -233,22 +233,4 @@ class IntegracionStoreModel
     {
         return MasterDatabase::getInstance()->saveIntegrationEcf($data);
     }
-
-    /**
-     * Respaldo de un e-CF emitido, por e-NCF. Sirve para resolver el track_id
-     * cuando el cliente consulta el estado sabiendo solo el e-NCF. Sin el
-     * xml_firmado: no hace falta aqui y es una columna MEDIUMTEXT.
-     * El mas reciente primero (un reenvio deja mas de una fila).
-     */
-    public function getEmitidoByENCF(int $tenantId, string $rncEmisor, string $eNcf): ?array
-    {
-        $stmt = $this->conexion->prepare(
-            'SELECT id, tenant_id, rnc_emisor, tipo_ecf, e_ncf, rnc_comprador, monto_total, track_id, created_at
-               FROM ecf_integracion_backup
-              WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e
-              ORDER BY id DESC LIMIT 1'
-        );
-        $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf]);
-        return $stmt->fetch() ?: null;
-    }
 }

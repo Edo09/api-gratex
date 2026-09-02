@@ -61,7 +61,6 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [integrations/dgii-ecf.md](integrations/dgii-ecf.md) | Integración DGII: flujos entrante/saliente, ARECF, auth, bugs resueltos |
 | [integrations/multi-tenant-onboarding.md](integrations/multi-tenant-onboarding.md) | Alta de tenants (app/integración), demo, certificación, rutas públicas admin |
 | [integrations/alta-tenant-runbook.md](integrations/alta-tenant-runbook.md) | Runbook paso a paso para dar de alta un tenant app: orden de ejecución, verificaciones y troubleshooting |
-| [integrations/cert-integracion-runbook.md](integrations/cert-integracion-runbook.md) | Runbook paso a paso para certificar un tenant integración: alta, fases por API con los runners, RI y promoción |
 
 ### Otros archivos de `docs/`
 | Archivo | Para qué |

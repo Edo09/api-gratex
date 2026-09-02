@@ -83,49 +83,9 @@ Base URL: `https://gratex.net/api/`
 | `/api/integracion/aprobacion-comercial` | POST | Aceptar o rechazar una factura que le emitieron |
 | `/api/integracion/recibidos` | GET | Facturas que otros le emitieron a usted |
 | `/api/integracion/aprobaciones` | GET | Veredictos de sus clientes sobre las facturas que usted emitió |
-| `/api/integracion/empresas` | GET | Empresas que cubre su credencial |
 
 Toda respuesta tiene la forma `{"status": true, "data": {...}}` o
 `{"status": false, "error": "mensaje"}`.
-
-### Si administra varias empresas
-
-**Un solo par de credenciales cubre todas sus empresas.** No necesita un juego por RNC: la
-empresa se elige en cada llamada por su RNC.
-
-| Llamada | Cómo elige la empresa |
-|---|---|
-| Emitir | `emisor.rnc` del cuerpo |
-| Aprobar/rechazar | `rnc_comprador` del cuerpo (opcional; sin él, la primera empresa) |
-| Bandejas | `?rnc=<RNC>` en la URL (opcional; sin él, la primera empresa) |
-
-Para saber qué empresas cubre su credencial:
-
-```
-GET /api/integracion/empresas
-```
-
-```json
-{
-  "status": true,
-  "recurso": "empresas",
-  "data": [
-    { "id": 7, "nombre": "Empresa 1 SRL", "rnc": "131111111", "tipo": "integracion", "ambiente": "ecf" },
-    { "id": 8, "nombre": "Empresa 2 SRL", "rnc": "131111112", "tipo": "integracion", "ambiente": "certecf" }
-  ]
-}
-```
-
-Note el campo `ambiente`: **cada empresa avanza por su cuenta**. Puede tener una en
-producción y otra todavía en certificación, con la misma credencial y sin tocar su código —
-nosotros firmamos cada comprobante con el certificado de la empresa que corresponda y lo
-mandamos al ambiente en que esa empresa esté.
-
-Un RNC que no sea de su grupo devuelve `422`; no hay forma de emitir por una empresa ajena.
-
-> **Lo que sí necesita una vez por empresa:** su propio certificado digital `.p12` y su
-> propia certificación ante la DGII. Eso lo exige la DGII a cada emisor por separado y no
-> se puede agrupar. Lo que le ahorramos es manejar N credenciales en su código.
 
 ---
 
@@ -138,9 +98,8 @@ Un RNC que no sea de su grupo devuelve `422`; no hay forma de emitir por una emp
    Es su responsabilidad no repetir ni saltar números.
 2. **El objeto `emisor` va completo** en cada llamada, con al menos `rnc`, `razon_social`
    y `direccion`.
-3. **`emisor.rnc` debe ser el RNC de su empresa** — el mismo con el que se registró, o el de
-   otra de **sus** empresas si administra varias (ver sección 3). No se puede emitir por
-   cuenta de un tercero.
+3. **`emisor.rnc` debe ser el RNC de su empresa** — el mismo con el que se registró. No se
+   puede emitir por cuenta de un tercero.
 
 El **ambiente** (certificación o producción) lo determinamos nosotros según el estado de su
 cuenta. No lo envíe: si lo manda, se ignora.
@@ -215,32 +174,6 @@ imprimir la Representación Impresa (sección 7).
 ```bash
 curl -X POST https://gratex.net/api/integracion/ecf -H "X-API-KEY: $API_KEY" -H "X-API-SECRET: $API_SECRET" -H "Content-Type: application/json" -d @factura.json
 ```
-
-### Consultar el estado después — `GET /api/integracion/estado`
-
-El `estado` de la respuesta es el acuse del momento del envío. La DGII resuelve algunos
-comprobantes de forma asíncrona: si le devolvimos `EN_PROCESO`, el estado definitivo se
-consulta después.
-
-```bash
-curl "https://gratex.net/api/integracion/estado?e_ncf=E310000000001&track_id=$TRACK_ID" -H "X-API-KEY: $API_KEY" -H "X-API-SECRET: $API_SECRET"
-```
-
-| Parámetro | Requerido | Notas |
-|---|---|---|
-| `e_ncf` | Sí | |
-| `track_id` | No | Si lo omite lo buscamos en nuestro respaldo; mándelo si lo tiene, es más directo |
-| `codigo_seguridad` | Solo E32 <250k | Esos comprobantes no generan `track_id` |
-| `rnc` | No | Si su credencial cubre varias empresas |
-
-Respuesta: `{status, recurso:"estado", e_ncf, track_id, flujo, ambiente, estado, consulta}`.
-`estado` es uno de `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO`,
-`NO_ENCONTRADO` (con prefijo `RFCE_` cuando consulta por código de seguridad); el detalle
-completo de la DGII va en `consulta`.
-
-> No reemita un comprobante rechazado con el mismo `e_ncf` sin revisar antes el mensaje de
-> `consulta`: si el rechazo no consumió la secuencia, el mismo `e_ncf` sirve; si la consumió,
-> tiene que usar el siguiente.
 
 ---
 
@@ -405,9 +338,6 @@ como tal, no lo asuma aprobado.
 
 `GET /api/integracion/aprobaciones` funciona igual, pero lista los veredictos que **sus
 clientes** enviaron sobre las facturas que **usted** emitió.
-
-Si administra varias empresas, agregue `?rnc=<RNC>` para pedir la bandeja de una en
-concreto. La respuesta siempre dice de cuál es, en los campos `rnc` y `empresa`.
 
 ### Opción B — Webhook
 

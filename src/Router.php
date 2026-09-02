@@ -198,20 +198,18 @@ switch ($route) {
         //   /api/integracion/aprobacion-comercial -> aprobar/rechazar e-CF recibido (ACECF)
         //   /api/integracion/recibidos            -> listar e-CF recibidos
         //   /api/integracion/aprobaciones         -> listar aprobaciones recibidas
-        //   /api/integracion/empresas             -> empresas que cubre la credencial
-        //   /api/integracion/estado               -> estado en DGII de un e-CF emitido
         $sub = strtolower($route_segments[1] ?? '');
         if ($sub === 'ecf') {
             require_once 'src/Controllers/integracionEcfController.php';
         } elseif ($sub === 'aprobacion-comercial' || $sub === 'aprobacioncomercial') {
             require_once 'src/Controllers/integracionAprobacionController.php';
-        } elseif ($sub === 'recibidos' || $sub === 'aprobaciones' || $sub === 'empresas' || $sub === 'estado') {
+        } elseif ($sub === 'recibidos' || $sub === 'aprobaciones') {
             require_once 'src/Controllers/integracionConsultaController.php';
         } else {
             http_response_code(404);
             echo json_encode([
                 'status' => false,
-                'error' => 'Sub-ruta no encontrada bajo /api/integracion. Use ecf, aprobacion-comercial, recibidos, aprobaciones, empresas o estado.',
+                'error' => 'Sub-ruta no encontrada bajo /api/integracion. Use ecf, aprobacion-comercial, recibidos o aprobaciones.',
             ]);
         }
         break;

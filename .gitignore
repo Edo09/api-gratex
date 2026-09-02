@@ -4,5 +4,3 @@ certificado_dgii*
 certificados/
 *.p12
 *.pfx
-# XML firmados de tenants de integracion (comprobantes fiscales de clientes)
-tools/xml_integracion/

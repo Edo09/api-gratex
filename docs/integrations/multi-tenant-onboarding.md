@@ -146,34 +146,6 @@ No se crea DB ni usuario: el handler registra el tenant y entrega
 **`api_key` + `api_secret`** (el secret se muestra UNA sola vez — el master
 solo guarda su hash sha256). Entregarlos al cliente por canal seguro.
 
-#### Cliente con varias empresas (una sola credencial)
-
-Un cliente que administra N razones sociales en su propio ERP no debe llevar N pares de
-credenciales. Se dan de alta como tenants agrupados (`grupo_id`) y una sola credencial
-sirve para todos; el RNC del payload elige la empresa. Requiere la migración master
-**008**. Detalle del contrato y del límite de seguridad en
-[../api/integracion.md](../api/integracion.md#multi-empresa--una-credencial-varios-rnc).
-
-```powershell
-# 1a empresa: inicia el grupo. Su tenant_id pasa a ser el grupo_id.
-php tools/create_tenant.php --tipo=integracion --grupo=self `
-  --nombre="Empresa 1 SRL" --rnc=131111111 --ambiente=certecf `
-  --cert-path=certs/e1.p12 --cert-pass=...
-# -> "Grupo #7 iniciado". Esa es LA credencial que se entrega al cliente.
-
-# 2a..Na: se unen al grupo 7. Cada una con SU .p12; comparten credencial.
-php tools/create_tenant.php --tipo=integracion --grupo=7 `
-  --nombre="Empresa 2 SRL" --rnc=131111112 --ambiente=certecf `
-  --cert-path=certs/e2.p12 --cert-pass=...
-```
-
-Cada empresa sigue necesitando **su propio `.p12` y su propia certificación DGII** — el
-grupo agrupa el acceso, no la identidad fiscal. Cada una avanza a `ecf` por separado, y con
-la misma credencial pueden convivir en ambientes distintos.
-
-> Agrupar SOLO empresas del mismo cliente: comparten credencial, así que un secret
-> filtrado las expone a todas.
-
 ### 2. Cómo consume el cliente
 Headers en todo request: `X-API-KEY: <api_key>` + `X-API-SECRET: <api_secret>`.
 
@@ -183,7 +155,6 @@ Headers en todo request: `X-API-KEY: <api_key>` + `X-API-SECRET: <api_secret>`.
 | `POST /api/integracion/aprobacion-comercial` | Aprobar/rechazar (ACECF) un e-CF que le emitieron |
 | `GET /api/integracion/recibidos` | Polling de e-CF que le facturaron (filtrado por SU ambiente) |
 | `GET /api/integracion/aprobaciones` | Polling de aprobaciones recibidas sobre lo que emitió |
-| `GET /api/integracion/estado` | Estado en DGII de un e-CF que emitió (`?e_ncf=` + `track_id`, o `codigo_seguridad` para RFCE). No persiste nada |
 
 Si configuró webhook: los documentos entrantes también se notifican por POST
 firmado HMAC-SHA256 (header de firma con el `webhook_secret`), con reintentos.
@@ -200,67 +171,10 @@ resuelve el tenant por RNCComprador → guarda en `master.ecf_recibidos`
 tenant → webhook/polling.
 
 ### 4. Certificación y promoción
-El tenant arranca en `certecf`. Los pasos de portal (solicitar la certificación, pedir los
-rangos de e-NCF, registrar las URLs compartidas, subir Representaciones Impresas y XML
-íntegros) son del cliente. Las fases que van por API las puede correr **él desde su
-sistema**, o **nosotros con los runners** — misma API, misma credencial.
-
-Al aprobar DGII se promueve: `UPDATE tenants SET ambiente='ecf' WHERE id=<id>;`
-Desde ahí sus listados (`/recibidos`, `/aprobaciones`) muestran solo el ambiente actual.
-
-> Para ejecutarlo paso a paso (orden, verificaciones y errores comunes) usa el
-> [runbook de certificación de integración](cert-integracion-runbook.md). Lo de abajo es la
-> referencia de qué hace cada pieza.
-
-#### Correr las fases nosotros (runners)
-
-Los runners de `tools/` aceptan `--api-secret`: con eso apuntan a `/api/integracion/*` en
-vez de a los endpoints de app (`/facturas` necesita DB, clientes y usuario). El wizard
-`public/cert.html` **no** sirve para integración — pide token de sesión y ese tenant no
-tiene login.
-
-**Antes de correr nada:** `SELECT ambiente FROM tenants WHERE id=<id>;` tiene que decir
-`certecf`. En integración el servidor fuerza el ambiente desde ahí y `--ambiente` no lo
-cambia (los runners lo rechazan para no dar falsa seguridad); un tenant ya en `ecf`
-emitiría el set como facturas fiscales reales.
-
-```powershell
-# Fase 2 — set de pruebas (el e-NCF sale del xlsx de DGII)
-php tools/send_fase2.php <set.xlsx> --api=https://gratex.net/api `
-  --api-key=<key> --api-secret=<secret>
-
-# Estados reales en DGII de esa corrida (los EN_PROCESO se resuelven despues)
-php tools/check_fase2_status.php --api=https://gratex.net/api `
-  --api-key=<key> --api-secret=<secret> --input=tools/fase2_results.json
-
-# Fase 3 — aprobaciones comerciales (hoja ACEECF_Generadas)
-php tools/send_fase3.php <set.xlsx> --api=https://gratex.net/api `
-  --api-key=<key> --api-secret=<secret>
-
-# Fase 4 — emisión de los 10 tipos. Aquí el e-NCF lo asigna el runner
-# (--encf-start = primer número libre por tipo) y el emisor va en cada payload.
-php tools/send_fase4_simulation.php --api=https://gratex.net/api `
-  --api-key=<key> --api-secret=<secret> --encf-start=1 `
-  --emisor-rnc=131111111 --emisor-razon-social="CLIENTE A SRL" `
-  --emisor-direccion="Av. Winston Churchill #45"
-```
-
-Diferencias contra una corrida de tipo app:
-
-| | app | integración |
-|---|---|---|
-| e-NCF | lo dispensa el sistema (`ncf_sequences`) | lo pone el runner: del xlsx (fase 2/3) o `--encf-start` (fase 4) |
-| Emisor | de `emisor_config` | en cada payload (`--emisor-*` en fase 4) |
-| XML firmado | `GET /facturas/{id}/xml` | solo en la respuesta → se guarda en `--xml-dir` (default `tools/xml_integracion/`, en `.gitignore`) |
-| Estado DGII | `GET /facturas/{id}/estado` | `GET /integracion/estado?e_ncf=&track_id=` (RFCE: `&codigo_seguridad=`). `check_fase2_status.php` y `--nota-wait-accepted` funcionan igual pasando `--api-secret` |
-
-Guardar los XML no es opcional: para los **E32 <250k** ese es el XML íntegro que hay que
-subir a mano al portal, y sin DB no hay de dónde volver a bajarlo (el respaldo de
-`master.ecf_integracion_backup` es del lado servidor).
-
-> Si el set se corre desde nuestro lado, las secuencias que consuma el runner son
-> secuencias reales del cliente. Acordar con él desde qué número arrancar y avisarle
-> dónde quedó, o el ERP va a repetir e-NCF y DGII los rechaza.
+El cliente certifica su flujo contra DGII en `certecf` (mandando sus e-CF con
+`ambiente` de prueba), registra las URLs compartidas en su directorio, y al
+aprobar se promueve: `UPDATE tenants SET ambiente='ecf' WHERE id=<id>;`
+Sus listados (`/recibidos`, `/aprobaciones`) muestran solo el ambiente actual.
 
 ---
 

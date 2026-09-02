@@ -10,21 +10,13 @@
  *
  *   https://ecf.dgii.gov.do/CerteCF/AprobacionComercial/api/AprobacionComercial
  *
- * Uso (tenant tipo app):
+ * Uso:
  *   php tools/send_fase3.php samples/131256432-22052026125156.xlsx \
  *       --api=https://gratex.net/api \
  *       --api-key=7a775f6fb0d5ccab15cf149d2c60f15c \
  *       [--output=tools/fase3_results.json] \
  *       [--case=E310000000001] \
  *       [--dry-run]
- *
- * Uso (tenant tipo INTEGRACION): con --api-secret el runner apunta a
- * POST /api/integracion/aprobacion-comercial y manda X-API-KEY + X-API-SECRET.
- * El `rnc_comprador` del xlsx se sigue enviando: el servidor lo usa solo para
- * elegir la empresa del grupo que aprueba, y luego lo fija al tenant activo.
- *   php tools/send_fase3.php samples/131111111-set.xlsx \
- *       --api=https://gratex.net/api \
- *       --api-key=<api_key> --api-secret=<api_secret>
  */
 
 require_once __DIR__ . '/Fase2XlsxReader.php';
@@ -51,8 +43,6 @@ function main(array $argv): int
     }
     $apiBase = rtrim($opts['api'] ?? DEFAULT_API, '/');
     $apiKey = $opts['api-key'] ?? '';
-    // --api-secret => tenant tipo integracion (otro endpoint, otra auth).
-    $apiSecret = (string) ($opts['api-secret'] ?? '');
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
     $caseFilter = $opts['case'] ?? '';
     $dryRun = isset($opts['dry-run']);
@@ -60,9 +50,6 @@ function main(array $argv): int
     if (!$dryRun && $apiKey === '') {
         fwrite(STDERR, "ERROR: --api-key requerido (o usa --dry-run).\n");
         return 2;
-    }
-    if ($apiSecret !== '') {
-        fwrite(STDOUT, "==> Modo INTEGRACION: POST {$apiBase}/integracion/aprobacion-comercial\n");
     }
 
     fwrite(STDOUT, "==> Leyendo xlsx: {$opts['xlsx']}\n");
@@ -96,7 +83,7 @@ function main(array $argv): int
             continue;
         }
 
-        $response = postAprobacion($apiBase, $apiKey, $payload, $apiSecret);
+        $response = postAprobacion($apiBase, $apiKey, $payload);
         $entry = [
             'e_ncf' => $eNcf,
             'rnc_emisor' => $payload['rnc_emisor'] ?? null,
@@ -164,20 +151,10 @@ function mapRowToPayload(array $row): array
     ];
 }
 
-function postAprobacion(string $apiBase, string $apiKey, array $payload, string $apiSecret = ''): array
+function postAprobacion(string $apiBase, string $apiKey, array $payload): array
 {
-    $integracion = $apiSecret !== '';
-    $url = $apiBase . ($integracion ? '/integracion/aprobacion-comercial' : '/aprobaciones-comerciales');
+    $url = $apiBase . '/aprobaciones-comerciales';
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
-
-    $headers = [
-        'Content-Type: application/json',
-        'Accept: application/json',
-        'X-API-KEY: ' . $apiKey,
-    ];
-    if ($integracion) {
-        $headers[] = 'X-API-SECRET: ' . $apiSecret;
-    }
 
     $ch = curl_init($url);
     $opts = [
@@ -185,7 +162,11 @@ function postAprobacion(string $apiBase, string $apiKey, array $payload, string 
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
-        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'Accept: application/json',
+            'X-API-KEY: ' . $apiKey,
+        ],
     ];
     if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
         $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
