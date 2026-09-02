@@ -27,6 +27,13 @@ Parámetros comunes de todos los runners:
 - `--client-id`, `--user-id` — emisor/usuario
 - `--dry-run` — imprime payloads sin enviar
 
+**Tenants tipo integración:** los runners de `tools/` (no estas copias) aceptan
+`--api-secret=<secret>` y con eso apuntan a `/api/integracion/*` en vez de a
+`/facturas`. Cambian dos cosas: el e-NCF lo pone el runner y el emisor va en cada
+payload. La consulta de estado va por `GET /api/integracion/estado` (mismo
+`check_fase2_status.php`, con `--api-secret`). Detalle y comandos:
+[../docs/integrations/multi-tenant-onboarding.md](../docs/integrations/multi-tenant-onboarding.md#correr-las-fases-nosotros-runners).
+
 Requiere PHP CLI con extensiones: `zip`, `curl`, `openssl`, `mbstring`, `fileinfo`.
 
 ---

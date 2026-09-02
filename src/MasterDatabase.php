@@ -102,6 +102,38 @@ class MasterDatabase
         return $row ?: null;
     }
 
+    /**
+     * Resolve a tenant by RNC *within a group* (multi-empresa credential).
+     *
+     * Used by TenantResolver::switchToSibling: a credential belonging to a
+     * grouped tenant may act for its siblings. The `grupo_id = :g` predicate is
+     * the security boundary — with a non-null :g it never matches a row whose
+     * grupo_id is NULL, so an ungrouped tenant can never be reached this way.
+     */
+    public function getTenantByRncInGroup(string $rnc, int $grupoId): ?array
+    {
+        $stmt = $this->conexion->prepare(
+            "SELECT * FROM tenants WHERE rnc = :r AND grupo_id = :g AND activo = 1 LIMIT 1"
+        );
+        $stmt->execute([':r' => $rnc, ':g' => $grupoId]);
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
+
+    /**
+     * All active tenants of a group (for listing which companies a credential
+     * can act for). Returns only the fields safe to echo back to the client.
+     */
+    public function getTenantsInGroup(int $grupoId): array
+    {
+        $stmt = $this->conexion->prepare(
+            "SELECT id, nombre, rnc, tipo, ambiente FROM tenants
+             WHERE grupo_id = :g AND activo = 1 ORDER BY id"
+        );
+        $stmt->execute([':g' => $grupoId]);
+        return $stmt->fetchAll() ?: [];
+    }
+
     public function getTenantById(int $id): ?array
     {
         $stmt = $this->conexion->prepare(

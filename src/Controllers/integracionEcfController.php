@@ -9,6 +9,11 @@
  *
  * Firma con el cert del tenant, envia a DGII y guarda respaldo en master.
  * No persiste facturas/clientes (el cliente eso lo maneja en su sistema).
+ *
+ * Multi-empresa: si los tenants del cliente comparten `grupo_id`, una sola
+ * credencial emite por todos — `emisor.rnc` elige la empresa y de ahi salen el
+ * certificado, el ambiente y el tenant_id del respaldo. Ver
+ * TenantResolver::switchToSibling.
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -59,10 +64,23 @@ function handleEmitirIntegracion(): void
         respondIntegracionEcf(false, 'Falta emisor.rnc en el JSON.', 422);
         return;
     }
-    // El emisor del JSON debe ser el tenant autenticado (no emitir por otro RNC).
+    // El emisor del JSON debe ser el tenant autenticado, o una empresa HERMANA
+    // (mismo grupo_id) cuando el cliente administra varias empresas con una sola
+    // credencial. switchToSibling deniega si no hay grupo o el RNC no pertenece
+    // a el; sin grupo el comportamiento es identico al anterior.
     if ((string) $emisor['rnc'] !== (string) $tenant['rnc']) {
-        respondIntegracionEcf(false, 'emisor.rnc no coincide con el RNC del tenant autenticado.', 422);
-        return;
+        if (!TenantResolver::switchToSibling((string) $emisor['rnc'])) {
+            respondIntegracionEcf(
+                false,
+                'emisor.rnc (' . $emisor['rnc'] . ') no corresponde a la credencial usada'
+                . ' ni a una empresa de su grupo.',
+                422
+            );
+            return;
+        }
+        // El tenant activo cambio: cert, ambiente y tenant_id del respaldo deben
+        // salir de la empresa que realmente emite.
+        $tenant = TenantResolver::current();
     }
     if (empty($input['e_ncf'])) {
         respondIntegracionEcf(false, 'Falta e_ncf en el JSON (el cliente asigna la secuencia).', 422);
