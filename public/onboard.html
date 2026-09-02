@@ -85,6 +85,16 @@
 
     <!-- Integración -->
     <section id="secIntegracion">
+      <h2>Grupo de empresas (opcional)</h2>
+      <label>Una sola credencial para varias empresas del mismo cliente</label>
+      <input name="grupo" placeholder="self  ·  o el tenant_id del grupo (ej. 7)">
+      <div class="hint">
+        Vacío = empresa aislada (lo normal). <b>self</b> = es la primera empresa del cliente e inicia
+        el grupo; anota el tenant_id que sale y úsalo para las demás. Un <b>número</b> = se une a ese grupo
+        y comparte su credencial. Cada empresa conserva su propio .p12 y su propia certificación DGII.
+        <b>Solo empresas del mismo cliente</b>: comparten credencial.
+      </div>
+
       <h2>Webhook (opcional)</h2>
       <label>URL para documentos entrantes</label>
       <input name="webhook-url" placeholder="https://cliente.com/webhook">

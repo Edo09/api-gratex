@@ -7,17 +7,30 @@
  * de gratex.net. Los E32 < 250,000 se enrutan automaticamente al servicio
  * de RecepcionFC (resumen) por el ECFEmissionService.
  *
- * Uso:
+ * Uso (tenant tipo app):
  *   php tools/send_fase2.php samples/131256432-05052026110320.xlsx \
  *       --api=https://gratex.net/api \
  *       --api-key=7a775f6fb0d5ccab15cf149d2c60f15c \
  *       --client-id=1
+ *
+ * Uso (tenant tipo INTEGRACION): basta con pasar --api-secret. El runner cambia
+ * a POST /api/integracion/ecf, manda X-API-KEY + X-API-SECRET y omite
+ * client_id/user_id (ese tenant no tiene DB ni clientes). El e-NCF sale del
+ * xlsx, que es justo lo que ese modo exige (el cliente asigna su secuencia):
+ *   php tools/send_fase2.php samples/131111111-set.xlsx \
+ *       --api=https://gratex.net/api \
+ *       --api-key=<api_key> --api-secret=<api_secret>
  *
  * Modos:
  *   --dry-run               No envia nada; imprime los payloads que se mandarian
  *   --filter=E31,E32        Solo procesa los tipos indicados
  *   --case=E310000000005    Solo procesa este caso
  *   --output=results.json   Donde guardar el reporte (default: tools/fase2_results.json)
+ *   --xml-dir=DIR           Solo integracion: guarda el XML firmado de cada caso
+ *                           (default tools/xml_integracion). Sin DB propia esa
+ *                           respuesta es la unica copia a mano del comprobante,
+ *                           y para los E32 <250k es el XML integro que hay que
+ *                           subir al portal DGII.
  *
  * Salida:
  *   - JSON con resultado por caso (caso, e_ncf, http_status, track_id, estado, error)
@@ -29,6 +42,7 @@ require_once __DIR__ . '/Fase2XlsxReader.php';
 const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_CLIENT_ID = 1;
 const DEFAULT_OUTPUT = __DIR__ . '/fase2_results.json';
+const DEFAULT_XML_DIR = __DIR__ . '/xml_integracion';
 const DEFAULT_TIMEOUT_SECONDS = 60;
 
 function main(array $argv): int
@@ -50,9 +64,14 @@ function main(array $argv): int
 
     $apiBase = rtrim($opts['api'] ?? DEFAULT_API, '/');
     $apiKey = $opts['api-key'] ?? '';
+    // Con --api-secret el destino es el tenant de integracion: otro endpoint,
+    // otra auth y sin client_id/user_id (no hay DB donde vivan).
+    $apiSecret = (string) ($opts['api-secret'] ?? '');
+    $integracion = $apiSecret !== '';
     $clientId = (int) ($opts['client-id'] ?? DEFAULT_CLIENT_ID);
     $userId = isset($opts['user-id']) ? (int) $opts['user-id'] : null;
     $output = $opts['output'] ?? DEFAULT_OUTPUT;
+    $xmlDir = $integracion ? ($opts['xml-dir'] ?? DEFAULT_XML_DIR) : null;
     // El xlsx trae TipoeCF como '32'. Aceptamos tambien 'E32' porque es como se
     // nombra el tipo en todos lados; sin esto el filtro no matchea y la corrida
     // sale con 0 casos sin decir por que.
@@ -70,6 +89,17 @@ function main(array $argv): int
     if (!$dryRun && $apiKey === '') {
         fwrite(STDERR, "ERROR: --api-key es requerido (o usa --dry-run para inspeccionar payloads).\n");
         return 2;
+    }
+    // En integracion el servidor FUERZA el ambiente desde tenants.ambiente y
+    // ningun campo del body lo cambia. Aceptar --ambiente aqui daria una falsa
+    // sensacion de seguridad: el set saldria en produccion sin avisar.
+    if ($integracion && $ambiente !== null && $ambiente !== '') {
+        fwrite(STDERR, "ERROR: --ambiente no aplica en modo integracion (el servidor lo toma de tenants.ambiente).\n"
+            . "   Verifica antes: SELECT ambiente FROM tenants WHERE id=<id>;  -> tiene que decir 'certecf'.\n");
+        return 2;
+    }
+    if ($integracion) {
+        fwrite(STDOUT, "==> Modo INTEGRACION: POST {$apiBase}/integracion/ecf (e-NCF del xlsx, ambiente del tenant)\n");
     }
 
     fwrite(STDOUT, "==> Leyendo xlsx: {$opts['xlsx']}\n");
@@ -112,7 +142,7 @@ function main(array $argv): int
 
         try {
             $rfceRow = $rfceMap[$row['ENCF'] ?? ''] ?? null;
-            $payload = mapRowToPayload($row, $clientId, $userId, $rfceRow);
+            $payload = mapRowToPayload($row, $clientId, $userId, $rfceRow, $integracion);
             if ($ambiente !== null && $ambiente !== '') {
                 $payload['ambiente'] = $ambiente;
             }
@@ -141,7 +171,7 @@ function main(array $argv): int
             continue;
         }
 
-        $response = postFactura($apiBase, $apiKey, $payload);
+        $response = postFactura($apiBase, $apiKey, $payload, $apiSecret);
         $entry = [
             'caso' => $caso,
             'tipo_ecf' => $tipo,
@@ -153,6 +183,13 @@ function main(array $argv): int
 
         if ($entry['ok']) {
             $data = $response['body']['data'] ?? [];
+            // Integracion: el XML firmado solo viene en esta respuesta. Se guarda
+            // aparte y se saca del reporte, que si no queda inmanejable.
+            if ($integracion) {
+                $entry['xml_file'] = guardarXmlFirmado($xmlDir, $encf, $data['xml_firmado'] ?? null);
+                unset($response['body']['data']['xml_firmado']);
+                $entry['response'] = $response['body'];
+            }
             $entry['factura_id'] = $data['factura_id'] ?? null;
             $entry['track_id'] = $data['track_id'] ?? null;
             $entry['rfce_track_id'] = $data['rfce_track_id'] ?? null;
@@ -165,6 +202,9 @@ function main(array $argv): int
                 $entry['rfce_track_id'] ?? '-',
                 $entry['flujo'] ?? '-'
             ));
+            if (!empty($entry['xml_file'])) {
+                fwrite(STDOUT, "    XML " . $entry['xml_file'] . "\n");
+            }
         } else {
             $entry['error'] = $response['body']['error'] ?? ('HTTP ' . $response['http_status']);
             fwrite(STDOUT, "    FAIL " . $entry['error'] . "\n");
@@ -201,12 +241,18 @@ function parseArgs(array $argv): array
  * Toma la mayoria de campos del comprador y emisor del xlsx (DGII te dice
  * que valores usar). El client_id solo se usa para satisfacer la API actual
  * que requiere un cliente existente; los datos reales vienen del row.
+ *
+ * En modo integracion (POST /api/integracion/ecf) no hay clientes ni usuarios
+ * que referenciar, y el e-NCF es obligatorio en el body.
  */
-function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRow = null): array
+function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRow = null, bool $integracion = false): array
 {
     $tipoEcf = (string) ($row['TipoeCF'] ?? '');
     if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipoEcf)) {
         throw new RuntimeException('TipoeCF invalido: ' . $tipoEcf);
+    }
+    if ($integracion && empty($row['ENCF'])) {
+        throw new RuntimeException('La fila no trae ENCF y en integracion el e-NCF lo asigna el cliente (el servidor no dispensa).');
     }
 
     $items = extractItems($row);
@@ -276,6 +322,9 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
     ];
     if ($userId !== null) {
         $payload['user_id'] = $userId;
+    }
+    if ($integracion) {
+        unset($payload['client_id'], $payload['user_id']);
     }
 
     if (!empty($row['NCFModificado'])) {
@@ -473,10 +522,44 @@ function intIfWhole($value)
     return (floor($f) == $f) ? (int) $f : $f;
 }
 
-function postFactura(string $apiBase, string $apiKey, array $payload): array
+/**
+ * Guarda el XML firmado que devuelve /api/integracion/ecf. Ese tenant no tiene
+ * DB ni endpoint para volver a bajarlo, asi que si no se guarda aqui la unica
+ * copia queda en master.ecf_integracion_backup (lado servidor).
+ * Devuelve la ruta escrita, o null si no vino XML / no se pudo escribir.
+ */
+function guardarXmlFirmado(?string $dir, string $eNcf, ?string $xml): ?string
 {
-    $url = $apiBase . '/facturas';
+    if ($dir === null || $xml === null || $xml === '') {
+        return null;
+    }
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+        fwrite(STDOUT, "    ! No se pudo crear el directorio de XML: $dir\n");
+        return null;
+    }
+    $safe = preg_replace('/[^A-Za-z0-9_-]/', '_', $eNcf !== '' ? $eNcf : ('ecf_' . date('His')));
+    $path = rtrim($dir, "/\\") . DIRECTORY_SEPARATOR . $safe . '.xml';
+    if (file_put_contents($path, $xml) === false) {
+        fwrite(STDOUT, "    ! No se pudo escribir el XML: $path\n");
+        return null;
+    }
+    return $path;
+}
+
+function postFactura(string $apiBase, string $apiKey, array $payload, string $apiSecret = ''): array
+{
+    $integracion = $apiSecret !== '';
+    $url = $apiBase . ($integracion ? '/integracion/ecf' : '/facturas');
     $body = json_encode($payload, JSON_UNESCAPED_UNICODE);
+
+    $headers = [
+        'Content-Type: application/json',
+        'Accept: application/json',
+        'X-API-KEY: ' . $apiKey,
+    ];
+    if ($integracion) {
+        $headers[] = 'X-API-SECRET: ' . $apiSecret;
+    }
 
     $ch = curl_init($url);
     $opts = [
@@ -484,11 +567,7 @@ function postFactura(string $apiBase, string $apiKey, array $payload): array
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
-        CURLOPT_HTTPHEADER => [
-            'Content-Type: application/json',
-            'Accept: application/json',
-            'X-API-KEY: ' . $apiKey,
-        ],
+        CURLOPT_HTTPHEADER => $headers,
     ];
     if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
         $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;

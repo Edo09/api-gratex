@@ -403,11 +403,20 @@ class ECFEmissionService
         ));
     }
 
-    public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null): array
+    /**
+     * $rncEmisor permite consultar sin `emisor_config`: los tenants tipo
+     * integracion no tienen DB propia, asi que el RNC viene del tenant resuelto.
+     * Sin ese parametro el comportamiento es el de siempre (lee emisor_config).
+     */
+    public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null, ?string $rncEmisor = null): array
     {
-        $emisor = $this->emisorModel->get();
-        if (!$emisor) {
-            throw new RuntimeException('emisor_config no configurado.');
+        $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
+        if ($rncEmisor === null) {
+            $emisor = $this->emisorModel->get();
+            if (!$emisor) {
+                throw new RuntimeException('emisor_config no configurado.');
+            }
+            $rncEmisor = $emisor['rnc'];
         }
         $cert = CertResolver::resolve();
         $tokenInfo = $this->auth->autenticar([
@@ -417,7 +426,7 @@ class ECFEmissionService
         ]);
         return $this->reception->consultarEstado(
             $trackId,
-            $emisor['rnc'],
+            $rncEmisor,
             $eNcf,
             $tokenInfo['token'],
             ['environment' => $tokenInfo['ambiente']]
@@ -428,12 +437,18 @@ class ECFEmissionService
      * Consulta el estado fiscal de un RFCE (E32 < 250,000) por RNC Emisor +
      * e-NCF + codigo de seguridad. Usa el servicio RecepcionFC (fc.dgii.gov.do)
      * en lugar de ConsultaResultado, porque los RFCE no generan trackId.
+     *
+     * $rncEmisor: igual que en consultarEstado(), para tenants sin emisor_config.
      */
-    public function consultarEstadoRFCE(string $eNcf, string $codigoSeguridad, ?string $ambiente = null): array
+    public function consultarEstadoRFCE(string $eNcf, string $codigoSeguridad, ?string $ambiente = null, ?string $rncEmisor = null): array
     {
-        $emisor = $this->emisorModel->get();
-        if (!$emisor) {
-            throw new RuntimeException('emisor_config no configurado.');
+        $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
+        if ($rncEmisor === null) {
+            $emisor = $this->emisorModel->get();
+            if (!$emisor) {
+                throw new RuntimeException('emisor_config no configurado.');
+            }
+            $rncEmisor = $emisor['rnc'];
         }
         $cert = CertResolver::resolve();
         $tokenInfo = $this->auth->autenticar([
@@ -442,7 +457,7 @@ class ECFEmissionService
             'certificate_password' => $cert['password'],
         ]);
         return $this->reception->consultarResumenRFCE(
-            $emisor['rnc'],
+            $rncEmisor,
             $eNcf,
             $codigoSeguridad,
             $tokenInfo['token'],
