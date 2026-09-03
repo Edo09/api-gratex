@@ -192,6 +192,16 @@ class ECFEmissionService
             'correo' => $emisor['correo'] ?? null,
             'website' => $emisor['website'] ?? null,
             'actividad_economica' => $emisor['actividad_economica'] ?? null,
+            // Opcionales del emisor que el builder si emite (CodigoVendedor,
+            // NumeroFacturaInterna, ...). Sin ellos aqui nunca llegaban al XML:
+            // el set de pruebas de DGII los compara uno a uno contra los valores
+            // que entrego y rechaza el set entero si van vacios.
+            'codigo_vendedor' => $emisor['codigo_vendedor'] ?? null,
+            'numero_factura_interna' => $emisor['numero_factura_interna'] ?? null,
+            'numero_pedido_interno' => $emisor['numero_pedido_interno'] ?? null,
+            'zona_venta' => $emisor['zona_venta'] ?? null,
+            'ruta_venta' => $emisor['ruta_venta'] ?? null,
+            'informacion_adicional' => $emisor['informacion_adicional'] ?? null,
         ];
         $strictInput = !empty($payload['strict_input']);
         $emisorOverride = is_array($payload['emisor_override'] ?? null) ? $payload['emisor_override'] : [];
