@@ -266,7 +266,13 @@ const PASOS = [
         <div><label>Razón social emisor</label><input type="text" id="f4razon"></div>
         <div><label>Dirección emisor</label><input type="text" id="f4dir" value="N/D"></div>
       </div>
-      <label>counts (opcional, ej. E31:2,E34:1)</label><input type="text" id="f4counts">
+      <div class="row">
+        <div><label>Vencimiento de la secuencia (dd-mm-aaaa)</label>
+             <input type="text" id="f4venc" placeholder="31-12-2026"></div>
+        <div><label>counts (opcional, ej. E31:2,E34:1)</label><input type="text" id="f4counts"></div>
+      </div>
+      <p class="muted">El vencimiento tiene que ser el del <b>rango autorizado</b> por DGII. Si se
+      omite, el sistema usa 31-12-2030 y DGII responde <i>"Fecha de vencimiento de secuencia inválida"</i>.</p>
       <button class="act" data-fase="4" data-dry="1">Dry-run</button>
       <button class="act" data-fase="4">Correr fase 4</button>
     </div>
@@ -439,6 +445,7 @@ async function correrFase(btn) {
     fd.append('emisor_rnc', $('f4rnc').value.trim());
     fd.append('emisor_razon_social', $('f4razon').value.trim());
     fd.append('emisor_direccion', $('f4dir').value.trim());
+    if ($('f4venc').value.trim()) fd.append('fecha_venc_secuencia', $('f4venc').value.trim());
     if ($('f4counts').value.trim()) fd.append('counts', $('f4counts').value.trim());
   }
 

@@ -120,6 +120,9 @@ if ($esIntegracion) {
             'emisor-provincia' => 'emisor_provincia',
             'emisor-telefono' => 'emisor_telefono',
             'emisor-correo' => 'emisor_correo',
+            'fecha-vencimiento-secuencia' => 'fecha_venc_secuencia',
+            'comprador-rnc' => 'comprador_rnc',
+            'comprador-razon-social' => 'comprador_razon_social',
         ] as $flag => $key) {
             if ((string) ($_REQUEST[$key] ?? '') !== '') {
                 $argv[] = '--' . $flag . '=' . $_REQUEST[$key];

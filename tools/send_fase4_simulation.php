@@ -24,6 +24,12 @@
  * del rango que DGII te autorizo. Se numera por tipo: E31 0000000007,
  * E31 0000000008, ... Repetir un e-NCF ya usado lo rechaza DGII.
  *
+ * Opcionales de integracion: --fecha-vencimiento-secuencia=31-12-2026 (la del
+ * rango autorizado; sin ella se usa el default 31-12-2030 que DGII suele
+ * rechazar) y --comprador-rnc / --comprador-razon-social (default: el comprador
+ * de prueba de DGII 131880681). El comprador se inyecta en los casos que el plan
+ * no lo trae, porque en la ruta app lo aportaba client_id.
+ *
  * Y como no hay emisor_config que leer, el emisor va en cada payload:
  * --emisor-rnc, --emisor-razon-social y --emisor-direccion son obligatorios
  * (opcionales: --emisor-nombre-comercial, --emisor-municipio,
@@ -124,6 +130,18 @@ function main(array $argv): int
                 . "   El emisor va completo en cada payload (no hay emisor_config sin DB).\n");
             return 2;
         }
+        // Comprador de prueba de DGII, el mismo que usa el plan para los E31.
+        $compradorPrueba = [
+            'rnc' => trim((string) ($opts['comprador-rnc'] ?? '131880681')),
+            'razon_social' => trim((string) ($opts['comprador-razon-social'] ?? 'CLIENTE COMPROBANTE TEST SRL')),
+        ];
+        // Vencimiento del rango autorizado. En la ruta app sale de ncf_sequences;
+        // sin DB hay que decirlo, y el default historico (31-12-2030) no coincide
+        // con el rango real -> "Fecha de vencimiento de secuencia invalida".
+        $fechaVencSecuencia = isset($opts['fecha-vencimiento-secuencia'])
+            ? trim((string) $opts['fecha-vencimiento-secuencia'])
+            : null;
+
         $emisor = array_filter([
             'rnc' => trim((string) $opts['emisor-rnc']),
             'razon_social' => trim((string) $opts['emisor-razon-social']),
@@ -216,6 +234,18 @@ function main(array $argv): int
                     'rnc' => $candidate['rnc_comprador'],
                     'razon_social' => $candidate['nombre_comprador'] ?? 'CLIENTE COMPROBANTE TEST SRL',
                 ];
+            }
+        }
+
+        if ($integracion) {
+            // En la ruta app el comprador sale de client_id (la tabla clients del
+            // tenant), por eso el plan no lo trae en casi ningun caso. Sin DB no
+            // hay de donde sacarlo y el XML sale sin <Comprador>: DGII responde
+            // "El elemento Encabezado tiene un elemento hijo Totales invalido;
+            // se esperaba Comprador".
+            $case['payload']['comprador'] ??= $compradorPrueba;
+            if ($fechaVencSecuencia !== null) {
+                $case['payload']['fecha_vencimiento_secuencia'] ??= $fechaVencSecuencia;
             }
         }
 

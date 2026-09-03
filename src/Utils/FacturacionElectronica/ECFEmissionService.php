@@ -5,6 +5,7 @@ require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ECFXmlBuilder.php';
 require_once __DIR__ . '/RFCEXmlBuilder.php';
+require_once __DIR__ . '/EcfItemMapper.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
@@ -124,6 +125,14 @@ class ECFEmissionService
                 throw new RuntimeException('Integracion: el payload debe incluir emisor con rnc, razon_social y direccion.');
             }
             $ambienteEarly = (string) ($payload['ambiente'] ?? 'ecf');
+            // La ruta app normaliza los items en facturaController antes de llegar
+            // aqui; la de integracion no pasa por ese controller. Sin esto los
+            // items entran crudos y <MontoItem> sale 0.00 (DGII lo rechaza por el
+            // MinInclusive de Decimal18D2ValidationTypeMayor).
+            $payload['items'] = EcfItemMapper::map(
+                is_array($payload['items'] ?? null) ? $payload['items'] : [],
+                !empty($payload['strict_input'])
+            );
         } else {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
