@@ -368,7 +368,11 @@ function buildPlan(array $countsOverride = []): array
                 'fecha_emision' => $today,
                 'tipo_ingresos' => '01',
                 'tipo_pago' => 1,
-                'comprador' => ['rnc' => '131880681', 'nombre' => 'CLIENTE COMPROBANTE TEST SRL'],
+                // razon_social, no 'nombre': es la clave que lee el builder para
+                // <RazonSocialComprador>. En la ruta app daba igual porque el
+                // comprador salia de la tabla clients; en integracion el XML salia
+                // con el elemento vacio y DGII lo rechaza (minLength 1).
+                'comprador' => ['rnc' => '131880681', 'razon_social' => 'CLIENTE COMPROBANTE TEST SRL'],
                 'items' => itemsGravados18(rand(1, 4), 1000, 5000),
             ],
         ];
