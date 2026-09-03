@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Consola de tenant integración</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --pend:#475569; --err:#ef4444; --warn:#fbbf24; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  header { padding:14px 22px; border-bottom:1px solid var(--line); display:flex; gap:12px;
+           align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:17px; margin:0; flex:1; min-width:220px; }
+  header input { padding:8px 10px; background:#0b1220; color:var(--txt); border:1px solid var(--line);
+                 border-radius:8px; font-size:13px; }
+  .layout { display:flex; min-height:calc(100vh - 62px); }
+  .steps { width:280px; border-right:1px solid var(--line); padding:12px 0; }
+  .step { display:flex; gap:11px; align-items:flex-start; padding:10px 18px; cursor:pointer; border:none;
+          background:none; color:var(--txt); width:100%; text-align:left; font-size:13.5px; }
+  .step:hover { background:#172033; }
+  .step.active { background:#172033; border-left:3px solid var(--accent); }
+  .num { width:25px; height:25px; border-radius:50%; background:var(--pend); color:#fff; display:flex;
+         align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0; }
+  .step.done .num { background:var(--ok); }
+  .step .tag { font-size:10px; color:var(--mut); display:block; margin-top:2px; }
+  .content { flex:1; padding:26px 30px; max-width:820px; }
+  .content h2 { margin:0 0 6px; font-size:20px; }
+  .content p, .content li { color:#cbd5e1; line-height:1.55; font-size:14px; }
+  .content a { color:var(--accent); }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; margin:16px 0; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; }
+  .row > div { flex:1; min-width:150px; }
+  label { display:block; font-size:12.5px; color:var(--mut); margin:10px 0 4px; }
+  input[type=text], input[type=number], input[type=password], textarea, select {
+         width:100%; padding:9px 11px; background:#0b1220; color:var(--txt);
+         border:1px solid var(--line); border-radius:8px; font-size:13px; }
+  textarea { min-height:70px; resize:vertical; font-family:ui-monospace,monospace; }
+  button.act { margin-top:14px; padding:10px 16px; background:var(--accent); color:#06283d; border:none;
+               border-radius:8px; font-weight:600; cursor:pointer; }
+  button.act:disabled { opacity:.5; cursor:not-allowed; }
+  button.ghost { background:#0b1220; color:var(--txt); border:1px solid var(--line); }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:12px;
+        white-space:pre-wrap; word-break:break-word; font-size:12.5px; max-height:340px; overflow:auto; }
+  .muted { color:var(--mut); font-size:12.5px; }
+  code { background:#0b1220; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+  .pill { display:inline-block; font-size:11px; padding:2px 9px; border-radius:99px; margin-left:6px; }
+  .pill.ok { background:#052e16; color:var(--ok); }
+  .pill.err { background:#3f1414; color:var(--err); }
+  .pill.warn { background:#3f2d12; color:var(--warn); }
+  table { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--mut); font-weight:600; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Consola de tenant integración</h1>
+  <input id="apiKey" placeholder="X-API-KEY" style="width:270px">
+  <input id="apiSecret" type="password" placeholder="X-API-SECRET" style="width:230px">
+  <input id="certToken" type="password" placeholder="CERT_RUN_TOKEN" style="width:160px"
+         title="Solo para correr las fases del set de pruebas">
+</header>
+
+<div class="layout">
+  <nav class="steps" id="nav"></nav>
+  <main class="content" id="content"></main>
+</div>
+
+<script>
+const API = location.origin + '/api';
+const $ = id => document.getElementById(id);
+
+// Las credenciales viven en sessionStorage: se borran al cerrar la pestaña. El
+// api_secret no debe quedar guardado en el navegador mas alla de la sesion.
+const KEYS = ['apiKey', 'apiSecret', 'certToken'];
+KEYS.forEach(k => {
+  const el = $(k);
+  el.value = sessionStorage.getItem(k) || '';
+  el.addEventListener('change', () => sessionStorage.setItem(k, el.value.trim()));
+});
+
+const creds = () => ({
+  'X-API-KEY': $('apiKey').value.trim(),
+  'X-API-SECRET': $('apiSecret').value.trim(),
+});
+
+function faltanCreds() {
+  const c = creds();
+  return !c['X-API-KEY'] || !c['X-API-SECRET'];
+}
+
+async function call(method, path, body) {
+  if (faltanCreds()) throw new Error('Pon X-API-KEY y X-API-SECRET arriba.');
+  const opts = { method, headers: { ...creds(), 'Accept': 'application/json' } };
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(API + path, opts);
+  const txt = await res.text();
+  let json = null;
+  try { json = JSON.parse(txt); } catch (e) { /* respuesta no JSON */ }
+  return { status: res.status, json, txt };
+}
+
+// Muestra la respuesta cruda. El xml_firmado se saca del JSON y se ofrece como
+// descarga: pegarlo entero en pantalla hace ilegible todo lo demas.
+function render(outId, r, nombreXml) {
+  const out = $(outId);
+  let data = r.json;
+  let xml = null;
+  if (data && data.data && data.data.xml_firmado) {
+    xml = data.data.xml_firmado;
+    data = JSON.parse(JSON.stringify(data));
+    data.data.xml_firmado = '[' + xml.length.toLocaleString() + ' bytes — ver botón de descarga]';
+  }
+  const ok = r.status >= 200 && r.status < 300 && data && data.status === true;
+  out.innerHTML = '';
+  const head = document.createElement('div');
+  head.innerHTML = 'HTTP ' + r.status + '<span class="pill ' + (ok ? 'ok' : 'err') + '">' +
+                   (ok ? 'OK' : 'FALLO') + '</span>';
+  out.appendChild(head);
+  const pre = document.createElement('pre');
+  pre.textContent = data ? JSON.stringify(data, null, 2) : r.txt.slice(0, 4000);
+  out.appendChild(pre);
+  if (xml) {
+    const b = document.createElement('button');
+    b.className = 'act ghost';
+    b.textContent = 'Descargar XML firmado';
+    b.onclick = () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([xml], { type: 'application/xml' }));
+      a.download = (nombreXml || 'ecf') + '.xml';
+      a.click();
+    };
+    out.appendChild(b);
+  }
+  out.style.display = 'block';
+}
+
+const PASOS = [
+  { n:1, t:'Credenciales y empresas', tag:'GET /integracion/empresas', body: () => `
+    <p>Primer chequeo, y no toca DGII: confirma que la credencial resuelve al tenant correcto
+    y en qué ambiente está.</p>
+    <div class="panel">
+      <button class="act" id="btnEmpresas">Verificar credenciales</button>
+      <div id="outEmpresas" style="display:none;margin-top:12px"></div>
+    </div>
+    <p class="muted">Si da <code>401</code>, el secret no corresponde (el master guarda solo su sha256).
+    Si da <code>403</code>, ese tenant no es tipo integración.</p>` },
+
+  { n:2, t:'Emitir e-CF de prueba', tag:'POST /integracion/ecf', body: () => `
+    <p>El smoke real: arma el XML, lo firma con el certificado del tenant y lo manda a DGII.
+    El <b>e-NCF lo pones tú</b> — tiene que estar dentro del rango que DGII autorizó.</p>
+    <div class="panel">
+      <div class="row">
+        <div><label>Tipo e-CF</label>
+          <select id="emTipo">
+            <option value="31">31 — Factura de Crédito Fiscal</option>
+            <option value="32">32 — Factura de Consumo</option>
+            <option value="34">34 — Nota de Crédito</option>
+            <option value="41">41 — Compras</option>
+            <option value="43">43 — Gastos Menores</option>
+            <option value="44">44 — Regímenes Especiales</option>
+            <option value="45">45 — Gubernamental</option>
+            <option value="46">46 — Exportaciones</option>
+            <option value="47">47 — Pagos al Exterior</option>
+          </select></div>
+        <div><label>e-NCF</label><input type="text" id="emEncf" placeholder="E310000000001"></div>
+      </div>
+      <div class="row">
+        <div><label>RNC emisor</label><input type="text" id="emRnc"></div>
+        <div><label>Razón social emisor</label><input type="text" id="emRazon"></div>
+      </div>
+      <label>Dirección emisor</label><input type="text" id="emDir" value="N/D">
+      <div class="row">
+        <div><label>RNC comprador</label><input type="text" id="emCompRnc" value="131880681"></div>
+        <div><label>Razón social comprador</label><input type="text" id="emCompRazon" value="EMPRESA COMPRADORA SRL"></div>
+      </div>
+      <div class="row">
+        <div><label>Descripción del ítem</label><input type="text" id="emItem" value="Servicio de prueba"></div>
+        <div><label>Cantidad</label><input type="number" id="emCant" value="1" step="0.01"></div>
+        <div><label>Precio unitario</label><input type="number" id="emPrecio" value="1000" step="0.01"></div>
+      </div>
+      <button class="act" id="btnEmitir">Emitir</button>
+      <div id="outEmitir" style="display:none;margin-top:12px"></div>
+    </div>
+    <p class="muted"><b>Guarda el XML firmado.</b> Este tenant no tiene DB: esa respuesta es la única
+    copia a mano del comprobante, y para los E32 &lt;250k es el XML íntegro que se sube al portal.</p>` },
+
+  { n:3, t:'Consultar estado', tag:'GET /integracion/estado', body: () => `
+    <p>Pregunta a DGII en qué quedó un comprobante. Con solo el e-NCF lo busca en el respaldo del
+    master; si es un RFCE (E32 &lt;250k) no hay <code>track_id</code> y hay que dar el código de seguridad.</p>
+    <div class="panel">
+      <div class="row">
+        <div><label>e-NCF</label><input type="text" id="stEncf" placeholder="E310000000001"></div>
+        <div><label>track_id (opcional)</label><input type="text" id="stTrack"></div>
+        <div><label>código seguridad (RFCE)</label><input type="text" id="stCod"></div>
+      </div>
+      <button class="act" id="btnEstado">Consultar</button>
+      <div id="outEstado" style="display:none;margin-top:12px"></div>
+    </div>` },
+
+  { n:4, t:'Bandejas de entrada', tag:'GET /recibidos · /aprobaciones', body: () => `
+    <p>Lo que otros emisores le facturaron y las aprobaciones que recibió sobre lo que emitió.
+    Se filtran solas por el ambiente actual del tenant.</p>
+    <div class="panel">
+      <button class="act" id="btnRecibidos">Ver recibidos</button>
+      <button class="act ghost" id="btnAprobaciones">Ver aprobaciones</button>
+      <div id="outBandeja" style="display:none;margin-top:12px"></div>
+    </div>` },
+
+  { n:5, t:'Aprobación comercial', tag:'POST /integracion/aprobacion-comercial', body: () => `
+    <p>Como comprador: acepta o rechaza un e-CF recibido. Se arma el ACECF, se firma con el
+    certificado del tenant y se envía a DGII.</p>
+    <div class="panel">
+      <div class="row">
+        <div><label>RNC emisor</label><input type="text" id="acRnc"></div>
+        <div><label>e-NCF</label><input type="text" id="acEncf"></div>
+      </div>
+      <div class="row">
+        <div><label>Fecha emisión (dd-mm-aaaa)</label><input type="text" id="acFecha"></div>
+        <div><label>Monto total</label><input type="number" id="acMonto" step="0.01"></div>
+        <div><label>Decisión</label>
+          <select id="acEstado"><option value="1">1 — Aceptar</option><option value="2">2 — Rechazar</option></select></div>
+      </div>
+      <label>Motivo (obligatorio al rechazar)</label><input type="text" id="acMotivo">
+      <button class="act" id="btnAprobar">Enviar ACECF</button>
+      <div id="outAprobar" style="display:none;margin-top:12px"></div>
+    </div>
+    <p class="muted">En la respuesta, <code>dgii_response.codigo</code> = <code>1</code>/<code>01</code>
+    significa que DGII <b>procesó</b> el envío; <code>2</code>/<code>02</code> = no procesada.</p>` },
+
+  { n:6, t:'Set de pruebas (fases 2/3/4)', tag:'runners', body: () => `
+    <p>Corre los runners del set de certificación contra <code>/api/integracion/*</code>.
+    Necesita el <code>CERT_RUN_TOKEN</code> del <code>.env</code> (arriba).</p>
+
+    <div class="panel">
+      <h3 style="margin:0;font-size:15px">Fase 2 — set de pruebas</h3>
+      <p class="muted">Lee el xlsx de DGII y emite cada caso. El e-NCF sale del propio xlsx.</p>
+      <label>Archivo xlsx del set</label><input type="file" id="f2xlsx" accept=".xlsx,.xlsm">
+      <label>Filtrar tipos (opcional, ej. E31,E32)</label><input type="text" id="f2filter">
+      <button class="act" data-fase="2" data-dry="1">Dry-run</button>
+      <button class="act" data-fase="2">Correr fase 2</button>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0;font-size:15px">Fase 3 — aprobaciones comerciales</h3>
+      <p class="muted">Lee la hoja ACEECF_Generadas del mismo xlsx.</p>
+      <label>Archivo xlsx del set</label><input type="file" id="f3xlsx" accept=".xlsx,.xlsm">
+      <button class="act" data-fase="3" data-dry="1">Dry-run</button>
+      <button class="act" data-fase="3">Correr fase 3</button>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0;font-size:15px">Fase 4 — emisión de los 10 tipos</h3>
+      <p class="muted">Sin xlsx: el runner genera la data y <b>asigna el e-NCF</b>, así que hay que
+      decirle desde qué número numerar y quién es el emisor.</p>
+      <div class="row">
+        <div><label>encf-start (número o E31:7,E32:5)</label><input type="text" id="f4encf" value="1"></div>
+        <div><label>RNC emisor</label><input type="text" id="f4rnc"></div>
+      </div>
+      <div class="row">
+        <div><label>Razón social emisor</label><input type="text" id="f4razon"></div>
+        <div><label>Dirección emisor</label><input type="text" id="f4dir" value="N/D"></div>
+      </div>
+      <label>counts (opcional, ej. E31:2,E34:1)</label><input type="text" id="f4counts">
+      <button class="act" data-fase="4" data-dry="1">Dry-run</button>
+      <button class="act" data-fase="4">Correr fase 4</button>
+    </div>
+
+    <pre id="outRunner" style="display:none"></pre>
+    <p class="muted">Ojo: si DGII rechaza <b>cualquier</b> comprobante, reinicia el set completo.
+    Y las secuencias que consuma el runner son secuencias reales del cliente.</p>` },
+
+  { n:7, t:'Pendientes del portal DGII', tag:'manual', body: () => `
+    <p>Lo que no se puede hacer desde aquí y bloquea la certificación:</p>
+    <div class="panel">
+      <p><b>1. Delegar el certificado.</b> Si el <code>.p12</code> es de persona física, esa cédula
+      tiene que estar autorizada a firmar por el RNC del tenant en la Oficina Virtual. Si falta,
+      la emisión devuelve <i>"El RNC del certificado no está delegado para realizar transacciones"</i>.</p>
+      <p><b>2. Postulación activa.</b> Sin ella DGII responde
+      <i>"No se encuentra en una fase válida dentro del proceso de certificación"</i>.</p>
+      <p><b>3. Rangos de e-NCF autorizados</b> para el ambiente de certificación.</p>
+      <p><b>4. Registrar las tres URLs de WebServices</b> — son las mismas para todos los tenants:</p>
+      <pre id="urlsWs"></pre>
+      <p><b>5. Representación Impresa.</b> No hay generador para tenants de integración: la produce
+      el cliente con el <code>codigo_seguridad</code>, la <code>fecha_emision</code> y el QR.</p>
+    </div>` },
+];
+
+let activo = 1;
+function pintarNav() {
+  $('nav').innerHTML = '';
+  PASOS.forEach(p => {
+    const b = document.createElement('button');
+    b.className = 'step' + (p.n === activo ? ' active' : '');
+    b.innerHTML = `<span class="num">${p.n}</span><span class="label">${p.t}<span class="tag">${p.tag}</span></span>`;
+    b.onclick = () => { activo = p.n; pintar(); };
+    $('nav').appendChild(b);
+  });
+}
+
+function pintar() {
+  const p = PASOS.find(x => x.n === activo);
+  pintarNav();
+  $('content').innerHTML = `<h2>${p.t}</h2>` + p.body();
+  wire(p.n);
+}
+
+function wire(n) {
+  if (n === 1) {
+    $('btnEmpresas').onclick = async (e) => {
+      e.target.disabled = true;
+      try { render('outEmpresas', await call('GET', '/integracion/empresas')); }
+      catch (err) { $('outEmpresas').style.display = 'block'; $('outEmpresas').textContent = err.message; }
+      finally { e.target.disabled = false; }
+    };
+  }
+
+  if (n === 2) {
+    // Prellenar emisor con la empresa dueña de la credencial.
+    call('GET', '/integracion/empresas').then(r => {
+      const emp = r.json && r.json.data && r.json.data[0];
+      if (emp) { $('emRnc').value = emp.rnc || ''; $('emRazon').value = emp.nombre || ''; }
+    }).catch(() => {});
+
+    $('btnEmitir').onclick = async (e) => {
+      e.target.disabled = true;
+      const payload = {
+        tipo_ecf: $('emTipo').value,
+        e_ncf: $('emEncf').value.trim(),
+        emisor: { rnc: $('emRnc').value.trim(), razon_social: $('emRazon').value.trim(), direccion: $('emDir').value.trim() },
+        comprador: { rnc: $('emCompRnc').value.trim(), razon_social: $('emCompRazon').value.trim() },
+        items: [{
+          numero_linea: 1, indicador_facturacion: 1, indicador_bien_servicio: 2,
+          nombre_item: $('emItem').value.trim(), unidad_medida: '43',
+          cantidad: parseFloat($('emCant').value) || 1,
+          precio_unitario: parseFloat($('emPrecio').value) || 0,
+        }],
+      };
+      try { render('outEmitir', await call('POST', '/integracion/ecf', payload), payload.e_ncf); }
+      catch (err) { $('outEmitir').style.display = 'block'; $('outEmitir').textContent = err.message; }
+      finally { e.target.disabled = false; }
+    };
+  }
+
+  if (n === 3) {
+    $('btnEstado').onclick = async (e) => {
+      e.target.disabled = true;
+      const q = new URLSearchParams({ e_ncf: $('stEncf').value.trim() });
+      if ($('stTrack').value.trim()) q.set('track_id', $('stTrack').value.trim());
+      if ($('stCod').value.trim()) q.set('codigo_seguridad', $('stCod').value.trim());
+      try { render('outEstado', await call('GET', '/integracion/estado?' + q)); }
+      catch (err) { $('outEstado').style.display = 'block'; $('outEstado').textContent = err.message; }
+      finally { e.target.disabled = false; }
+    };
+  }
+
+  if (n === 4) {
+    const ver = async (ruta, btn) => {
+      btn.disabled = true;
+      try { render('outBandeja', await call('GET', ruta + '?page=1&pageSize=20')); }
+      catch (err) { $('outBandeja').style.display = 'block'; $('outBandeja').textContent = err.message; }
+      finally { btn.disabled = false; }
+    };
+    $('btnRecibidos').onclick = (e) => ver('/integracion/recibidos', e.target);
+    $('btnAprobaciones').onclick = (e) => ver('/integracion/aprobaciones', e.target);
+  }
+
+  if (n === 5) {
+    $('btnAprobar').onclick = async (e) => {
+      e.target.disabled = true;
+      const payload = {
+        rnc_emisor: $('acRnc').value.trim(),
+        e_ncf: $('acEncf').value.trim(),
+        fecha_emision: $('acFecha').value.trim(),
+        monto_total: parseFloat($('acMonto').value) || 0,
+        estado: $('acEstado').value,
+      };
+      if ($('acMotivo').value.trim()) payload.detalle_motivo = $('acMotivo').value.trim();
+      try { render('outAprobar', await call('POST', '/integracion/aprobacion-comercial', payload)); }
+      catch (err) { $('outAprobar').style.display = 'block'; $('outAprobar').textContent = err.message; }
+      finally { e.target.disabled = false; }
+    };
+  }
+
+  if (n === 6) {
+    document.querySelectorAll('button[data-fase]').forEach(btn => {
+      btn.onclick = async () => correrFase(btn);
+    });
+  }
+
+  if (n === 7) {
+    $('urlsWs').textContent =
+      `Recepción e-CF:        ${location.origin}/api/ecf/recepcion\n` +
+      `Aprobación Comercial:  ${location.origin}/api/ecf/aprobacion-comercial\n` +
+      `Autenticación:         ${location.origin}/api/ecf/autenticacion`;
+  }
+}
+
+async function correrFase(btn) {
+  const fase = btn.dataset.fase;
+  const out = $('outRunner');
+  if (faltanCreds() || !$('certToken').value.trim()) {
+    out.style.display = 'block';
+    out.textContent = 'Faltan X-API-KEY, X-API-SECRET y CERT_RUN_TOKEN (arriba).';
+    return;
+  }
+
+  const fd = new FormData();
+  fd.append('token', $('certToken').value.trim());
+  fd.append('fase', fase);
+  fd.append('api', API);
+  fd.append('api_key', $('apiKey').value.trim());
+  fd.append('api_secret', $('apiSecret').value.trim());
+  if (btn.dataset.dry) fd.append('dry-run', '1');
+
+  if (fase === '2' || fase === '3') {
+    const input = $(fase === '2' ? 'f2xlsx' : 'f3xlsx');
+    if (!input.files[0]) { out.style.display = 'block'; out.textContent = 'Sube el xlsx del set de pruebas.'; return; }
+    fd.append('xlsx', input.files[0]);
+    if (fase === '2' && $('f2filter').value.trim()) fd.append('filter', $('f2filter').value.trim());
+  }
+  if (fase === '4') {
+    fd.append('encf_start', $('f4encf').value.trim());
+    fd.append('emisor_rnc', $('f4rnc').value.trim());
+    fd.append('emisor_razon_social', $('f4razon').value.trim());
+    fd.append('emisor_direccion', $('f4dir').value.trim());
+    if ($('f4counts').value.trim()) fd.append('counts', $('f4counts').value.trim());
+  }
+
+  const botones = document.querySelectorAll('button[data-fase]');
+  botones.forEach(b => b.disabled = true);
+  out.style.display = 'block';
+  out.textContent = 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') + '...\n\n';
+  try {
+    const res = await fetch('cert_run.php', { method: 'POST', body: fd });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.textContent += dec.decode(value, { stream: true });
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (e) {
+    out.textContent += '\nError de red: ' + e.message + '\n';
+  } finally {
+    botones.forEach(b => b.disabled = false);
+  }
+}
+
+pintar();
+</script>
+</body>
+</html>
