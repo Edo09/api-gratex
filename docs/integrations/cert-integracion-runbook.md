@@ -221,6 +221,7 @@ repite e-NCF y DGII los rechaza.
 | `ERROR: --ambiente no aplica en modo integracion` | Se intentó forzar el ambiente | Es intencional: verificar `tenants.ambiente` |
 | `Unable to read certificate ... unsupported` | `.p12` legacy (Fase 1 saltada) | Convertirlo y reemplazarlo en el server |
 | `Unable to read certificate ... mac verify failure` | Contraseña incorrecta o `cert_pass_encrypted` NULL | Re-cifrar con `public/encrypt_credential.php` |
+| `El formato del XML no es válido` | Un campo incumple el XSD y DGII no dice cuál | Validar los comprobantes contra los XSD oficiales: `php tools/validar_xml_dgii.php --tenant-id=<id>`, o el paso 7 de `public/integracion.html`. Dice el elemento y la regla exacta |
 | `La firma del XML no es válida` (y la firma sí es válida) | Retornos de carro (`\r`) en textos del payload | El backend normaliza y bloquea, pero conviene normalizar en el origen |
 | `404` en `/integracion/estado` | No hay respaldo de ese e-NCF, o es un RFCE sin `track_id` | Mandar `track_id`, o `codigo_seguridad` si es E32 <250k |
 | `NO_ENCONTRADO` al consultar estado | `track_id` de otro ambiente, o el envío nunca llegó | Confirmar el ambiente del tenant y reintentar la emisión |

@@ -281,7 +281,20 @@ const PASOS = [
     <p class="muted">Ojo: si DGII rechaza <b>cualquier</b> comprobante, reinicia el set completo.
     Y las secuencias que consuma el runner son secuencias reales del cliente.</p>` },
 
-  { n:7, t:'Pendientes del portal DGII', tag:'manual', body: () => `
+  { n:7, t:'Validar XML contra los XSD', tag:'validador local', body: () => `
+    <p>Cuando DGII rechaza con <i>"El formato del XML no es válido"</i> no dice qué campo está mal.
+    Esto sí: valida cada comprobante contra el XSD oficial de su tipo y muestra el elemento y la
+    regla que falla. No toca DGII, así que se puede correr todas las veces que haga falta.</p>
+    <div class="panel">
+      <label>tenant_id (valida desde el respaldo del master; vacío = carpeta <code>tools/xml_integracion</code>)</label>
+      <input type="text" id="vxTenant" placeholder="3">
+      <button class="act" id="btnValidar">Validar</button>
+      <pre id="outValidar" style="display:none;margin-top:12px"></pre>
+    </div>
+    <p class="muted">Un <code>Missing child element(s)</code> al final del ECF significa que ese XML
+    está sin firmar — la Signature la agrega el paso de firma.</p>` },
+
+  { n:8, t:'Pendientes del portal DGII', tag:'manual', body: () => `
     <p>Lo que no se puede hacer desde aquí y bloquea la certificación:</p>
     <div class="panel">
       <p><b>1. Delegar el certificado.</b> Si el <code>.p12</code> es de persona física, esa cédula
@@ -410,6 +423,38 @@ function wire(n) {
   }
 
   if (n === 7) {
+    $('btnValidar').onclick = async (e) => {
+      const out = $('outValidar');
+      if (!$('certToken').value.trim()) {
+        out.style.display = 'block';
+        out.textContent = 'Falta el CERT_RUN_TOKEN (arriba).';
+        return;
+      }
+      e.target.disabled = true;
+      out.style.display = 'block';
+      out.textContent = 'Validando...\n\n';
+      const q = new URLSearchParams({ token: $('certToken').value.trim() });
+      if ($('vxTenant').value.trim()) q.set('tenant_id', $('vxTenant').value.trim());
+      try {
+        const res = await fetch('validar_xml_dgii.php?' + q);
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        out.textContent = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          out.textContent += dec.decode(value, { stream: true });
+          out.scrollTop = out.scrollHeight;
+        }
+      } catch (err) {
+        out.textContent += '\nError de red: ' + err.message + '\n';
+      } finally {
+        e.target.disabled = false;
+      }
+    };
+  }
+
+  if (n === 8) {
     $('urlsWs').textContent =
       `Recepción e-CF:        ${location.origin}/api/ecf/recepcion\n` +
       `Aprobación Comercial:  ${location.origin}/api/ecf/aprobacion-comercial\n` +
