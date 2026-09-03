@@ -259,7 +259,8 @@ const PASOS = [
       decirle desde qué número numerar y quién es el emisor.</p>
       <div class="row">
         <div><label>encf-start (número o E31:7,E32:5)</label><input type="text" id="f4encf" value="1"></div>
-        <div><label>RNC emisor</label><input type="text" id="f4rnc"></div>
+        <div><label>RNC emisor <span style="color:#94a3b8">— el del tenant, no el del comprador</span></label>
+             <input type="text" id="f4rnc"></div>
       </div>
       <div class="row">
         <div><label>Razón social emisor</label><input type="text" id="f4razon"></div>
@@ -387,6 +388,16 @@ function wire(n) {
   }
 
   if (n === 6) {
+    // El emisor de la fase 4 es SIEMPRE el tenant de la credencial. Se rellena
+    // solo para no confundirlo con el RNC del comprador de prueba de DGII
+    // (131880681), que es el error facil de cometer aqui.
+    call('GET', '/integracion/empresas').then(r => {
+      const emp = r.json && r.json.data && r.json.data[0];
+      if (!emp) return;
+      if (!$('f4rnc').value) $('f4rnc').value = emp.rnc || '';
+      if (!$('f4razon').value) $('f4razon').value = emp.nombre || '';
+    }).catch(() => {});
+
     document.querySelectorAll('button[data-fase]').forEach(btn => {
       btn.onclick = async () => correrFase(btn);
     });
