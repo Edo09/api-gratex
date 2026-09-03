@@ -133,6 +133,22 @@ class ECFEmissionService
                 is_array($payload['items'] ?? null) ? $payload['items'] : [],
                 !empty($payload['strict_input'])
             );
+            // Y lo mismo con los Totales: el cliente puede mandar solo las tasas
+            // (o nada). Sin los montos derivados de los items, DGII rechaza con
+            // "El campo MontoGravadoI1 / MontoExento ... no es valido".
+            // Mismas reglas de override que facturaController: en modo estricto
+            // (set de pruebas) manda lo que venga en el payload, tal cual.
+            $totalesOverride = is_array($payload['totales'] ?? null)
+                ? array_filter($payload['totales'], fn($v) => $v !== null && $v !== '')
+                : [];
+            $totalesCalc = EcfItemMapper::totales($payload['items']);
+            if (!empty($payload['strict_input']) && $totalesOverride) {
+                $payload['totales'] = $totalesOverride;
+            } elseif ($totalesOverride) {
+                $payload['totales'] = array_merge($totalesCalc, $totalesOverride);
+            } else {
+                $payload['totales'] = $totalesCalc;
+            }
         } else {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
