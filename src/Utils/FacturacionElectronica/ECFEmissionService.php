@@ -28,8 +28,12 @@ class ECFEmissionService
     private DgiiReceptionService $reception;
     private ECFXmlBuilder $builder;
     private RFCEXmlBuilder $rfceBuilder;
-    private EmisorConfigModel $emisorModel;
-    private ncfModel $ncfModel;
+    // Perezosos a proposito: sus constructores abren la conexion a la DB DEL
+    // TENANT, y un tenant tipo integracion no tiene. Instanciarlos aqui hacia
+    // que la sola construccion del servicio intentara conectar (cayendo a las
+    // credenciales globales del .env) y matara la emision antes de empezar.
+    private ?EmisorConfigModel $emisorModel = null;
+    private ?ncfModel $ncfModel = null;
 
     public function __construct()
     {
@@ -38,8 +42,18 @@ class ECFEmissionService
         $this->reception = new DgiiReceptionService($this->auth);
         $this->builder = new ECFXmlBuilder();
         $this->rfceBuilder = new RFCEXmlBuilder();
-        $this->emisorModel = new EmisorConfigModel();
-        $this->ncfModel = new ncfModel();
+    }
+
+    /** emisor_config vive en la DB del tenant: solo para tenants tipo app. */
+    private function emisorModel(): EmisorConfigModel
+    {
+        return $this->emisorModel ??= new EmisorConfigModel();
+    }
+
+    /** ncf_sequences vive en la DB del tenant: solo para tenants tipo app. */
+    private function ncfModel(): ncfModel
+    {
+        return $this->ncfModel ??= new ncfModel();
     }
 
     /**
@@ -111,11 +125,11 @@ class ECFEmissionService
             }
             $ambienteEarly = (string) ($payload['ambiente'] ?? 'ecf');
         } else {
-            $emisor = $this->emisorModel->get();
+            $emisor = $this->emisorModel()->get();
             if (!$emisor) {
                 throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
             }
-            $ambienteEarly = $this->ncfModel->resolveActiveAmbiente() ?? 'certecf';
+            $ambienteEarly = $this->ncfModel()->resolveActiveAmbiente() ?? 'certecf';
         }
 
         $eNcfOverride = $payload['e_ncf'] ?? null;
@@ -137,7 +151,7 @@ class ECFEmissionService
             // Por eso se salta hacia adelante ANTES de emitir.
             $intentos = 0;
             do {
-                $disp = $this->ncfModel->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
+                $disp = $this->ncfModel()->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
                 if ($disp === null) {
                     throw new RuntimeException(
                         'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
@@ -391,7 +405,7 @@ class ECFEmissionService
         $flagTxt = $utilizada === null ? 'ausente' : ($utilizada ? 'true' : 'false');
         $resultado = 'no_revierte';
         if ($debeRevertir) {
-            $resultado = $this->ncfModel->rollbackECFSequence($type, $valor, $ambiente, $rangoId)
+            $resultado = $this->ncfModel()->rollbackECFSequence($type, $valor, $ambiente, $rangoId)
                 ? 'revertido'
                 : 'rollback_sin_coincidencia';
         }
@@ -412,7 +426,7 @@ class ECFEmissionService
     {
         $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
         if ($rncEmisor === null) {
-            $emisor = $this->emisorModel->get();
+            $emisor = $this->emisorModel()->get();
             if (!$emisor) {
                 throw new RuntimeException('emisor_config no configurado.');
             }
@@ -444,7 +458,7 @@ class ECFEmissionService
     {
         $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
         if ($rncEmisor === null) {
-            $emisor = $this->emisorModel->get();
+            $emisor = $this->emisorModel()->get();
             if (!$emisor) {
                 throw new RuntimeException('emisor_config no configurado.');
             }

@@ -64,7 +64,12 @@ class Database
                 ]
             );
         } catch (PDOException $e) {
-            die('Database connection failed: ' . $e->getMessage());
+            // Nada de die(): mataba la peticion con el mensaje crudo del driver,
+            // que expone usuario y host de la DB en la respuesta del API (y ningun
+            // try/catch podia interceptarlo). El detalle va al log; al cliente,
+            // un mensaje neutro que el controller convierte en su codigo de error.
+            error_log('[DB] conexion fallida (' . $user . '@' . $host . '/' . $name . '): ' . $e->getMessage());
+            throw new RuntimeException('No se pudo conectar a la base de datos del tenant.', 0, $e);
         }
     }
 
