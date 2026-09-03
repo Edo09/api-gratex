@@ -24,7 +24,11 @@ class ACECFEmissionService
     private DgiiXmlSigner $signer;
     private DgiiReceptionService $reception;
     private ACECFXmlBuilder $builder;
-    private EmisorConfigModel $emisorModel;
+    // Perezoso: su constructor abre la DB DEL TENANT y un tenant tipo integracion
+    // no tiene. Instanciarlo aqui hacia que la sola construccion del servicio
+    // intentara conectar y matara el envio antes de empezar. Mismo motivo que en
+    // ECFEmissionService.
+    private ?EmisorConfigModel $emisorModel = null;
 
     public function __construct()
     {
@@ -32,7 +36,12 @@ class ACECFEmissionService
         $this->signer = new DgiiXmlSigner();
         $this->reception = new DgiiReceptionService($this->auth);
         $this->builder = new ACECFXmlBuilder();
-        $this->emisorModel = new EmisorConfigModel();
+    }
+
+    /** emisor_config vive en la DB del tenant: solo para tenants tipo app. */
+    private function emisorModel(): EmisorConfigModel
+    {
+        return $this->emisorModel ??= new EmisorConfigModel();
     }
 
     /**
@@ -60,7 +69,7 @@ class ACECFEmissionService
             }
             $emisor = ['rnc' => (string) $payload['rnc_comprador']];
         } else {
-            $emisor = $this->emisorModel->get();
+            $emisor = $this->emisorModel()->get();
             if (!$emisor) {
                 throw new RuntimeException('emisor_config no configurado.');
             }
