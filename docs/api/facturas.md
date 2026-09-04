@@ -381,7 +381,8 @@ Todo lo demás (`fecha_emision`, `tipo_pago`, `tipo_ingresos`, `totales`, `compr
 | `items` | **sí** | array | — | Al menos 1 item |
 | `user_id` | no | int | `null` | ID del usuario que emite |
 | `fecha_emision` | no | string | hoy | Formato `DD-MM-YYYY` |
-| `tipo_pago` | no | int | `1` | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros |
+| `tipo_pago` | no | int | `1` | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros. **`2` solo si el cliente tiene `permitir_credito=1`**, si no responde 422 |
+| `descuento` | no | number | el del cliente | % de descuento de la factura (0-100). Si se omite se usa `clients.descuento`; mandar `0` lo anula. Se reparte por línea como `DescuentoMonto` y baja la base del ITBIS. Una línea con su propio `descuento_monto` no se toca |
 | `tipo_ingresos` | no | string | `"01"` | `"01"` Operaciones (no aplica a E43/E47) |
 | `indicador_monto_gravado` | no | string | `"0"` | `"0"`=precio incluye ITBIS, `"1"`=lo excluye (E31/32/33/34/41/45) |
 | `comprador` | no | object | del cliente | Sobrescribe datos del comprador (ver abajo) |

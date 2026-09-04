@@ -28,13 +28,14 @@ class clientModel
         }
     }
 
-    public function saveClient($email, $client_name, $company_name, $phone_number, $rnc = null)
+    public function saveClient($email, $client_name, $company_name, $phone_number, $rnc = null, $descuento = null, $permitirCredito = null)
     {
         try {
             $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
             $resultado = ['error', 'This client already exists'];
             if (count($valida) == 0) {
-                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc, razon_social) VALUES(:email, :client_name, :company_name, :phone_number, :rnc, :razon_social)";
+                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc, razon_social, descuento, permitir_credito)
+                    VALUES(:email, :client_name, :company_name, :phone_number, :rnc, :razon_social, :descuento, :permitir_credito)";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([
                     ':email' => $email,
@@ -42,7 +43,10 @@ class clientModel
                     ':company_name' => $company_name,
                     ':phone_number' => $phone_number,
                     ':rnc' => $this->normalizeRnc($rnc),
-                    ':razon_social' => $company_name
+                    ':razon_social' => $company_name,
+                    // Las columnas son NOT NULL: en alta, "no enviado" = 0.
+                    ':descuento' => $this->normalizeDescuento($descuento) ?? 0.0,
+                    ':permitir_credito' => $this->normalizeCredito($permitirCredito) ?? 0
                 ]);
                 $resultado = ['success', 'Client saved', (int) $this->conexion->lastInsertId()];
             }
@@ -52,7 +56,7 @@ class clientModel
         }
     }
 
-    public function updateClient($id, $email, $client_name, $company_name, $phone_number, $rnc = null)
+    public function updateClient($id, $email, $client_name, $company_name, $phone_number, $rnc = null, $descuento = null, $permitirCredito = null)
     {
         try {
             $existe = $this->getClients($id);
@@ -61,7 +65,10 @@ class clientModel
                 $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
                 $resultado = ['error', 'This client already exists'];
                 if (count($valida) == 0) {
-                    $sql = "UPDATE clients SET email = :email, client_name = :client_name, company_name = :company_name, phone_number = :phone_number, rnc = :rnc, razon_social = :razon_social WHERE id = :id";
+                    $sql = "UPDATE clients SET email = :email, client_name = :client_name, company_name = :company_name,
+                        phone_number = :phone_number, rnc = :rnc, razon_social = :razon_social,
+                        descuento = COALESCE(:descuento, descuento),
+                        permitir_credito = COALESCE(:permitir_credito, permitir_credito) WHERE id = :id";
                     $stmt = $this->conexion->prepare($sql);
                     $stmt->execute([
                         ':id' => $id,
@@ -70,7 +77,12 @@ class clientModel
                         ':company_name' => $company_name,
                         ':phone_number' => $phone_number,
                         ':rnc' => $this->normalizeRnc($rnc),
-                        ':razon_social' => $company_name
+                        ':razon_social' => $company_name,
+                        // null = el PUT no las mando: el COALESCE del SQL conserva
+                        // lo que ya tenia. Asi un cliente de otro consumidor del
+                        // API no pierde su descuento ni su credito al editarlo.
+                        ':descuento' => $this->normalizeDescuento($descuento),
+                        ':permitir_credito' => $this->normalizeCredito($permitirCredito)
                     ]);
                     $resultado = ['success', 'Client updated'];
                 }
@@ -105,6 +117,32 @@ class clientModel
         }
         $digits = preg_replace('/\D/', '', (string) $rnc);
         return $digits === '' ? null : $digits;
+    }
+
+    /**
+     * Descuento del cliente en %. Las columnas son NOT NULL DEFAULT 0, asi que
+     * null/vacio = 0 (sin descuento), no "conservar el anterior". Se acota a
+     * 0-100 para que un dato sucio del catalogo anterior no entre como 999.
+     */
+    private function normalizeDescuento($valor): ?float
+    {
+        if ($valor === null || $valor === '' || !is_numeric($valor)) {
+            return null;
+        }
+        return max(0.0, min(100.0, round((float) $valor, 2)));
+    }
+
+    /**
+     * permitir_credito: cualquier cosa distinta de 1 es 0 (solo contado).
+     * null solo cuando no vino en el request, para poder distinguir "ponlo en 0"
+     * de "no lo toques".
+     */
+    private function normalizeCredito($valor): ?int
+    {
+        if ($valor === null || $valor === '') {
+            return null;
+        }
+        return ((int) $valor) === 1 ? 1 : 0;
     }
 
     // Duplicate check intentionally ignores rnc and company_name: multiple

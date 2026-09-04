@@ -23,8 +23,14 @@ class EcfItemMapper
         foreach ($items as $i => $raw) {
             $cantidad = (float) ($raw['cantidad'] ?? $raw['quantity'] ?? 1);
             $precio = (float) ($raw['precio_unitario'] ?? $raw['amount'] ?? 0);
-            $monto = round($cantidad * $precio, 2);
             $indicador = (int) ($raw['indicador_facturacion'] ?? 1);
+
+            // DGII: MontoItem = Cantidad x PrecioUnitario - DescuentoMonto, y el
+            // ITBIS se calcula sobre ese neto. Antes el descuento se pasaba al XML
+            // pero no se restaba, asi que MontoItem y el ITBIS quedaban inflados.
+            $descuento = self::montoDescuento($raw, round($cantidad * $precio, 2));
+            $monto = round(round($cantidad * $precio, 2) - $descuento, 2);
+
             $itbis = 0.0;
             if ($indicador === 1) {
                 $itbis = round($monto * 0.18, 2);
@@ -54,7 +60,7 @@ class EcfItemMapper
                 'fecha_vencimiento_item' => $raw['fecha_vencimiento_item'] ?? null,
                 'precio_unitario' => $precio,
                 'precio_unitario_raw' => $raw['precio_unitario_raw'] ?? null,
-                'descuento_monto' => $raw['descuento_monto'] ?? null,
+                'descuento_monto' => $descuento > 0 ? $descuento : null,
                 'subdescuentos' => is_array($raw['subdescuentos'] ?? null) ? $raw['subdescuentos'] : [],
                 'recargo_monto' => $raw['recargo_monto'] ?? null,
                 'subrecargos' => is_array($raw['subrecargos'] ?? null) ? $raw['subrecargos'] : [],
@@ -65,6 +71,54 @@ class EcfItemMapper
             ];
         }
         return $mapped;
+    }
+
+    /**
+     * Descuento en monto de una linea, acotado a [0, bruto]: un descuento mayor
+     * que la linea daria un MontoItem negativo, que el XSD rechaza.
+     */
+    private static function montoDescuento(array $raw, float $bruto): float
+    {
+        $d = $raw['descuento_monto'] ?? null;
+        if ($d === null || $d === '' || !is_numeric($d)) {
+            return 0.0;
+        }
+        return max(0.0, min($bruto, round((float) $d, 2)));
+    }
+
+    /**
+     * Aplica un descuento porcentual a las lineas que NO traen uno propio.
+     *
+     * Lo usa la emision para bajar el `descuento` del cliente a cada linea: el
+     * porcentaje es del cliente, pero DGII solo entiende montos por item. Una
+     * linea que ya trae `descuento_monto` se respeta tal cual — el usuario lo
+     * puso a mano y manda sobre el default del cliente.
+     *
+     * @param float $porcentaje 0-100. Fuera de rango o 0 devuelve los items intactos.
+     */
+    public static function aplicarDescuentoPorcentaje(array $items, float $porcentaje): array
+    {
+        if ($porcentaje <= 0 || $porcentaje > 100) {
+            return $items;
+        }
+        foreach ($items as &$item) {
+            $yaTiene = isset($item['descuento_monto']) && $item['descuento_monto'] !== ''
+                && is_numeric($item['descuento_monto']) && (float) $item['descuento_monto'] > 0;
+            if ($yaTiene) {
+                continue;
+            }
+            $cantidad = (float) ($item['cantidad'] ?? $item['quantity'] ?? 1);
+            $precio = (float) ($item['precio_unitario'] ?? $item['amount'] ?? 0);
+            $bruto = round($cantidad * $precio, 2);
+            if ($bruto <= 0) {
+                continue;
+            }
+            $item['descuento_monto'] = round($bruto * $porcentaje / 100, 2);
+            // MontoItem se recalcula neto en map(): un valor viejo aqui lo pisaria.
+            unset($item['monto_item']);
+        }
+        unset($item);
+        return $items;
     }
 
     /**
@@ -90,7 +144,10 @@ class EcfItemMapper
         foreach ($items as $item) {
             $cantidad = (float) ($item['cantidad'] ?? $item['quantity'] ?? 1);
             $precio = (float) ($item['precio_unitario'] ?? $item['amount'] ?? 0);
-            $base = round($cantidad * $precio, 2);
+            // Neto de descuento, igual que MontoItem: los montos gravados del
+            // Encabezado tienen que cuadrar con la suma de las lineas.
+            $bruto = round($cantidad * $precio, 2);
+            $base = round($bruto - self::montoDescuento($item, $bruto), 2);
             $indicador = (int) ($item['indicador_facturacion'] ?? 1);
 
             $itbis = 0.0;

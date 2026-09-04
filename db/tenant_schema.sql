@@ -30,6 +30,10 @@ CREATE TABLE IF NOT EXISTS clients (
   direccion     VARCHAR(100) NULL,
   municipio     VARCHAR(50)  NULL,
   provincia     VARCHAR(50)  NULL,
+  descuento     DECIMAL(5,2) NOT NULL DEFAULT 0.00
+                  COMMENT 'Descuento fijo del cliente en % (0 = sin descuento)',
+  permitir_credito TINYINT(1) NOT NULL DEFAULT 0
+                  COMMENT '1 = se le puede facturar a credito; 0 = solo contado',
   phone_number  VARCHAR(20)  NOT NULL,
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

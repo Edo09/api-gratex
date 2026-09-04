@@ -169,6 +169,29 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     }
 
     $strictInput = !empty($input['strict_input']);
+
+    // Credito: solo si el cliente lo tiene habilitado. TipoPago DGII: 1=Contado,
+    // 2=Credito. Se valida aqui y no en el front porque es una regla comercial
+    // del cliente, no una preferencia de la pantalla.
+    if ($client && (int) ($input['tipo_pago'] ?? 1) === 2 && (int) ($client['permitir_credito'] ?? 0) !== 1) {
+        respond(false, 'El cliente ' . ($client['client_name'] ?? '') . ' no tiene credito habilitado: '
+            . 'la factura debe ser de contado (tipo_pago = 1).', 422);
+        return;
+    }
+
+    // Descuento: el del cliente es el DEFAULT. Si la factura manda `descuento`
+    // (aunque sea 0) gana ese, que es lo que el usuario decidio al crearla.
+    // En modo estricto (set de pruebas DGII) no se aplica nada automatico: los
+    // montos del set son exactos y cualquier ajuste nuestro lo hace fallar.
+    if (!$strictInput) {
+        $descuentoPct = array_key_exists('descuento', $input)
+            ? (float) $input['descuento']
+            : (float) ($client['descuento'] ?? 0);
+        if ($descuentoPct > 0) {
+            $items = EcfItemMapper::aplicarDescuentoPorcentaje($items, $descuentoPct);
+        }
+    }
+
     $totales = computeTotales($items);
     $totalesOverride = is_array($input['totales'] ?? null)
         ? array_filter($input['totales'], fn($v) => $v !== null && $v !== '')
