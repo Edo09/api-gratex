@@ -95,10 +95,10 @@ class productModel
             }
             $sql = "INSERT INTO products
                 (sku, nombre, descripcion, category_id, warehouse_id, indicador_bien_servicio, indicador_facturacion,
-                 precio, costo, unidad_medida, stock, stock_minimo, activo)
+                 precio, precio_2, precio_3, precio_4, costo, unidad_medida, stock, stock_minimo, activo)
                 VALUES
                 (:sku, :nombre, :descripcion, :category_id, :warehouse_id, :ibs, :ifact,
-                 :precio, :costo, :unidad_medida, :stock, :stock_minimo, :activo)";
+                 :precio, :precio_2, :precio_3, :precio_4, :costo, :unidad_medida, :stock, :stock_minimo, :activo)";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute($this->bindParams($data, $warehouseId));
             return ['success', 'Product saved', (int) $this->conexion->lastInsertId()];
@@ -123,7 +123,8 @@ class productModel
                 sku = :sku, nombre = :nombre, descripcion = :descripcion,
                 category_id = :category_id, warehouse_id = :warehouse_id,
                 indicador_bien_servicio = :ibs, indicador_facturacion = :ifact,
-                precio = :precio, costo = :costo, unidad_medida = :unidad_medida,
+                precio = :precio, precio_2 = :precio_2, precio_3 = :precio_3, precio_4 = :precio_4,
+                costo = :costo, unidad_medida = :unidad_medida,
                 stock = :stock, stock_minimo = :stock_minimo, activo = :activo
                 WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
@@ -182,6 +183,9 @@ class productModel
         $intOrNull = function ($v) {
             return ($v === null || $v === '') ? null : (int) $v;
         };
+        $precioOpcional = function ($v) {
+            return ($v === null || $v === '' || !is_numeric($v)) ? null : (float) $v;
+        };
         $catId = $d->category_id ?? null;
         return [
             ':sku'           => $str($d->sku ?? null),
@@ -192,6 +196,11 @@ class productModel
             ':ibs'           => (int) ($d->indicador_bien_servicio ?? 1),
             ':ifact'         => (int) ($d->indicador_facturacion ?? 1),
             ':precio'        => (float) ($d->precio ?? 0),
+            // Listas 2-4: NULL = "no aplica", distinto de 0.00 (precio cero).
+            // Por eso no se castea a float lo vacio.
+            ':precio_2'      => $precioOpcional($d->precio_2 ?? null),
+            ':precio_3'      => $precioOpcional($d->precio_3 ?? null),
+            ':precio_4'      => $precioOpcional($d->precio_4 ?? null),
             ':costo'         => (float) ($d->costo ?? 0),
             ':unidad_medida' => $str($d->unidad_medida ?? null) ?? '43',
             ':stock'         => $intOrNull($d->stock ?? null),

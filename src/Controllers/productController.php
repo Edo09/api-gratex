@@ -32,6 +32,17 @@ function validateProduct($p): ?string
     if (isset($p->costo) && (!is_numeric($p->costo) || (float) $p->costo < 0)) {
         return 'Cost must be a non-negative number';
     }
+    // Listas 2-4: opcionales. Vacio o null = "no aplica"; si viene algo, tiene
+    // que ser un numero no negativo, igual que precio.
+    foreach (['precio_2', 'precio_3', 'precio_4'] as $campo) {
+        $valor = $p->$campo ?? null;
+        if ($valor === null || $valor === '') {
+            continue;
+        }
+        if (!is_numeric($valor) || (float) $valor < 0) {
+            return "{$campo} must be a non-negative number";
+        }
+    }
     if (isset($p->indicador_facturacion) && !in_array((int) $p->indicador_facturacion, [0, 1, 2, 3, 4], true)) {
         return 'indicador_facturacion must be 0, 1, 2, 3 or 4';
     }

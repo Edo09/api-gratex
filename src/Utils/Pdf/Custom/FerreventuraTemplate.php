@@ -31,7 +31,7 @@ class FerreventuraTemplate extends FacturaTemplate
      * Linea de cuenta bancaria del pie. No existe en emisor_config: es dato
      * propio de este cliente, por eso vive aqui y no en el motor.
      */
-    private const CUENTA = 'Cuenta Banreserva 9605481575';
+    private const CUENTA = 'Cuenta Popular 829580422';
 
     /** Emisor cacheado en el encabezado para poder repetirlo en el pie. */
     private array $emisor = [];

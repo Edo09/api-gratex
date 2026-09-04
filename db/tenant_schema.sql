@@ -492,7 +492,14 @@ CREATE TABLE IF NOT EXISTS products (
     COMMENT '1=Bien | 2=Servicio',
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
     COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=Tasa cero | 4=Exento (gravado=1, exento=4)',
-  precio DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  precio DECIMAL(18,2) NOT NULL DEFAULT 0.00
+    COMMENT 'Lista de precio 1 (la que usan facturas y cotizaciones)',
+  precio_2 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 2 (NULL = no aplica)',
+  precio_3 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 3 (NULL = no aplica)',
+  precio_4 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 4 (NULL = no aplica)',
   costo DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
     COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
