@@ -281,23 +281,84 @@ class ncfModel
             // Tope ya comprometido del tipo: numeros usados (current_value) y
             // autorizados (numero_hasta) no pueden solaparse con el rango nuevo.
             $stmt = $this->conexion->prepare(
-                'SELECT id, current_value, numero_hasta FROM ncf_sequences
+                'SELECT id, current_value, numero_desde, numero_hasta FROM ncf_sequences
                  WHERE type = :type AND ambiente = :amb FOR UPDATE'
             );
             $stmt->execute([':type' => $type, ':amb' => $amb]);
             $existentes = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            $tope = 0;
             $sinLimite = null;
             foreach ($existentes as $e) {
-                $tope = max($tope, (int) $e['current_value'], (int) ($e['numero_hasta'] ?? 0));
                 if ($e['numero_hasta'] === null) {
                     $sinLimite = $e;
                 }
             }
+
+            // La fila "sin limite" sembrada por db/tenant_schema.sql toma el default
+            // numero_desde = 1, asi que YA OCUPA el inicio del primer rango real que
+            // la DGII autoriza (que casi siempre empieza en 1). Insertar otra fila
+            // con ese mismo numero_desde choca con uq_type_amb_desde (error 23000:
+            // "Ya existe un rango que inicia en 1") y deja imposible registrar el
+            // primer rango de un tenant nuevo. En ese caso no hay rango duplicado
+            // que rechazar: hay que CONVERTIR la fila existente en el rango
+            // autorizado, que es lo mismo que hizo a mano la migracion 014 para
+            // Gratex (por eso alli nunca se noto).
+            $convertir = $sinLimite !== null && (int) $sinLimite['numero_desde'] === $numeroDesde;
+
+            // El consumo de la fila que se va a convertir NO cuenta como tope: ese
+            // consumo pertenece justamente al rango que se esta formalizando. Sin
+            // esta exclusion, un tenant que ya emitio en produccion antes de
+            // registrar su rango quedaba bloqueado por su propio contador.
+            $tope = 0;
+            foreach ($existentes as $e) {
+                if ($convertir && (int) $e['id'] === (int) $sinLimite['id']) {
+                    continue;
+                }
+                $tope = max($tope, (int) $e['current_value'], (int) ($e['numero_hasta'] ?? 0));
+            }
             if ($numeroDesde <= $tope) {
                 $this->conexion->rollBack();
                 return ['error', "numero_desde debe ser mayor que {$tope} (ultimo numero usado/autorizado de {$type} en {$amb})"];
+            }
+
+            if ($convertir) {
+                // Se conserva lo ya dispensado; si la fila no habia dispensado nada
+                // (current_value 0 en un tenant nuevo) arranca en numero_desde - 1.
+                $cv = max((int) $sinLimite['current_value'], $numeroDesde - 1);
+                if ($cv > $numeroHasta) {
+                    $this->conexion->rollBack();
+                    return ['error', "{$type} en {$amb} ya dispenso hasta {$cv}, fuera del rango"
+                        . " {$numeroDesde}-{$numeroHasta} que intenta registrar."];
+                }
+                $upd = $this->conexion->prepare(
+                    'UPDATE ncf_sequences
+                        SET numero_hasta = :hasta, fecha_vencimiento = :venc,
+                            no_solicitud = :sol, no_autorizacion = :aut,
+                            current_value = :cv, description = :descr
+                      WHERE id = :id'
+                );
+                $upd->execute([
+                    ':hasta' => $numeroHasta,
+                    ':venc' => $fechaVencimiento,
+                    ':sol' => $noSolicitud !== null && $noSolicitud !== '' ? $noSolicitud : null,
+                    ':aut' => $noAutorizacion !== null && $noAutorizacion !== '' ? $noAutorizacion : null,
+                    ':cv' => $cv,
+                    ':descr' => 'Rango autorizado DGII',
+                    ':id' => $sinLimite['id'],
+                ]);
+                $this->conexion->commit();
+
+                return ['success', [
+                    'id' => (int) $sinLimite['id'],
+                    'type' => $type,
+                    'ambiente' => $amb,
+                    'numero_desde' => $numeroDesde,
+                    'numero_hasta' => $numeroHasta,
+                    'fecha_vencimiento' => $fechaVencimiento,
+                    'no_solicitud' => $noSolicitud,
+                    'no_autorizacion' => $noAutorizacion,
+                    'restantes' => $numeroHasta - $cv,
+                ]];
             }
 
             // Cerrar la fila legacy sin limite en su consumo actual.
@@ -346,7 +407,9 @@ class ncfModel
                 $this->conexion->rollBack();
             }
             if ($e->getCode() === '23000') {
-                return ['error', 'Ya existe un rango de ' . $type . ' que inicia en ' . $numeroDesde . ' para ' . $amb];
+                return ['error', 'Ya existe un rango de ' . $type . ' que inicia en ' . $numeroDesde
+                    . ' para ' . $amb . '. Consulta GET /api/ncf/rangos?type=' . $type
+                    . ' y registra el siguiente rango a partir de donde termina ese.'];
             }
             return ['error', 'No se pudo registrar el rango'];
         }
