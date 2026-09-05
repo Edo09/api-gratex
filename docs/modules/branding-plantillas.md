@@ -4,15 +4,21 @@ Cada tenant elige cómo se ve su factura PDF (y su cotización): una plantilla
 predefinida + un color de acento + su logo. Para clientes que pidan un diseño
 totalmente a la medida existe la vía `custom:*` (sección final).
 
+> Esto describe la **hoja carta**. La misma factura se puede imprimir en tirilla
+> térmica de 80 mm con `?formato=pos`; el branding (plantilla, acento) no aplica
+> ahí. Ver [representacion-impresa-pos.md](representacion-impresa-pos.md).
+
 ## Arquitectura
 
-- **Motor:** `src/Utils/FacturaPdfGenerator.php`. Dueño de TODO el contenido
-  exigido por la norma DGII de Representación Impresa: identificación del e-CF
-  (título, e-NCF, fechas), receptor, tabla de items con las 6 columnas
-  obligatorias (Cantidad | Descripción | Und. Medida | Precio | ITBIS | Valor),
-  totales (Subtotal Gravado / Monto Exento / Total ITBIS / Total), QR del
-  timbre + Código de Seguridad + Fecha Firma, NCF Modificado (E33/E34) y la
-  paginación "Página X de Y".
+- **Contenido:** `src/Utils/Pdf/EcfDocumento.php`. Dueño de TODO lo que exige la
+  norma DGII de Representación Impresa: identificación del e-CF (título, e-NCF,
+  fechas), receptor, líneas con sus 6 datos obligatorios (Cantidad | Descripción
+  | Und. Medida | Precio | ITBIS | Valor), totales (Subtotal Gravado / Monto
+  Exento / Total ITBIS / Total), timbre (URL del QR + Código de Seguridad +
+  Fecha Firma) y NCF Modificado / Motivo (E33/E34). Lo comparten la hoja carta y
+  la tirilla POS: una regla de la norma se cambia una sola vez.
+- **Motor de la hoja carta:** `src/Utils/FacturaPdfGenerator.php`. Coloca ese
+  contenido en 8½×11 y agrega la paginación "Página X de Y".
 - **Plantillas:** `src/Utils/Pdf/` — estrategia de dibujo (`FacturaTemplate`).
   Una plantilla solo decide CÓMO se ve cada bloque; por construcción no puede
   eliminar un elemento obligatorio de la RI.

@@ -54,7 +54,15 @@ class MasterDatabase
                 ]
             );
         } catch (PDOException $e) {
-            die('Master DB connection failed: ' . $e->getMessage());
+            // Antes esto era die(): mataba el request con texto plano, filtraba
+            // host/usuario del master al cliente y — peor — era INCATCHABLE, asi
+            // que los try/catch defensivos de quien llama (p.ej.
+            // FacturaPdfGenerator::unidadMedidaSigla) no servian de nada y una
+            // caida momentanea del master rompia hasta imprimir una factura ya
+            // emitida. Ahora lanza: quien puede seguir sin master lo captura, y
+            // lo que no, cae en ErrorHandler como un 500 JSON con referencia.
+            error_log("[MasterDB] conexion fallida ({$user}@{$host}:{$port}/{$name}): " . $e->getMessage());
+            throw new RuntimeException('No se pudo conectar a la base de datos maestra.', 0, $e);
         }
     }
 

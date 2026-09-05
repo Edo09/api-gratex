@@ -4,14 +4,17 @@
 //   GET    /api/facturas-simples              -> lista paginada (?page,?pageSize,?query)
 //   GET    /api/facturas-simples/{id}          -> una factura con sus lineas
 //   GET    /api/facturas-simples?id={id}       -> idem
-//   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64)
+//   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64, ?formato=pos)
 //   POST   /api/facturas-simples              -> crear
-//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64)
+//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64, ?formato=pos)
 //   PUT    /api/facturas-simples/{id}          -> actualizar (id tambien valido en el body)
 //   DELETE /api/facturas-simples/{id}          -> eliminar (id tambien valido en el body)
 //
 // Una "factura simple" es una factura interna que NO se emitio a la DGII
 // (tipo_ecf IS NULL). El modelo nunca toca un e-CF emitido por esta via.
+//
+// ?formato=pos (o 80mm/tirilla) devuelve la tirilla termica de 80 mm en vez de
+// la hoja carta. Mismo contenido, otro papel. Ver RepresentacionImpresa.
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
@@ -177,26 +180,24 @@ function fsHandlePreview(clientModel $clientModel): void
         'items'        => $items,
     ];
 
-    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
-    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
-    $pdf->setNoElectronica(true);  // diseño NCF, sin timbre/etiquetas de e-CF
-    $pdf->setFactura($factura);
-    if (!empty($client)) {
-        $pdf->setClientData($client);
-    }
-    $pdfContent = $pdf->generatePdf();
+    // ?formato=pos -> tirilla termica de 80 mm; por defecto, la hoja carta.
+    // true = diseño NCF, sin timbre ni etiquetas de e-CF.
+    require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
+    $pos = RepresentacionImpresa::esPos($body);
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $pos);
+    $nombre = 'Preview_factura_simple' . RepresentacionImpresa::sufijo($pos) . '.pdf';
 
     $format = $_GET['format'] ?? $body['format'] ?? 'base64';
     if ($format === 'download') {
         header('Content-Type: application/pdf');
-        header('Content-Disposition: attachment; filename="Preview_factura_simple.pdf"');
+        header('Content-Disposition: attachment; filename="' . $nombre . '"');
         header('Content-Length: ' . strlen($pdfContent));
         echo $pdfContent;
         return;
     }
 
     fsRespond(true, [
-        'filename'  => 'Preview_factura_simple.pdf',
+        'filename'  => $nombre,
         'content'   => base64_encode($pdfContent),
         'mime_type' => 'application/pdf',
     ]);
@@ -228,16 +229,13 @@ function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientMod
         }
     }
 
-    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
-    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
-    $pdf->setNoElectronica(true);  // diseño NCF, sin timbre/etiquetas de e-CF
-    $pdf->setFactura($factura);
-    if (!empty($client)) {
-        $pdf->setClientData($client);
-    }
-    $pdfContent = $pdf->generatePdf();
+    // ?formato=pos -> tirilla termica de 80 mm; por defecto, la hoja carta.
+    // true = diseño NCF, sin timbre ni etiquetas de e-CF.
+    require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
+    $pos = RepresentacionImpresa::esPos();
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $pos);
 
-    $filename = 'Factura_' . ($factura['no_factura'] ?? $id) . '.pdf';
+    $filename = 'Factura_' . ($factura['no_factura'] ?? $id) . RepresentacionImpresa::sufijo($pos) . '.pdf';
     $format = $_GET['format'] ?? 'base64';
     if ($format === 'download') {
         header('Content-Type: application/pdf');

@@ -1,25 +1,8 @@
 <?php
-/**
- * Include FPDF library
- */
-$fpdfPath = __DIR__ . '/../../vendor/fpdf/fpdf.php';
-$composerPath = __DIR__ . '/../../vendor/autoload.php';
-
-if (file_exists($composerPath)) {
-    require_once($composerPath);
-} elseif (file_exists($fpdfPath)) {
-    require_once($fpdfPath);
-} else {
-    die('FPDF library not found. Please install via composer (composer require setasign/fpdf) or download from http://www.fpdf.org/');
-}
-
-$qrLibPath = __DIR__ . '/../../vendor/phpqrcode/qrlib.php';
-if (file_exists($qrLibPath)) {
-    require_once($qrLibPath);
-}
-
+require_once __DIR__ . '/Pdf/libs.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/Pdf/FacturaTemplateFactory.php';
+require_once __DIR__ . '/Pdf/EcfDocumento.php';
 
 /**
  * PDF Generator for Facturas
@@ -32,8 +15,12 @@ class FacturaPdfGenerator extends FPDF
     private $aligns;
     private $lineHeight;
     private $clientData;
-    private $emisorConfig = null;
-    private $emisorConfigLoaded = false;
+    /**
+     * Contenido del comprobante segun la norma DGII (titulo, receptor, lineas,
+     * totales, timbre). Vive aparte porque la tirilla POS de 80 mm imprime
+     * exactamente lo mismo con otro diseno: un solo lugar donde cambiarlo.
+     */
+    private $doc = null;
     /** @var FacturaTemplate|null Plantilla visual (estrategia). Lazy: branding del tenant. */
     private $template = null;
     // true => factura NO electronica (NCF tradicional / factura simple): se omite
@@ -44,9 +31,6 @@ class FacturaPdfGenerator extends FPDF
     // en cm) sobre cada pagina. SOLO para disenar plantillas a la medida via
     // /api/branding/preview; jamas se activa en una factura real.
     private $debugGrid = false;
-    /** @var array<int,array{nombre_item:string,descripcion:string}>|null */
-    private $itemsDesdeXml = null;
-
     /**
      * Datos del emisor desde emisor_config (cacheados: Header() se invoca por
      * pagina). Asi la Representacion Impresa (RNC, direccion, telefono, correo)
@@ -54,20 +38,23 @@ class FacturaPdfGenerator extends FPDF
      */
     private function emisorConfig(): array
     {
-        if (!$this->emisorConfigLoaded) {
-            try {
-                // Sin driver pdo_mysql (CLI local sin BD) no se intenta conectar:
-                // Database::getInstance() hace die() en fallo de conexion (no
-                // lanza), lo que mataria el preview en vez de caer al fallback.
-                $this->emisorConfig = extension_loaded('pdo_mysql')
-                    ? ((new EmisorConfigModel())->get() ?: [])
-                    : [];
-            } catch (\Throwable $e) {
-                $this->emisorConfig = [];
-            }
-            $this->emisorConfigLoaded = true;
+        return $this->doc()->emisorConfig();
+    }
+
+    /**
+     * Datos del comprobante (lazy). Se reconstruye cuando cambia la factura,
+     * el cliente o el modo no-electronico.
+     */
+    private function doc(): EcfDocumento
+    {
+        if ($this->doc === null) {
+            $this->doc = new EcfDocumento(
+                $this->factura ?? [],
+                $this->clientData ?: [],
+                $this->noElectronica
+            );
         }
-        return $this->emisorConfig;
+        return $this->doc;
     }
 
     /**
@@ -107,21 +94,7 @@ class FacturaPdfGenerator extends FPDF
      */
     private function emisorParaPlantilla(): array
     {
-        $emisor = $this->emisorConfig();
-        // Los valores de Gratex solo aplican cuando NO hay tenant resuelto (preview
-        // sin BD / single-tenant). Con un tenant resuelto se deja vacio: imprimir el
-        // telefono, el correo o el RNC de Gratex en la factura de otro contribuyente
-        // es peor que no imprimir nada, y DGII valida la representacion impresa.
-        $sinTenant = !class_exists('TenantResolver') || TenantResolver::current() === null;
-        $fb = fn(string $valor) => $sinTenant ? $valor : '';
-        return [
-            'razon_social' => $emisor['nombre_comercial'] ?? $emisor['razon_social'] ?? '',
-            'direccion'    => $emisor['direccion'] ?? $fb('Calle Jose Nicolas Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.'),
-            'telefono'     => $emisor['telefono'] ?? $fb('809-681-5141'),
-            'correo'       => $emisor['correo'] ?? $fb('info@gratex.net'),
-            'rnc'          => $emisor['rnc'] ?? $fb('131256432'),
-            'website'      => $emisor['website'] ?? '',
-        ];
+        return $this->doc()->emisor();
     }
 
     /**
@@ -131,7 +104,7 @@ class FacturaPdfGenerator extends FPDF
     public function setFactura($factura)
     {
         $this->factura = $factura;
-        $this->itemsDesdeXml = null;
+        $this->doc = null;
     }
 
     /**
@@ -142,6 +115,7 @@ class FacturaPdfGenerator extends FPDF
     public function setNoElectronica(bool $v = true)
     {
         $this->noElectronica = $v;
+        $this->doc = null;
     }
 
     /**
@@ -162,6 +136,7 @@ class FacturaPdfGenerator extends FPDF
     public function setClientData($clientData)
     {
         $this->clientData = $clientData;
+        $this->doc = null;
     }
 
     /**
@@ -172,138 +147,6 @@ class FacturaPdfGenerator extends FPDF
     private function convertEncoding($string)
     {
         return mb_convert_encoding($string, 'ISO-8859-1', 'UTF-8');
-    }
-
-    private function firstNonBlank(array $values): string
-    {
-        foreach ($values as $value) {
-            if ($value === null) {
-                continue;
-            }
-            $text = (string) $value;
-            if (trim($text) !== '') {
-                return $text;
-            }
-        }
-        return '';
-    }
-
-    private function sameVisibleText(string $a, string $b): bool
-    {
-        $normalize = static function (string $value): string {
-            return trim((string) preg_replace('/\s+/', ' ', $value));
-        };
-        return $normalize($a) === $normalize($b);
-    }
-
-    private function xmlItemsParaPdf(): array
-    {
-        if ($this->itemsDesdeXml !== null) {
-            return $this->itemsDesdeXml;
-        }
-
-        $this->itemsDesdeXml = [];
-        $xml = (string) ($this->factura['xml_firmado'] ?? '');
-        if ($xml === '' || !class_exists('DOMDocument')) {
-            return $this->itemsDesdeXml;
-        }
-
-        $previous = libxml_use_internal_errors(true);
-        $doc = new DOMDocument();
-        $options = defined('LIBXML_NONET') ? LIBXML_NONET : 0;
-        $loaded = $doc->loadXML($xml, $options);
-        libxml_clear_errors();
-        libxml_use_internal_errors($previous);
-        if (!$loaded) {
-            return $this->itemsDesdeXml;
-        }
-
-        foreach ($doc->getElementsByTagName('Item') as $itemEl) {
-            $this->itemsDesdeXml[] = [
-                'nombre_item' => $this->childText($itemEl, 'NombreItem'),
-                'descripcion' => $this->childText($itemEl, 'DescripcionItem'),
-            ];
-        }
-
-        return $this->itemsDesdeXml;
-    }
-
-    private function childText($parent, string $tag): string
-    {
-        $nodes = $parent->getElementsByTagName($tag);
-        if ($nodes->length === 0) {
-            return '';
-        }
-        return trim((string) $nodes->item(0)->textContent);
-    }
-
-    private function partesItemParaPdf(array $item, int $index): array
-    {
-        $xmlItem = $this->xmlItemsParaPdf()[$index] ?? [];
-        $nombre = $this->firstNonBlank([
-            $item['nombre_item'] ?? null,
-            $xmlItem['nombre_item'] ?? null,
-        ]);
-        $descripcion = $this->firstNonBlank([
-            $item['descripcion'] ?? null,
-            $xmlItem['descripcion'] ?? null,
-        ]);
-        $legacyDescription = $this->firstNonBlank([$item['description'] ?? null]);
-
-        if ($descripcion === '' && $legacyDescription !== '') {
-            if ($nombre === '' || !$this->sameVisibleText($legacyDescription, $nombre)) {
-                $descripcion = $legacyDescription;
-            }
-        }
-        if ($nombre !== '' && $descripcion !== '' && $this->sameVisibleText($nombre, $descripcion)) {
-            $descripcion = '';
-        }
-
-        return [$nombre, $descripcion];
-    }
-
-    private function itemTieneDescripcionPropiaParaPdf(array $item, int $index): bool
-    {
-        [, $descripcion] = $this->partesItemParaPdf($item, $index);
-        return trim($descripcion) !== '';
-    }
-
-    private function itemDescripcionParaPdf(array $item, int $index, string $descripcionExtra = ''): string
-    {
-        [$nombre, $descripcion] = $this->partesItemParaPdf($item, $index);
-        if ($descripcionExtra !== '') {
-            if ($descripcion === '') {
-                $descripcion = $descripcionExtra;
-            } elseif (!$this->sameVisibleText($descripcion, $descripcionExtra)) {
-                $descripcion .= ' ' . $descripcionExtra;
-            }
-        }
-
-        $parts = [];
-        if ($nombre !== '') {
-            $parts[] = $nombre;
-        }
-        if ($descripcion !== '') {
-            $parts[] = $descripcion;
-        }
-        return implode("\n", $parts);
-    }
-
-    /**
-     * Convert date to Spanish format (e.g. "Febrero 24, 2026")
-     * @param string $date Date string
-     * @return string Spanish formatted date
-     */
-    private function fechaCastellano($date)
-    {
-        $timestamp = strtotime($date);
-        $numeroDia = date('d', $timestamp);
-        $mes = date('F', $timestamp);
-        $anio = date('Y', $timestamp);
-        $meses_EN = array("January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December");
-        $meses_ES = array("Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre");
-        $nombreMes = str_replace($meses_EN, $meses_ES, $mes);
-        return $nombreMes . " " . $numeroDia . ", " . $anio;
     }
 
     /**
@@ -498,167 +341,30 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
-     * MontoTotal para el QR del timbre. La DGII valida el timbre contra el
-     * <MontoTotal> del e-CF firmado, por lo que se extrae del XML emitido
-     * (xml_firmado) en vez del campo `total`, que puede no incluir el ITBIS
-     * (p.ej. filas sembradas con el monto gravado). Cae al campo `total` solo
-     * cuando no hay XML (preview/legacy).
-     */
-    private function montoTotalParaTimbre(): string
-    {
-        $xml = $this->factura['xml_firmado'] ?? '';
-        if ($xml !== '' && preg_match('/<MontoTotal>\s*([0-9.]+)\s*<\/MontoTotal>/i', $xml, $m)) {
-            return number_format((float) $m[1], 2, '.', '');
-        }
-        return number_format((float) ($this->factura['total'] ?? 0), 2, '.', '');
-    }
-
-    /**
-     * Razon social del comprador tal como se emitio en el e-CF firmado, para que
-     * el PDF coincida con lo que validó la DGII. Evita divergencias si el registro
-     * del cliente cambia tras emitir, o si la emision uso un override distinto al
-     * cliente vinculado. Null si no hay XML o el nodo no existe (preview / comprador
-     * ausente), dejando que el llamador caiga al registro del cliente.
-     */
-    private function razonSocialCompradorDesdeXml(): ?string
-    {
-        $xml = $this->factura['xml_firmado'] ?? '';
-        if ($xml !== '' && preg_match('/<RazonSocialComprador>([^<]*)<\/RazonSocialComprador>/i', $xml, $m)) {
-            $val = html_entity_decode(trim($m[1]), ENT_QUOTES | ENT_XML1, 'UTF-8');
-            if ($val !== '') {
-                return $val;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Totales para el pie de la Representacion Impresa, tomados del e-CF firmado
-     * para que cuadren con lo emitido a la DGII. Evita recalcular el ITBIS a
-     * ciegas al 18% sobre items exentos/0%/16%. Devuelve null si no hay XML
-     * (preview), dejando que el llamador caiga a la suma por linea.
-     * @return array{subtotal: float, exento: float, itbis: float, total: float}|null
-     */
-    private function totalesParaImpresion(): ?array
-    {
-        $xml = $this->factura['xml_firmado'] ?? '';
-        if ($xml === '') {
-            return null;
-        }
-        $get = static function (string $tag) use ($xml): ?float {
-            if (preg_match('/<' . $tag . '>\s*([0-9.]+)\s*<\/' . $tag . '>/i', $xml, $m)) {
-                return (float) $m[1];
-            }
-            return null;
-        };
-        $total = $get('MontoTotal');
-        if ($total === null) {
-            return null;
-        }
-        $itbis  = $get('TotalITBIS') ?? 0.0;
-        $exento = $get('MontoExento') ?? 0.0;
-        $gravado = $get('MontoGravadoTotal');
-        if ($gravado === null) {
-            $gravado = $total - $itbis - $exento;
-        }
-        return [
-            'subtotal' => round($gravado, 2),
-            'exento'   => round($exento, 2),
-            'itbis'    => round($itbis, 2),
-            'total'    => round($total, 2),
-        ];
-    }
-
-    /**
-     * Render DGII timbre QR + Codigo de Seguridad + Fecha Firma en el pie de
-     * factura (seccion de validacion fiscal, segun norma DGII de Representacion
-     * Impresa). Solo renderiza si la factura tiene e_ncf y codigo_seguridad.
+     * Dibuja el timbre fiscal DGII (QR + Codigo de Seguridad + Fecha Firma) en
+     * el pie. El CONTENIDO del timbre (la URL de ConsultaTimbre con todos sus
+     * parametros) lo arma EcfDocumento: es lo que la DGII valida contra el e-CF
+     * y debe ser identico en carta y en tirilla POS. Aqui solo se coloca.
      */
     private function addQRTimbre(): void
     {
-        // Factura NO electronica: no lleva timbre fiscal DGII (no es un e-CF).
-        if ($this->noElectronica) {
+        $timbre = $this->doc()->timbre();
+        if ($timbre === null) {
             return;
         }
-        if (!class_exists('QRcode')) {
-            return;
-        }
-
-        $eNcf = $this->factura['e_ncf'] ?? '';
-        $codigoSeguridad = $this->factura['codigo_seguridad'] ?? '';
-        $isPreview = ($eNcf === '' || $codigoSeguridad === '');
-
-        $emisor = $this->emisorConfig();
-        $rncEmisor = $emisor['rnc'] ?? '';
-
-        if ($isPreview) {
-            $url = 'PREVIEW - Sin validez fiscal';
-            $codigoSeguridad = 'PREVIEW';
-        } else {
-            if ($rncEmisor === '') {
-                return;
-            }
-            $ambiente = $this->factura['ambiente_dgii'] ?? ($emisor['environment'] ?? 'CerteCF');
-            $ambiente = match(strtolower((string) $ambiente)) {
-                'certecf'  => 'CerteCF',
-                'testecf'  => 'TesteCF',
-                'ecf'      => 'ecf',
-                default    => $ambiente,
-            };
-            $fechaEmision = $this->formatFechaQr($this->factura['date'] ?? '');
-            $monto = $this->montoTotalParaTimbre();
-            $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
-
-            $isFc = ($this->factura['tipo_ecf'] ?? '') === '32'
-                && (float) ($this->factura['total'] ?? 0) < 250000;
-            $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
-
-            // RncComprador en el QR debe coincidir con el XML: DGII valida el timbre
-            // contra el e-CF emitido. E43 nunca lleva nodo Comprador y E47 solo lleva
-            // IdentificadorExtranjero (jamas RNCComprador). Incluirlo en esos tipos
-            // hace que ConsultaTimbre devuelva "no encontrado". Ver ECFXmlBuilder::
-            // requiereComprador() y buildComprador().
-            $tiposSinRncComprador = ['43', '47'];
-            $rncComprador = $this->clientData['rnc'] ?? '';
-            $incluyeRncComprador = $rncComprador !== ''
-                && !in_array((string) ($this->factura['tipo_ecf'] ?? ''), $tiposSinRncComprador, true);
-            $rncCompradorParam = $incluyeRncComprador ? '&RncComprador=' . rawurlencode($rncComprador) : '';
-
-            $url = sprintf(
-                'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
-                rawurlencode($ambiente),
-                $endpoint,
-                rawurlencode($rncEmisor),
-                $rncCompradorParam,
-                rawurlencode($eNcf),
-                rawurlencode($fechaEmision),
-                rawurlencode($monto),
-                rawurlencode($fechaFirma),
-                rawurlencode($codigoSeguridad)
-            );
-        }
-
-        $tmpPath = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'qr_' . bin2hex(random_bytes(8)) . '.png';
-        try {
-            @QRcode::png($url, $tmpPath, QR_ECLEVEL_M, 4, 1);
-        } catch (\Throwable $e) {
-            return;
-        }
-        if (!file_exists($tmpPath) || filesize($tmpPath) === 0) {
+        $png = EcfDocumento::generarQrPng($timbre['url']);
+        if ($png === null) {
             return;
         }
 
-        // QR del timbre + datos de firma electronica en el pie de factura.
-        // Para reubicar el bloque cambia estas coordenadas (mm). Pagina Letter:
-        // 215.9 mm de ancho x 279.4 mm de alto.
+        // Pagina Letter: 215.9 x 279.4 mm. Para reubicar el bloque, estas mm.
         $qrX = 8;
         $qrY = 205;
         $qrSize = 30;
-        $this->Image($tmpPath, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
-        @unlink($tmpPath);
+        $this->Image($png, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
+        @unlink($png);
 
         // Codigo de Seguridad y Fecha Firma a la derecha del QR (norma DGII).
-        $fechaFirma = $this->formatFechaHoraQr($this->factura['fecha_emision_dgii'] ?? '');
         $infoX = $qrX + $qrSize + 4;
         $savedY = $this->GetY();
         $this->SetXY($infoX, $qrY + 4);
@@ -666,84 +372,15 @@ class FacturaPdfGenerator extends FPDF
         $this->Cell(70, 4, $this->convertEncoding('Código de Seguridad:'), 0, 1, 'L');
         $this->SetX($infoX);
         $this->SetFont($this->fontFamily(), '', 9);
-        $this->Cell(70, 4, $codigoSeguridad, 0, 1, 'L');
+        $this->Cell(70, 4, $timbre['codigo_seguridad'], 0, 1, 'L');
         $this->SetX($infoX);
         $this->SetFont($this->fontFamily(), 'B', 8);
         $this->Cell(70, 4, 'Fecha Firma:', 0, 1, 'L');
         $this->SetX($infoX);
         $this->SetFont($this->fontFamily(), '', 9);
-        $this->Cell(70, 4, $fechaFirma !== '' ? $fechaFirma : 'N/D', 0, 1, 'L');
+        $this->Cell(70, 4, $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D', 0, 1, 'L');
 
         $this->SetXY($this->lMargin, $savedY);
-    }
-
-    private function formatFechaQr(string $value): string
-    {
-        if ($value === '') return '';
-        $ts = strtotime($value);
-        return $ts ? date('d-m-Y', $ts) : '';
-    }
-
-    private function formatFechaHoraQr(string $value): string
-    {
-        if ($value === '') return '';
-        $ts = strtotime($value);
-        return $ts ? date('d-m-Y H:i:s', $ts) : '';
-    }
-
-    /**
-     * Titulo dinamico del documento segun el tipo de e-CF (norma DGII).
-     */
-    private function tituloDocumento(): string
-    {
-        if ($this->noElectronica) {
-            return 'Factura';
-        }
-        $tipo = (string) ($this->factura['tipo_ecf'] ?? '');
-        $titulos = [
-            '31' => 'Factura de Crédito Fiscal Electrónica',
-            '32' => 'Factura de Consumo Electrónica',
-            '33' => 'Nota de Débito Electrónica',
-            '34' => 'Nota de Crédito Electrónica',
-            '41' => 'Comprobante Electrónico de Compras',
-            '43' => 'Comprobante Electrónico para Gastos Menores',
-            '44' => 'Comprobante Electrónico para Regímenes Especiales',
-            '45' => 'Comprobante Electrónico Gubernamental',
-            '46' => 'Comprobante Electrónico para Exportaciones',
-            '47' => 'Comprobante Electrónico para Pagos al Exterior',
-        ];
-        return $titulos[$tipo] ?? 'Comprobante Fiscal Electrónico';
-    }
-
-    /**
-     * Sigla a imprimir en la columna "Und. Medida" (norma DGII: siglas
-     * estandar, ej. UND, PZA, CAJ). Las lineas guardan el CODIGO DGII
-     * (43 = unidad, ver products.unidad_medida); valores no numericos se
-     * asumen ya como sigla y se imprimen tal cual.
-     */
-    private function unidadMedidaSigla($value): string
-    {
-        $value = trim((string) $value);
-        if ($value === '') {
-            return 'UND';
-        }
-        // Valores no numéricos: ya son siglas, se imprimen tal cual.
-        if (!ctype_digit($value)) {
-            return strtoupper($value);
-        }
-        // Código DGII (numérico) -> sigla del catálogo unidades_medida (DB master).
-        // Cache estático por request; fallback al número si no se halla.
-        static $map = null;
-        if ($map === null) {
-            $map = [];
-            try {
-                require_once __DIR__ . '/../Models/unidadMedidaModel.php';
-                $map = (new unidadMedidaModel())->codigoMap();
-            } catch (Throwable $e) {
-                $map = [];
-            }
-        }
-        return $map[(int) $value] ?? $value;
     }
 
     /**
@@ -765,44 +402,9 @@ class FacturaPdfGenerator extends FPDF
         $this->SetMargins(8, 10, 8);
         $this->AddPage();
 
-        // Fetch client data from DB if not already set
-        $clientName = '';
-        $companyName = '';
-        $phone = '';
-        $rnc = '';
-        $email = '';
-
-        if ($this->clientData) {
-            $clientName = $this->clientData['client_name'] ?? '';
-            $companyName = $this->clientData['company_name'] ?? '';
-            $phone = $this->clientData['phone_number'] ?? '';
-            $rnc = $this->clientData['rnc'] ?? '';
-            $email = $this->clientData['email'] ?? '';
-        } elseif (!empty($this->factura['client_id'])) {
-            try {
-                $db = Database::getInstance()->getConnection();
-                $stmt = $db->prepare('SELECT client_name, company_name, email, phone_number, rnc FROM clients WHERE id = :id LIMIT 1');
-                $stmt->execute([':id' => $this->factura['client_id']]);
-                $clientRow = $stmt->fetch(\PDO::FETCH_ASSOC);
-                if ($clientRow) {
-                    $clientName = $clientRow['client_name'];
-                    $companyName = $clientRow['company_name'];
-                    $phone = $clientRow['phone_number'];
-                    $rnc = $clientRow['rnc'];
-                    $email = $clientRow['email'];
-                }
-            } catch (\Exception $e) {
-                // fallback
-            }
-        }
-
-        // Fallbacks
-        if (!$clientName) $clientName = $this->factura['client_name'] ?? '';
-        if (!$companyName) $companyName = $this->factura['company_name'] ?? '';
-
-        $noFactura = $this->factura['no_factura'] ?? '';
-        $facturaDate = $this->factura['date'] ?? date('Y-m-d');
-        $fechaEspanol = $this->fechaCastellano($facturaDate);
+        $doc = $this->doc();
+        $receptor = $doc->receptor();
+        $fechaEspanol = $doc->fechaLarga();
 
         // La identificacion del documento (e-NCF y fechas) va en la columna
         // derecha, junto al titulo dinamico. La norma DGII prohibe usar la
@@ -815,15 +417,15 @@ class FacturaPdfGenerator extends FPDF
         $this->SetY($hasQR ? $docIdY : max(30, $docIdY));
         $this->SetX(-73);
         $this->SetFont($this->fontFamily(), 'B', $style['title_font_size'] ?? 11);
-        $this->MultiCell(70, 5, $this->convertEncoding($this->tituloDocumento()), 0, 'L');
+        $this->MultiCell(70, 5, $this->convertEncoding($doc->titulo()), 0, 'L');
         $this->Ln(1);
         $this->SetFont($this->fontFamily(), '', 9);
         if ($this->noElectronica) {
             // Factura NO electronica: numero interno + NCF tradicional (si lo hay).
             // Sin etiqueta "e-NCF" ni fecha de vencimiento (eso es propio del e-CF).
             $this->SetX(-73);
-            $this->Cell(70, 3.8, $this->convertEncoding('Factura No.: ' . $noFactura), 0, 1, 'L');
-            $ncfTradicional = $this->factura['NCF'] ?? $this->factura['ncf'] ?? '';
+            $this->Cell(70, 3.8, $this->convertEncoding('Factura No.: ' . $doc->noFactura()), 0, 1, 'L');
+            $ncfTradicional = $doc->ncfTradicional();
             if ($ncfTradicional !== '') {
                 $this->SetX(-73);
                 $this->Cell(70, 3.8, 'NCF: ' . $ncfTradicional, 0, 1, 'L');
@@ -831,13 +433,12 @@ class FacturaPdfGenerator extends FPDF
             $this->SetX(-73);
             $this->Cell(70, 3.8, $this->convertEncoding('Fecha: ' . $fechaEspanol), 0, 1, 'L');
         } else {
-            $eNcfLabel = $this->factura['e_ncf'] ?? $noFactura;
             $this->SetX(-73);
-            $this->Cell(70, 3.8, 'e-NCF: ' . $eNcfLabel, 0, 1, 'L');
+            $this->Cell(70, 3.8, 'e-NCF: ' . $doc->eNcf(), 0, 1, 'L');
             $this->SetX(-73);
             $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
             $this->SetX(-73);
-            $this->Cell(70, 3.8, 'Fecha de Vencimiento: 31/12/' . date('Y'), 0, 1, 'L');
+            $this->Cell(70, 3.8, 'Fecha de Vencimiento: ' . $doc->fechaVencimiento(), 0, 1, 'L');
         }
         $this->Ln(1);
         // El bloque receptor debe reflejar el e-CF emitido (ver ECFXmlBuilder::
@@ -845,28 +446,17 @@ class FacturaPdfGenerator extends FPDF
         //  - E43 (Gastos Menores): el e-CF no lleva Comprador -> no se imprime receptor.
         //  - E47 (Pagos al Exterior): comprador extranjero, sin RNC dominicano; el XML
         //    escribe IdentificadorExtranjero -> se etiqueta "Identificación Tributaria".
-        $tipoEcfReceptor = (string) ($this->factura['tipo_ecf'] ?? '');
-        if ($tipoEcfReceptor !== '43') {
-            $labelId = $tipoEcfReceptor === '47' ? 'Identificación Tributaria: ' : 'RNC Cliente: ';
+        if ($receptor['mostrar']) {
             // Sin RNC (p.ej. E32 Consumo sin comprador) no se imprime la linea.
-            if ($rnc !== '') {
+            if ($receptor['rnc'] !== '') {
                 $this->SetX(-73);
-                $this->Cell(70, 3.8, $this->convertEncoding($labelId . $rnc), 0, 1, 'L');
+                $this->Cell(70, 3.8, $this->convertEncoding($receptor['label_id'] . ': ' . $receptor['rnc']), 0, 1, 'L');
             }
-            // Prioridad: la razon social emitida en el e-CF firmado (lo que validó
-            // la DGII). Sin XML cae al registro del cliente y, en ultimo caso (E32
-            // Consumo sin comprador), a "Consumidor Final".
-            $razonSocial = $this->razonSocialCompradorDesdeXml()
-                ?? ($companyName !== '' ? $companyName : ($clientName !== '' ? $clientName : 'Consumidor Final'));
             $this->SetX(-73);
-            $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $razonSocial), 0, 'L');
-            $phoneContact = trim($phone);
-            if ($clientName) {
-                $phoneContact .= ($phoneContact !== '' ? ', ' : '') . 'Att. ' . $clientName;
-            }
-            if ($phoneContact !== '') {
+            $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $receptor['razon_social']), 0, 'L');
+            if ($receptor['contacto'] !== '') {
                 $this->SetX(-73);
-                $this->Cell(70, 3.8, $this->convertEncoding($phoneContact), 0, 1, 'L');
+                $this->Cell(70, 3.8, $this->convertEncoding($receptor['contacto']), 0, 1, 'L');
             }
         }
 
@@ -875,18 +465,13 @@ class FacturaPdfGenerator extends FPDF
         // facturaModel::saveFacturaConECF y la migracion 006). El NCF Modificado
         // va aqui en el encabezado; el Motivo se muestra como descripcion de la
         // linea en la tabla (mas abajo).
-        $tipoEcf = (string) ($this->factura['tipo_ecf'] ?? '');
-        $ncfModificado = $this->factura['ncf_modificado'] ?? '';
-        $razonNota = in_array($tipoEcf, ['33', '34'], true)
-            ? trim((string) ($this->factura['razon_modificacion'] ?? ''))
-            : '';
-        if (in_array($tipoEcf, ['33', '34'], true) && $ncfModificado !== '') {
+        $nota = $doc->notaModificacion();
+        if ($nota !== null && $nota['ncf'] !== '') {
             $this->SetXY($this->lMargin, 48);
             $this->SetFont($this->fontFamily(), 'B', 9);
-            $fechaMod = $this->formatFechaQr($this->factura['fecha_ncf_modificado'] ?? '');
-            $lineNcf = 'NCF Modificado: ' . $ncfModificado;
-            if ($fechaMod !== '') {
-                $lineNcf .= '  (' . $fechaMod . ')';
+            $lineNcf = 'NCF Modificado: ' . $nota['ncf'];
+            if ($nota['fecha'] !== '') {
+                $lineNcf .= '  (' . $nota['fecha'] . ')';
             }
             $this->Cell(125, 3.8, $lineNcf, 0, 1, 'L');
         }
@@ -918,95 +503,31 @@ class FacturaPdfGenerator extends FPDF
         $this->SetLineHeight($style['line_height'] ?? 4);
         $this->SetWidths($columnWidths);
 
-        // En Notas E33/E34 el Motivo (razon de modificacion) se muestra como
-        // descripcion: si las lineas no traen descripcion propia, llena la columna
-        // Descripcion de la linea; si los items ya tienen su propia descripcion,
-        // el Motivo va en su propia fila al final (norma DGII).
-        $anyDescripcion = false;
-        if (isset($this->factura['items']) && is_array($this->factura['items'])) {
-            foreach (array_values($this->factura['items']) as $i => $it) {
-                if ($this->itemTieneDescripcionPropiaParaPdf((array) $it, $i)) { $anyDescripcion = true; break; }
-            }
-        }
-        $motivoPendiente = $razonNota;
-
-        $subtotal = 0;
-        $itbisLineSum = 0;
-        if (isset($this->factura['items']) && is_array($this->factura['items'])) {
-            foreach (array_values($this->factura['items']) as $i => $item) {
-                $item = (array) $item;
-                $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
-                $descripcionExtra = '';
-                // Linea sin descripcion propia (y ningun item la trae): el Motivo
-                // se agrega despues del NombreItem en la misma columna.
-                if (!$anyDescripcion && $motivoPendiente !== '') {
-                    $descripcionExtra = $motivoPendiente;
-                    $motivoPendiente = '';
-                }
-                $descripcion = $this->itemDescripcionParaPdf($item, $i, $descripcionExtra);
-                // Descuento de la linea: se anota en la descripcion en vez de
-                // abrir una columna. Las 6 columnas de esta tabla son las que
-                // exige la norma DGII para la Representacion Impresa; agregar una
-                // rompe ese formato. Asi el cliente ve por que el Valor es menor
-                // que Cantidad x Precio, sin tocar el layout certificado.
-                $descuentoLinea = (float) ($item['descuento_monto'] ?? 0);
-                if ($descuentoLinea > 0) {
-                    $descripcion .= "\n" . $this->convertEncoding('Descuento: -') . number_format($descuentoLinea, 2);
-                }
-                $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
-                $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
-                // ITBIS de la linea: usa el valor guardado; si no viene o viene en
-                // 0 sobre una linea gravada (indicador 1=18%, 2=16%), lo calcula
-                // desde el subtotal y la tasa del indicador (exento/0% se quedan en
-                // 0 — nunca un 18% ciego). Necesario para facturas simples viejas
-                // que guardaron itbis_amount=0; las recientes ya traen el valor.
-                $indItem = (int) ($item['indicador_facturacion'] ?? 1);
-                $itbisBD = $item['itbis_amount'] ?? null;
-                if ($itbisBD === null || ((float) $itbisBD == 0.0 && in_array($indItem, [1, 2], true))) {
-                    $tasa = $indItem === 1 ? 0.18 : ($indItem === 2 ? 0.16 : 0.0);
-                    $itbis = round((float) $lineSubtotal * $tasa, 2);
-                } else {
-                    $itbis = (float) $itbisBD;
-                }
-                $unidad = $this->unidadMedidaSigla($item['unidad_medida'] ?? '');
-                $subtotal += (float) $lineSubtotal;
-                $itbisLineSum += (float) $itbis;
-
-                $this->Row([
-                    $cantidad,
-                    $this->convertEncoding(html_entity_decode($descripcion)) . "\n ",
-                    $unidad,
-                    number_format($unitario, 2),
-                    number_format($itbis, 2),
-                    number_format($lineSubtotal, 2)
-                ]);
-            }
+        // Las lineas ya vienen resueltas por EcfDocumento: nombre + descripcion
+        // (fila de la BD completada con el XML firmado), ITBIS por linea, sigla
+        // de unidad y el Motivo de las notas E33/E34 anexado donde corresponde.
+        foreach ($doc->lineas() as $linea) {
+            $this->Row([
+                $linea['cantidad'],
+                $this->convertEncoding(html_entity_decode($linea['descripcion'])) . "\n ",
+                $linea['unidad'],
+                number_format($linea['precio'], 2),
+                number_format($linea['itbis'], 2),
+                number_format($linea['valor'], 2),
+            ]);
         }
 
-        // Si el Motivo no se uso como descripcion de una linea (porque los items
-        // ya traen su propia descripcion), se muestra en su propia fila.
-        if ($motivoPendiente !== '') {
-            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoPendiente), '', '', '', '']);
+        // Si el Motivo no se pudo usar como descripcion de una linea (porque los
+        // items ya traen la suya), se muestra en su propia fila (norma DGII).
+        $motivoFila = $doc->motivoEnFilaAparte();
+        if ($motivoFila !== '') {
+            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoFila), '', '', '', '']);
         }
 
-        // Totales del e-CF firmado (cuadran con lo emitido a la DGII). Sin XML
-        // (preview) cae a la suma de ITBIS por linea, nunca a un 18% ciego sobre
-        // el subtotal (que inventaba ITBIS en facturas exentas/0%/16%).
-        $impresion = $this->totalesParaImpresion();
-        $subtotalGravado = $impresion['subtotal'] ?? $subtotal;
-        $montoExento     = $impresion['exento'] ?? 0.0;
-        $itbistotal      = $impresion['itbis'] ?? $itbisLineSum;
-        $totalGeneral    = $impresion['total'] ?? ($subtotalGravado + $itbistotal);
-
-        // Totals section (bottom right) — etiquetas exactas exigidas por la DGII:
-        // Subtotal Gravado, Monto Exento (solo si aplica), Total ITBIS, Total.
-        // 'Monto Exento' se omite cuando es 0 para no recargar facturas gravadas.
-        $filasTotales = [['Subtotal Gravado', $subtotalGravado, false]];
-        if ($montoExento > 0) {
-            $filasTotales[] = ['Monto Exento', $montoExento, false];
-        }
-        $filasTotales[] = ['Total ITBIS', $itbistotal, false];
-        $filasTotales[] = ['Total', $totalGeneral, true];
+        // Totales del e-CF firmado (cuadran con lo emitido a la DGII); sin XML
+        // (preview) caen a la suma por linea. Etiquetas exactas exigidas por la
+        // DGII: Subtotal Gravado, Monto Exento (si aplica), Total ITBIS, Total.
+        $filasTotales = $doc->filasTotales();
 
         // Cuadro de totales anclado al pie (la plantilla decide colores/fuente;
         // las filas y etiquetas DGII las fija el motor).

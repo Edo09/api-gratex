@@ -633,13 +633,11 @@ function handlePreview(clientModel $clientModel): void
         'items'              => mapItemsForXml($items),
     ];
 
-    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
-    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
-    $pdf->setFactura($factura);
-    $pdf->setClientData($client ?? []);
-    $pdfContent = $pdf->generatePdf();
+    require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
+    $pos = RepresentacionImpresa::esPos($input);
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?? [], false, $pos);
 
-    $filenameBase = $input['ncf'] ?? 'preview';
+    $filenameBase = ($input['ncf'] ?? 'preview') . RepresentacionImpresa::sufijo($pos);
     $format = $_GET['format'] ?? $input['format'] ?? 'base64';
 
     if ($format === 'download') {
@@ -702,19 +700,22 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
     }
     $factura = $facturas[0];
     $factura['items'] = $facturaModel->getFacturaItems($facturaId);
-    require_once __DIR__ . '/../Utils/FacturaPdfGenerator.php';
-    $pdf = new FacturaPdfGenerator('P', 'mm', 'Letter');
-    $pdf->setFactura($factura);
     // client_id puede ser null (E32 Consumo / E43 sin comprador). getClients(null)
     // devolveria TODOS los clientes, asi que solo se consulta cuando hay id.
+    $client = [];
     if (!empty($factura['client_id'])) {
         $clientData = $clientModel->getClients($factura['client_id']);
         if (!empty($clientData)) {
-            $pdf->setClientData($clientData[0]);
+            $client = $clientData[0];
         }
     }
-    $pdfContent = $pdf->generatePdf();
-    $filenameBase = $factura['e_ncf'] ?? $factura['no_factura'];
+
+    // ?formato=pos -> tirilla termica de 80 mm; por defecto, la hoja carta.
+    require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
+    $pos = RepresentacionImpresa::esPos();
+    $pdfContent = RepresentacionImpresa::generar($factura, $client, false, $pos);
+
+    $filenameBase = ($factura['e_ncf'] ?? $factura['no_factura']) . RepresentacionImpresa::sufijo($pos);
     $format = $_GET['format'] ?? 'download';
     if ($format === 'base64') {
         echo json_encode([
