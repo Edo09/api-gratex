@@ -151,9 +151,18 @@ switch ($_SERVER['REQUEST_METHOD']) {
             break;
         }
 
+        // Campos explicitos, no el body crudo: 'anula_a_id' lo pone SOLO
+        // anularAjuste. Si el cliente pudiera enviarlo se fabricaria un ajuste con
+        // motivo ANULACION que no anula nada, y 'user_id' dejaria de ser el del
+        // token, que es lo unico que hace fiable la auditoria.
         $body = invBody();
-        $body['user_id'] = $authUserId ?? ($body['user_id'] ?? null);
-        $res = $inventoryModel->crearAjuste($body);
+        $res = $inventoryModel->crearAjuste([
+            'motivo' => $body['motivo'] ?? null,
+            'nota' => $body['nota'] ?? null,
+            'warehouse_id' => $body['warehouse_id'] ?? null,
+            'lineas' => $body['lineas'] ?? [],
+            'user_id' => $authUserId,
+        ]);
         if ($res[0] === 'success') {
             AuditLogger::log([
                 'module' => 'inventario', 'action' => 'AJUSTE_CREAR',

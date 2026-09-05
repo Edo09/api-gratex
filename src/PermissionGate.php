@@ -27,8 +27,17 @@ class PermissionGate
 
         // Ruta no mapeada: no se aplica RBAC (el controller sigue exigiendo token
         // por su cuenta). Se registra para que se agregue al mapa.
+        //
+        // Pero el tenant hay que resolverlo IGUAL. Los controllers instancian sus
+        // models en el tope del archivo, antes de su propio validateRequest, y un
+        // model sin credenciales de tenant hace que Database no sepa a que DB
+        // conectarse. Cuando esta rama volvia sin resolver nada, el modulo nuevo
+        // moria con un 500 vacio que no apuntaba a ningun sitio (paso con
+        // 'inventario' el 2026-09-04). Olvidarse del mapa debe costar una entrada
+        // en el log, no un modulo caido.
         if ($required === null) {
             error_log("[PermissionGate] ruta sin mapeo RBAC: {$route} {$method}");
+            self::resolverTenant('ruta sin mapeo');
             return;
         }
 
@@ -41,11 +50,7 @@ class PermissionGate
         // Principals externos (DGII / integracion): resolver tenant best-effort,
         // el controller valida firma/secret. Sin chequeo de rol.
         if ($required === 'dgii' || $required === 'integration') {
-            try {
-                $auth->validateRequest();
-            } catch (Throwable $e) {
-                error_log('[PermissionGate] resolucion tenant (externo) fallo: ' . $e->getMessage());
-            }
+            self::resolverTenant('externo');
             return;
         }
 
@@ -76,6 +81,21 @@ class PermissionGate
             return;
         }
         // Autorizado: continua al controller.
+    }
+
+    /**
+     * Resuelve el tenant sin exigir permiso: validateRequest() es quien llama a
+     * Database::setCredentials(), asi que sin esto el controller conecta a la DB
+     * equivocada (o a ninguna). Best-effort a proposito: si el token no sirve, el
+     * controller devolvera su propio 401; lo que no puede es morir antes.
+     */
+    private static function resolverTenant(string $motivo): void
+    {
+        try {
+            (new AuthMiddleware())->validateRequest();
+        } catch (Throwable $e) {
+            error_log("[PermissionGate] resolucion tenant ({$motivo}) fallo: " . $e->getMessage());
+        }
     }
 
     /** Resuelve el permiso/tag requerido para una ruta+metodo. null = sin mapeo. */

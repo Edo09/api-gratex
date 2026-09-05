@@ -37,19 +37,28 @@ class Database
             $user = self::$credentials['user'] ?? '';
             $pass = self::$credentials['pass'] ?? '';
         } else {
-            // Sin tenant resuelto: cae al DB por defecto del .env.
-            // NOTA multi-tenant: los controllers instancian sus models en el tope
-            // (antes de validateRequest), y los models fijan la conexion en su
-            // constructor. Por eso NO se lanza excepcion aqui: romperia toda la app.
-            // Implicacion: para un 2do tenant tipo "app" con DB distinta hace falta
-            // resolver el tenant ANTES de instanciar models (o conexion lazy).
-            // Gratex (tenant #1) no se ve afectado: su DB == la default del .env.
-            // Integracion no usa la DB de tenant. Ver docs/architecture.md.
-            $host = $_ENV['DB_HOST'] ?? 'sh00032.hostgator.com';
+            // Sin tenant resuelto: DB por defecto del .env (instalacion de un solo
+            // tenant o scripts de tools/). En multi-tenant esto NO deberia ocurrir:
+            // PermissionGate resuelve el tenant para toda ruta, mapeada o no.
+            //
+            // Aqui hubo credenciales de produccion hardcodeadas como valor por
+            // defecto. Eran las de la cuenta anterior a la migracion de cPanel, y
+            // cuando esa cuenta quedo bloqueada toda ruta sin tenant resuelto moria
+            // con un 500 vacio. No se restauran: un password en el codigo es un
+            // secreto filtrado, y un fallback silencioso a la DB de OTRA empresa es
+            // peor que un fallo. Sin configuracion, se falla diciendo por que.
+            $host = $_ENV['DB_HOST'] ?? '';
             $port = $_ENV['DB_PORT'] ?? '3306';
-            $name = $_ENV['DB_NAME'] ?? 'mtldtmte_new_gratexdb';
-            $user = $_ENV['DB_USER'] ?? 'mtldtmte_edwin';
-            $pass = $_ENV['DB_PASS'] ?? 'gratexdb.';
+            $name = $_ENV['DB_NAME'] ?? '';
+            $user = $_ENV['DB_USER'] ?? '';
+            $pass = $_ENV['DB_PASS'] ?? '';
+
+            if ($host === '' || $name === '' || $user === '') {
+                error_log('[DB] sin tenant resuelto y sin DB_HOST/DB_NAME/DB_USER en .env. '
+                    . 'Si es una ruta nueva, agregala a config/routes en config/permissions.php '
+                    . 'para que PermissionGate resuelva el tenant antes del controller.');
+                throw new RuntimeException('No se pudo determinar la base de datos de la peticion.');
+            }
         }
 
         try {

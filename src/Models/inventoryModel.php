@@ -22,6 +22,13 @@ class inventoryModel
         'DEVOLUCION', 'ERROR_CAPTURA', 'ANULACION', 'OTRO',
     ];
 
+    /**
+     * Tope de lineas por ajuste. Cada linea toma un SELECT ... FOR UPDATE dentro
+     * de la misma transaccion, asi que un ajuste sin limite puede dejar en espera
+     * a toda la facturacion hasta agotar el lock wait timeout.
+     */
+    public const MAX_LINEAS = 500;
+
     public function __construct()
     {
         $this->conexion = Database::getInstance()->getConnection();
@@ -96,6 +103,9 @@ class inventoryModel
                     ? round((float) $l['costo_unitario'], 2)
                     : round((float) ($prod['costo'] ?? 0), 2);
                 $warehouseId = (int) ($ctx['warehouse_id'] ?? $prod['warehouse_id']);
+                // Un solo calculo: la fila guardada y el total que suma el ajuste
+                // tienen que salir de la misma expresion o dejan de cuadrar.
+                $valor = round($cantidad * $costo, 2);
 
                 $insert->execute([
                     ':product_id' => $productId,
@@ -107,7 +117,7 @@ class inventoryModel
                     ':anterior' => $anterior,
                     ':nueva' => $nueva,
                     ':costo' => $costo,
-                    ':valor' => round($cantidad * $costo, 2),
+                    ':valor' => $valor,
                     ':user_id' => $ctx['user_id'] ?? null,
                 ]);
                 $updStock->execute([':nueva' => $nueva, ':id' => $productId]);
@@ -119,7 +129,7 @@ class inventoryModel
                     'cantidad_anterior' => $anterior,
                     'cantidad_nueva' => $nueva,
                     'costo_unitario' => $costo,
-                    'valor_movimiento' => round($cantidad * $costo, 2),
+                    'valor_movimiento' => $valor,
                 ];
             }
 
@@ -127,7 +137,9 @@ class inventoryModel
                 $this->conexion->commit();
             }
             return ['success', $creados];
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
+            // Throwable y no PDOException: un TypeError por una linea malformada
+            // escapaba con la transaccion abierta y sin rollback.
             if ($ownTransaction && $this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
@@ -163,44 +175,94 @@ class inventoryModel
         $entrada = in_array((string) $tipoEcf, ['34', '41'], true);
         $signo = $entrada ? 1 : -1;
 
-        $lineas = [];
-        foreach ($items as $it) {
-            $it = (array) $it;
-            if (empty($it['product_id'])) {
-                continue;
+        // Todo el cuerpo va en try/catch: el contrato de este metodo es que un
+        // fallo de inventario NUNCA tumba una factura ya emitida, y eso incluye
+        // los errores que no vienen de aplicarMovimientos.
+        try {
+            $ids = [];
+            foreach ($items as $it) {
+                $it = (array) $it;
+                if (!empty($it['product_id'])) {
+                    $ids[(int) $it['product_id']] = true;
+                }
             }
-            if ((int) ($it['indicador_bien_servicio'] ?? 1) === 2) {
-                continue; // servicio: no tiene inventario
+            if ($ids === []) {
+                return 0;
             }
-            $cantidad = (int) round((float) ($it['quantity'] ?? $it['cantidad'] ?? 0));
-            if ($cantidad <= 0) {
-                continue;
-            }
-            $lineas[] = [
-                'product_id' => (int) $it['product_id'],
-                'cantidad' => $signo * $cantidad,
-                // El costo lo pone el producto: valorizar la salida al precio de
-                // venta inflaria el valor del movimiento.
-                'costo_unitario' => null,
-            ];
-        }
-        if ($lineas === []) {
-            return 0;
-        }
+            // Quien decide que es servicio es el catalogo, no la linea: las
+            // facturas simples no llevan indicador_bien_servicio, y asumir "bien"
+            // hacia que un servicio del catalogo descontara existencias.
+            $servicios = $this->serviciosDelCatalogo(array_keys($ids));
 
-        $res = $this->aplicarMovimientos($lineas, [
-            'tipo_movimiento' => (string) $tipoEcf === '41'
-                ? 'COMPRA'
-                : ($entrada ? 'DEVOLUCION' : 'VENTA'),
-            'referencia_tipo' => 'factura',
-            'referencia_id' => $facturaId,
-            'user_id' => $userId,
-        ]);
-        if ($res[0] !== 'success') {
-            error_log('[inventario] factura ' . $facturaId . ': ' . $res[1]);
+            $lineas = [];
+            foreach ($items as $it) {
+                $it = (array) $it;
+                $productId = (int) ($it['product_id'] ?? 0);
+                if ($productId <= 0 || isset($servicios[$productId])) {
+                    continue;
+                }
+                $cruda = (float) ($it['quantity'] ?? $it['cantidad'] ?? 0);
+                $cantidad = (int) round($cruda);
+                // products.stock e inventory_movements.cantidad son enteros en
+                // todo el sistema: una venta fraccionada se redondea (y por debajo
+                // de 0.5 desaparece). Queda en el log para poder rastrear el
+                // descuadre en vez de descubrirlo en el proximo conteo fisico.
+                if (abs($cruda - $cantidad) > 0.0001) {
+                    error_log('[inventario] factura ' . $facturaId . ' producto ' . $productId
+                        . ': cantidad ' . $cruda . ' redondeada a ' . $cantidad . ' (el stock es entero)');
+                }
+                if ($cantidad <= 0) {
+                    continue;
+                }
+                $lineas[] = [
+                    'product_id' => $productId,
+                    'cantidad' => $signo * $cantidad,
+                    // El costo lo pone el producto: valorizar la salida al precio de
+                    // venta inflaria el valor del movimiento.
+                    'costo_unitario' => null,
+                ];
+            }
+            if ($lineas === []) {
+                return 0;
+            }
+
+            $res = $this->aplicarMovimientos($lineas, [
+                'tipo_movimiento' => (string) $tipoEcf === '41'
+                    ? 'COMPRA'
+                    : ($entrada ? 'DEVOLUCION' : 'VENTA'),
+                'referencia_tipo' => 'factura',
+                'referencia_id' => $facturaId,
+                'user_id' => $userId,
+            ]);
+            if ($res[0] !== 'success') {
+                error_log('[inventario] factura ' . $facturaId . ': ' . $res[1]);
+                return 0;
+            }
+            return count($res[1]);
+        } catch (Throwable $e) {
+            error_log('[inventario] factura ' . $facturaId . ' fallo inesperado: ' . $e->getMessage());
             return 0;
         }
-        return count($res[1]);
+    }
+
+    /**
+     * Ids del catalogo marcados como servicio (indicador_bien_servicio = 2).
+     * Un servicio no tiene existencias: products.stock es NULL para ellos.
+     *
+     * @param int[] $ids
+     * @return array<int,true>
+     */
+    private function serviciosDelCatalogo(array $ids): array
+    {
+        if ($ids === []) {
+            return [];
+        }
+        $marcadores = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->conexion->prepare(
+            "SELECT id FROM products WHERE id IN ({$marcadores}) AND indicador_bien_servicio = 2"
+        );
+        $stmt->execute(array_map('intval', $ids));
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
     // ------------------------------------------------------------------
@@ -210,19 +272,33 @@ class inventoryModel
     /**
      * Crea un ajuste con sus lineas.
      *
-     * @param array $data motivo, nota, warehouse_id, user_id,
+     * @param array $data motivo, nota, warehouse_id, user_id, anula_a_id,
      *                    lineas: [['product_id','tipo'=>'INCREMENTO|DISMINUCION',
      *                              'cantidad'=>int>0,'costo_unitario'=>float|null], ...]
+     * @param bool  $ownTransaction false cuando el llamador ya abrio una.
      */
-    public function crearAjuste(array $data): array
+    public function crearAjuste(array $data, bool $ownTransaction = true): array
     {
+        // ANULACION no la elige el usuario: solo vale acompanada del ajuste que
+        // anula. Antes se insertaba un motivo falso y se corregia con un UPDATE
+        // posterior al commit, asi que un fallo a medias dejaba la anulacion
+        // guardada para siempre como un conteo fisico.
         $motivo = strtoupper(trim((string) ($data['motivo'] ?? '')));
-        if (!in_array($motivo, self::MOTIVOS, true) || $motivo === 'ANULACION') {
-            return ['error', 'motivo invalido. Use: ' . implode(', ', array_diff(self::MOTIVOS, ['ANULACION']))];
+        $permitidos = !empty($data['anula_a_id'])
+            ? ['ANULACION']
+            : array_values(array_diff(self::MOTIVOS, ['ANULACION']));
+        if (!in_array($motivo, $permitidos, true)) {
+            return ['error', 'motivo invalido. Use: ' . implode(', ', $permitidos)];
         }
+
         $lineas = is_array($data['lineas'] ?? null) ? $data['lineas'] : [];
         if ($lineas === []) {
             return ['error', 'El ajuste necesita al menos una linea.'];
+        }
+        // Cada linea bloquea una fila de products dentro de una sola transaccion:
+        // sin tope, una peticion deja en espera a toda la facturacion.
+        if (count($lineas) > self::MAX_LINEAS) {
+            return ['error', 'Un ajuste admite hasta ' . self::MAX_LINEAS . ' lineas. Divide el conteo en varios.'];
         }
 
         // El signo lo decide el tipo de la linea; la cantidad siempre llega positiva.
@@ -252,7 +328,9 @@ class inventoryModel
         }
 
         try {
-            $this->conexion->beginTransaction();
+            if ($ownTransaction) {
+                $this->conexion->beginTransaction();
+            }
 
             $stmt = $this->conexion->prepare(
                 'INSERT INTO inventory_adjustments
@@ -278,7 +356,9 @@ class inventoryModel
                 'user_id' => $data['user_id'] ?? null,
             ], false);
             if ($res[0] !== 'success') {
-                $this->conexion->rollBack();
+                if ($ownTransaction) {
+                    $this->conexion->rollBack();
+                }
                 return $res;
             }
 
@@ -287,11 +367,18 @@ class inventoryModel
                 'UPDATE inventory_adjustments SET total_lineas = :n, total_valor = :v WHERE id = :id'
             )->execute([':n' => count($res[1]), ':v' => round($totalValor, 2), ':id' => $ajusteId]);
 
-            $this->conexion->commit();
+            if ($ownTransaction) {
+                $this->conexion->commit();
+            }
             return ['success', $this->getAjuste($ajusteId)];
-        } catch (PDOException $e) {
-            if ($this->conexion->inTransaction()) {
+        } catch (Throwable $e) {
+            if ($ownTransaction && $this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
+            }
+            // Chocar con uk_codigo es la carrera de dos ajustes simultaneos, no un
+            // error del usuario: merece un mensaje que se entienda.
+            if ($e instanceof PDOException && (string) $e->getCode() === '23000') {
+                return ['error', 'Otro ajuste se guardo al mismo tiempo. Vuelve a intentarlo.'];
             }
             return ['error', 'No se pudo crear el ajuste: ' . $e->getMessage()];
         }
@@ -300,61 +387,73 @@ class inventoryModel
     /**
      * Anula un ajuste creando el ajuste INVERSO. No se borra nada: un historial
      * que se puede borrar no sirve como historial.
+     *
+     * Todo pasa en UNA transaccion y con la cabecera original bloqueada. Antes el
+     * inverso se confirmaba por su cuenta y solo despues se marcaba el original,
+     * asi que dos anulaciones a la vez revertian el stock dos veces.
      */
     public function anularAjuste(int $id, array $ctx = []): array
     {
-        $ajuste = $this->getAjuste($id);
-        if (!$ajuste) {
-            return ['error', 'Ajuste no encontrado'];
-        }
-        if (!empty($ajuste['anulado_por_id'])) {
-            return ['error', 'Ese ajuste ya fue anulado (por el ' . $ajuste['anulado_por_id'] . ').'];
-        }
-        if ($ajuste['motivo'] === 'ANULACION') {
-            return ['error', 'Un ajuste de anulacion no se puede anular.'];
-        }
+        try {
+            $this->conexion->beginTransaction();
 
-        // Lineas invertidas: lo que sumo, resta; lo que resto, suma.
-        $lineas = [];
-        foreach ($ajuste['lineas'] as $mov) {
-            $cantidad = (int) $mov['cantidad'];
-            $lineas[] = [
-                'product_id' => (int) $mov['product_id'],
-                'tipo' => $cantidad > 0 ? 'DISMINUCION' : 'INCREMENTO',
-                'cantidad' => abs($cantidad),
-                'costo_unitario' => $mov['costo_unitario'],
-            ];
+            $stmt = $this->conexion->prepare(
+                'SELECT id, codigo, motivo, warehouse_id, anulado_por_id
+                 FROM inventory_adjustments WHERE id = :id FOR UPDATE'
+            );
+            $stmt->execute([':id' => $id]);
+            $ajuste = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$ajuste) {
+                $this->conexion->rollBack();
+                return ['error', 'Ajuste no encontrado'];
+            }
+            if (!empty($ajuste['anulado_por_id'])) {
+                $this->conexion->rollBack();
+                return ['error', 'Ese ajuste ya fue anulado (por el ' . $ajuste['anulado_por_id'] . ').'];
+            }
+            if ($ajuste['motivo'] === 'ANULACION') {
+                $this->conexion->rollBack();
+                return ['error', 'Un ajuste de anulacion no se puede anular.'];
+            }
+
+            // Lineas invertidas: lo que sumo, resta; lo que resto, suma.
+            $lineas = [];
+            foreach ($this->movimientosDeAjuste($id) as $mov) {
+                $cantidad = (int) $mov['cantidad'];
+                $lineas[] = [
+                    'product_id' => (int) $mov['product_id'],
+                    'tipo' => $cantidad > 0 ? 'DISMINUCION' : 'INCREMENTO',
+                    'cantidad' => abs($cantidad),
+                    'costo_unitario' => $mov['costo_unitario'],
+                ];
+            }
+
+            $res = $this->crearAjuste([
+                'motivo' => 'ANULACION',
+                'nota' => 'Anulacion del ajuste ' . $ajuste['codigo']
+                    . (!empty($ctx['nota']) ? ' - ' . $ctx['nota'] : ''),
+                'warehouse_id' => $ajuste['warehouse_id'],
+                'user_id' => $ctx['user_id'] ?? null,
+                'anula_a_id' => $id,
+                'lineas' => $lineas,
+            ], false);
+            if ($res[0] !== 'success') {
+                $this->conexion->rollBack();
+                return $res;
+            }
+
+            $this->conexion->prepare('UPDATE inventory_adjustments SET anulado_por_id = :nuevo WHERE id = :id')
+                ->execute([':nuevo' => $res[1]['id'], ':id' => $id]);
+
+            $this->conexion->commit();
+            return ['success', $res[1]];
+        } catch (Throwable $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            return ['error', 'No se pudo anular el ajuste: ' . $e->getMessage()];
         }
-
-        $res = $this->crearAjusteAnulacion([
-            'nota' => 'Anulacion del ajuste ' . $ajuste['codigo']
-                . (!empty($ctx['nota']) ? ' — ' . $ctx['nota'] : ''),
-            'warehouse_id' => $ajuste['warehouse_id'],
-            'user_id' => $ctx['user_id'] ?? null,
-            'anula_a_id' => $id,
-            'lineas' => $lineas,
-        ]);
-        if ($res[0] !== 'success') {
-            return $res;
-        }
-
-        $this->conexion->prepare('UPDATE inventory_adjustments SET anulado_por_id = :nuevo WHERE id = :id')
-            ->execute([':nuevo' => $res[1]['id'], ':id' => $id]);
-
-        return ['success', $res[1]];
-    }
-
-    /** crearAjuste con motivo ANULACION (que el usuario no puede elegir). */
-    private function crearAjusteAnulacion(array $data): array
-    {
-        $data['motivo'] = 'CONTEO_FISICO'; // pasa la validacion; se corrige abajo
-        $res = $this->crearAjuste($data);
-        if ($res[0] === 'success') {
-            $this->conexion->prepare('UPDATE inventory_adjustments SET motivo = :m WHERE id = :id')
-                ->execute([':m' => 'ANULACION', ':id' => $res[1]['id']]);
-            $res[1]['motivo'] = 'ANULACION';
-        }
-        return $res;
     }
 
     // ------------------------------------------------------------------
@@ -384,10 +483,10 @@ class inventoryModel
             'SELECT m.*, p.nombre AS producto_nombre, p.sku
              FROM inventory_movements m
              LEFT JOIN products p ON p.id = m.product_id
-             WHERE m.referencia_tipo = "ajuste" AND m.referencia_id = :id
+             WHERE m.referencia_tipo = :ref_tipo AND m.referencia_id = :id
              ORDER BY m.id ASC'
         );
-        $stmt->execute([':id' => $ajusteId]);
+        $stmt->execute([':ref_tipo' => 'ajuste', ':id' => $ajusteId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
@@ -440,11 +539,12 @@ class inventoryModel
             'SELECT m.*, a.codigo AS ajuste_codigo, a.motivo
              FROM inventory_movements m
              LEFT JOIN inventory_adjustments a
-                    ON a.id = m.referencia_id AND m.referencia_tipo = "ajuste"
+                    ON a.id = m.referencia_id AND m.referencia_tipo = :ref_tipo
              WHERE m.product_id = :pid
              ORDER BY m.id DESC
              LIMIT :limit OFFSET :offset'
         );
+        $stmt->bindValue(':ref_tipo', 'ajuste');
         $stmt->bindValue(':pid', $productId, PDO::PARAM_INT);
         $stmt->bindValue(':limit', $limit, PDO::PARAM_INT);
         $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
@@ -457,11 +557,17 @@ class inventoryModel
         return ['items' => $rows, 'total' => (int) $cnt->fetchColumn()];
     }
 
-    /** Consecutivo visible del ajuste: AJ-000001. */
+    /**
+     * Consecutivo visible del ajuste: AJ-000001.
+     *
+     * FOR UPDATE: sin el, dos ajustes simultaneos leen el mismo ultimo codigo y
+     * el segundo choca contra uk_codigo. Siempre se llama dentro de la
+     * transaccion del ajuste, asi que el bloqueo se suelta en el commit.
+     */
     private function siguienteCodigo(): string
     {
         $ultimo = $this->conexion
-            ->query('SELECT codigo FROM inventory_adjustments ORDER BY id DESC LIMIT 1')
+            ->query('SELECT codigo FROM inventory_adjustments ORDER BY id DESC LIMIT 1 FOR UPDATE')
             ->fetchColumn();
         $n = ($ultimo && preg_match('/(\d+)$/', (string) $ultimo, $m)) ? ((int) $m[1] + 1) : 1;
         return 'AJ-' . str_pad((string) $n, 6, '0', STR_PAD_LEFT);

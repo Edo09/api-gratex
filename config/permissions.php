@@ -69,6 +69,12 @@ return [
         'provincias-municipios'    => 'unidades',
         'categories'               => 'categories',
         'warehouses'               => 'warehouses',
+        // Ajustes y libro de movimientos: mueven el stock de products, asi que
+        // comparten su modulo y no hacen falta un modulo/seed RBAC nuevos (mismo
+        // criterio que 'provincias-municipios'). Sin esta entrada la ruta queda
+        // sin mapeo, el gate no resuelve el tenant y el modelo del controller
+        // conecta al fallback del .env en vez de a la DB del tenant.
+        'inventario'               => 'products',
         'cotizaciones'             => 'cotizaciones',
         'facturas'                 => 'facturas',
         'facturas-simples'         => 'facturas-simples',
