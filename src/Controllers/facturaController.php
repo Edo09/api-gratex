@@ -292,6 +292,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'client_id' => $clientId,
         'client_name' => $client['client_name'] ?? 'Consumidor Final',
         'total' => $totales['monto_total'],
+        'tipo_pago' => (int) ($input['tipo_pago'] ?? 1),
         'user_id' => $input['user_id'] ?? null,
         // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
         // en la Representacion Impresa (norma DGII).
@@ -306,6 +307,9 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
                 'amount' => $item['precio_unitario'] ?? 0,
                 'quantity' => $item['cantidad'] ?? 1,
                 'subtotal' => $item['monto_item'] ?? 0,
+                // monto_item ya viene neto; el descuento se guarda aparte para
+                // que la Representacion Impresa y el detalle lo puedan mostrar.
+                'descuento_monto' => $item['descuento_monto'] ?? 0,
                 'indicador_facturacion' => $item['indicador_facturacion'] ?? 1,
                 'indicador_bien_servicio' => $item['indicador_bien_servicio'] ?? 2,
                 // Código DGII de unidad de medida (id del catálogo; 43 = Unidad).

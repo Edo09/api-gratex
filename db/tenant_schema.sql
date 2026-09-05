@@ -73,6 +73,8 @@ CREATE TABLE IF NOT EXISTS facturas (
   client_id    INT(11)        DEFAULT NULL,
   client_name  VARCHAR(100)   NOT NULL,
   total        DECIMAL(10,2)  NOT NULL DEFAULT 0.00,
+  tipo_pago TINYINT NOT NULL DEFAULT 1
+    COMMENT '1=Contado 2=Credito 3=Gratuito 4=Permuta 5=Otros (codigos DGII)',
   NCF          VARCHAR(50)    NULL,
   tipo_ecf     VARCHAR(2)     NULL
                  COMMENT '31, 32, 33, 34, 41, 43, 44, 45, 46, 47',
@@ -117,6 +119,8 @@ CREATE TABLE IF NOT EXISTS factura_items (
   amount      DECIMAL(10,2)  NOT NULL,
   quantity    INT(11)        NOT NULL DEFAULT 1,
   subtotal    DECIMAL(10,2)  NOT NULL,
+  descuento_monto DECIMAL(18,2) NOT NULL DEFAULT 0.00
+    COMMENT 'Descuento de la linea en monto; subtotal ya va neto de el',
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
                  COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=ITBIS 0% | 4=Exento',
   indicador_bien_servicio TINYINT NOT NULL DEFAULT 1

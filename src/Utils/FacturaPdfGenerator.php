@@ -944,6 +944,15 @@ class FacturaPdfGenerator extends FPDF
                     $motivoPendiente = '';
                 }
                 $descripcion = $this->itemDescripcionParaPdf($item, $i, $descripcionExtra);
+                // Descuento de la linea: se anota en la descripcion en vez de
+                // abrir una columna. Las 6 columnas de esta tabla son las que
+                // exige la norma DGII para la Representacion Impresa; agregar una
+                // rompe ese formato. Asi el cliente ve por que el Valor es menor
+                // que Cantidad x Precio, sin tocar el layout certificado.
+                $descuentoLinea = (float) ($item['descuento_monto'] ?? 0);
+                if ($descuentoLinea > 0) {
+                    $descripcion .= "\n" . $this->convertEncoding('Descuento: -') . number_format($descuentoLinea, 2);
+                }
                 $unitario = $item['amount'] ?? $item['precio_unitario'] ?? 0;
                 $lineSubtotal = $item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $unitario);
                 // ITBIS de la linea: usa el valor guardado; si no viene o viene en

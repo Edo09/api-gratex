@@ -75,6 +75,30 @@ function fsResolveClientName(array $body, clientModel $clientModel): array
  * (description/amount/quantity/subtotal/itbis_amount). Misma forma que persiste
  * facturaModel::createFacturaSimple, para que el preview se vea igual al guardado.
  */
+/**
+ * Valida que el cliente admita credito cuando la factura se marca como tal.
+ * Devuelve el mensaje de error, o null si esta bien.
+ *
+ * Solo aplica con `client_id`: una factura a nombre libre (mostrador) no tiene
+ * ficha donde consultar el permiso, y esas son de contado por definicion.
+ */
+function fsValidarCredito(array $body, clientModel $clientModel): ?string
+{
+    if ((int) ($body['tipo_pago'] ?? 1) !== 2 || empty($body['client_id'])) {
+        return null;
+    }
+    $clients = $clientModel->getClients($body['client_id']);
+    $client = $clients[0] ?? null;
+    if (!$client) {
+        return null; // el cliente inexistente lo reporta el flujo normal
+    }
+    if ((int) ($client['permitir_credito'] ?? 0) === 1) {
+        return null;
+    }
+    return 'El cliente ' . ($client['client_name'] ?? '')
+        . ' no tiene credito habilitado: la factura debe ser de contado (tipo_pago = 1).';
+}
+
 function fsMapPreviewItems(array $items): array
 {
     $mapped = [];
@@ -82,9 +106,15 @@ function fsMapPreviewItems(array $items): array
         $raw = (array) $raw;
         $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
         $amount   = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+        // Descuento de la linea en monto, acotado a [0, bruto]: el subtotal va
+        // NETO de el, igual que MontoItem en el e-CF.
+        $bruto    = round($quantity * $amount, 2);
+        $descuento = isset($raw['descuento_monto']) && is_numeric($raw['descuento_monto'])
+            ? max(0.0, min($bruto, round((float) $raw['descuento_monto'], 2)))
+            : 0.0;
         $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
             ? (float) $raw['subtotal']
-            : round($quantity * $amount, 2);
+            : round($bruto - $descuento, 2);
         $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
             ? (float) $raw['itbis_amount']
             : 0.0;
@@ -93,6 +123,7 @@ function fsMapPreviewItems(array $items): array
             'amount'       => $amount,
             'quantity'     => $quantity,
             'subtotal'     => $subtotal,
+            'descuento_monto' => $descuento,
             'itbis_amount' => $itbis,
         ];
     }
@@ -278,6 +309,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
             fsRespond(false, 'No se pudo determinar el usuario del token', 401);
             break;
         }
+        // Credito: misma regla que la emision e-CF. Una factura simple no va a
+        // DGII, pero el permiso es del cliente, no del tipo de documento.
+        $errorCredito = fsValidarCredito($body, $clientModel);
+        if ($errorCredito !== null) {
+            fsRespond(false, $errorCredito, 422);
+            break;
+        }
         $body = fsResolveClientName($body, $clientModel);
         $body['user_id'] = $userId;
 
@@ -294,6 +332,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         if (isset($body['items']) && (!is_array($body['items']) || count($body['items']) === 0)) {
             fsRespond(false, 'items, si se envia, debe ser un arreglo con al menos un elemento', 422);
+            break;
+        }
+        $errorCredito = fsValidarCredito($body, $clientModel);
+        if ($errorCredito !== null) {
+            fsRespond(false, $errorCredito, 422);
             break;
         }
         $body = fsResolveClientName($body, $clientModel);

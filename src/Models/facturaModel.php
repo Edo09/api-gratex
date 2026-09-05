@@ -74,7 +74,7 @@ class facturaModel
     public function getFacturaItems($factura_id)
     {
         try {
-            $sql = "SELECT id, description, amount, quantity, subtotal, itbis_amount, indicador_facturacion, unidad_medida FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
+            $sql = "SELECT id, description, amount, quantity, subtotal, descuento_monto, itbis_amount, indicador_facturacion, unidad_medida FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':factura_id' => $factura_id]);
             return $stmt->fetchAll();
@@ -242,9 +242,16 @@ class facturaModel
             $raw = (array) $raw;
             $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
             $amount = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+            // Descuento en MONTO, acotado a [0, bruto]. El subtotal va neto de el
+            // (misma regla que MontoItem en el e-CF), y el ITBIS se calcula sobre
+            // ese neto: cobrar impuesto sobre un precio que no se cobro seria mal.
+            $bruto = round($quantity * $amount, 2);
+            $descuento = isset($raw['descuento_monto']) && is_numeric($raw['descuento_monto'])
+                ? max(0.0, min($bruto, round((float) $raw['descuento_monto'], 2)))
+                : 0.0;
             $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
                 ? (float) $raw['subtotal']
-                : round($quantity * $amount, 2);
+                : round($bruto - $descuento, 2);
             $indicador = (int) ($raw['indicador_facturacion'] ?? 1);
             // Si el front no envia itbis_amount, se calcula desde el indicador
             // (1=18%, 2=16%, resto=0). Antes caia a 0.0 y dejaba en cero el ITBIS
@@ -257,6 +264,7 @@ class facturaModel
                 'amount' => $amount,
                 'quantity' => $quantity,
                 'subtotal' => $subtotal,
+                'descuento_monto' => $descuento,
                 'indicador_facturacion' => $indicador,
                 'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 1),
                 'unidad_medida' => (string) ($raw['unidad_medida'] ?? '43'),
@@ -269,10 +277,10 @@ class facturaModel
     private function insertSimpleItems(int $facturaId, array $items): void
     {
         $sql = 'INSERT INTO factura_items
-                (factura_id, description, amount, quantity, subtotal,
+                (factura_id, description, amount, quantity, subtotal, descuento_monto,
                  indicador_facturacion, indicador_bien_servicio, unidad_medida, itbis_amount)
                 VALUES
-                (:factura_id, :description, :amount, :quantity, :subtotal,
+                (:factura_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
                  :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
         $stmt = $this->conexion->prepare($sql);
         foreach ($items as $it) {
@@ -282,6 +290,7 @@ class facturaModel
                 ':amount' => $it['amount'],
                 ':quantity' => $it['quantity'],
                 ':subtotal' => $it['subtotal'],
+                ':descuento_monto' => (float) ($it['descuento_monto'] ?? 0),
                 ':indicador_facturacion' => $it['indicador_facturacion'],
                 ':indicador_bien_servicio' => $it['indicador_bien_servicio'],
                 ':unidad_medida' => $it['unidad_medida'] ?? '43',
@@ -323,9 +332,9 @@ class facturaModel
         try {
             $this->conexion->beginTransaction();
             $sql = 'INSERT INTO facturas
-                    (no_factura, date, client_id, client_name, user_id, total, NCF, tipo_ecf)
+                    (no_factura, date, client_id, client_name, user_id, total, tipo_pago, NCF, tipo_ecf)
                     VALUES
-                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, :NCF, NULL)';
+                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, :tipo_pago, :NCF, NULL)';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $noFactura,
@@ -334,6 +343,9 @@ class facturaModel
                 ':client_name' => $data['client_name'] ?? '',
                 ':user_id' => $data['user_id'],
                 ':total' => $total,
+                // Contado por defecto: es la venta de mostrador tipica y el lado
+                // seguro (el credito exige que el cliente lo tenga habilitado).
+                ':tipo_pago' => (int) ($data['tipo_pago'] ?? 1),
                 ':NCF' => $data['NCF'] ?? null,
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
@@ -476,6 +488,7 @@ class facturaModel
             $clientId = array_key_exists('client_id', $data) ? $data['client_id'] : $row['client_id'];
             $clientName = $data['client_name'] ?? $row['client_name'];
             $ncf = array_key_exists('NCF', $data) ? $data['NCF'] : $row['NCF'];
+            $tipoPago = array_key_exists('tipo_pago', $data) ? (int) $data['tipo_pago'] : (int) $row['tipo_pago'];
 
             $replaceItems = isset($data['items']) && is_array($data['items']);
             $items = $replaceItems ? $this->normalizeSimpleItems($data['items']) : [];
@@ -492,7 +505,7 @@ class facturaModel
             $upd = $this->conexion->prepare(
                 'UPDATE facturas SET no_factura = :no_factura, date = :date,
                         client_id = :client_id, client_name = :client_name,
-                        total = :total, NCF = :NCF
+                        total = :total, tipo_pago = :tipo_pago, NCF = :NCF
                  WHERE id = :id AND tipo_ecf IS NULL'
             );
             $upd->execute([
@@ -501,6 +514,7 @@ class facturaModel
                 ':client_id' => $clientId,
                 ':client_name' => $clientName,
                 ':total' => $total,
+                ':tipo_pago' => $tipoPago,
                 ':NCF' => $ncf,
                 ':id' => $id,
             ]);
@@ -713,13 +727,13 @@ class facturaModel
             }
 
             $sql = 'INSERT INTO facturas
-                (no_factura, date, client_id, client_name, total, NCF, user_id,
+                (no_factura, date, client_id, client_name, total, tipo_pago, NCF, user_id,
                  tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
                  fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
                  rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta,
                  ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion)
                 VALUES
-                (:no_factura, :date, :client_id, :client_name, :total, NULL, :user_id,
+                (:no_factura, :date, :client_id, :client_name, :total, :tipo_pago, NULL, :user_id,
                  :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
                  :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
                  :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta,
@@ -731,6 +745,9 @@ class facturaModel
                 ':client_id' => $factura['client_id'],
                 ':client_name' => $factura['client_name'],
                 ':total' => $factura['total'],
+                // Ya viajaba a DGII dentro del XML; ahora tambien queda guardado
+                // en la factura, para que la app sepa si fue contado o credito.
+                ':tipo_pago' => (int) ($factura['tipo_pago'] ?? 1),
                 ':user_id' => $factura['user_id'] ?? null,
                 ':tipo_ecf' => $ecf['tipo_ecf'],
                 ':e_ncf' => $ecf['e_ncf'],
@@ -753,10 +770,10 @@ class facturaModel
             $facturaId = (int) $this->conexion->lastInsertId();
 
             $itemSql = 'INSERT INTO factura_items
-                (factura_id, description, amount, quantity, subtotal,
+                (factura_id, description, amount, quantity, subtotal, descuento_monto,
                  indicador_facturacion, indicador_bien_servicio, unidad_medida, itbis_amount)
                 VALUES
-                (:factura_id, :description, :amount, :quantity, :subtotal,
+                (:factura_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
                  :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
             $itemStmt = $this->conexion->prepare($itemSql);
             foreach ($factura['items'] as $item) {
@@ -769,6 +786,7 @@ class facturaModel
                     ':amount' => $amount,
                     ':quantity' => $quantity,
                     ':subtotal' => $subtotal,
+                    ':descuento_monto' => (float) ($item['descuento_monto'] ?? 0),
                     ':indicador_facturacion' => (int) ($item['indicador_facturacion'] ?? 1),
                     ':indicador_bien_servicio' => (int) ($item['indicador_bien_servicio'] ?? 2),
                     ':unidad_medida' => (string) ($item['unidad_medida'] ?? '43'),
