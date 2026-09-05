@@ -39,6 +39,9 @@ class EcfItemMapper
             }
 
             $mapped[] = [
+                // No va al XML: viaja para que la factura sepa que producto del
+                // catalogo es cada linea y pueda descontar inventario al guardar.
+                'product_id' => !empty($raw['product_id']) ? (int) $raw['product_id'] : null,
                 'numero_linea' => (int) ($raw['numero_linea'] ?? ($i + 1)),
                 'indicador_facturacion' => $indicador,
                 'indicador_agente_retencion_percepcion' => $raw['indicador_agente_retencion_percepcion'] ?? null,

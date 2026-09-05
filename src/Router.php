@@ -121,6 +121,12 @@ switch ($route) {
         require_once 'src/Controllers/warehouseController.php';
         break;
 
+    case 'inventario':
+        // Inventario: ajustes y libro de movimientos - token required
+        //   /inventario/ajustes · /inventario/movimientos
+        require_once 'src/Controllers/inventarioController.php';
+        break;
+
     case 'proveedores':
         // Supplier directory CRUD endpoints - token required
         require_once 'src/Controllers/proveedorController.php';

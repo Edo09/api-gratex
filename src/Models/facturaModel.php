@@ -74,7 +74,7 @@ class facturaModel
     public function getFacturaItems($factura_id)
     {
         try {
-            $sql = "SELECT id, description, amount, quantity, subtotal, descuento_monto, itbis_amount, indicador_facturacion, unidad_medida FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
+            $sql = "SELECT id, product_id, description, amount, quantity, subtotal, descuento_monto, itbis_amount, indicador_facturacion, indicador_bien_servicio, unidad_medida FROM factura_items WHERE factura_id = :factura_id ORDER BY id ASC";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':factura_id' => $factura_id]);
             return $stmt->fetchAll();
@@ -260,6 +260,8 @@ class facturaModel
                 ? (float) $raw['itbis_amount']
                 : round($subtotal * ($indicador === 1 ? 0.18 : ($indicador === 2 ? 0.16 : 0.0)), 2);
             $normalized[] = [
+                // Linea del catalogo: se guarda para poder descontar inventario.
+                'product_id' => !empty($raw['product_id']) ? (int) $raw['product_id'] : null,
                 'description' => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
                 'amount' => $amount,
                 'quantity' => $quantity,
@@ -277,15 +279,16 @@ class facturaModel
     private function insertSimpleItems(int $facturaId, array $items): void
     {
         $sql = 'INSERT INTO factura_items
-                (factura_id, description, amount, quantity, subtotal, descuento_monto,
+                (factura_id, product_id, description, amount, quantity, subtotal, descuento_monto,
                  indicador_facturacion, indicador_bien_servicio, unidad_medida, itbis_amount)
                 VALUES
-                (:factura_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
+                (:factura_id, :product_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
                  :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
         $stmt = $this->conexion->prepare($sql);
         foreach ($items as $it) {
             $stmt->execute([
                 ':factura_id' => $facturaId,
+                ':product_id' => $it['product_id'] ?? null,
                 ':description' => $it['description'],
                 ':amount' => $it['amount'],
                 ':quantity' => $it['quantity'],
@@ -770,10 +773,10 @@ class facturaModel
             $facturaId = (int) $this->conexion->lastInsertId();
 
             $itemSql = 'INSERT INTO factura_items
-                (factura_id, description, amount, quantity, subtotal, descuento_monto,
+                (factura_id, product_id, description, amount, quantity, subtotal, descuento_monto,
                  indicador_facturacion, indicador_bien_servicio, unidad_medida, itbis_amount)
                 VALUES
-                (:factura_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
+                (:factura_id, :product_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
                  :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
             $itemStmt = $this->conexion->prepare($itemSql);
             foreach ($factura['items'] as $item) {
@@ -782,6 +785,7 @@ class facturaModel
                 $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : $amount * $quantity;
                 $itemStmt->execute([
                     ':factura_id' => $facturaId,
+                    ':product_id' => $item['product_id'] ?? null,
                     ':description' => $item['description'] ?? '',
                     ':amount' => $amount,
                     ':quantity' => $quantity,

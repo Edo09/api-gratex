@@ -320,6 +320,21 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body['user_id'] = $userId;
 
         $result = $facturaModel->createFacturaSimple($body);
+        // Una factura simple no va a DGII, pero la mercancia sale del almacen
+        // igual: descuenta inventario como cualquier venta.
+        if ($result[0] === 'success') {
+            try {
+                require_once __DIR__ . '/../Models/inventoryModel.php';
+                (new inventoryModel())->registrarVenta(
+                    (int) ($result[1]['id'] ?? 0),
+                    $result[1]['items'] ?? [],
+                    null,
+                    $userId
+                );
+            } catch (Throwable $e) {
+                error_log('[inventario] factura simple: ' . $e->getMessage());
+            }
+        }
         fsRespond($result[0] === 'success', $result[1], $result[0] === 'success' ? 201 : 400);
         break;
 

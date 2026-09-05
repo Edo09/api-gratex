@@ -306,6 +306,8 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
                 'description' => $descripcion !== '' ? $descripcion : (string) ($item['nombre_item'] ?? ''),
                 'amount' => $item['precio_unitario'] ?? 0,
                 'quantity' => $item['cantidad'] ?? 1,
+                // Vinculo con el catalogo: sin esto la venta no puede descontar.
+                'product_id' => $item['product_id'] ?? null,
                 'subtotal' => $item['monto_item'] ?? 0,
                 // monto_item ya viene neto; el descuento se guarda aparte para
                 // que la Representacion Impresa y el detalle lo puedan mostrar.
@@ -323,6 +325,22 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     if ($saved[0] !== 'success') {
         respond(false, $saved[1], 500);
         return;
+    }
+
+    // Inventario: la venta descuenta (la Nota de Credito repone). Va DESPUES de
+    // guardar y de que DGII acepto — a esta altura el e-CF ya existe, asi que
+    // un problema de inventario no puede tumbar la factura: se registra en el
+    // log y se corrige con un ajuste.
+    try {
+        require_once __DIR__ . '/../Models/inventoryModel.php';
+        (new inventoryModel())->registrarVenta(
+            (int) ($saved[1]['factura_id'] ?? 0),
+            $facturaInput['items'],
+            $tipoEcf,
+            $input['user_id'] ?? null
+        );
+    } catch (Throwable $e) {
+        error_log('[inventario] no se pudo descontar la factura: ' . $e->getMessage());
     }
 
     // La respuesta de DGII puede venir en dgii_response (e-CF integro) o
