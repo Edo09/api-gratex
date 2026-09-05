@@ -21,7 +21,7 @@ GET /api/reportes/ventas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&agrupar=<a>&format=<f
 |---|---|---|
 | `desde` / `hasta` | `AAAA-MM-DD`, ambos extremos incluidos | mes en curso |
 | `agrupar` | `documento` (detalle) · `cliente` · `forma_pago` · `usuario` | `documento` |
-| `format` | `json` · `csv` | `json` |
+| `format` | `json` · `pdf` · `xlsx` | `json` |
 
 Va bajo `reportes`, que ya está en `config/permissions.php` — sin ruta nueva no
 hay mapeo RBAC que olvidar (ver [roles-permisos.md](roles-permisos.md)).
@@ -80,15 +80,46 @@ ventas no puede caerse porque falten los nombres.
 ## Frontend
 
 `src/features/reports/VentasView.tsx`, colgado de **Reportes › Ventas**. Rango de
-fechas + pestañas para las cuatro vistas + tarjetas de totales + descarga CSV.
+fechas + pestañas para las cuatro vistas + tarjetas de totales + botones de
+descarga (PDF y Excel).
 
 El rango no puede quedar invertido: mover un extremo más allá del otro lo
 arrastra, así que no hay estado de error que mostrar ni petición que el API vaya a
 rechazar con un 400.
 
-El CSV lleva BOM (sin él Excel en Windows abre el UTF-8 como ANSI y parte los
-acentos), montos con punto decimal y sin separador de miles (con miles Excel los
-lee como texto), y una fila de totales al pie para que el archivo cuadre solo.
+## Descargas
+
+Dos formatos, y las dos salidas comparten la misma definición de columnas en el
+controller para que el papel y la hoja de cálculo digan lo mismo, en el mismo
+orden.
+
+**PDF** (`src/Utils/Pdf/ReporteVentasPdf.php`) — para imprimir o archivar. Lleva
+el membrete del emisor (logo, razón social, RNC) porque es un documento que sale
+de la empresa. El detalle va apaisado (diez columnas no caben a lo ancho de una
+carta) y las agrupaciones en vertical. La banda de columnas se repite en cada
+página: sin eso, un reporte de 300 líneas obliga a volver a la primera hoja para
+saber qué columna es cuál. Los montos negativos (notas de crédito) salen en rojo.
+
+**Excel** (`src/Utils/XlsxWriter.php`) — `.xlsx` nativo, no un CSV renombrado:
+Excel lo abre sin avisos de formato, los montos son **números de verdad** (se
+pueden sumar y filtrar) con formato `#,##0.00`, y el encabezado queda congelado
+al hacer scroll.
+
+Ese escritor es propio y son ~250 líneas. No hay Composer, así que no hay
+PhpSpreadsheet, y un `.xlsx` es un ZIP con unos cuantos XML dentro — mucho menos
+que vendorizar una librería entera. **El ZIP se arma a mano en vez de con
+`ZipArchive`**: esa extensión puede no estar en un hosting compartido y no hay
+forma de comprobarlo desde fuera. zlib sí está (FPDF ya comprime los PDF con
+`gzcompress`) y, si faltara, el archivo sale sin comprimir pero igual de válido.
+
+Detalles de OOXML que Excel exige y que ya están resueltos ahí, no tocar:
+
+- Los rellenos 0 y 1 de `styles.xml` tienen que ser `none` y `gray125`, en ese
+  orden, aunque no se usen: si faltan, Excel considera el libro corrupto.
+- Los caracteres de control ASCII (por debajo de 0x20, salvo tabulador, salto
+  de linea y retorno) estan prohibidos en el XML; uno pegado desde otro sistema
+  deja el archivo ilegible para Excel. Se limpian al escapar.
+- El nombre de hoja se limita a 31 caracteres y se le quitan `\ / ? * [ ] :`.
 
 ## Pendiente
 

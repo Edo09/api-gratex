@@ -2,7 +2,7 @@
 // Reporte de ventas (gestion, no fiscal).
 //   GET /api/reportes/ventas?desde=AAAA-MM-DD&hasta=AAAA-MM-DD&agrupar=<a>&format=<f>
 //     agrupar: documento (detalle, por defecto) | cliente | forma_pago | usuario
-//     format:  json (por defecto) | csv
+//     format:  json (por defecto) | pdf | xlsx
 //
 // Reemplaza los cinco reportes del sistema anterior del cliente: "Ventas" es el
 // detalle, y "por cliente" / "por forma de pago" / "por vendedor" / "por usuario"
@@ -74,11 +74,15 @@ if (!in_array($agrupar, ReporteVentasModel::AGRUPACIONES, true)) {
     return;
 }
 
+$formato = strtolower(trim((string) ($_GET['format'] ?? 'json')));
+if (!in_array($formato, ['json', 'pdf', 'xlsx'], true)) {
+    $rvError('Formato invalido. Use: json, pdf o xlsx.');
+    return;
+}
+
 $reporte = (new ReporteVentasModel())->reporte($desdeOk, $hastaOk, $agrupar);
 
-$formato = strtolower(trim((string) ($_GET['format'] ?? 'json')));
-
-if ($formato !== 'csv') {
+if ($formato === 'json') {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
         'status' => true,
@@ -95,63 +99,145 @@ if ($formato !== 'csv') {
 }
 
 // ---------------------------------------------------------------------------
-// CSV
+// Exportacion: PDF (para imprimir/archivar) y Excel (para seguir trabajando).
+//
+// Las dos salidas comparten esta definicion de columnas para que el papel y la
+// hoja de calculo digan lo mismo, en el mismo orden. Los anchos van en mm (los
+// del PDF); el xlsx los convierte a su unidad.
 // ---------------------------------------------------------------------------
-$columnas = $agrupar === 'documento'
-    ? [
-        'fecha'       => 'Fecha',
-        'documento'   => 'Documento',
-        'tipo'        => 'Tipo',
-        'cliente'     => 'Cliente',
-        'cliente_rnc' => 'RNC',
-        'forma_pago'  => 'Forma de pago',
-        'usuario'     => 'Usuario',
-        'estado'      => 'Estado',
-        'base'        => 'Base',
-        'itbis'       => 'ITBIS',
-        'total'       => 'Total',
-    ]
-    : [
-        'etiqueta' => match ($agrupar) {
-            'cliente'    => 'Cliente',
-            'forma_pago' => 'Forma de pago',
-            'usuario'    => 'Usuario',
-        },
-        'cantidad' => 'Documentos',
-        'base'     => 'Base',
-        'itbis'    => 'ITBIS',
-        'total'    => 'Total',
+$etiquetaGrupo = [
+    'cliente'    => 'Cliente',
+    'forma_pago' => 'Forma de pago',
+    'usuario'    => 'Usuario / vendedor',
+];
+
+if ($agrupar === 'documento') {
+    // Diez columnas no caben a lo ancho de una carta: va apaisado, 263 mm utiles.
+    $columnas = [
+        ['ancho' => 19, 'titulo' => 'Fecha',         'campo' => 'fecha'],
+        ['ancho' => 30, 'titulo' => 'Documento',     'campo' => 'documento'],
+        ['ancho' => 12, 'titulo' => 'Tipo',          'campo' => 'tipo'],
+        ['ancho' => 52, 'titulo' => 'Cliente',       'campo' => 'cliente'],
+        ['ancho' => 23, 'titulo' => 'Forma de pago', 'campo' => 'forma_pago'],
+        ['ancho' => 30, 'titulo' => 'Usuario',       'campo' => 'usuario'],
+        ['ancho' => 26, 'titulo' => 'Estado',        'campo' => 'estado'],
+        ['ancho' => 24, 'titulo' => 'Base',          'campo' => 'base',  'alin' => 'R', 'dinero' => true],
+        ['ancho' => 22, 'titulo' => 'ITBIS',         'campo' => 'itbis', 'alin' => 'R', 'dinero' => true],
+        ['ancho' => 25, 'titulo' => 'Total',         'campo' => 'total', 'alin' => 'R', 'dinero' => true],
     ];
-
-$nombre = 'ventas_' . $agrupar . '_' . $desdeOk . '_a_' . $hastaOk . '.csv';
-header('Content-Type: text/csv; charset=utf-8');
-header('Content-Disposition: attachment; filename="' . $nombre . '"');
-
-$salida = fopen('php://output', 'w');
-// BOM: sin el, Excel en Windows abre el UTF-8 como ANSI y parte los acentos.
-fwrite($salida, "\xEF\xBB\xBF");
-fputcsv($salida, array_values($columnas));
-foreach ($reporte['filas'] as $fila) {
-    $linea = [];
-    foreach (array_keys($columnas) as $k) {
-        $v = $fila[$k] ?? '';
-        // Los montos van con punto decimal y sin separador de miles: es lo que
-        // Excel reconoce como numero, y con miles lo leeria como texto.
-        $linea[] = in_array($k, ['base', 'itbis', 'total'], true)
-            ? number_format((float) $v, 2, '.', '')
-            : $v;
+    $orientacion = 'L';
+} else {
+    // Vertical: 195 mm utiles. El RNC solo aporta en la vista por cliente.
+    $columnas = [[
+        'ancho'  => $agrupar === 'cliente' ? 55 : 77,
+        'titulo' => $etiquetaGrupo[$agrupar],
+        'campo'  => 'etiqueta',
+    ]];
+    if ($agrupar === 'cliente') {
+        $columnas[] = ['ancho' => 22, 'titulo' => 'RNC', 'campo' => 'cliente_rnc'];
     }
-    fputcsv($salida, $linea);
+    $columnas[] = ['ancho' => 18, 'titulo' => 'Docs.',   'campo' => 'cantidad',   'alin' => 'R'];
+    $columnas[] = ['ancho' => 28, 'titulo' => 'Base',    'campo' => 'base',       'alin' => 'R', 'dinero' => true];
+    $columnas[] = ['ancho' => 26, 'titulo' => 'ITBIS',   'campo' => 'itbis',      'alin' => 'R', 'dinero' => true];
+    $columnas[] = ['ancho' => 30, 'titulo' => 'Total',   'campo' => 'total',      'alin' => 'R', 'dinero' => true];
+    $columnas[] = ['ancho' => 16, 'titulo' => '% total', 'campo' => 'porcentaje', 'alin' => 'R'];
+    $orientacion = 'P';
 }
-// Fila de totales al pie, para que el archivo cuadre solo.
-$t = $reporte['totales'];
-fputcsv($salida, []);
-$pie = $agrupar === 'documento'
-    ? ['TOTAL', '', '', '', '', '', '', '']
-    : ['TOTAL', $t['cantidad']];
-fputcsv($salida, array_merge($pie, [
-    number_format($t['base'], 2, '.', ''),
-    number_format($t['itbis'], 2, '.', ''),
-    number_format($t['total'], 2, '.', ''),
-]));
-fclose($salida);
+
+$filas = $reporte['filas'];
+$totalGeneral = (float) $reporte['totales']['total'];
+if ($agrupar !== 'documento') {
+    // El % se calcula al exportar y no en el modelo: es presentacion, no dato.
+    foreach ($filas as &$fila) {
+        $fila['porcentaje'] = $totalGeneral != 0.0
+            ? number_format($fila['total'] / $totalGeneral * 100, 1) . '%'
+            : '';
+    }
+    unset($fila);
+}
+
+$rotulo = $agrupar === 'documento' ? 'Ventas' : ('Ventas por ' . mb_strtolower($etiquetaGrupo[$agrupar], 'UTF-8'));
+$rango = 'Del ' . date('d/m/Y', strtotime($desdeOk)) . ' al ' . date('d/m/Y', strtotime($hastaOk));
+$nombre = 'ventas_' . $agrupar . '_' . $desdeOk . '_a_' . $hastaOk;
+$nota = 'Incluye facturas de venta (E31, E32, E44, E45, E46) y facturas simples. Las notas de crédito (E34) '
+    . 'restan y las de débito (E33) suman. No entran compras ni gastos (E41, E43, E47) ni los comprobantes '
+    . 'rechazados por la DGII. No es un formato de envío a la DGII.';
+
+if ($formato === 'pdf') {
+    require_once __DIR__ . '/../Utils/Pdf/ReporteVentasPdf.php';
+    $pdf = new ReporteVentasPdf($orientacion);
+    $pdf->configurar($rotulo, $rango, $columnas);
+    $pdf->AddPage();
+    $pdf->tabla($filas, $reporte['totales']);
+    foreach ($reporte['advertencias'] as $a) {
+        $pdf->aviso($a);
+    }
+    $pdf->notaAlPie($nota);
+    $contenido = $pdf->contenido();
+
+    header('Content-Type: application/pdf');
+    header('Content-Disposition: attachment; filename="' . $nombre . '.pdf"');
+    header('Content-Length: ' . strlen($contenido));
+    echo $contenido;
+    return;
+}
+
+// --- Excel -----------------------------------------------------------------
+require_once __DIR__ . '/../Utils/XlsxWriter.php';
+$x = new XlsxWriter($rotulo);
+// mm -> "caracteres" de Excel: ~1.9 mm por caracter a 11pt Calibri.
+$x->anchos(array_map(static fn(array $c): float => round($c['ancho'] / 1.9, 1), $columnas));
+
+$x->fila([[$rotulo, XlsxWriter::TITULO]]);
+$x->fila([$rango]);
+$x->filaVacia();
+$x->fila(array_map(static fn(array $c): array => [$c['titulo'], XlsxWriter::ENCABEZADO], $columnas));
+$x->congelarFilas(4);
+
+foreach ($filas as $f) {
+    $celdas = [];
+    foreach ($columnas as $c) {
+        $v = $f[$c['campo']] ?? '';
+        if (!empty($c['dinero'])) {
+            // Numero de verdad, no texto: asi se puede sumar y filtrar en Excel.
+            $celdas[] = [(float) $v, XlsxWriter::DINERO];
+        } elseif ($c['campo'] === 'cantidad') {
+            $celdas[] = (int) $v;
+        } elseif ($c['campo'] === 'fecha') {
+            $ts = strtotime((string) $v);
+            $celdas[] = $ts ? date('d/m/Y', $ts) : (string) $v;
+        } else {
+            $celdas[] = (string) $v;
+        }
+    }
+    $x->fila($celdas);
+}
+
+$x->filaVacia();
+$pie = [];
+foreach ($columnas as $i => $c) {
+    if ($i === 0) {
+        $pie[] = ['TOTAL', XlsxWriter::NEGRITA];
+    } elseif ($c['campo'] === 'cantidad') {
+        $pie[] = [(int) $reporte['totales']['cantidad'], XlsxWriter::NEGRITA];
+    } elseif (in_array($c['campo'], ['base', 'itbis', 'total'], true)) {
+        $pie[] = [(float) $reporte['totales'][$c['campo']], XlsxWriter::DINERO_TOT];
+    } elseif ($c['campo'] === 'porcentaje') {
+        $pie[] = ['100%', XlsxWriter::NEGRITA];
+    } else {
+        $pie[] = '';
+    }
+}
+$x->fila($pie);
+
+$x->filaVacia();
+foreach ($reporte['advertencias'] as $a) {
+    $x->fila([$a]);
+}
+$x->fila([$nota]);
+
+$contenido = $x->generar();
+header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+header('Content-Disposition: attachment; filename="' . $nombre . '.xlsx"');
+header('Content-Length: ' . strlen($contenido));
+echo $contenido;
