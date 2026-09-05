@@ -324,7 +324,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // igual: descuenta inventario como cualquier venta.
         if ($result[0] === 'success') {
             try {
-                require_once __DIR__ . '/../Models/inventoryModel.php';
+                // Ver facturaController: un require fallido es fatal y este
+                // try/catch no lo atraparia. Se comprueba antes.
+                $rutaInventario = __DIR__ . '/../Models/inventoryModel.php';
+                if (!is_file($rutaInventario)) {
+                    throw new RuntimeException('falta ' . $rutaInventario);
+                }
+                require_once $rutaInventario;
                 (new inventoryModel())->registrarVenta(
                     (int) ($result[1]['id'] ?? 0),
                     $result[1]['items'] ?? [],

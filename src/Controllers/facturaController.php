@@ -332,7 +332,14 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     // un problema de inventario no puede tumbar la factura: se registra en el
     // log y se corrige con un ajuste.
     try {
-        require_once __DIR__ . '/../Models/inventoryModel.php';
+        // is_file antes del require: un require que falla es un fatal que este
+        // try/catch NO atrapa, y tumbaria la respuesta de una factura que DGII
+        // ya acepto. Asi el fallo baja a excepcion y solo queda en el log.
+        $rutaInventario = __DIR__ . '/../Models/inventoryModel.php';
+        if (!is_file($rutaInventario)) {
+            throw new RuntimeException('falta ' . $rutaInventario);
+        }
+        require_once $rutaInventario;
         (new inventoryModel())->registrarVenta(
             (int) ($saved[1]['factura_id'] ?? 0),
             $facturaInput['items'],

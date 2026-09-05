@@ -15,7 +15,19 @@ header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 header('Allow: GET, POST, OPTIONS');
 header('content-type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/../Models/inventoryModel.php';
+// En el hosting compartido no siempre se puede leer el error_log, y un require
+// fallido responde un 500 con el cuerpo vacio: imposible de diagnosticar desde
+// el navegador. Se comprueba antes para devolver algo legible.
+$rutaModelo = __DIR__ . '/../Models/inventoryModel.php';
+if (!is_file($rutaModelo)) {
+    http_response_code(500);
+    echo json_encode([
+        'status' => false,
+        'error' => 'Falta src/Models/inventoryModel.php en el servidor: el despliegue del modulo de inventario quedo incompleto.',
+    ]);
+    return;
+}
+require_once $rutaModelo;
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 
 $inventoryModel = new inventoryModel();
