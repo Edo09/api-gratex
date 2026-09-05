@@ -114,21 +114,36 @@ switch($_SERVER['REQUEST_METHOD']){
         if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
             $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
         }
-        else if(!isset($_PUT->email) || is_null($_PUT->email) || empty(trim($_PUT->email)) || !filter_var($_PUT->email, FILTER_VALIDATE_EMAIL) || strlen($_PUT->email) > 100){
-            $respuesta= ['status' => false, 'error' => 'Email must not be empty, must be a valid email and no more than 100 characters'];
+        // PUT parcial: solo se valida lo que venga. Un campo ausente conserva su
+        // valor (COALESCE en el modelo), lo que permite corregir un dato suelto
+        // —el RNC desde la pantalla de factura, por ejemplo— sin reenviar todo.
+        // Exigirlos siempre bloqueaba la edicion de los clientes migrados, que
+        // no traen correo ni telefono.
+        else if(isset($_PUT->email) && trim((string) $_PUT->email) !== '' && (!filter_var($_PUT->email, FILTER_VALIDATE_EMAIL) || strlen($_PUT->email) > 100)){
+            $respuesta= ['status' => false, 'error' => 'Email must be a valid email and no more than 100 characters'];
         }
-        else if(!isset($_PUT->client_name) || is_null($_PUT->client_name) || empty(trim($_PUT->client_name)) || strlen($_PUT->client_name) > 100){
+        else if(isset($_PUT->client_name) && (empty(trim((string) $_PUT->client_name)) || strlen($_PUT->client_name) > 100)){
             $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
         }
-        else if(!isset($_PUT->company_name) || is_null($_PUT->company_name) || empty(trim($_PUT->company_name)) || strlen($_PUT->company_name) > 100){
+        else if(isset($_PUT->company_name) && (empty(trim((string) $_PUT->company_name)) || strlen($_PUT->company_name) > 100)){
             $respuesta= ['status' => false, 'error' => 'Company name must not be empty and no more than 100 characters'];
         }
-        else if(!isset($_PUT->phone_number) || is_null($_PUT->phone_number) || empty(trim($_PUT->phone_number)) || strlen($_PUT->phone_number) > 20){
-            $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
+        else if(isset($_PUT->phone_number) && strlen((string) $_PUT->phone_number) > 20){
+            $respuesta= ['status' => false, 'error' => 'Phone number must be no more than 20 characters'];
         }
         else{
             $oldClient = $clientModel->getClients($_PUT->id)[0] ?? null;
-            $result = $clientModel->updateClient($_PUT->id,$_PUT->email,$_PUT->client_name,$_PUT->company_name,$_PUT->phone_number,$_PUT->rnc ?? null,$_PUT->descuento ?? null,$_PUT->permitir_credito ?? null);
+            // ?? null en todos: el modelo trata null como "conservar el actual".
+            $result = $clientModel->updateClient(
+                $_PUT->id,
+                $_PUT->email ?? null,
+                $_PUT->client_name ?? null,
+                $_PUT->company_name ?? null,
+                $_PUT->phone_number ?? null,
+                $_PUT->rnc ?? null,
+                $_PUT->descuento ?? null,
+                $_PUT->permitir_credito ?? null
+            );
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
 

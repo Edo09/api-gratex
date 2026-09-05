@@ -62,11 +62,21 @@ class clientModel
             $existe = $this->getClients($id);
             $resultado = ['error', "There is no client with ID {$id}"];
             if (count($existe) > 0) {
-                $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
+                $valida = $this->validateClients($email, $client_name, $company_name, $phone_number, $id);
                 $resultado = ['error', 'This client already exists'];
                 if (count($valida) == 0) {
-                    $sql = "UPDATE clients SET email = :email, client_name = :client_name, company_name = :company_name,
-                        phone_number = :phone_number, rnc = :rnc, razon_social = :razon_social,
+                    // Actualizacion PARCIAL: null = "no vino en el request" y se
+                    // conserva lo que ya habia. Asi se puede corregir un solo
+                    // campo (p. ej. agregar el RNC desde la factura) sin tener
+                    // que reenviar el registro completo — que ademas fallaria en
+                    // los clientes migrados, que no tienen correo ni telefono.
+                    $sql = "UPDATE clients SET
+                        email = COALESCE(:email, email),
+                        client_name = COALESCE(:client_name, client_name),
+                        company_name = COALESCE(:company_name, company_name),
+                        phone_number = COALESCE(:phone_number, phone_number),
+                        rnc = COALESCE(:rnc, rnc),
+                        razon_social = COALESCE(:razon_social, razon_social),
                         descuento = COALESCE(:descuento, descuento),
                         permitir_credito = COALESCE(:permitir_credito, permitir_credito) WHERE id = :id";
                     $stmt = $this->conexion->prepare($sql);
@@ -77,6 +87,7 @@ class clientModel
                         ':company_name' => $company_name,
                         ':phone_number' => $phone_number,
                         ':rnc' => $this->normalizeRnc($rnc),
+                        // razon_social sigue a company_name, pero solo si vino.
                         ':razon_social' => $company_name,
                         // null = el PUT no las mando: el COALESCE del SQL conserva
                         // lo que ya tenia. Asi un cliente de otro consumidor del
@@ -149,16 +160,29 @@ class clientModel
     // clients may share the same RNC or company_name (e.g. several contacts of
     // the same company). Only an exact email + client_name + phone match counts
     // as a duplicate, to guard against accidental re-submission.
-    public function validateClients($email, $client_name, $company_name, $phone_number)
+    /**
+     * Busca un cliente ya existente con el mismo email + nombre + telefono.
+     *
+     * $excludeId: al EDITAR hay que excluir el propio registro. Sin eso el
+     * cliente se encontraba a si mismo y toda edicion moria con "This client
+     * already exists" — y peor con catalogos migrados, donde muchos comparten
+     * email y telefono vacios.
+     */
+    public function validateClients($email, $client_name, $company_name, $phone_number, $excludeId = null)
     {
         try {
             $sql = "SELECT * FROM clients WHERE email = :email AND client_name = :client_name AND phone_number = :phone_number";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([
+            $params = [
                 ':email' => $email,
                 ':client_name' => $client_name,
                 ':phone_number' => $phone_number
-            ]);
+            ];
+            if ($excludeId !== null) {
+                $sql .= ' AND id <> :exclude_id';
+                $params[':exclude_id'] = $excludeId;
+            }
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute($params);
             return $stmt->fetchAll();
         } catch (PDOException $e) {
             return [];
