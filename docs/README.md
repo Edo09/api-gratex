@@ -47,6 +47,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/gastos.md](modules/gastos.md) | Módulo de gastos (menores + facturas de proveedores), auto-emisión |
 | [modules/branding-plantillas.md](modules/branding-plantillas.md) | Plantillas de Representación Impresa por tenant, branding, logo, diseños a la medida |
 | [modules/representacion-impresa-pos.md](modules/representacion-impresa-pos.md) | Tirilla POS de 80 mm: `?formato=pos`, alto variable, contenido compartido con la hoja carta |
+| [modules/reporte-ventas.md](modules/reporte-ventas.md) | Reporte de ventas de gestión: `/api/reportes/ventas`, detalle y agrupaciones por cliente, forma de pago y usuario |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |
 | [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos |
 | [modules/auditoria.md](modules/auditoria.md) | Bitácora de auditoría (`audit_logs`): quién hizo qué y cuándo, `AuditLogger`, `GET /api/audit-logs` |
