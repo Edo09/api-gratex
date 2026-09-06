@@ -142,8 +142,34 @@ Array de strings legibles. Si no está vacío, **muéstralas antes de permitir l
 - `"NCF XYZ (RNC 130000000): formato no valido o no autorizado — revisar."`
 - `"e-CF E310000099: tiene retencion (ITBIS/ISR) pero falta Fecha de Pago (campo 7 obligatorio)."`
 - `"RNC 130000000: comprobante sin NCF/e-NCF."`
+- `"NCF E310000099 (RNC 130000000): esta en recepcion e-CF y en gastos/compras. Se declara una sola vez, con el de recepcion e-CF — revisa si la compra tambien esta duplicada en tus costos."`
 
 No bloquean la generación; son para revisión humana.
+
+### Deduplicación
+
+Un comprobante es **uno**: un RNC de proveedor más un NCF. El 606 se arma de dos
+fuentes (`ecf_recibidos` y `gastos`) y antes se concatenaban sin comparar, así que
+el mismo comprobante podía salir repetido de tres formas:
+
+- el e-CF entra por `/api/ecf/recepcion` **y además** alguien lo registra como gasto,
+- se importa dos veces con `public/import_recibido.php`,
+- se digita dos veces el mismo NCF de un proveedor.
+
+Declararlo dos veces infla el ITBIS adelantado, y la DGII lo cruza contra el 607
+del proveedor, que solo lo reportó una vez.
+
+Ahora se descarta la copia y **gana el de `ecf_recibidos`**, porque trae el XML
+firmado: el desglose bienes/servicios, las retenciones y la fecha de pago salen
+del documento que la DGII ya tiene, no de lo que alguien tecleó.
+
+Cada descarte deja advertencia — nunca se hace en silencio. Un duplicado aquí casi
+siempre significa que la compra también está dos veces en los costos, y eso se
+arregla en los datos, no en la declaración.
+
+Los comprobantes **sin NCF** no se deduplican: sin clave, dos compras distintas del
+mismo proveedor colisionarían y se perdería una de verdad. Ya llevan su propia
+advertencia.
 
 ---
 

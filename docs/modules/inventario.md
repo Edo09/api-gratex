@@ -55,3 +55,67 @@ productos) y [../database/schema.md](../database/schema.md).
 `src/Controllers/categoryController.php`, `src/Controllers/warehouseController.php`,
 `config/permissions.php` (módulos `categories` + `warehouses`), `src/Router.php`, `src/Models/productModel.php`,
 `src/Controllers/productController.php`, `db/tenant_schema.sql`.
+
+---
+
+## Valor de inventario
+
+`GET /api/inventario/valor` — cuánto vale lo que hay en almacén, producto por
+producto, a una fecha de corte. Con el detalle de movimientos de cada uno
+(`/api/inventario/movimientos?product_id=`, el kardex que ya existía).
+
+| Parámetro | Valores | Por defecto |
+|---|---|---|
+| `estado` | `activos` · `inactivos` · `todos` | `activos` |
+| `warehouse_id`, `category_id` | filtro | todos |
+| `hasta` | `AAAA-MM-DD` (corte) | hoy |
+| `query` | busca en nombre y SKU | — |
+| `page`, `pageSize` | paginación (tope 100) | 1, 20 |
+
+Los servicios (`indicador_bien_servicio = 2`) quedan fuera: no tienen existencia.
+
+### La existencia NO se reconstruye sumando el libro
+
+Se parte de `products.stock` —la verdad de hoy— y se le **restan los movimientos
+posteriores al corte**. Es exacto y no necesita asiento de apertura.
+
+Eso importa aquí: el stock de este sistema se cargó directo en `products`, no por
+el libro. Sumar movimientos desde cero daría **cero** para todo lo que existía
+antes del primer movimiento. Un producto dado de alta después del corte se
+reporta en 0: a esa fecha no existía.
+
+### Costo promedio
+
+Ponderado de las **entradas** del libro hasta el corte: `valor entrado / cantidad
+entrada`. Un producto sin entradas registradas cae a `products.costo`, el único
+costo que se conoce de él, y la respuesta lo marca con `costo_ponderado: false`
+para que el front lo rotule «de ficha». Sin esa marca, un costo de ficha se lee
+como un promedio calculado y no lo es.
+
+Cada movimiento del libro trae su costo: cuando la línea no lo especifica,
+`aplicarMovimientos()` usa `products.costo`. Por eso `costo_unitario` y
+`valor_movimiento` nunca vienen nulos y el ponderado se puede calcular.
+
+### Totales
+
+Se calculan sobre **todos** los productos que pasan el filtro y se pagina después.
+En un reporte de valorización el total tiene que ser el del inventario completo,
+no el de la página — y ordenar por valor exige tenerlos todos. La contrapartida es
+que la consulta lee el catálogo filtrado entero; con catálogos muy grandes hay que
+revisarlo.
+
+### Lo que el reporte destapa
+
+Es su trabajo, no un defecto:
+
+- **Existencias negativas** — se venden sin bloquear (el comprobante ya se emitió),
+  así que aparecen en rojo hasta que un ajuste las corrija.
+- **Servicios marcados como bienes** — en el tenant de pruebas, `ENVIO MERCANCIA`
+  tenía stock 1,000,000,000 y `INSTALACION` 999,997, ambos con costo 0. Alguien
+  les puso una existencia enorme para que no se agotaran. Se arregla marcándolos
+  como servicio, y entonces salen del reporte solos.
+
+### Archivos
+`src/Models/inventoryModel.php` (`valorInventario`, `filaValorizada`,
+`agregadosMovimientos`), `src/Controllers/inventarioController.php`,
+frontend `src/features/inventory/InventoryValueView.tsx`.

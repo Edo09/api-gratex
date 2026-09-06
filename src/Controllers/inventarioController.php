@@ -6,6 +6,8 @@
 //   POST /api/inventario/ajustes                 -> crear ajuste
 //   POST /api/inventario/ajustes/{id}/anular     -> anula creando el ajuste inverso
 //   GET  /api/inventario/movimientos?product_id= -> kardex de un producto
+//   GET  /api/inventario/valor                    -> valor del inventario por producto
+//                                                    (?warehouse_id,?category_id,?estado,?hasta,?query)
 //
 // El ajuste NUNCA se edita ni se borra: se anula con un ajuste inverso, y ambos
 // quedan en el historial. Por eso no hay PUT ni DELETE aqui.
@@ -45,6 +47,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $esAjustes = (bool) preg_match('#/inventario/ajustes#', $path);
 $esMovimientos = (bool) preg_match('#/inventario/movimientos#', $path);
+$esValor = (bool) preg_match('#/inventario/valor#', $path);
 $ajusteId = preg_match('#/inventario/ajustes/(\d+)#', $path, $m) ? (int) $m[1] : null;
 $esAnular = (bool) preg_match('#/inventario/ajustes/\d+/anular$#', $path);
 
@@ -96,8 +99,40 @@ switch ($_SERVER['REQUEST_METHOD']) {
             break;
         }
 
+        if ($esValor) {
+            $estado = strtolower(trim((string) ($_GET['estado'] ?? 'activos')));
+            if (!in_array($estado, ['activos', 'inactivos', 'todos'], true)) {
+                invRespond(false, 'estado invalido. Use: activos, inactivos o todos.', 422);
+                break;
+            }
+            $hasta = trim((string) ($_GET['hasta'] ?? ''));
+            if ($hasta !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $hasta)) {
+                invRespond(false, 'hasta invalido. Formato: AAAA-MM-DD.', 422);
+                break;
+            }
+            [$page, $pageSize, $offset] = invPaginacion();
+            $res = $inventoryModel->valorInventario($offset, $pageSize, [
+                'query'        => trim((string) ($_GET['query'] ?? '')),
+                'warehouse_id' => isset($_GET['warehouse_id']) ? (int) $_GET['warehouse_id'] : null,
+                'category_id'  => isset($_GET['category_id']) ? (int) $_GET['category_id'] : null,
+                'estado'       => $estado,
+                'hasta'        => $hasta,
+            ]);
+            echo json_encode([
+                'status' => true,
+                'data' => $res['items'],
+                'totales' => $res['totales'],
+                'hasta' => $res['hasta'],
+                'pagination' => [
+                    'page' => $page, 'pageSize' => $pageSize, 'total' => $res['total'],
+                    'totalPages' => (int) ceil($res['total'] / $pageSize),
+                ],
+            ]);
+            break;
+        }
+
         if (!$esAjustes) {
-            invRespond(false, 'Sub-ruta no encontrada. Use /inventario/ajustes o /inventario/movimientos.', 404);
+            invRespond(false, 'Sub-ruta no encontrada. Use /inventario/ajustes, /inventario/movimientos o /inventario/valor.', 404);
             break;
         }
 

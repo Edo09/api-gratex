@@ -572,4 +572,181 @@ class inventoryModel
         $n = ($ultimo && preg_match('/(\d+)$/', (string) $ultimo, $m)) ? ((int) $m[1] + 1) : 1;
         return 'AJ-' . str_pad((string) $n, 6, '0', STR_PAD_LEFT);
     }
+
+    // ------------------------------------------------------------------
+    // Valor de inventario
+    // ------------------------------------------------------------------
+
+    /**
+     * Cuanto vale el inventario, producto por producto, a una fecha de corte.
+     *
+     * La existencia NO se reconstruye sumando movimientos desde cero: se parte
+     * de `products.stock` (la verdad de hoy) y se le RESTAN los movimientos
+     * posteriores al corte. Eso da el saldo exacto sin necesitar un asiento de
+     * apertura — y aqui hace falta, porque el stock de este sistema se cargo
+     * directo en products, no por el libro: sumar el libro desde cero daria
+     * cero para todo lo que existia antes del primer movimiento.
+     *
+     * El costo promedio es el PONDERADO de las entradas del libro hasta el
+     * corte (valor total entrado / cantidad total entrada). Un producto sin
+     * entradas registradas cae a `products.costo`, que es el unico costo que se
+     * conoce de el; la respuesta dice cual de los dos se uso, para que nadie
+     * confunda un promedio real con el costo de ficha.
+     *
+     * Se calcula sobre TODOS los productos que pasan el filtro y se pagina
+     * despues: el total del reporte tiene que ser el del inventario completo,
+     * no el de la pagina, y ordenar por valor exige tenerlos todos.
+     *
+     * @param array{query?:string,warehouse_id?:int,category_id?:int,estado?:string,hasta?:string} $filtros
+     * @return array{items:array<int,array>,total:int,totales:array}
+     */
+    public function valorInventario(int $offset, int $limit, array $filtros = []): array
+    {
+        // Corte: fin del dia indicado, o ahora. Sin hora, un `hasta` de hoy
+        // dejaria fuera todo lo que se movio hoy mismo.
+        $hasta = !empty($filtros['hasta'])
+            ? date('Y-m-d 23:59:59', strtotime((string) $filtros['hasta']))
+            : date('Y-m-d H:i:s');
+
+        $where = ['p.indicador_bien_servicio <> 2'];  // los servicios no tienen existencia
+        $params = [];
+
+        $estado = strtolower((string) ($filtros['estado'] ?? 'activos'));
+        if ($estado === 'activos') {
+            $where[] = 'p.activo = 1';
+        } elseif ($estado === 'inactivos') {
+            $where[] = 'p.activo = 0';
+        }
+        if (!empty($filtros['warehouse_id'])) {
+            $where[] = 'p.warehouse_id = :wid';
+            $params[':wid'] = (int) $filtros['warehouse_id'];
+        }
+        if (!empty($filtros['category_id'])) {
+            $where[] = 'p.category_id = :cid';
+            $params[':cid'] = (int) $filtros['category_id'];
+        }
+        if (!empty($filtros['query'])) {
+            $where[] = '(p.nombre LIKE :q OR p.sku LIKE :q)';
+            $params[':q'] = '%' . $filtros['query'] . '%';
+        }
+
+        $sql = 'SELECT p.id, p.sku, p.nombre, p.stock, p.costo, p.activo, p.created_at,
+                       p.category_id, p.warehouse_id,
+                       c.nombre AS categoria, w.nombre AS almacen
+                FROM products p
+                LEFT JOIN categories c ON c.id = p.category_id
+                LEFT JOIN warehouses w ON w.id = p.warehouse_id
+                WHERE ' . implode(' AND ', $where) . '
+                ORDER BY p.id';
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute($params);
+        $productos = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $agregados = $this->agregadosMovimientos(array_column($productos, 'id'), $hasta);
+
+        $filas = [];
+        $totalExistencia = 0.0;
+        $totalValor = 0.0;
+        foreach ($productos as $p) {
+            $fila = $this->filaValorizada($p, $agregados[(int) $p['id']] ?? [], $hasta);
+            $totalExistencia += $fila['existencia'];
+            $totalValor += $fila['valor_inventario'];
+            $filas[] = $fila;
+        }
+
+        // De mayor a menor valor: en un reporte de valorizacion lo primero que
+        // se mira es donde esta el dinero.
+        usort($filas, static fn(array $a, array $b) => $b['valor_inventario'] <=> $a['valor_inventario']);
+
+        return [
+            'items' => array_slice($filas, $offset, $limit),
+            'total' => count($filas),
+            'totales' => [
+                'productos'  => count($filas),
+                'existencia' => $totalExistencia,
+                'valor'      => round($totalValor, 2),
+            ],
+            'hasta' => $hasta,
+        ];
+    }
+
+    /**
+     * La aritmetica de una fila del reporte, aislada de SQL a proposito: es
+     * dinero, y asi se puede probar sin base de datos.
+     *
+     * @param array $p        Fila de products (stock, costo, created_at...).
+     * @param array $agregado Salida de agregadosMovimientos() para ese producto.
+     */
+    private function filaValorizada(array $p, array $agregado, string $hasta): array
+    {
+        $a = $agregado + ['delta_posterior' => 0, 'entradas' => 0, 'salidas' => 0,
+                          'ent_cant' => 0, 'ent_valor' => 0.0];
+
+        // Producto dado de alta despues del corte: a esa fecha no existia.
+        $nacioDespues = !empty($p['created_at']) && $p['created_at'] > $hasta;
+        $existencia = $nacioDespues ? 0 : ((int) $p['stock'] - (int) $a['delta_posterior']);
+
+        $promediado = (int) $a['ent_cant'] > 0;
+        $costo = $promediado
+            ? round((float) $a['ent_valor'] / (int) $a['ent_cant'], 4)
+            : round((float) ($p['costo'] ?? 0), 4);
+
+        return [
+            'id'             => (int) $p['id'],
+            'sku'            => (string) ($p['sku'] ?? ''),
+            'nombre'         => (string) ($p['nombre'] ?? ''),
+            'categoria'      => (string) ($p['categoria'] ?? ''),
+            'almacen'        => (string) ($p['almacen'] ?? ''),
+            'activo'         => (int) ($p['activo'] ?? 0) === 1,
+            'entradas'       => $nacioDespues ? 0 : (int) $a['entradas'],
+            'salidas'        => $nacioDespues ? 0 : (int) $a['salidas'],
+            'existencia'     => $existencia,
+            'costo_promedio' => $costo,
+            // false => es el costo de ficha del producto, no un promedio
+            // calculado. El front lo marca para que nadie de por real un
+            // promedio que nadie calculo.
+            'costo_ponderado' => $promediado,
+            'valor_inventario' => round($existencia * $costo, 2),
+        ];
+    }
+
+    /**
+     * Agregados del libro por producto hasta el corte, en una sola consulta
+     * (nada de una por producto).
+     *
+     * @param array<int,int|string> $productIds
+     * @return array<int,array{delta_posterior:int,entradas:int,salidas:int,ent_cant:int,ent_valor:float}>
+     */
+    private function agregadosMovimientos(array $productIds, string $hasta): array
+    {
+        if ($productIds === []) {
+            return [];
+        }
+        $marcas = implode(',', array_fill(0, count($productIds), '?'));
+
+        $sql = "SELECT product_id,
+                       SUM(CASE WHEN created_at >  ? THEN cantidad ELSE 0 END) AS delta_posterior,
+                       SUM(CASE WHEN created_at <= ? AND cantidad > 0 THEN cantidad ELSE 0 END) AS entradas,
+                       SUM(CASE WHEN created_at <= ? AND cantidad < 0 THEN -cantidad ELSE 0 END) AS salidas,
+                       SUM(CASE WHEN created_at <= ? AND cantidad > 0 THEN cantidad ELSE 0 END) AS ent_cant,
+                       SUM(CASE WHEN created_at <= ? AND cantidad > 0 THEN valor_movimiento ELSE 0 END) AS ent_valor
+                FROM inventory_movements
+                WHERE product_id IN ({$marcas})
+                GROUP BY product_id";
+
+        $stmt = $this->conexion->prepare($sql);
+        $stmt->execute(array_merge([$hasta, $hasta, $hasta, $hasta, $hasta], array_values($productIds)));
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['product_id']] = [
+                'delta_posterior' => (int) $r['delta_posterior'],
+                'entradas'        => (int) $r['entradas'],
+                'salidas'         => (int) $r['salidas'],
+                'ent_cant'        => (int) $r['ent_cant'],
+                'ent_valor'       => (float) $r['ent_valor'],
+            ];
+        }
+        return $out;
+    }
 }

@@ -41,6 +41,7 @@ class Reporte606Model
         $registros = [];
         $advertencias = [];
 
+        // El ORDEN importa: ecf_recibidos va primero a proposito. Ver deduplicar().
         foreach ($this->fetchEcfRecibidos($ini, $fin, $ambiente) as $r) {
             $registros[] = $this->mapEcfRecibido($r, $advertencias);
         }
@@ -48,7 +49,77 @@ class Reporte606Model
             $registros[] = $this->mapGasto($g, $advertencias);
         }
 
+        $registros = $this->deduplicar($registros, $advertencias);
+
         return ['registros' => $registros, 'advertencias' => $advertencias];
+    }
+
+    /**
+     * Un comprobante es UNO: un RNC de proveedor mas un NCF. Declararlo dos
+     * veces infla el ITBIS adelantado y la DGII lo cruza contra el 607 del
+     * proveedor, que solo lo reporto una vez.
+     *
+     * Las dos fuentes del 606 se leian por separado y se concatenaban sin
+     * comparar, asi que el mismo comprobante salia repetido de tres formas:
+     *   - el e-CF entra por /api/ecf/recepcion Y ademas alguien lo registra
+     *     como gasto,
+     *   - se importa dos veces con public/import_recibido.php,
+     *   - se digita dos veces el mismo NCF de un proveedor.
+     *
+     * Gana el PRIMERO que llega, y por eso getCompras() lee ecf_recibidos antes
+     * que gastos: ese trae el XML firmado, o sea que el desglose bienes/
+     * servicios, las retenciones y la fecha de pago salen del documento que la
+     * DGII ya tiene, no de lo que alguien tecleo a mano.
+     *
+     * Nunca se descarta en silencio: cada copia deja advertencia. Un duplicado
+     * aqui casi siempre significa que la compra tambien esta dos veces en los
+     * costos, y eso hay que arreglarlo en los datos, no solo en la declaracion.
+     *
+     * @param array<int,array> $registros
+     * @return array<int,array>
+     */
+    private function deduplicar(array $registros, array &$advertencias): array
+    {
+        $vistos = [];
+        $unicos = [];
+
+        foreach ($registros as $r) {
+            $ncf = strtoupper(trim((string) ($r['ncf'] ?? '')));
+            $rnc = (string) ($r['rnc'] ?? '');
+
+            // Sin NCF no hay clave que valga: dos comprobantes distintos del
+            // mismo proveedor colisionarian y se perderia uno de verdad. Pasan
+            // los dos; ya llevan su propia advertencia desde validarNcf().
+            if ($ncf === '') {
+                $unicos[] = $r;
+                continue;
+            }
+
+            $clave = $rnc . '|' . $ncf;
+            $origen = $this->etiquetaOrigen((string) ($r['origen'] ?? ''));
+
+            if (isset($vistos[$clave])) {
+                $conservado = $vistos[$clave];
+                $advertencias[] = $conservado === $origen
+                    ? "NCF {$ncf} (RNC {$rnc}): registrado dos veces en {$conservado}. Se declara "
+                        . 'una sola vez — revisa si la compra tambien esta duplicada en tus costos.'
+                    : "NCF {$ncf} (RNC {$rnc}): esta en {$conservado} y en {$origen}. Se declara una "
+                        . "sola vez, con el de {$conservado} — revisa si la compra tambien esta "
+                        . 'duplicada en tus costos.';
+                continue;
+            }
+
+            $vistos[$clave] = $origen;
+            $unicos[] = $r;
+        }
+
+        return $unicos;
+    }
+
+    /** Nombre en cristiano de la fuente, para las advertencias. */
+    private function etiquetaOrigen(string $origen): string
+    {
+        return $origen === 'ecf_recibido' ? 'recepcion e-CF' : 'gastos/compras';
     }
 
     // ---------------------------------------------------------------- fuentes
