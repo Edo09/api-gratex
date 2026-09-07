@@ -72,13 +72,19 @@ switch ($_SERVER['REQUEST_METHOD']) {
             } else {
                 $respuesta = ['status' => true, 'data' => $products[0]];
             }
-        } else if (isset($_GET['page']) || isset($_GET['pageSize']) || isset($_GET['query'])) {
+        } else if (isset($_GET['page']) || isset($_GET['pageSize']) || isset($_GET['query']) || isset($_GET['category_id'])) {
             $page = isset($_GET['page']) && is_numeric($_GET['page']) && $_GET['page'] > 0 ? (int) $_GET['page'] : 1;
             $pageSize = isset($_GET['pageSize']) && is_numeric($_GET['pageSize']) && $_GET['pageSize'] > 0 ? (int) $_GET['pageSize'] : 10;
             $query = isset($_GET['query']) ? $_GET['query'] : null;
+            // category_id invalido (0, vacio o basura) = sin filtro, igual que en
+            // /api/inventario/valor: un filtro que no se entiende no debe vaciar
+            // el catalogo sin decir por que.
+            $categoryId = isset($_GET['category_id']) && is_numeric($_GET['category_id']) && (int) $_GET['category_id'] > 0
+                ? (int) $_GET['category_id']
+                : null;
             $offset = ($page - 1) * $pageSize;
-            $products = $productModel->getProductsPaginated($offset, $pageSize, $query);
-            $total = $productModel->getProductsCount($query);
+            $products = $productModel->getProductsPaginated($offset, $pageSize, $query, $categoryId);
+            $total = $productModel->getProductsCount($query, $categoryId);
             $respuesta = [
                 'status' => true,
                 'data' => $products,

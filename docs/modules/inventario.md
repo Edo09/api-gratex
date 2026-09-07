@@ -44,6 +44,7 @@ Respuestas: `{status:true,data}` / `{status:false,error}`; listas con `paginatio
 
 ## Productos
 
+`GET /api/products` acepta `?category_id=` para filtrar el listado por categoría.
 `POST/PUT /api/products` aceptan `category_id` (nullable) y `warehouse_id` (si se omite al crear →
 `Almacén Principal`). Las listas y el detalle exponen `categoria_nombre` y `almacen_nombre`
 (nombres, vía JOIN), además de los ids. Ver [../api/facturas.md](../api/facturas.md) (sección

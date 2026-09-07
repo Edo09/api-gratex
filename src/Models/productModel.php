@@ -41,21 +41,43 @@ class productModel
         }
     }
 
-    private function searchWhere(): string
+    /**
+     * Condiciones del listado, compartidas por la pagina y el conteo: si se
+     * escribieran por separado, el total dejaria de cuadrar con las filas y la
+     * paginacion mostraria paginas vacias.
+     *
+     * @return array{0:string,1:array<string,mixed>} [WHERE (o vacio), parametros]
+     */
+    private function listFilters($query = null, $categoryId = null): array
     {
-        return 'WHERE (p.nombre LIKE :query OR p.sku LIKE :query OR p.descripcion LIKE :query
-                       OR c.nombre LIKE :query OR w.nombre LIKE :query)';
+        $where = [];
+        $params = [];
+        if ($query !== null && $query !== '') {
+            $where[] = '(p.nombre LIKE :query OR p.sku LIKE :query OR p.descripcion LIKE :query
+                         OR c.nombre LIKE :query OR w.nombre LIKE :query)';
+            $params[':query'] = "%{$query}%";
+        }
+        // Filtra por la categoria del producto, no por su nombre: `?query=` ya
+        // matchea el nombre de la categoria y traeria ademas los productos que
+        // la mencionan en su propio nombre o descripcion.
+        if ($categoryId !== null && (int) $categoryId > 0) {
+            $where[] = 'p.category_id = :category_id';
+            $params[':category_id'] = (int) $categoryId;
+        }
+        return [$where ? 'WHERE ' . implode(' AND ', $where) : '', $params];
     }
 
-    public function getProductsPaginated($offset, $limit, $query = null)
+    public function getProductsPaginated($offset, $limit, $query = null, $categoryId = null)
     {
         try {
-            $where = $query ? $this->searchWhere() : '';
+            [$where, $params] = $this->listFilters($query, $categoryId);
             $sql = self::SELECT_JOINED . " {$where} ORDER BY p.id DESC LIMIT :limit OFFSET :offset";
             $stmt = $this->conexion->prepare($sql);
-            if ($query) {
-                $stmt->bindValue(':query', "%{$query}%", PDO::PARAM_STR);
+            foreach ($params as $nombre => $valor) {
+                $stmt->bindValue($nombre, $valor, is_int($valor) ? PDO::PARAM_INT : PDO::PARAM_STR);
             }
+            // LIMIT/OFFSET van con bindValue y PARAM_INT: execute() con array los
+            // manda como string y MySQL rechaza `LIMIT '100'`.
             $stmt->bindValue(':limit', (int) $limit, PDO::PARAM_INT);
             $stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
             $stmt->execute();
@@ -65,20 +87,16 @@ class productModel
         }
     }
 
-    public function getProductsCount($query = null)
+    public function getProductsCount($query = null, $categoryId = null)
     {
         try {
-            $where = $query ? $this->searchWhere() : '';
+            [$where, $params] = $this->listFilters($query, $categoryId);
             $sql = 'SELECT COUNT(*) AS total
                       FROM products p
                       LEFT JOIN categories c ON c.id = p.category_id
                       LEFT JOIN warehouses w ON w.id = p.warehouse_id ' . $where;
             $stmt = $this->conexion->prepare($sql);
-            if ($query) {
-                $stmt->execute([':query' => "%{$query}%"]);
-            } else {
-                $stmt->execute();
-            }
+            $stmt->execute($params);
             $row = $stmt->fetch();
             return $row ? (int) $row['total'] : 0;
         } catch (PDOException $e) {

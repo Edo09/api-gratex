@@ -128,6 +128,11 @@ En **listado y detalle** de productos (`GET /api/products`) cada producto incluy
 - `categoria_nombre` = `null` si el producto no tiene categoría.
 - La búsqueda de productos (`?query=`) también matchea por nombre de categoría y de almacén.
 
+**Filtrar el listado por categoría:** `GET /api/products?category_id=8` (combinable con
+`page`, `pageSize` y `query`; `pagination.total` ya viene filtrado). Es distinto de
+`?query=Bebidas`, que además trae los productos que mencionan «Bebidas» en su nombre o
+descripción. Un `category_id` no numérico o `<= 0` se ignora (no filtra, no da error).
+
 > Para poblar los selects del formulario de producto: cargar `GET /api/categories` y
 > `GET /api/warehouses` (usar `?query=` para autocompletar si la lista es grande).
 

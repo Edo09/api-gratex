@@ -226,7 +226,7 @@ X-API-KEY: <key>
 |--------|----------|-------------|
 | `POST` | `/api/auth/login` · `/signout` | Autenticación de usuarios (ver sección Autenticación) |
 | `GET/POST/PUT/DELETE` | `/api/clients` | CRUD clientes (`?page,?pageSize,?query` para listado) |
-| `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query`) |
+| `GET/POST/PUT/DELETE` | `/api/products` | CRUD catálogo de productos/servicios (`?page,?pageSize,?query,?category_id`) |
 | `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
 | `GET` | `/api/unidades-medida` | Catálogo DGII de unidades de medida (solo lectura) — ver nota abajo |
 | `GET` | `/api/provincias-municipios` | Catálogo DGII de provincias/municipios/distritos (solo lectura) — ver nota abajo |
