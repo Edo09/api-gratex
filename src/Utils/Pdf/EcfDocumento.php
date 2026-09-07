@@ -86,16 +86,35 @@ final class EcfDocumento
     public function emisor(): array
     {
         $e = $this->emisorConfig();
+        $o = $this->emisorOverride();
         $sinTenant = !class_exists('TenantResolver') || TenantResolver::current() === null;
-        $fb = fn(string $valor) => $sinTenant ? $valor : '';
+        // Con emisor explicito los valores historicos de Gratex NO aplican: el
+        // impreso dice quien firmo el documento y lo que este no traiga se deja
+        // en blanco, nunca se completa con el telefono o la direccion de otro.
+        $fb = fn(string $valor) => ($sinTenant && $o === []) ? $valor : '';
         return [
-            'razon_social' => $e['nombre_comercial'] ?? $e['razon_social'] ?? '',
-            'direccion'    => $e['direccion'] ?? $fb('Calle Jose Nicolas Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.'),
-            'telefono'     => $e['telefono'] ?? $fb('809-681-5141'),
-            'correo'       => $e['correo'] ?? $fb('info@gratex.net'),
-            'rnc'          => $e['rnc'] ?? $fb('131256432'),
-            'website'      => $e['website'] ?? '',
+            'razon_social' => $this->primeroNoVacio([$o['razon_social'] ?? null, $e['nombre_comercial'] ?? null, $e['razon_social'] ?? null]),
+            'direccion'    => $this->primeroNoVacio([$o['direccion'] ?? null, $e['direccion'] ?? null, $fb('Calle Jose Nicolas Casimiro #85, Ensanche Espaillat, Santo Domingo, D.N.')]),
+            'telefono'     => $this->primeroNoVacio([$o['telefono'] ?? null, $e['telefono'] ?? null, $fb('809-681-5141')]),
+            'correo'       => $this->primeroNoVacio([$o['correo'] ?? null, $e['correo'] ?? null, $fb('info@gratex.net')]),
+            'rnc'          => $this->primeroNoVacio([$o['rnc'] ?? null, $e['rnc'] ?? null, $fb('131256432')]),
+            'website'      => $this->primeroNoVacio([$o['website'] ?? null, $e['website'] ?? null]),
         ];
+    }
+
+    /**
+     * Emisor pasado explicitamente por el llamador en $factura['emisor'].
+     * Manda sobre emisor_config porque al reimprimir un e-CF que llega como XML
+     * (tools/ri_desde_xml.php, respaldo de otro contribuyente) el papel debe
+     * decir el emisor de ESE documento: imprimir el del tenant conectado seria
+     * una representacion impresa que no corresponde al comprobante firmado.
+     *
+     * @return array{razon_social?:string,direccion?:string,telefono?:string,correo?:string,rnc?:string,website?:string}
+     */
+    private function emisorOverride(): array
+    {
+        $o = $this->factura['emisor'] ?? null;
+        return is_array($o) ? $o : [];
     }
 
     // ------------------------------------------------------------------
@@ -165,8 +184,24 @@ final class EcfDocumento
      */
     public function fechaVencimiento(): string
     {
+        // La emitida en el e-CF firmado manda: es la que la DGII autorizo para
+        // esa secuencia y puede no ser el 31/12 del ano de emision.
+        $delXml = $this->campoXml('FechaVencimientoSecuencia');
+        if ($delXml !== '') {
+            return str_replace('-', '/', $delXml);
+        }
         $ts = strtotime($this->fecha());
         return '31/12/' . date('Y', $ts ?: time());
+    }
+
+    /** Texto de un nodo simple del e-CF firmado ('' si no hay XML o no existe). */
+    private function campoXml(string $tag): string
+    {
+        $xml = (string) ($this->factura['xml_firmado'] ?? '');
+        if ($xml === '' || !preg_match('/<' . $tag . '>([^<]*)<\/' . $tag . '>/i', $xml, $m)) {
+            return '';
+        }
+        return trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
     }
 
     // ------------------------------------------------------------------
@@ -495,7 +530,10 @@ final class EcfDocumento
         }
 
         $emisor = $this->emisorConfig();
-        $rncEmisor = (string) ($emisor['rnc'] ?? '');
+        $rncEmisor = $this->primeroNoVacio([
+            $this->emisorOverride()['rnc'] ?? null,
+            $emisor['rnc'] ?? null,
+        ]);
         if ($rncEmisor === '') {
             return null;
         }

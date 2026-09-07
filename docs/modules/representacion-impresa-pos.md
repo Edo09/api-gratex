@@ -121,3 +121,58 @@ La página del PDF ya mide 80 mm × lo que ocupe, así que en el diálogo hay qu
 poner **escala 100 % / tamaño real** (no "ajustar a la página") y, en el driver
 de la térmica, el papel en rollo de 80 mm. Con el papel puesto en A4 el navegador
 reescala y el recibo sale diminuto en medio de la hoja.
+
+## Reimprimir desde el XML firmado (CLI)
+
+Cuando lo único que hay es el XML del comprobante — un respaldo, un e-CF recibido
+de otro contribuyente, un tenant de `integracion` que no tiene BD — la RI se
+genera sin tocar la base de datos:
+
+```
+php tools/ri_desde_xml.php factura.xml [--out=ruta.pdf] [--formato=carta|pos] [--ambiente=ecf|certecf|testecf]
+```
+
+Imprime en pantalla la URL del timbre, que es la forma rápida de comprobar que la
+DGII reconoce el comprobante sin escanear el papel.
+
+Todo sale del XML: el código de seguridad son los primeros 6 caracteres del
+`SignatureValue` (igual que al emitir), los totales y la razón social del
+comprador ya los tomaba `EcfDocumento` del XML firmado, y el vencimiento sale de
+`FechaVencimientoSecuencia` en vez de calcularse como 31/12 del año de emisión.
+
+Tres cosas que hacen falta para que el papel diga la verdad:
+
+- **`$factura['emisor']`** manda sobre `emisor_config`. Sin eso, el impreso
+  llevaría el emisor del tenant conectado (o los datos históricos de Gratex en
+  CLI) sobre el comprobante de otro. Con emisor explícito, lo que el XML no traiga
+  queda en blanco: no se completa con datos ajenos.
+- **`BrandingResolver::sinMarcaGlobal()`** apaga `logo2020.png` y `sello.png`,
+  que son los de Gratex y sin tenant resuelto serían el fallback.
+- **Sin logo se escribe la razón social** en su lugar (`drawLogoOrNombre`). En
+  `clasico` y `compacto` el nombre del emisor vivía solo dentro de la imagen del
+  logo, así que sin logo la factura no decía quién la emitía — y la norma exige
+  identificar al emisor. Esto aplica también a cualquier tenant que nunca subió
+  su logo.
+
+### El ambiente lo fija el emisor, no el servidor
+
+El ambiente decide la ruta del QR (`https://ecf.dgii.gov.do/<ambiente>/ConsultaTimbre`)
+y equivocarlo imprime un timbre que no resuelve. El orden es:
+
+1. `--ambiente` explicito.
+2. **El del emisor del documento**: `master.tenants.ambiente` buscado por
+   `RNCEmisor`. Es el unico correcto por definicion — un tenant en certificacion
+   necesita `CerteCF` aunque el servidor donde se reimprime este en produccion.
+3. El global del `.env`, si el master no responde.
+4. `ecf`, avisando por stderr.
+
+`AmbienteResolver` **no** sirve aqui: en CLI no hay request, no hay tenant
+resuelto y devuelve el global del servidor (`ecf` en produccion) para todos. Ese
+era el defecto original del tool: la RI de un tenant en certificacion salia con
+la URL de produccion, sin avisar.
+
+La linea `Ambiente:` de la salida dice de donde salio (`--ambiente`, `tenant
+<rnc>`, `.env del server` o `supuesto`), para no tener que adivinarlo.
+
+La sigla de la unidad de medida sale del catálogo `unidades_medida`: corriendo
+fuera del servidor (sin BD) se imprime el código DGII crudo, p. ej. `43`.

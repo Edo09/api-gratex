@@ -136,6 +136,31 @@ abstract class FacturaTemplate
         $pdf->Image($logoPath, $x, $y, $maxW);
     }
 
+    /**
+     * El logo del emisor o, cuando no hay, su razon social en texto dentro de
+     * la MISMA caja (nada se corre de sitio).
+     *
+     * En clasico y compacto el nombre del emisor vivia solo dentro de la imagen
+     * del logo: un tenant que no lo subio -- o la RI de un e-CF que llega como
+     * XML, donde el logo global no puede usarse porque es de otra empresa --
+     * imprimia una factura que no decia quien la emite. La norma DGII exige
+     * identificar al emisor, asi que sin logo se escribe el nombre.
+     */
+    protected function drawLogoOrNombre($pdf, ?string $logoPath, string $razonSocial, float $x, float $y, float $maxW, float $maxH, float $fontSize = 13): void
+    {
+        if ($logoPath !== null) {
+            $this->drawLogo($pdf, $logoPath, $x, $y, $maxW, $maxH);
+            return;
+        }
+        $razonSocial = trim($razonSocial);
+        if ($razonSocial === '') {
+            return;
+        }
+        $pdf->SetXY($x, $y);
+        $pdf->SetFont('Arial', 'B', $fontSize);
+        $pdf->MultiCell($maxW, $fontSize * 0.45, $this->enc($razonSocial), 0, 'L');
+    }
+
     /** Acento del tenant o el color por defecto de la plantilla. */
     protected function accentOr(array $default): array
     {

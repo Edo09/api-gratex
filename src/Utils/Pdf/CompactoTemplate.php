@@ -32,13 +32,21 @@ class CompactoTemplate extends FacturaTemplate
     public function drawCompanyHeader($pdf, array $emisor, ?string $logoPath, string $variant = 'factura'): void
     {
         // Caja maxima 45x14 mm: el bloque del emisor empieza en y=24.
-        $this->drawLogo($pdf, $logoPath, 8, 8, 45, 14);
+        $this->drawLogoOrNombre($pdf, $logoPath, $emisor['razon_social'], 8, 8, 45, 14, 10);
         $font = $this->narrowFont($pdf);
         $pdf->SetFont($font, '', 8);
         $pdf->SetY(24);
         // Dos lineas condensadas: direccion / contacto + RNC.
         $pdf->MultiCell(95, 3.2, $this->enc($emisor['direccion']), 0, 'L');
-        $pdf->Cell(95, 3.2, $this->enc('Tel.: ' . $emisor['telefono'] . ' - ' . $emisor['correo'] . ' - RNC: ' . $emisor['rnc']), 0, 1, 'L');
+        // Solo los datos que el emisor tenga (ver ClasicoTemplate): sin
+        // telefono ni correo la linea queda "RNC: 130968837", no separadores
+        // sueltos.
+        $partes = array_filter([
+            trim($emisor['telefono']) !== '' ? 'Tel.: ' . $emisor['telefono'] : '',
+            trim($emisor['correo']),
+            'RNC: ' . $emisor['rnc'],
+        ], static fn($v) => $v !== '');
+        $pdf->Cell(95, 3.2, $this->enc(implode(' - ', $partes)), 0, 1, 'L');
     }
 
     public function drawFooter($pdf): void

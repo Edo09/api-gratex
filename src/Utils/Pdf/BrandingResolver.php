@@ -24,6 +24,24 @@ class BrandingResolver
     /** Cache por request (Header() de FPDF corre en cada pagina). */
     private static ?array $resolved = null;
 
+    /** @see sinMarcaGlobal() */
+    private static bool $sinMarcaGlobal = false;
+
+    /**
+     * Apaga los recursos de marca globales del repo (logo2020.png y sello.png,
+     * que son los de Gratex) para el resto de la ejecucion.
+     *
+     * Existe para imprimir un comprobante que NO es de este emisor: la RI de un
+     * XML ajeno (tools/ri_desde_xml.php), un respaldo de otro contribuyente. Sin
+     * tenant resuelto esos dos archivos son el fallback, asi que el documento
+     * saldria con el logo y el sello de Gratex encima — la misma fuga que ya se
+     * corrigio para los tenants, por CLI.
+     */
+    public static function sinMarcaGlobal(bool $v = true): void
+    {
+        self::$sinMarcaGlobal = $v;
+    }
+
     /**
      * Branding efectivo del tenant actual.
      * @return array{template:string, accent:?array{0:int,1:int,2:int}, accent_hex:?string, logo_path:?string}
@@ -76,6 +94,9 @@ class BrandingResolver
             }
             return null;
         }
+        if (self::$sinMarcaGlobal) {
+            return null;
+        }
         $global = $root . '/sello.png';
         return is_file($global) ? $global : null;
     }
@@ -116,6 +137,9 @@ class BrandingResolver
         // Solo aplica cuando no hay tenant resuelto (preview / single-tenant): la
         // marca de otra empresa en una factura fiscal es peor que no poner logo.
         if (class_exists('TenantResolver') && TenantResolver::current() !== null) {
+            return null;
+        }
+        if (self::$sinMarcaGlobal) {
             return null;
         }
         $global = $root . '/logo2020.png';

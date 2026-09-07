@@ -16,12 +16,25 @@ class ClasicoTemplate extends FacturaTemplate
             return;
         }
         // Logo: del tenant (logos/<tenant_id>.<ext>) o el global por defecto.
-        // Caja maxima 65x18 mm: el bloque del emisor empieza en y=30.
-        $this->drawLogo($pdf, $logoPath, 8, 10, 65, 18);
+        // Sin logo va la razon social en texto: el emisor tiene que quedar
+        // identificado igual. Caja maxima 65x18 mm: el bloque del emisor
+        // empieza en y=30.
+        $this->drawLogoOrNombre($pdf, $logoPath, $emisor['razon_social'], 8, 10, 65, 18, 13);
         $pdf->SetFont('Arial', '', 9);
         $pdf->SetY(30);
         $pdf->MultiCell(70, 3.8, $this->enc($emisor['direccion']), 0, 'L');
-        $pdf->Cell(70, 3.8, $this->enc('Tel.: ' . $emisor['telefono'] . ' - E-mail: ' . $emisor['correo']), 0, 1, 'L');
+        // Solo lo que el emisor tenga: un e-CF reimpreso desde su XML no trae
+        // telefono ni correo, y "Tel.: - E-mail:" vacio ensucia la factura.
+        $contacto = [];
+        if (trim($emisor['telefono']) !== '') {
+            $contacto[] = 'Tel.: ' . $emisor['telefono'];
+        }
+        if (trim($emisor['correo']) !== '') {
+            $contacto[] = 'E-mail: ' . $emisor['correo'];
+        }
+        if ($contacto !== []) {
+            $pdf->Cell(70, 3.8, $this->enc(implode(' - ', $contacto)), 0, 1, 'L');
+        }
         $pdf->Cell(70, 3.8, 'RNC: ' . $emisor['rnc'], 0, 1, 'L');
     }
 
@@ -33,7 +46,7 @@ class ClasicoTemplate extends FacturaTemplate
     private function drawCotizacionHeader($pdf, array $emisor, ?string $logoPath): void
     {
         // Caja maxima 65x18 mm: el titulo de la cotizacion empieza en y=30.
-        $this->drawLogo($pdf, $logoPath, 5, 10, 65, 18);
+        $this->drawLogoOrNombre($pdf, $logoPath, $emisor['razon_social'], 5, 10, 65, 18, 13);
         $pdf->SetFont('Arial', 'B', 8);
         $pdf->SetY(10);
         $pdf->SetX(-78);
