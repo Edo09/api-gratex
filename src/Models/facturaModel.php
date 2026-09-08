@@ -336,12 +336,22 @@ class facturaModel
 
         // El front no envia no_factura: se genera aqui como "{secuencia}-{ddmmaa}".
         // Si llega uno explicito (p.ej. migracion/correccion) se respeta.
-        $noFactura = isset($data['no_factura']) && $data['no_factura'] !== ''
-            ? (string) $data['no_factura']
-            : $this->nextSimpleFacturaNumber();
+        $generaNumero = !(isset($data['no_factura']) && $data['no_factura'] !== '');
+
+        // La numeracion se serializa entre conexiones. Antes el MAX+1 se leia
+        // FUERA de la transaccion y sin ningun candado: dos cajas guardando a la
+        // vez leian el mismo maximo, las dos insertaban el mismo numero y como
+        // facturas.no_factura no tiene indice unico, MySQL no se quejaba. La
+        // siguiente venta tomaba MAX+1 y el duplicado quedaba enterrado.
+        $lock = $generaNumero ? $this->tomarLockSecuenciaSimple() : false;
 
         try {
             $this->conexion->beginTransaction();
+            // Dentro del candado Y de la transaccion: entre leer el maximo y
+            // grabar la fila no puede colarse otra conexion.
+            $noFactura = $generaNumero
+                ? $this->nextSimpleFacturaNumber()
+                : (string) $data['no_factura'];
             $sql = 'INSERT INTO facturas
                     (no_factura, date, client_id, client_name, user_id, total, tipo_pago, NCF, tipo_ecf)
                     VALUES
@@ -369,6 +379,53 @@ class facturaModel
                 $this->conexion->rollBack();
             }
             return ['error', 'No se pudo crear la factura: ' . $e->getMessage()];
+        } finally {
+            // Se suelta pase lo que pase: si una excepcion se lo llevara puesto,
+            // la conexion quedaria con el candado tomado y la siguiente venta
+            // esperaria los 5 segundos completos.
+            if ($lock) {
+                $this->soltarLockSecuenciaSimple();
+            }
+        }
+    }
+
+    /** Nombre del candado, por base de datos: un tenant no serializa a otro. */
+    private const LOCK_SECUENCIA_SIMPLE = "CONCAT(DATABASE(), ':factura_simple_seq')";
+
+    /**
+     * Toma el candado con nombre que serializa la numeracion de facturas
+     * simples. Es un lock de MySQL a nivel de CONEXION, no de tabla: no bloquea
+     * filas, asi que la emision de e-CF sigue su curso mientras tanto.
+     *
+     * Espera hasta 5 segundos. Si no lo consigue NO aborta la venta: sigue sin
+     * candado, que es exactamente como se comportaba antes. Un mostrador no se
+     * queda sin poder facturar por un candado ocupado; el riesgo que se acepta
+     * es el duplicado que ya existia.
+     *
+     * @return bool true si hay que soltarlo despues.
+     */
+    private function tomarLockSecuenciaSimple(): bool
+    {
+        try {
+            $stmt = $this->conexion->query('SELECT GET_LOCK(' . self::LOCK_SECUENCIA_SIMPLE . ', 5)');
+            // 1 = tomado; 0 = expiro la espera; NULL = error del servidor.
+            if ((int) $stmt->fetchColumn() === 1) {
+                return true;
+            }
+            error_log('[facturas] lock de numeracion ocupado: se numera sin serializar');
+            return false;
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo tomar el lock de numeracion: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    private function soltarLockSecuenciaSimple(): void
+    {
+        try {
+            $this->conexion->query('SELECT RELEASE_LOCK(' . self::LOCK_SECUENCIA_SIMPLE . ')');
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo soltar el lock de numeracion: ' . $e->getMessage());
         }
     }
 
@@ -580,7 +637,16 @@ class facturaModel
     {
         try {
             $ambiente = $this->resolveActiveAmbiente();
-            $conditions = [];
+            // Este listado es el de COMPROBANTES. Las facturas simples
+            // (tipo_ecf NULL) tienen su propio modulo y su propio endpoint.
+            //
+            // El filtro es explicito a proposito: antes quedaban fuera solo de
+            // rebote, porque el INSERT de simples no escribe ambiente_dgii y la
+            // condicion de ambiente no las alcanzaba. Con el ambiente sin
+            // resolver (sin DGII_ECF_ENVIRONMENT, o un tenant con ambiente
+            // vacio) esa condicion se salta entera y las simples aparecian
+            // mezcladas con los e-CF y contadas en la paginacion.
+            $conditions = ['f.tipo_ecf IS NOT NULL'];
             $params = [];
 
             if ($query) {
@@ -616,7 +682,16 @@ class facturaModel
     {
         try {
             $ambiente = $this->resolveActiveAmbiente();
-            $conditions = [];
+            // Este listado es el de COMPROBANTES. Las facturas simples
+            // (tipo_ecf NULL) tienen su propio modulo y su propio endpoint.
+            //
+            // El filtro es explicito a proposito: antes quedaban fuera solo de
+            // rebote, porque el INSERT de simples no escribe ambiente_dgii y la
+            // condicion de ambiente no las alcanzaba. Con el ambiente sin
+            // resolver (sin DGII_ECF_ENVIRONMENT, o un tenant con ambiente
+            // vacio) esa condicion se salta entera y las simples aparecian
+            // mezcladas con los e-CF y contadas en la paginacion.
+            $conditions = ['f.tipo_ecf IS NOT NULL'];
             $params = [];
 
             if ($query) {

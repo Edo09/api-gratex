@@ -46,7 +46,15 @@ function handleSemilla(): void
     $xml = autenticacionConstruirXmlSemilla($seedValue, $fecha);
 
     try {
-        (new authSeedModel())->create($seedValue, $xml, 300);
+        // 1 hora, no 5 minutos: DGII firma la semilla y la reenvia bastante
+        // despues (y la reusa entre intentos). Con la ventana corta el segundo
+        // fallo era "semilla expirada", que aborta la fase igual que el 401 de
+        // semilla consumida. La semilla sigue exigiendo firma valida.
+        $seedId = (new authSeedModel())->create($seedValue, $xml, 3600);
+        // Sin esta linea el log solo muestra los fallos del POST y no se puede
+        // saber si DGII llego a pedir una semilla nueva antes de reenviar la
+        // vieja. Con ella la secuencia GET->POST queda visible.
+        error_log('[ecfAutenticacion] Semilla emitida id=' . $seedId . ' valor=' . substr($seedValue, 0, 8) . '...');
     } catch (Throwable $e) {
         error_log('[ecfAutenticacion] Semilla DB error: ' . $e->getMessage());
     }
@@ -103,9 +111,17 @@ function handleValidarSemillaInternal(): void
         autenticacionResponderError('Semilla no reconocida.', 401);
         return;
     }
+    // El RNC del firmante se necesita antes que los chequeos de la semilla: es
+    // lo que decide si un reintento es del mismo consumidor o de un tercero.
+    $rnc = $validation['firma_rnc'] ?? '';
+    if ($rnc === '') {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: RNC vacio, subject=' . json_encode($validation['firma_subject'] ?? []));
+        autenticacionResponderError('No se pudo extraer RNC del certificado firmante.', 401);
+        return;
+    }
+
     if ($seed['consumida_at'] !== null) {
-        error_log('[ecfAutenticacion] ValidarSemilla 401: semilla ya consumida, id=' . $seed['id']);
-        autenticacionResponderError('La semilla ya fue consumida.', 401);
+        autenticacionReemitirToken($seedModel, $seed, $rnc);
         return;
     }
     if (strtotime($seed['expira_at']) < time()) {
@@ -114,21 +130,77 @@ function handleValidarSemillaInternal(): void
         return;
     }
 
-    $rnc = $validation['firma_rnc'] ?? '';
-    if ($rnc === '') {
-        error_log('[ecfAutenticacion] ValidarSemilla 401: RNC vacio, subject=' . json_encode($validation['firma_subject'] ?? []));
-        autenticacionResponderError('No se pudo extraer RNC del certificado firmante.', 401);
+    $token = autenticacionGenerarToken();
+    $seedModel->markConsumed((int) $seed['id'], $rnc, $token);
+    $seedModel->saveToken($token, $rnc, 3600);
+
+    autenticacionResponderToken(
+        $token,
+        (new DateTime())->format('Y-m-d\TH:i:s'),
+        (new DateTime())->modify('+1 hour')->format('Y-m-d\TH:i:s')
+    );
+}
+
+/**
+ * Reintento del handshake sobre una semilla que YA se canjeo.
+ *
+ * DGII no pide una semilla nueva en cada intento: reenvia la que ya tiene
+ * firmada. Tambien reintenta el mismo POST cuando nuestra respuesta no le llego
+ * a tiempo — de este lado el canje si se completo y la semilla quedo quemada.
+ * En los dos casos, responder 401 aborta la fase completa con "fallo en la
+ * comunicacion con su servicio de autenticacion, Error: Unauthorized" y DGII
+ * reinicia el set de pruebas.
+ *
+ * No debilita nada: para llegar hasta aqui el XML ya paso la verificacion de
+ * firma, y solo se atiende al MISMO RNC que canjeo la semilla. Quien pueda
+ * firmar con ese certificado puede pedir una semilla nueva y obtener el mismo
+ * token por la via normal. Se reenvia el token vigente que ya se le habia
+ * emitido (idempotente de verdad); solo si ese token vencio se emite otro.
+ */
+function autenticacionReemitirToken(authSeedModel $seedModel, array $seed, string $rnc): void
+{
+    // Otro RNC reenviando una semilla ajena si es un replay: se rechaza.
+    $consumidor = (string) ($seed['rnc_consumidor'] ?? '');
+    if ($consumidor !== '' && $consumidor !== $rnc) {
+        error_log('[ecfAutenticacion] ValidarSemilla 401: semilla id=' . $seed['id']
+            . ' fue consumida por ' . $consumidor . ' y la reenvia ' . $rnc);
+        autenticacionResponderError('La semilla ya fue consumida.', 401);
+        return;
+    }
+
+    $token = (string) ($seed['token_emitido'] ?? '');
+    $vigente = $token !== '' ? $seedModel->findValidToken($token) : null;
+
+    if ($vigente !== null) {
+        error_log('[ecfAutenticacion] ValidarSemilla: reintento sobre semilla id=' . $seed['id']
+            . '; se reenvia el token vigente de ' . $rnc);
+        autenticacionResponderToken(
+            $token,
+            (new DateTime((string) $vigente['expedido_at']))->format('Y-m-d\TH:i:s'),
+            (new DateTime((string) $vigente['expira_at']))->format('Y-m-d\TH:i:s')
+        );
         return;
     }
 
     $token = autenticacionGenerarToken();
-    $expedido = (new DateTime())->format('Y-m-d\TH:i:s');
-    $expira = (new DateTime())->modify('+1 hour')->format('Y-m-d\TH:i:s');
-
     $seedModel->markConsumed((int) $seed['id'], $rnc, $token);
     $seedModel->saveToken($token, $rnc, 3600);
+    error_log('[ecfAutenticacion] ValidarSemilla: reintento sobre semilla id=' . $seed['id']
+        . '; el token anterior ya vencio, se emite uno nuevo para ' . $rnc);
 
-    // Flat format — DGII expects token at root level, same as their own auth endpoint
+    autenticacionResponderToken(
+        $token,
+        (new DateTime())->format('Y-m-d\TH:i:s'),
+        (new DateTime())->modify('+1 hour')->format('Y-m-d\TH:i:s')
+    );
+}
+
+/**
+ * Respuesta del handshake. Formato PLANO: DGII espera el token en la raiz, no
+ * envuelto en {"status":true,"data":{...}} como el resto de la API.
+ */
+function autenticacionResponderToken(string $token, string $expedido, string $expira): void
+{
     echo json_encode([
         'token'    => $token,
         'expira'   => $expira,
