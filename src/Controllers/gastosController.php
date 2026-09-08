@@ -299,6 +299,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
             gastoRespond(false, 'tipo_gasto requerido', 422);
             break;
         }
+        // Tipo de Bienes y Servicios Comprados (campo 3 del 606). El codigo
+        // exacto lo valida el modelo contra el catalogo; aqui solo se corta
+        // temprano con un 422 en vez de un 400 generico.
+        if (empty($body['tipo_bienes_servicios'])) {
+            gastoRespond(false, 'tipo_bienes_servicios requerido (codigo DGII 01..11)', 422);
+            break;
+        }
         // rnc_proveedor: requerido salvo Gastos Menores (E43).
         if (empty($body['rnc_proveedor']) && strtoupper(trim((string) $body['tipo_gasto'])) !== 'E43') {
             gastoRespond(false, 'rnc_proveedor requerido (excepto Gastos Menores E43)', 422);

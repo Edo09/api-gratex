@@ -156,6 +156,12 @@ switch ($route) {
         require_once 'src/Controllers/unidadMedidaController.php';
         break;
 
+    case 'tipos-bienes-servicios':
+        // Catálogo DGII Tipo de Bienes y Servicios Comprados (campo 3 del 606),
+        // solo lectura - token required
+        require_once 'src/Controllers/tipoBienesServiciosController.php';
+        break;
+
     case 'provincias-municipios':
         // Catálogo DGII de provincias/municipios/distritos (solo lectura) - token required
         require_once 'src/Controllers/provinciaMunicipioController.php';

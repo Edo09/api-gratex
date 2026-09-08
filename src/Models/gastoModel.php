@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/ncfModel.php');
+require_once(__DIR__ . '/tipoBienesServiciosModel.php');
 
 /**
  * Modulo de Gastos.
@@ -187,6 +188,18 @@ class gastoModel
                 . 'Permitidos: ' . implode(', ', self::CATEGORIAS[$categoria])];
         }
 
+        // Tipo de Bienes y Servicios Comprados: campo 3 del 606. Es el dato que
+        // el reporte declara a la DGII, y antes se estampaba '09' a ciegas en
+        // todas las filas. Se exige al registrar para no arrastrar un valor
+        // inventado hasta el momento de declarar.
+        $tipoBienes = tipoBienesServiciosModel::normalizar($data['tipo_bienes_servicios'] ?? null);
+        if ($tipoBienes === null) {
+            return ['error', 'tipo_bienes_servicios requerido (codigo DGII 01..11)'];
+        }
+        if (!(new tipoBienesServiciosModel())->isValid($tipoBienes)) {
+            return ['error', "tipo_bienes_servicios {$tipoBienes} no existe en el catalogo DGII"];
+        }
+
         // RNC/Cedula del proveedor: requerido salvo Gastos Menores (E43), que suele
         // sustentar peajes/parqueos/suministros sin RNC formal.
         $rncProveedor = trim((string) ($data['rnc_proveedor'] ?? ''));
@@ -234,6 +247,7 @@ class gastoModel
         $g = [
             'categoria' => $categoria,
             'tipo_gasto' => $tipoGasto,
+            'tipo_bienes_servicios' => $tipoBienes,
             'ncf' => $ncf !== '' ? $ncf : null,
             'rnc_proveedor' => $rncProveedor !== '' ? $rncProveedor : null,
             'nombre_proveedor' => $nombreProveedor !== '' ? $nombreProveedor : null,
@@ -323,12 +337,12 @@ class gastoModel
             }
 
             $sql = 'INSERT INTO gastos
-                    (categoria, tipo_gasto, ncf, rnc_proveedor, nombre_proveedor, fecha,
+                    (categoria, tipo_gasto, tipo_bienes_servicios, ncf, rnc_proveedor, nombre_proveedor, fecha,
                      subtotal, itbis, total, es_auto_emision, ambiente, user_id,
                      track_id, estado_dgii, codigo_seguridad, fecha_emision_dgii,
                      xml_firmado, respuesta_dgii, secuencia_utilizada)
                     VALUES
-                    (:categoria, :tipo_gasto, :ncf, :rnc_proveedor, :nombre_proveedor, :fecha,
+                    (:categoria, :tipo_gasto, :tipo_bienes_servicios, :ncf, :rnc_proveedor, :nombre_proveedor, :fecha,
                      :subtotal, :itbis, :total, :es_auto_emision, :ambiente, :user_id,
                      :track_id, :estado_dgii, :codigo_seguridad, :fecha_emision_dgii,
                      :xml_firmado, :respuesta_dgii, :secuencia_utilizada)';
@@ -336,6 +350,7 @@ class gastoModel
             $stmt->execute([
                 ':categoria' => $g['categoria'],
                 ':tipo_gasto' => $g['tipo_gasto'],
+                ':tipo_bienes_servicios' => $g['tipo_bienes_servicios'],
                 ':ncf' => $g['ncf'],
                 ':rnc_proveedor' => $g['rnc_proveedor'],
                 ':nombre_proveedor' => $g['nombre_proveedor'],
@@ -385,6 +400,21 @@ class gastoModel
             $nombreProveedor = $data['nombre_proveedor'] ?? $row['nombre_proveedor'];
             $fecha = $data['fecha'] ?? $row['fecha'];
 
+            // Tipo de Bienes y Servicios (campo 3 del 606). Editable a proposito:
+            // los gastos anteriores a la migracion quedaron en NULL y hay que
+            // poder clasificarlos antes de declarar el periodo. Si no viene en el
+            // body se conserva el guardado; si viene, se valida como en el alta.
+            $tipoBienes = $row['tipo_bienes_servicios'];
+            if (array_key_exists('tipo_bienes_servicios', $data)) {
+                $tipoBienes = tipoBienesServiciosModel::normalizar($data['tipo_bienes_servicios']);
+                if ($tipoBienes === null) {
+                    return ['error', 'tipo_bienes_servicios invalido (codigo DGII 01..11)'];
+                }
+                if (!(new tipoBienesServiciosModel())->isValid($tipoBienes)) {
+                    return ['error', "tipo_bienes_servicios {$tipoBienes} no existe en el catalogo DGII"];
+                }
+            }
+
             $replaceItems = isset($data['items']) && is_array($data['items']);
             $items = $replaceItems ? $this->normalizeItems($data['items']) : [];
 
@@ -402,7 +432,8 @@ class gastoModel
             $this->conexion->beginTransaction();
             $upd = $this->conexion->prepare(
                 'UPDATE gastos SET rnc_proveedor = :rnc_proveedor, nombre_proveedor = :nombre_proveedor,
-                        fecha = :fecha, subtotal = :subtotal, itbis = :itbis, total = :total
+                        fecha = :fecha, subtotal = :subtotal, itbis = :itbis, total = :total,
+                        tipo_bienes_servicios = :tipo_bienes_servicios
                  WHERE id = :id'
             );
             $upd->execute([
@@ -412,6 +443,7 @@ class gastoModel
                 ':subtotal' => $subtotal,
                 ':itbis' => $itbis,
                 ':total' => $total,
+                ':tipo_bienes_servicios' => $tipoBienes,
                 ':id' => $id,
             ]);
 

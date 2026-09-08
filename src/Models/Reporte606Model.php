@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../Database.php';
 require_once __DIR__ . '/../AmbienteResolver.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
+require_once __DIR__ . '/tipoBienesServiciosModel.php';
 
 /**
  * Reporte606Model — agrega compras/gastos del periodo (AAAAMM) y las normaliza
@@ -12,6 +13,15 @@ class Reporte606Model
     private $conexion;
 
     // Defaults DGII para campos sin fuente en el esquema (editar aqui si cambia el negocio).
+    //
+    // TIPO_BIENES_SERVICIOS_DEFAULT ya NO se aplica a los gastos: desde la
+    // migracion tools/migration_tipo_bienes_servicios.sql el usuario elige el
+    // tipo al registrar y se guarda en gastos.tipo_bienes_servicios. Queda como
+    // respaldo para dos casos:
+    //   - gastos anteriores a esa migracion (columna NULL), que es justo lo que
+    //     se venia declarando, asi que el 606 no cambia retroactivamente;
+    //   - ecf_recibidos, que llegan de la DGII sin este dato y no tienen
+    //     pantalla de captura donde elegirlo.
     const TIPO_BIENES_SERVICIOS_DEFAULT = '09'; // 09 = Compras/gastos parte del costo de venta
     const FORMA_PAGO_DEFAULT            = '04'; // 04 = Compra a credito
 
@@ -149,7 +159,7 @@ class Reporte606Model
     private function fetchGastos(string $ini, string $fin, ?string $ambiente): array
     {
         // gastos.ambiente puede ser NULL en compras recibidas (sin emision) -> incluirlos.
-        $sql = "SELECT id, tipo_gasto, ncf, rnc_proveedor, nombre_proveedor,
+        $sql = "SELECT id, tipo_gasto, tipo_bienes_servicios, ncf, rnc_proveedor, nombre_proveedor,
                        fecha, subtotal, itbis, total, categoria, es_auto_emision
                 FROM gastos
                 WHERE fecha BETWEEN :ini AND :fin";
@@ -215,7 +225,9 @@ class Reporte606Model
             'tipo_comprobante'       => (string) $g['tipo_gasto'],
             'rnc'                    => $rnc,                                // 1
             'tipo_id'                => $this->tipoIdentificacion($rnc),     // 2
-            'tipo_bienes_serv'       => self::TIPO_BIENES_SERVICIOS_DEFAULT, // 3
+            // El tipo que eligio el usuario al registrar el gasto. Los gastos
+            // previos a la migracion lo tienen NULL y caen al default.
+            'tipo_bienes_serv'       => $this->tipoBienesServicios($g['tipo_bienes_servicios'] ?? null), // 3
             'ncf'                    => (string) $g['ncf'],                  // 4
             'ncf_modificado'         => '',                                 // 5
             'fecha_comprobante'      => $this->fechaDgii($g['fecha']),       // 6
@@ -379,6 +391,20 @@ class Reporte606Model
     private function tipoIdentificacion(string $rnc): string
     {
         return strlen($rnc) === 11 ? '2' : '1';
+    }
+
+    /**
+     * Campo 3 del 606: el codigo que eligio el usuario, o el default historico.
+     *
+     * Se normaliza a 2 digitos aunque venga de la columna: MySQL devuelve CHAR(2)
+     * tal cual, pero si alguna fila quedo con '1' en vez de '01' (import, edicion
+     * a mano en phpMyAdmin) el TXT saldria con un campo de un digito y la DGII
+     * rechaza el archivo entero.
+     */
+    private function tipoBienesServicios($guardado): string
+    {
+        return tipoBienesServiciosModel::normalizar($guardado)
+            ?? self::TIPO_BIENES_SERVICIOS_DEFAULT;
     }
 
     /** Cualquier fecha -> AAAAMMDD (vacio si no parsea). */

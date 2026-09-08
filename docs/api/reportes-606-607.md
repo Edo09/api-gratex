@@ -109,7 +109,7 @@ Los 23 campos oficiales del 606, en orden:
 |---|-------|-------------|
 | 1 | `rnc` | RNC/Cédula del suplidor |
 | 2 | `tipo_id` | Tipo identificación: `1`=RNC, `2`=Cédula |
-| 3 | `tipo_bienes_serv` | Tipo de bienes/servicios comprados (código DGII, default `09`) |
+| 3 | `tipo_bienes_serv` | Tipo de bienes/servicios comprados (código DGII `01`..`11`). Sale de `gastos.tipo_bienes_servicios`, que el usuario elige al registrar. Cae a `09` en dos casos: gastos anteriores a esa columna, y `ecf_recibidos` (llegan de la DGII sin el dato) |
 | 4 | `ncf` | NCF / e-NCF |
 | 5 | `ncf_modificado` | NCF modificado (notas de crédito/débito); vacío si no aplica |
 | 6 | `fecha_comprobante` | Fecha del comprobante, formato `AAAAMMDD` |

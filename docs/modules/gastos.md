@@ -69,6 +69,7 @@ La lista también filtra por **ambiente activo** (`DGII_ECF_ENVIRONMENT`), igual
 |---|---|---|
 | `categoria` | sí | `gastos_menores` \| `facturas_proveedores` |
 | `tipo_gasto` | sí | debe estar permitido para la categoría |
+| `tipo_bienes_servicios` | sí | **Tipo de Costos y Gastos** DGII (`'01'`..`'11'`). Cadena de 2 dígitos, no número. Se declara en el campo 3 del 606. Catálogo: `GET /api/tipos-bienes-servicios` |
 | `rnc_proveedor` | sí | RNC/Cédula. En Compras (11/E41) = proveedor informal |
 | `nombre_proveedor` | sí | |
 | `ncf` | solo si recibido (E33/E34) | el que entregó el proveedor. En auto-emisión se ignora y se genera |
@@ -103,6 +104,7 @@ Content-Type: application/json
 {
   "categoria": "gastos_menores",
   "tipo_gasto": "E43",
+  "tipo_bienes_servicios": "02",
   "rnc_proveedor": "00112345678",
   "nombre_proveedor": "Juan Perez (peajes)",
   "fecha": "2026-06-03",
@@ -142,7 +144,7 @@ subtotal = 1000, itbis = 180, total = 1180.
 # Gasto menor
 curl -X POST http://localhost/api/gastos \
   -H "X-API-KEY: TU_TOKEN" -H "Content-Type: application/json" \
-  -d '{"categoria":"gastos_menores","tipo_gasto":"E43","rnc_proveedor":"00112345678","nombre_proveedor":"Juan Perez","items":[{"description":"Peaje","amount":60,"quantity":2}]}'
+  -d '{"categoria":"gastos_menores","tipo_gasto":"E43","tipo_bienes_servicios":"02","rnc_proveedor":"00112345678","nombre_proveedor":"Juan Perez","items":[{"description":"Peaje","amount":60,"quantity":2}]}'
 
 # Nota de credito de proveedor (recibida)
 curl -X POST http://localhost/api/gastos \
