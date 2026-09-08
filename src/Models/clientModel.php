@@ -28,25 +28,54 @@ class clientModel
         }
     }
 
-    public function saveClient($email, $client_name, $company_name, $phone_number, $rnc = null, $descuento = null, $permitirCredito = null)
+    /**
+     * Alta de un cliente.
+     *
+     * Recibe un arreglo en vez de una lista de parametros posicionales: la
+     * lista se habia quedado corta y direccion/municipio/provincia se perdian
+     * en silencio — el formulario los mandaba, el controller no los leia y
+     * nadie se enteraba hasta abrir la ficha y ver el campo vacio. Con un
+     * arreglo, agregar una columna es tocar CAMPOS_TEXTO o el SQL, no encajar
+     * un argumento mas en el orden correcto de doce.
+     *
+     * @param array $d email, client_name, company_name, phone_number, rnc,
+     *                 razon_social, direccion, municipio, provincia, descuento,
+     *                 permitir_credito
+     */
+    public function saveClient(array $d)
     {
         try {
-            $valida = $this->validateClients($email, $client_name, $company_name, $phone_number);
+            $valida = $this->validateClients(
+                $d['email'] ?? null,
+                $d['client_name'] ?? null,
+                $d['company_name'] ?? null,
+                $d['phone_number'] ?? null
+            );
             $resultado = ['error', 'This client already exists'];
             if (count($valida) == 0) {
-                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc, razon_social, descuento, permitir_credito)
-                    VALUES(:email, :client_name, :company_name, :phone_number, :rnc, :razon_social, :descuento, :permitir_credito)";
+                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc,
+                                            razon_social, direccion, municipio, provincia,
+                                            descuento, permitir_credito)
+                    VALUES(:email, :client_name, :company_name, :phone_number, :rnc,
+                           :razon_social, :direccion, :municipio, :provincia,
+                           :descuento, :permitir_credito)";
                 $stmt = $this->conexion->prepare($sql);
                 $stmt->execute([
-                    ':email' => $email,
-                    ':client_name' => $client_name,
-                    ':company_name' => $company_name,
-                    ':phone_number' => $phone_number,
-                    ':rnc' => $this->normalizeRnc($rnc),
-                    ':razon_social' => $company_name,
+                    ':email' => $d['email'] ?? null,
+                    ':client_name' => $d['client_name'] ?? null,
+                    ':company_name' => $d['company_name'] ?? null,
+                    ':phone_number' => $d['phone_number'] ?? null,
+                    ':rnc' => $this->normalizeRnc($d['rnc'] ?? null),
+                    // razon_social cae a company_name cuando no viene: los
+                    // clientes de la API que solo mandan empresa siguen igual.
+                    ':razon_social' => $this->normalizeTexto($d['razon_social'] ?? null)
+                        ?? ($d['company_name'] ?? null),
+                    ':direccion' => $this->normalizeTexto($d['direccion'] ?? null),
+                    ':municipio' => $this->normalizeTexto($d['municipio'] ?? null),
+                    ':provincia' => $this->normalizeTexto($d['provincia'] ?? null),
                     // Las columnas son NOT NULL: en alta, "no enviado" = 0.
-                    ':descuento' => $this->normalizeDescuento($descuento) ?? 0.0,
-                    ':permitir_credito' => $this->normalizeCredito($permitirCredito) ?? 0
+                    ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null) ?? 0.0,
+                    ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null) ?? 0
                 ]);
                 $resultado = ['success', 'Client saved', (int) $this->conexion->lastInsertId()];
             }
@@ -56,20 +85,33 @@ class clientModel
         }
     }
 
-    public function updateClient($id, $email, $client_name, $company_name, $phone_number, $rnc = null, $descuento = null, $permitirCredito = null)
+    /**
+     * Actualizacion PARCIAL de un cliente. Igual que saveClient, recibe un
+     * arreglo: solo las claves PRESENTES se escriben; las ausentes conservan su
+     * valor (COALESCE). Asi se puede corregir un dato suelto —el RNC desde la
+     * pantalla de factura, por ejemplo— sin reenviar el registro completo, que
+     * ademas fallaria en los clientes migrados (sin correo ni telefono).
+     *
+     * "Presente con cadena vacia" SI escribe: es como se vacia una direccion.
+     * Solo la ausencia de la clave conserva.
+     *
+     * @param array $d mismas claves que saveClient (sin id)
+     */
+    public function updateClient($id, array $d)
     {
         try {
             $existe = $this->getClients($id);
             $resultado = ['error', "There is no client with ID {$id}"];
             if (count($existe) > 0) {
-                $valida = $this->validateClients($email, $client_name, $company_name, $phone_number, $id);
+                $valida = $this->validateClients(
+                    $d['email'] ?? null,
+                    $d['client_name'] ?? null,
+                    $d['company_name'] ?? null,
+                    $d['phone_number'] ?? null,
+                    $id
+                );
                 $resultado = ['error', 'This client already exists'];
                 if (count($valida) == 0) {
-                    // Actualizacion PARCIAL: null = "no vino en el request" y se
-                    // conserva lo que ya habia. Asi se puede corregir un solo
-                    // campo (p. ej. agregar el RNC desde la factura) sin tener
-                    // que reenviar el registro completo — que ademas fallaria en
-                    // los clientes migrados, que no tienen correo ni telefono.
                     $sql = "UPDATE clients SET
                         email = COALESCE(:email, email),
                         client_name = COALESCE(:client_name, client_name),
@@ -77,23 +119,42 @@ class clientModel
                         phone_number = COALESCE(:phone_number, phone_number),
                         rnc = COALESCE(:rnc, rnc),
                         razon_social = COALESCE(:razon_social, razon_social),
+                        direccion = COALESCE(:direccion, direccion),
+                        municipio = COALESCE(:municipio, municipio),
+                        provincia = COALESCE(:provincia, provincia),
                         descuento = COALESCE(:descuento, descuento),
                         permitir_credito = COALESCE(:permitir_credito, permitir_credito) WHERE id = :id";
                     $stmt = $this->conexion->prepare($sql);
                     $stmt->execute([
                         ':id' => $id,
-                        ':email' => $email,
-                        ':client_name' => $client_name,
-                        ':company_name' => $company_name,
-                        ':phone_number' => $phone_number,
-                        ':rnc' => $this->normalizeRnc($rnc),
-                        // razon_social sigue a company_name, pero solo si vino.
-                        ':razon_social' => $company_name,
+                        ':email' => $d['email'] ?? null,
+                        ':client_name' => $d['client_name'] ?? null,
+                        ':company_name' => $d['company_name'] ?? null,
+                        ':phone_number' => $d['phone_number'] ?? null,
+                        ':rnc' => $this->normalizeRnc($d['rnc'] ?? null),
+                        // razon_social propia si vino con contenido; si no, sigue
+                        // a company_name (comportamiento historico para quien
+                        // solo manda empresa). Antes SIEMPRE la pisaba
+                        // company_name, asi que el campo "Razon social" del
+                        // formulario no se podia guardar distinto del de
+                        // "Empresa".
+                        //
+                        // Nunca se escribe "": es RazonSocialComprador en el
+                        // e-CF y la DGII lo exige con contenido. Vacia +
+                        // company_name -> company_name; vacia y sin empresa ->
+                        // null y el COALESCE conserva la que ya tenia.
+                        ':razon_social' => $this->normalizeTexto($d['razon_social'] ?? null)
+                            ?? $this->normalizeTexto($d['company_name'] ?? null),
+                        // Direccion y ubicacion: el formulario las manda y hasta
+                        // ahora se descartaban en silencio.
+                        ':direccion' => $d['direccion'] ?? null,
+                        ':municipio' => $d['municipio'] ?? null,
+                        ':provincia' => $d['provincia'] ?? null,
                         // null = el PUT no las mando: el COALESCE del SQL conserva
                         // lo que ya tenia. Asi un cliente de otro consumidor del
                         // API no pierde su descuento ni su credito al editarlo.
-                        ':descuento' => $this->normalizeDescuento($descuento),
-                        ':permitir_credito' => $this->normalizeCredito($permitirCredito)
+                        ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null),
+                        ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null)
                     ]);
                     $resultado = ['success', 'Client updated'];
                 }
@@ -119,6 +180,23 @@ class clientModel
         } catch (PDOException $e) {
             return ['error', 'Failed to delete client'];
         }
+    }
+
+    /**
+     * Texto opcional para el ALTA: recorta y trata "" como null, que en un
+     * INSERT son lo mismo (no habia nada antes).
+     *
+     * A proposito NO se usa en updateClient: ahi "" es un valor real —es como se
+     * borra una direccion— y convertirlo a null haria que el COALESCE conservara
+     * el valor viejo, dejando un campo imposible de vaciar.
+     */
+    private function normalizeTexto($valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+        $limpio = trim((string) $valor);
+        return $limpio === '' ? null : $limpio;
     }
 
     private function normalizeRnc($rnc): ?string

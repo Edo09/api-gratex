@@ -74,23 +74,24 @@ function fsResolveClientName(array $body, clientModel $clientModel): array
 }
 
 /**
- * Normaliza las lineas del body al formato que entiende FacturaPdfGenerator
- * (description/amount/quantity/subtotal/itbis_amount). Misma forma que persiste
- * facturaModel::createFacturaSimple, para que el preview se vea igual al guardado.
- */
-/**
  * Valida que el cliente admita credito cuando la factura se marca como tal.
  * Devuelve el mensaje de error, o null si esta bien.
  *
- * Solo aplica con `client_id`: una factura a nombre libre (mostrador) no tiene
- * ficha donde consultar el permiso, y esas son de contado por definicion.
+ * El cliente sale del body o, si el PUT no lo reenvia, de la factura guardada
+ * ($previa): el front omite client_id cuando no se cambio de cliente, y sin ese
+ * respaldo bastaba con editar el metodo de pago para saltarse el permiso.
+ *
+ * Sin cliente en ninguno de los dos no hay nada que validar: una factura a
+ * nombre libre (mostrador) no tiene ficha donde consultar el permiso, y esas
+ * son de contado por definicion.
  */
-function fsValidarCredito(array $body, clientModel $clientModel): ?string
+function fsValidarCredito(array $body, clientModel $clientModel, ?array $previa = null): ?string
 {
-    if ((int) ($body['tipo_pago'] ?? 1) !== 2 || empty($body['client_id'])) {
+    $clientId = $body['client_id'] ?? ($previa['client_id'] ?? null);
+    if ((int) ($body['tipo_pago'] ?? 1) !== 2 || empty($clientId)) {
         return null;
     }
-    $clients = $clientModel->getClients($body['client_id']);
+    $clients = $clientModel->getClients($clientId);
     $client = $clients[0] ?? null;
     if (!$client) {
         return null; // el cliente inexistente lo reporta el flujo normal
@@ -102,45 +103,39 @@ function fsValidarCredito(array $body, clientModel $clientModel): ?string
         . ' no tiene credito habilitado: la factura debe ser de contado (tipo_pago = 1).';
 }
 
-function fsMapPreviewItems(array $items): array
+/**
+ * inventoryModel listo para usar, o null si el modulo no esta desplegado.
+ *
+ * Ver facturaController: un require fallido es fatal y no lo atrapa un
+ * try/catch, asi que el archivo se comprueba antes. El inventario NUNCA puede
+ * tumbar la operacion sobre la factura: si falla, se registra y se sigue.
+ */
+function fsInventario(): ?inventoryModel
 {
-    $mapped = [];
-    foreach ($items as $raw) {
-        $raw = (array) $raw;
-        $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
-        $amount   = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
-        // Descuento de la linea en monto, acotado a [0, bruto]: el subtotal va
-        // NETO de el, igual que MontoItem en el e-CF.
-        $bruto    = round($quantity * $amount, 2);
-        $descuento = isset($raw['descuento_monto']) && is_numeric($raw['descuento_monto'])
-            ? max(0.0, min($bruto, round((float) $raw['descuento_monto'], 2)))
-            : 0.0;
-        $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
-            ? (float) $raw['subtotal']
-            : round($bruto - $descuento, 2);
-        $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
-            ? (float) $raw['itbis_amount']
-            : 0.0;
-        $mapped[] = [
-            'description'  => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
-            'amount'       => $amount,
-            'quantity'     => $quantity,
-            'subtotal'     => $subtotal,
-            'descuento_monto' => $descuento,
-            'itbis_amount' => $itbis,
-        ];
+    try {
+        $ruta = __DIR__ . '/../Models/inventoryModel.php';
+        if (!is_file($ruta)) {
+            throw new RuntimeException('falta ' . $ruta);
+        }
+        require_once $ruta;
+        return new inventoryModel();
+    } catch (Throwable $e) {
+        error_log('[inventario] factura simple: ' . $e->getMessage());
+        return null;
     }
-    return $mapped;
 }
 
 /**
  * POST /api/facturas-simples/preview
- * Genera el PDF de una factura simple desde el body, SIN guardarla. Como no es
- * un e-CF (tipo_ecf null, sin e_ncf) el generador estampa el timbre "PREVIEW -
- * Sin validez fiscal". Devuelve base64 por defecto, o el PDF crudo con
- * ?format=download.
+ * Genera el PDF de una factura simple desde el body, SIN guardarla. Devuelve
+ * base64 por defecto, o el PDF crudo con ?format=download.
+ *
+ * Ojo: el PDF sale identico al de una factura ya guardada. El timbre "PREVIEW -
+ * Sin validez fiscal" es del e-CF sin firmar; EcfDocumento::timbre() devuelve
+ * null en cuanto el documento es no-electronico, asi que aqui no se estampa
+ * nada. Las lineas pasan por el mismo normalizador que el guardado.
  */
-function fsHandlePreview(clientModel $clientModel): void
+function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): void
 {
     $body = fsBody();
 
@@ -163,10 +158,15 @@ function fsHandlePreview(clientModel $clientModel): void
         }
     }
 
-    $items = fsMapPreviewItems($body['items']);
+    // Las lineas pasan por el MISMO normalizador que el guardado. La copia que
+    // vivia aqui se quedo atras (no mapeaba unidad_medida ni el indicador) y la
+    // vista previa dejaba de parecerse al documento final.
+    $items = $facturaModel->normalizeSimpleItems($body['items']);
+    // Sin impuestos: el total es la suma de los subtotales, igual que el que
+    // calcula facturaModel::sumSimpleTotal al guardar.
     $total = isset($body['total']) && $body['total'] !== ''
         ? (float) $body['total']
-        : array_reduce($items, static fn($c, $it) => $c + $it['subtotal'] + $it['itbis_amount'], 0.0);
+        : array_reduce($items, static fn($c, $it) => $c + $it['subtotal'], 0.0);
 
     $factura = [
         'no_factura'   => $body['no_factura'] ?? 'PREVIEW',
@@ -288,7 +288,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         if ($isPreview) {
-            fsHandlePreview($clientModel);
+            fsHandlePreview($clientModel, $facturaModel);
             break;
         }
         $body = fsBody();
@@ -321,23 +321,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Una factura simple no va a DGII, pero la mercancia sale del almacen
         // igual: descuenta inventario como cualquier venta.
         if ($result[0] === 'success') {
-            try {
-                // Ver facturaController: un require fallido es fatal y este
-                // try/catch no lo atraparia. Se comprueba antes.
-                $rutaInventario = __DIR__ . '/../Models/inventoryModel.php';
-                if (!is_file($rutaInventario)) {
-                    throw new RuntimeException('falta ' . $rutaInventario);
-                }
-                require_once $rutaInventario;
-                (new inventoryModel())->registrarVenta(
-                    (int) ($result[1]['id'] ?? 0),
-                    $result[1]['items'] ?? [],
-                    null,
-                    $userId
-                );
-            } catch (Throwable $e) {
-                error_log('[inventario] factura simple: ' . $e->getMessage());
-            }
+            fsInventario()?->registrarVenta(
+                (int) ($result[1]['id'] ?? 0),
+                $result[1]['items'] ?? [],
+                null,
+                $userId
+            );
         }
         fsRespond($result[0] === 'success', $result[1], $result[0] === 'success' ? 201 : 400);
         break;
@@ -353,7 +342,17 @@ switch ($_SERVER['REQUEST_METHOD']) {
             fsRespond(false, 'items, si se envia, debe ser un arreglo con al menos un elemento', 422);
             break;
         }
-        $errorCredito = fsValidarCredito($body, $clientModel);
+        // Estado previo: hace falta para dos cosas distintas. El cliente guardado
+        // es contra quien se valida el credito cuando el PUT no reenvia
+        // client_id (el front lo omite si no se cambio de cliente), y las lineas
+        // guardadas son las que hay que devolver al almacen si se reemplazan.
+        $previa = $facturaModel->getFacturaSimple($id);
+        if ($previa === null) {
+            fsRespond(false, 'Factura no encontrada', 404);
+            break;
+        }
+
+        $errorCredito = fsValidarCredito($body, $clientModel, $previa);
         if ($errorCredito !== null) {
             fsRespond(false, $errorCredito, 422);
             break;
@@ -361,6 +360,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body = fsResolveClientName($body, $clientModel);
 
         $result = $facturaModel->updateFacturaSimple($id, $body);
+        // Reemplazar las lineas es devolver la mercancia vieja y sacar la nueva.
+        // Quedan los dos movimientos en el kardex (DEVOLUCION + VENTA) en vez de
+        // un salto de saldo sin explicacion.
+        if ($result[0] === 'success' && isset($body['items'])) {
+            $inventario = fsInventario();
+            $inventario?->revertirVenta($id, $previa['items'] ?? [], $authUserId);
+            $inventario?->registrarVenta($id, $result[1]['items'] ?? [], null, $authUserId);
+        }
         $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
         fsRespond($result[0] === 'success', $result[1], $code);
         break;
@@ -372,7 +379,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             fsRespond(false, 'id requerido (en la ruta o el body)', 422);
             break;
         }
+        // Las lineas hay que leerlas ANTES: el delete se lleva factura_items por
+        // delante y despues ya no hay con que reponer el almacen.
+        $previa = $facturaModel->getFacturaSimple($id);
+
         $result = $facturaModel->deleteFacturaSimple($id);
+        // La venta se deshizo: lo que salio del almacen vuelve.
+        if ($result[0] === 'success' && $previa !== null) {
+            fsInventario()?->revertirVenta($id, $previa['items'] ?? [], $authUserId);
+        }
         $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
         fsRespond($result[0] === 'success', $result[1], $code);
         break;

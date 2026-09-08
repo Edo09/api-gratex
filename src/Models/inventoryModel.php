@@ -173,8 +173,47 @@ class inventoryModel
         //                          compra a un proveedor no registrado: la
         //                          mercancia entra, no sale.
         $entrada = in_array((string) $tipoEcf, ['34', '41'], true);
-        $signo = $entrada ? 1 : -1;
 
+        return $this->moverPorFactura(
+            $facturaId,
+            $items,
+            $entrada ? 1 : -1,
+            (string) $tipoEcf === '41' ? 'COMPRA' : ($entrada ? 'DEVOLUCION' : 'VENTA'),
+            $userId
+        );
+    }
+
+    /**
+     * Devuelve al almacen la mercancia de una factura que se borra o cuyas
+     * lineas se reemplazan. Es el inverso exacto de registrarVenta: mismas
+     * reglas de bien/servicio y de redondeo, signo opuesto.
+     *
+     * Una factura simple SI se puede editar y borrar (a diferencia del e-CF, que
+     * se corrige con una nota de credito E34). Sin esta reversa el descuento de
+     * la venta quedaba aplicado para siempre y products.stock derivaba hacia
+     * abajo en cada borrado.
+     *
+     * @param array $items lineas tal como estaban guardadas antes del cambio
+     * @return int cuantos movimientos se registraron
+     */
+    public function revertirVenta(int $facturaId, array $items, ?int $userId = null): int
+    {
+        return $this->moverPorFactura($facturaId, $items, 1, 'DEVOLUCION', $userId);
+    }
+
+    /**
+     * Cuerpo comun de registrarVenta/revertirVenta: filtra las lineas que mueven
+     * existencias y aplica los movimientos con el signo pedido.
+     *
+     * @param int $signo -1 saca del almacen, +1 devuelve
+     */
+    private function moverPorFactura(
+        int $facturaId,
+        array $items,
+        int $signo,
+        string $tipoMovimiento,
+        ?int $userId = null
+    ): int {
         // Todo el cuerpo va en try/catch: el contrato de este metodo es que un
         // fallo de inventario NUNCA tumba una factura ya emitida, y eso incluye
         // los errores que no vienen de aplicarMovimientos.
@@ -227,9 +266,7 @@ class inventoryModel
             }
 
             $res = $this->aplicarMovimientos($lineas, [
-                'tipo_movimiento' => (string) $tipoEcf === '41'
-                    ? 'COMPRA'
-                    : ($entrada ? 'DEVOLUCION' : 'VENTA'),
+                'tipo_movimiento' => $tipoMovimiento,
                 'referencia_tipo' => 'factura',
                 'referencia_id' => $facturaId,
                 'user_id' => $userId,

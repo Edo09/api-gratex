@@ -16,8 +16,8 @@ $res = $m->createFacturaSimple([
     'client_name' => 'Cliente Prueba CRUD',
     'user_id'     => 2,
     'items'       => [
-        ['description' => 'Servicio de diseno', 'quantity' => 2, 'amount' => 100, 'itbis_amount' => 36],
-        ['description' => 'Impresion', 'quantity' => 1, 'amount' => 50, 'itbis_amount' => 9],
+        ['description' => 'Servicio de diseno', 'quantity' => 2, 'amount' => 100],
+        ['description' => 'Impresion', 'quantity' => 1, 'amount' => 50],
     ],
 ]);
 check($res[0] === 'success', 'createFacturaSimple');
@@ -25,7 +25,9 @@ $factura = $res[1];
 $id = $factura['factura_id'] ?? $factura['id'] ?? null;
 check($id !== null, "id generado ({$id})");
 check(($factura['tipo_ecf'] ?? 'x') === null, 'tipo_ecf NULL (no e-CF)');
-check((float) $factura['total'] === 295.00, 'total computado = 295.00 (250 + 45 ITBIS), got ' . $factura['total']);
+// Sin ITBIS: el total de una factura simple es la suma de los subtotales.
+check((float) $factura['total'] === 250.00, 'total computado = 250.00 (200 + 50, sin impuestos), got ' . $factura['total']);
+check((float) ($factura['items'][0]['itbis_amount'] ?? -1) === 0.0, 'la linea no guarda ITBIS');
 check(count($factura['items']) === 2, 'guardo 2 lineas');
 
 echo "\n== GET ==\n";
@@ -43,13 +45,13 @@ echo "\n== UPDATE ==\n";
 $res = $m->updateFacturaSimple($id, [
     'no_factura' => $noFactura . '-MOD',
     'items' => [
-        ['description' => 'Servicio unico', 'quantity' => 3, 'amount' => 100, 'itbis_amount' => 54],
+        ['description' => 'Servicio unico', 'quantity' => 3, 'amount' => 100],
     ],
 ]);
 check($res[0] === 'success', 'updateFacturaSimple');
 $upd = $res[1];
 check($upd['no_factura'] === $noFactura . '-MOD', 'no_factura actualizado');
-check((float) $upd['total'] === 354.00, 'total recomputado = 354.00 (300 + 54), got ' . $upd['total']);
+check((float) $upd['total'] === 300.00, 'total recomputado = 300.00 (sin impuestos), got ' . $upd['total']);
 check(count($upd['items']) === 1, 'lineas reemplazadas (1)');
 
 echo "\n== GUARD (no tocar e-CF) ==\n";

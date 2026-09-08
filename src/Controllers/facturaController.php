@@ -202,9 +202,24 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         $totales = array_merge($totales, $totalesOverride);
     }
 
+    // La cadena de respaldo salta los vacios, no solo los NULL: un cliente
+    // importado con razon_social = '' dejaba RazonSocialComprador en blanco y la
+    // DGII rechaza el e-CF por un campo obligatorio sin contenido.
+    $primeroConTexto = static function (array $candidatos): ?string {
+        foreach ($candidatos as $v) {
+            if ($v !== null && trim((string) $v) !== '') {
+                return (string) $v;
+            }
+        }
+        return null;
+    };
     $compradorBase = $client ? [
         'rnc' => $client['rnc'] ?? null,
-        'razon_social' => $client['razon_social'] ?? $client['company_name'] ?? $client['client_name'],
+        'razon_social' => $primeroConTexto([
+            $client['razon_social'] ?? null,
+            $client['company_name'] ?? null,
+            $client['client_name'] ?? null,
+        ]),
         'direccion' => $client['direccion'] ?? null,
         'municipio' => $client['municipio'] ?? null,
         'provincia' => $client['provincia'] ?? null,

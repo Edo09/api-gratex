@@ -485,21 +485,38 @@ class FacturaPdfGenerator extends FPDF
         // Table header — columnas exactas y en el orden exigido por la norma
         // DGII (anchos y etiquetas los fija el motor; la plantilla solo dibuja):
         // Cantidad | Descripción | Unidad de Medida | Precio | ITBIS | Valor
-        $columnWidths = [18, 92, 24, 21, 21, 24];
-        $columnLabels = [
-            'Cantidad',
-            $this->convertEncoding('Descripción'),
-            'Und. Medida',
-            'Precio',
-            'ITBIS',
-            'Valor',
-        ];
+        //
+        // La factura simple no declara impuestos: no lleva columna de ITBIS, y
+        // sus 21 mm se reparten entre Descripción y Valor para que la tabla siga
+        // ocupando el mismo ancho.
+        if ($this->noElectronica) {
+            $columnWidths = [18, 105, 24, 21, 32];
+            $columnLabels = [
+                'Cantidad',
+                $this->convertEncoding('Descripción'),
+                'Und. Medida',
+                'Precio',
+                'Valor',
+            ];
+            $aligns = ['C', 'L', 'C', 'C', 'C'];
+        } else {
+            $columnWidths = [18, 92, 24, 21, 21, 24];
+            $columnLabels = [
+                'Cantidad',
+                $this->convertEncoding('Descripción'),
+                'Und. Medida',
+                'Precio',
+                'ITBIS',
+                'Valor',
+            ];
+            $aligns = ['C', 'L', 'C', 'C', 'C', 'C'];
+        }
         $tpl->drawItemsTableHeader($this, $columnWidths, $columnLabels);
 
         // Table rows
         $this->SetTextColor(0, 0, 0);
         $this->SetFont($this->fontFamily(), '', $style['body_font_size'] ?? 10);
-        $this->SetAligns(array('C', 'L', 'C', 'C', 'C', 'C'));
+        $this->SetAligns($aligns);
         $this->SetLineHeight($style['line_height'] ?? 4);
         $this->SetWidths($columnWidths);
 
@@ -507,21 +524,28 @@ class FacturaPdfGenerator extends FPDF
         // (fila de la BD completada con el XML firmado), ITBIS por linea, sigla
         // de unidad y el Motivo de las notas E33/E34 anexado donde corresponde.
         foreach ($doc->lineas() as $linea) {
-            $this->Row([
+            $fila = [
                 $linea['cantidad'],
                 $this->convertEncoding(html_entity_decode($linea['descripcion'])) . "\n ",
                 $linea['unidad'],
                 number_format($linea['precio'], 2),
-                number_format($linea['itbis'], 2),
-                number_format($linea['valor'], 2),
-            ]);
+            ];
+            if (!$this->noElectronica) {
+                $fila[] = number_format($linea['itbis'], 2);
+            }
+            $fila[] = number_format($linea['valor'], 2);
+            $this->Row($fila);
         }
 
         // Si el Motivo no se pudo usar como descripcion de una linea (porque los
         // items ya traen la suya), se muestra en su propia fila (norma DGII).
         $motivoFila = $doc->motivoEnFilaAparte();
         if ($motivoFila !== '') {
-            $this->Row(['', $this->convertEncoding('Motivo: ' . $motivoFila), '', '', '', '']);
+            $this->Row(array_pad(
+                ['', $this->convertEncoding('Motivo: ' . $motivoFila)],
+                count($columnWidths),
+                ''
+            ));
         }
 
         // Totales del e-CF firmado (cuadran con lo emitido a la DGII); sin XML

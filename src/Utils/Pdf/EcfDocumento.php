@@ -400,13 +400,23 @@ final class EcfDocumento
     }
 
     /**
-     * ITBIS de la linea: usa el valor guardado; si no viene o viene en 0 sobre
-     * una linea gravada (indicador 1=18%, 2=16%), lo calcula desde el subtotal
-     * y la tasa del indicador. Exento/0% se quedan en 0 — nunca un 18% ciego.
-     * Necesario para facturas simples viejas que guardaron itbis_amount=0.
+     * ITBIS de la linea.
+     *
+     * Una factura simple no lleva impuesto: es un documento interno, no se emite
+     * a la DGII y no entra en el 606/607, asi que no hay ITBIS que declarar ni
+     * que cobrar. Se corta aqui, antes de mirar el indicador, para que ni las
+     * facturas viejas (que llegaron a guardar itbis_amount > 0) ni las lineas
+     * sin indicador reintroduzcan un impuesto por la puerta de atras.
+     *
+     * En el e-CF se usa el valor guardado; si no viene o viene en 0 sobre una
+     * linea gravada (indicador 1=18%, 2=16%), se calcula desde el subtotal y la
+     * tasa del indicador. Exento/0% se quedan en 0 — nunca un 18% ciego.
      */
     private function itbisLinea(array $item, float $valor): float
     {
+        if ($this->noElectronica) {
+            return 0.0;
+        }
         $ind = (int) ($item['indicador_facturacion'] ?? 1);
         $guardado = $item['itbis_amount'] ?? null;
         if ($guardado === null || ((float) $guardado == 0.0 && in_array($ind, [1, 2], true))) {
@@ -482,11 +492,21 @@ final class EcfDocumento
      * Filas del cuadro de totales con las etiquetas exactas que exige la DGII.
      * 'Monto Exento' se omite en 0 para no recargar facturas gravadas.
      *
+     * La factura simple no declara impuestos, asi que no usa esas etiquetas:
+     * 'Subtotal Gravado', 'Monto Exento' y 'Total ITBIS' son vocabulario fiscal
+     * de la norma DGII. Lleva un pie llano de Subtotal y Total.
+     *
      * @return array<int,array{0:string,1:float,2:bool}> [etiqueta, valor, esTotal]
      */
     public function filasTotales(): array
     {
         $t = $this->totales();
+        if ($this->noElectronica) {
+            return [
+                ['Subtotal', $t['subtotal'], false],
+                ['Total', $t['total'], true],
+            ];
+        }
         $filas = [['Subtotal Gravado', $t['subtotal'], false]];
         if ($t['exento'] > 0) {
             $filas[] = ['Monto Exento', $t['exento'], false];

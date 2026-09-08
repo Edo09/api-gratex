@@ -4,6 +4,10 @@ CRUD de **facturas internas que NO se emiten a la DGII** (`tipo_ecf IS NULL`).
 No generan e-NCF, XML firmado ni QR de timbre fiscal. Sirven para facturación
 interna / comprobantes sin validez fiscal electrónica.
 
+> **Sin impuestos.** Al no ser un comprobante fiscal, una factura simple **no
+> lleva ITBIS**: las líneas no tienen tasa ni indicador de facturación, el PDF no
+> imprime columna ni total de ITBIS, y `total` es la suma de los subtotales.
+
 Controlador: `src/Controllers/facturaSimpleController.php`
 Base URL (local): `http://localhost:8000`
 
@@ -131,7 +135,7 @@ Body (JSON):
 | `no_factura` | ❌ | El backend lo genera (`{secuencia}-{ddmmaa}`) si se omite |
 | `date` | ❌ | Default: ahora |
 | `NCF` | ❌ | NCF tradicional (no e-CF) |
-| `total` | ❌ | Si se omite, suma `subtotal + itbis_amount` de las líneas |
+| `total` | ❌ | Si se omite, suma el `subtotal` de las líneas (sin impuestos) |
 | `user_id` | ❌ | Se toma del token; el body solo es respaldo |
 
 **Línea (`items[]`)**
@@ -141,10 +145,13 @@ Body (JSON):
 | `description` | `""` | `descripcion` |
 | `quantity` | `1` | `cantidad` |
 | `amount` (precio unitario) | `0` | `precio_unitario` |
-| `subtotal` | `quantity * amount` | — |
-| `itbis_amount` | `0` | — |
-| `indicador_facturacion` | `1` | — |
+| `subtotal` | `quantity * amount - descuento_monto` | — |
+| `descuento_monto` | `0` | — |
 | `indicador_bien_servicio` | `1` | — |
+
+> `itbis_amount` e `indicador_facturacion` ya **no se aceptan**: se guardan
+> siempre en `0` y `1` respectivamente (columnas compartidas con el e-CF, sin
+> significado fiscal aquí). Enviarlos no tiene efecto.
 
 **Ejemplo**
 
@@ -154,8 +161,8 @@ Body (JSON):
   "date": "2026-06-01",
   "NCF": "B0100000123",
   "items": [
-    { "description": "Servicio de diseno grafico", "quantity": 2, "amount": 1500, "itbis_amount": 540 },
-    { "description": "Impresion full color",        "quantity": 1, "amount": 800,  "itbis_amount": 144 }
+    { "description": "Servicio de diseno grafico", "quantity": 2, "amount": 1500 },
+    { "description": "Impresion full color",        "quantity": 1, "amount": 800 }
   ]
 }
 ```
@@ -169,8 +176,10 @@ Body (JSON):
 
 Genera el PDF de la factura **desde el body, sin persistirla**. Usa el diseño
 de **factura NO electrónica**: título "Factura", etiqueta "Factura No." (y "NCF"
-si se envía), **sin** fecha de vencimiento y **sin QR de timbre fiscal DGII**
-(eso es exclusivo del e-CF).
+si se envía), **sin** fecha de vencimiento, **sin columna ni total de ITBIS** y
+**sin QR de timbre fiscal DGII** (eso es exclusivo del e-CF). Las líneas pasan
+por el mismo normalizador que el guardado, así que la vista previa y el
+documento final coinciden.
 
 Mismo body que el `POST` de creación (acepta `client_id` **o** `client_name`,
 e `items` con ≥ 1 línea). `no_factura` y `total` son opcionales.
@@ -193,7 +202,7 @@ Content-Type: application/json
   "client_id": 3511,
   "date": "2026-06-01",
   "items": [
-    { "description": "Servicio de diseno grafico", "quantity": 2, "amount": 1500, "itbis_amount": 540 }
+    { "description": "Servicio de diseno grafico", "quantity": 2, "amount": 1500 }
   ]
 }
 ```
@@ -236,8 +245,16 @@ URL con el header de auth, la respuesta es el PDF binario.
 `id` puede ir en la ruta o en el body. Campos no enviados conservan su valor.
 Si se envía `items`, **reemplaza todas las líneas** (debe traer ≥ 1).
 
+> **Inventario.** Reemplazar las líneas devuelve al almacén la mercancía vieja y
+> descuenta la nueva: quedan dos movimientos en el kardex (`DEVOLUCION` +
+> `VENTA`) en vez de un salto de saldo sin explicar.
+>
+> **Crédito.** `tipo_pago = 2` exige que el cliente tenga `permitir_credito`. Si
+> el body no reenvía `client_id`, se valida contra el cliente ya guardado en la
+> factura.
+
 ```json
-{ "no_factura": "0001-MOD", "items": [ { "description": "Ajuste", "quantity": 3, "amount": 1500, "itbis_amount": 810 } ] }
+{ "no_factura": "0001-MOD", "items": [ { "description": "Ajuste", "quantity": 3, "amount": 1500 } ] }
 ```
 
 **Respuestas**: `200` (ok), `404` (no existe), `400` (fallo), `422` (id o items inválidos).
@@ -247,5 +264,9 @@ Si se envía `items`, **reemplaza todas las líneas** (debe traer ≥ 1).
 ### DELETE `/api/facturas-simples/{id}` — Eliminar
 
 `id` en ruta o body. **No** elimina e-CF emitidos (devuelve error).
+
+> **Inventario.** Al borrar se revierte la venta: lo que salió del almacén
+> vuelve (movimiento `DEVOLUCION`). Un e-CF no se borra — se corrige con una
+> nota de crédito E34, que ya entra mercancía por su propia vía.
 
 **Respuestas**: `200` (ok), `404` (no existe), `400` (es e-CF / fallo), `422` (sin id).

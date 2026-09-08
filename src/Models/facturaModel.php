@@ -235,16 +235,24 @@ class facturaModel
      * @param array $items Lineas crudas (description, quantity, amount, ...)
      * @return array Lineas normalizadas listas para insertar
      */
-    private function normalizeSimpleItems(array $items): array
+    /**
+     * Normaliza las lineas de una factura simple al formato que se persiste y
+     * que entiende el generador de PDF. Publica a proposito: el preview del
+     * controller la usa tal cual, porque una vista previa que no pase por las
+     * mismas reglas que el guardado deja de parecerse al documento final.
+     *
+     * Una factura simple NO lleva ITBIS: es un documento interno, no se emite a
+     * la DGII y no entra en el 606/607. `itbis_amount` se fija en 0 (la columna
+     * es comun con el e-CF) y no se deriva de ninguna tasa.
+     */
+    public function normalizeSimpleItems(array $items): array
     {
         $normalized = [];
         foreach ($items as $raw) {
             $raw = (array) $raw;
             $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
             $amount = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
-            // Descuento en MONTO, acotado a [0, bruto]. El subtotal va neto de el
-            // (misma regla que MontoItem en el e-CF), y el ITBIS se calcula sobre
-            // ese neto: cobrar impuesto sobre un precio que no se cobro seria mal.
+            // Descuento en MONTO, acotado a [0, bruto]. El subtotal va neto de el.
             $bruto = round($quantity * $amount, 2);
             $descuento = isset($raw['descuento_monto']) && is_numeric($raw['descuento_monto'])
                 ? max(0.0, min($bruto, round((float) $raw['descuento_monto'], 2)))
@@ -252,13 +260,6 @@ class facturaModel
             $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
                 ? (float) $raw['subtotal']
                 : round($bruto - $descuento, 2);
-            $indicador = (int) ($raw['indicador_facturacion'] ?? 1);
-            // Si el front no envia itbis_amount, se calcula desde el indicador
-            // (1=18%, 2=16%, resto=0). Antes caia a 0.0 y dejaba en cero el ITBIS
-            // de lineas gravadas (ver backfill tools/backfill_itbis_simples.php).
-            $itbis = isset($raw['itbis_amount']) && $raw['itbis_amount'] !== ''
-                ? (float) $raw['itbis_amount']
-                : round($subtotal * ($indicador === 1 ? 0.18 : ($indicador === 2 ? 0.16 : 0.0)), 2);
             $normalized[] = [
                 // Linea del catalogo: se guarda para poder descontar inventario.
                 'product_id' => !empty($raw['product_id']) ? (int) $raw['product_id'] : null,
@@ -267,10 +268,13 @@ class facturaModel
                 'quantity' => $quantity,
                 'subtotal' => $subtotal,
                 'descuento_monto' => $descuento,
-                'indicador_facturacion' => $indicador,
+                // Columnas compartidas con el e-CF. En una factura simple no
+                // significan nada fiscal: se guardan en su valor neutro para no
+                // dejar NULL en el esquema comun.
+                'indicador_facturacion' => 1,
                 'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 1),
                 'unidad_medida' => (string) ($raw['unidad_medida'] ?? '43'),
-                'itbis_amount' => $itbis,
+                'itbis_amount' => 0.0,
             ];
         }
         return $normalized;
@@ -302,11 +306,15 @@ class facturaModel
         }
     }
 
+    /**
+     * Total de una factura simple: la suma de los subtotales, sin impuestos.
+     * No hay ITBIS que sumar (ver normalizeSimpleItems).
+     */
     private function sumSimpleTotal(array $items): float
     {
         $total = 0.0;
         foreach ($items as $it) {
-            $total += (float) $it['subtotal'] + (float) $it['itbis_amount'];
+            $total += (float) $it['subtotal'];
         }
         return round($total, 2);
     }

@@ -13,6 +13,33 @@ require_once(__DIR__ . '/../Utils/WelcomeEmailService.php');
 $clientModel = new clientModel();
 $auth = new AuthMiddleware();
 
+/**
+ * Campos del cuerpo que el modelo sabe escribir, en el orden que da igual.
+ *
+ * Es una lista blanca: lo que no este aqui no llega a la BD (ni 'id', ni
+ * 'sent_mail', ni cualquier cosa que mande de mas un cliente del API). Solo se
+ * copian las claves PRESENTES, para que el modelo distinga "no vino" (conserva)
+ * de "vino vacio" (borra).
+ *
+ * Anadir un campo al formulario = anadirlo aqui y a los SQL del modelo. Antes
+ * habia que encajar un argumento mas en una lista posicional de ocho, y por eso
+ * direccion, municipio, provincia y razon_social se descartaban en silencio.
+ */
+function clientCampos(?object $body): array
+{
+    $permitidos = [
+        'email', 'client_name', 'company_name', 'razon_social', 'phone_number',
+        'rnc', 'direccion', 'municipio', 'provincia', 'descuento', 'permitir_credito',
+    ];
+    $campos = [];
+    foreach ($permitidos as $k) {
+        if ($body !== null && property_exists($body, $k)) {
+            $campos[$k] = $body->$k;
+        }
+    }
+    return $campos;
+}
+
 // Validate token for all requests except OPTIONS
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $validation = $auth->validateRequest();
@@ -79,7 +106,11 @@ switch($_SERVER['REQUEST_METHOD']){
             $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
         }
         else{
-            $result = $clientModel->saveClient($_POST->email,$_POST->client_name,$_POST->company_name,$_POST->phone_number,$_POST->rnc ?? null,$_POST->descuento ?? null,$_POST->permitir_credito ?? null);
+            // Se pasa el cuerpo completo filtrado por clientCampos(): asi un
+            // campo nuevo del formulario llega al modelo sin tener que anadir
+            // otro argumento posicional (que es como se perdian direccion,
+            // municipio y provincia).
+            $result = $clientModel->saveClient(clientCampos($_POST));
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
 
@@ -133,17 +164,9 @@ switch($_SERVER['REQUEST_METHOD']){
         }
         else{
             $oldClient = $clientModel->getClients($_PUT->id)[0] ?? null;
-            // ?? null en todos: el modelo trata null como "conservar el actual".
-            $result = $clientModel->updateClient(
-                $_PUT->id,
-                $_PUT->email ?? null,
-                $_PUT->client_name ?? null,
-                $_PUT->company_name ?? null,
-                $_PUT->phone_number ?? null,
-                $_PUT->rnc ?? null,
-                $_PUT->descuento ?? null,
-                $_PUT->permitir_credito ?? null
-            );
+            // Solo las claves presentes en el cuerpo: el modelo conserva con
+            // COALESCE lo que no venga.
+            $result = $clientModel->updateClient($_PUT->id, clientCampos($_PUT));
             if($result[0] === 'success'){
                 $respuesta = ['status' => true, 'data' => $result[1]];
 
