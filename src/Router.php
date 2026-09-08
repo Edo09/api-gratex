@@ -31,10 +31,29 @@ header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
 header('Content-Type: application/json; charset=utf-8');
 
 // Handle OPTIONS request immediately (preflight)
+// El preflight NO lleva datos de nadie y se responde antes del no-store de
+// abajo: asi conserva su Access-Control-Max-Age y el navegador se sigue
+// ahorrando un viaje por peticion.
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
     exit();
 }
+
+// NUNCA cachear una respuesta del API. Toda ruta de negocio devuelve datos de
+// UN tenant y de UN usuario, y la clave de la cache del navegador es la URL: el
+// header Authorization NO la diversifica. Sin esto, /api/facturas/stats
+// respondido para un tenant se le servia despues a OTRO en el mismo equipo,
+// sobreviviendo recargas y cierres de sesion (2026-09: stats de Gratex
+// apareciendo dentro de tenant_002; en otro dispositivo, con la cache limpia,
+// el mismo endpoint respondia bien).
+//
+// Va aqui y no en cada controller: el problema es de TODAS las rutas, y una
+// lista de controllers que "se acuerdan" de mandarlo se queda corta sola.
+// no-store cubre tambien proxies y el bfcache; 'private' es redundante con
+// no-store pero explicito para cualquier intermediario viejo.
+header('Cache-Control: no-store, no-cache, must-revalidate, private');
+header('Pragma: no-cache'); // HTTP/1.0 y proxies antiguos
+header('Expires: 0');
 
 $request_uri = $_SERVER['REQUEST_URI'];
 $request_method = $_SERVER['REQUEST_METHOD'];
