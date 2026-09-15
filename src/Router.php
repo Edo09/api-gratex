@@ -167,6 +167,12 @@ switch ($route) {
         require_once 'src/Controllers/provinciaMunicipioController.php';
         break;
 
+    case 'rnc':
+        // Consulta de RNC/cedula en servicio externo para autocompletar el alta
+        // de clientes y proveedores (solo lectura, no toca la DB) - token required
+        require_once 'src/Controllers/rncController.php';
+        break;
+
     case 'cotizaciones':
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';

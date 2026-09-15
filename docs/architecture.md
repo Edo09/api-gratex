@@ -84,6 +84,7 @@ api-gratex/
 | `proveedores` | `proveedorController.php` | token | directorio de proveedores (+ compras) |
 | `unidades-medida` | `unidadMedidaController.php` | token | catálogo DGII de unidades (solo lectura) |
 | `provincias-municipios` | `provinciaMunicipioController.php` | token | catálogo DGII de provincias/municipios/distritos (solo lectura) |
+| `rnc` | `rncController.php` | token | consulta de RNC/cédula en servicio externo para autocompletar altas (no toca la DB) |
 | `cotizaciones` | `cotizacionController.php` | token | cotizaciones + PDF |
 | `facturas` | `facturaController.php` | token | facturas (e-CF) + PDF/XML/estado |
 | `facturas-simples` | `facturaSimpleController.php` | token | facturas NO electrónicas |

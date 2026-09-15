@@ -68,6 +68,10 @@ return [
         // Catálogo DGII de ubicaciones (solo lectura): comparte el token de
         // catálogos 'unidades' para no requerir un módulo/seed RBAC nuevo.
         'provincias-municipios'    => 'unidades',
+        // Consulta de RNC/cedula (servicio externo) al dar de alta clientes y
+        // proveedores: es de solo lectura como los catalogos, asi que comparte el
+        // token 'unidades' y no hace falta un modulo/seed RBAC nuevo.
+        'rnc'                      => 'unidades',
         'categories'               => 'categories',
         'warehouses'               => 'warehouses',
         // Ajustes y libro de movimientos: mueven el stock de products, asi que

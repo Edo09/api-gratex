@@ -93,13 +93,15 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'POST':
         $_POST= InputSanitizer::jsonInput(false);
-        // El correo es OPCIONAL: muchos clientes (los de mostrador, sobre todo) no
-        // tienen, y exigirlo obligaba a inventar uno. Ausente o vacio se guarda
-        // como '': la columna es NOT NULL y asi quedaron los clientes migrados, y
-        // ni el e-CF (CorreoComprador) ni el envio de cotizaciones lo usan vacio.
-        // Si viene, tiene que ser valido.
+        // Correo y telefono son OPCIONALES: muchos clientes (los de mostrador,
+        // sobre todo) no tienen, y exigirlos obligaba a inventarlos. Con la
+        // consulta de RNC el alta puede quedar en el RNC y los nombres. Ausentes o
+        // vacios se guardan como '': las columnas son NOT NULL y asi quedaron los
+        // clientes migrados, y ni el e-CF (CorreoComprador) ni el envio de
+        // cotizaciones usan un correo vacio. El correo, si viene, tiene que ser valido.
         if (is_object($_POST)) {
             $_POST->email = trim((string) ($_POST->email ?? ''));
+            $_POST->phone_number = trim((string) ($_POST->phone_number ?? ''));
         }
         if(isset($_POST->email) && $_POST->email !== '' && (!filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 100)){
             $respuesta= ['status' => false, 'error' => 'Email must be a valid email and no more than 100 characters'];
@@ -110,8 +112,8 @@ switch($_SERVER['REQUEST_METHOD']){
         else if(!isset($_POST->company_name) || is_null($_POST->company_name) || empty(trim($_POST->company_name)) || strlen($_POST->company_name) > 100){
             $respuesta= ['status' => false, 'error' => 'Company name must not be empty and no more than 100 characters'];
         }
-        else if(!isset($_POST->phone_number) || is_null($_POST->phone_number) || empty(trim($_POST->phone_number)) || strlen($_POST->phone_number) > 20){
-            $respuesta= ['status' => false, 'error' => 'Phone number must not be empty and no more than 20 characters'];
+        else if(strlen($_POST->phone_number) > 20){
+            $respuesta= ['status' => false, 'error' => 'Phone number must be no more than 20 characters'];
         }
         else{
             // Se pasa el cuerpo completo filtrado por clientCampos(): asi un

@@ -1,0 +1,32 @@
+### ============================================================================
+### Consulta de RNC / cedula -> /api/rnc/consulta
+### Servicio externo (rnc.megaplus.com.do), no toca la DB. Modulo RBAC 'unidades'.
+### 200 encontrado · 404 no inscrito · 422 formato · 502 servicio no disponible
+### ============================================================================
+
+### RNC existente (Gratex) -> 200
+GET http://localhost:8000/api/rnc/consulta?rnc=131256432
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Con guiones: se limpian antes de consultar (el servicio solo acepta digitos) -> 200
+GET http://localhost:8000/api/rnc/consulta?rnc=131-25643-2
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### No inscrito como contribuyente -> 404
+GET http://localhost:8000/api/rnc/consulta?rnc=999999999
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Formato invalido (8 digitos) -> 422, sin llamar al servicio externo
+GET http://localhost:8000/api/rnc/consulta?rnc=12345678
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Alta de cliente SIN telefono ni correo (lo normal tras consultar el RNC) -> status true
+POST http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+{
+  "rnc": "131256432",
+  "client_name": "GRATEX",
+  "company_name": "GRATEX EIRL"
+}

@@ -230,6 +230,7 @@ X-API-KEY: <key>
 | `GET/POST/PUT/DELETE` | `/api/proveedores` | CRUD directorio de proveedores (`?page,?pageSize,?query`; lista incluye `compras` derivado de gastos) |
 | `GET` | `/api/unidades-medida` | Catálogo DGII de unidades de medida (solo lectura) — ver nota abajo |
 | `GET` | `/api/provincias-municipios` | Catálogo DGII de provincias/municipios/distritos (solo lectura) — ver nota abajo |
+| `GET` | `/api/rnc/consulta?rnc=` | Consulta de RNC/cédula (servicio externo) para autocompletar altas de clientes y proveedores — ver nota abajo |
 | `GET/POST/PUT/DELETE` | `/api/users` | CRUD usuarios |
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver [../modules/gastos.md](../modules/gastos.md) |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
@@ -314,6 +315,25 @@ para mostrar; **no** se envían al XML.
   `factura_items.unidad_medida` / `gasto_items.unidad_medida`.
 
 ---
+
+### Consulta de RNC / cédula — `GET /api/rnc/consulta?rnc=`
+
+Autocompleta el alta de clientes y proveedores. Consulta un servicio **externo de terceros**
+(hoy `rnc.megaplus.com.do`, sin SLA): el front nunca depende de que responda y cae a llenado
+manual. No toca la DB. Módulo RBAC: `unidades`, como los catálogos.
+
+`rnc` puede traer guiones o espacios: se limpian antes de consultar (el servicio solo acepta
+dígitos). Tiene que quedar en 9 dígitos (RNC) u 11 (cédula).
+
+| HTTP | Cuándo | Cuerpo |
+|---|---|---|
+| `200` | encontrado | `{status:true, data:{rnc, tipo: "RNC"\|"CEDULA", razon_social, nombre_comercial, estado, facturador_electronico, actividad_economica, regimen_pagos}}` |
+| `404` | no inscrito como contribuyente | `{status:false, error}` |
+| `422` | no tiene 9 u 11 dígitos (no se llama al servicio) | `{status:false, error}` |
+| `502` | el servicio falló, respondió algo inesperado o tardó más de 5 s | `{status:false, error}` |
+
+Implementación en `src/Utils/RncConsultaService.php`: cambiar de proveedor es tocar solo ese
+archivo.
 
 ### Provincias / municipios — `GET /api/provincias-municipios`
 
