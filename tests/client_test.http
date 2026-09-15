@@ -26,3 +26,26 @@ X-API-KEY: 515370b3a6caccf859e862636be6e26e
 	"phone_number": "809-555-0101",
 	"sent_mail": true
 }
+
+### Create Client WITHOUT email (el correo es opcional) -> status true
+POST http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 515370b3a6caccf859e862636be6e26e
+
+{
+	"client_name": "Cliente Mostrador",
+	"company_name": "Cliente Mostrador",
+	"phone_number": "809-555-0102"
+}
+
+### Create Client with INVALID email -> status false
+POST http://localhost:8000/api/clients
+Content-Type: application/json
+X-API-KEY: 515370b3a6caccf859e862636be6e26e
+
+{
+	"email": "no-es-un-correo",
+	"client_name": "Cliente Correo Malo",
+	"company_name": "Demo",
+	"phone_number": "809-555-0103"
+}

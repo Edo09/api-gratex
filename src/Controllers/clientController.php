@@ -93,8 +93,16 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'POST':
         $_POST= InputSanitizer::jsonInput(false);
-        if(!isset($_POST->email) || is_null($_POST->email) || empty(trim($_POST->email)) || !filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 100){
-            $respuesta= ['status' => false, 'error' => 'Email must not be empty, must be a valid email and no more than 100 characters'];
+        // El correo es OPCIONAL: muchos clientes (los de mostrador, sobre todo) no
+        // tienen, y exigirlo obligaba a inventar uno. Ausente o vacio se guarda
+        // como '': la columna es NOT NULL y asi quedaron los clientes migrados, y
+        // ni el e-CF (CorreoComprador) ni el envio de cotizaciones lo usan vacio.
+        // Si viene, tiene que ser valido.
+        if (is_object($_POST)) {
+            $_POST->email = trim((string) ($_POST->email ?? ''));
+        }
+        if(isset($_POST->email) && $_POST->email !== '' && (!filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 100)){
+            $respuesta= ['status' => false, 'error' => 'Email must be a valid email and no more than 100 characters'];
         }
         else if(!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100){
             $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
