@@ -202,8 +202,42 @@ class inventoryModel
     }
 
     /**
-     * Cuerpo comun de registrarVenta/revertirVenta: filtra las lineas que mueven
-     * existencias y aplica los movimientos con el signo pedido.
+     * Mueve el inventario de una compra (gasto) ya guardada.
+     *
+     * Que comprobantes mueven existencias. Espejo de efectoInventario() en el
+     * front (config/gastos.ts): si cambia uno, cambiar el otro.
+     *   E31 Credito Fiscal, E41 Compras, E47 Pagos al Exterior -> ENTRA (COMPRA).
+     *   E34 Nota de Credito del proveedor -> devolucion al proveedor, SALE.
+     *   E33 Nota de Debito y E43 Gastos Menores -> no mueven.
+     *
+     * Una compra que nace en ERROR o RECHAZADO no mueve nada: el comprobante no
+     * quedo valido y al reintentarlo se crea otro gasto, que volveria a sumar.
+     * Igual que en la venta, un rechazo que llega DESPUES por la consulta de
+     * estado no revierte el movimiento: se corrige con un ajuste.
+     *
+     * Se valoriza al precio de la linea, no al costo de ficha, y products.costo
+     * no se toca: el costo promedio sale del libro (ver valorInventario).
+     *
+     * @param array $items lineas ya persistidas (product_id, quantity, amount)
+     * @return int cuantos movimientos se registraron
+     */
+    public function registrarCompra(int $gastoId, array $items, string $tipoGasto, ?string $estadoDgii, ?int $userId = null): int
+    {
+        if (in_array((string) $estadoDgii, ['ERROR', 'RECHAZADO'], true)) {
+            return 0;
+        }
+        $tipo = strtoupper(trim($tipoGasto));
+        if (in_array($tipo, ['E31', 'E41', 'E47'], true)) {
+            return $this->moverPorDocumento('gasto', $gastoId, $items, 1, 'COMPRA', $userId, true);
+        }
+        if ($tipo === 'E34') {
+            return $this->moverPorDocumento('gasto', $gastoId, $items, -1, 'DEVOLUCION', $userId, true);
+        }
+        return 0;
+    }
+
+    /**
+     * Cuerpo comun de registrarVenta/revertirVenta (ver moverPorDocumento).
      *
      * @param int $signo -1 saca del almacen, +1 devuelve
      */
@@ -214,8 +248,29 @@ class inventoryModel
         string $tipoMovimiento,
         ?int $userId = null
     ): int {
+        return $this->moverPorDocumento('factura', $facturaId, $items, $signo, $tipoMovimiento, $userId, false);
+    }
+
+    /**
+     * Filtra las lineas de un documento (factura o gasto) que mueven existencias
+     * y aplica los movimientos con el signo pedido.
+     *
+     * @param string $referenciaTipo 'factura' | 'gasto' (inventory_movements.referencia_tipo)
+     * @param int    $signo          -1 saca del almacen, +1 entra
+     * @param bool   $costoDeLinea   true = valoriza al precio de la linea (compras);
+     *                               false = al costo del producto (ventas)
+     */
+    private function moverPorDocumento(
+        string $referenciaTipo,
+        int $referenciaId,
+        array $items,
+        int $signo,
+        string $tipoMovimiento,
+        ?int $userId,
+        bool $costoDeLinea
+    ): int {
         // Todo el cuerpo va en try/catch: el contrato de este metodo es que un
-        // fallo de inventario NUNCA tumba una factura ya emitida, y eso incluye
+        // fallo de inventario NUNCA tumba un documento ya guardado, y eso incluye
         // los errores que no vienen de aplicarMovimientos.
         try {
             $ids = [];
@@ -243,11 +298,11 @@ class inventoryModel
                 $cruda = (float) ($it['quantity'] ?? $it['cantidad'] ?? 0);
                 $cantidad = (int) round($cruda);
                 // products.stock e inventory_movements.cantidad son enteros en
-                // todo el sistema: una venta fraccionada se redondea (y por debajo
-                // de 0.5 desaparece). Queda en el log para poder rastrear el
+                // todo el sistema: una cantidad fraccionada se redondea (y por
+                // debajo de 0.5 desaparece). Queda en el log para poder rastrear el
                 // descuadre en vez de descubrirlo en el proximo conteo fisico.
                 if (abs($cruda - $cantidad) > 0.0001) {
-                    error_log('[inventario] factura ' . $facturaId . ' producto ' . $productId
+                    error_log('[inventario] ' . $referenciaTipo . ' ' . $referenciaId . ' producto ' . $productId
                         . ': cantidad ' . $cruda . ' redondeada a ' . $cantidad . ' (el stock es entero)');
                 }
                 if ($cantidad <= 0) {
@@ -256,9 +311,13 @@ class inventoryModel
                 $lineas[] = [
                     'product_id' => $productId,
                     'cantidad' => $signo * $cantidad,
-                    // El costo lo pone el producto: valorizar la salida al precio de
-                    // venta inflaria el valor del movimiento.
-                    'costo_unitario' => null,
+                    // Venta: el costo lo pone el producto (valorizar la salida al
+                    // precio de venta inflaria el valor del movimiento). Compra: lo
+                    // pone la linea, que es lo que costo de verdad y es lo que
+                    // alimenta el costo promedio.
+                    'costo_unitario' => $costoDeLinea
+                        ? (float) ($it['amount'] ?? $it['precio_unitario'] ?? 0)
+                        : null,
                 ];
             }
             if ($lineas === []) {
@@ -267,17 +326,17 @@ class inventoryModel
 
             $res = $this->aplicarMovimientos($lineas, [
                 'tipo_movimiento' => $tipoMovimiento,
-                'referencia_tipo' => 'factura',
-                'referencia_id' => $facturaId,
+                'referencia_tipo' => $referenciaTipo,
+                'referencia_id' => $referenciaId,
                 'user_id' => $userId,
             ]);
             if ($res[0] !== 'success') {
-                error_log('[inventario] factura ' . $facturaId . ': ' . $res[1]);
+                error_log('[inventario] ' . $referenciaTipo . ' ' . $referenciaId . ': ' . $res[1]);
                 return 0;
             }
             return count($res[1]);
         } catch (Throwable $e) {
-            error_log('[inventario] factura ' . $facturaId . ' fallo inesperado: ' . $e->getMessage());
+            error_log('[inventario] ' . $referenciaTipo . ' ' . $referenciaId . ' fallo inesperado: ' . $e->getMessage());
             return 0;
         }
     }

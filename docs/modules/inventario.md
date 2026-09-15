@@ -59,6 +59,14 @@ productos) y [../database/schema.md](../database/schema.md).
 
 ---
 
+## Compras
+
+Registrar una compra en `/api/gastos` mueve existencias en las líneas con `product_id`:
+`E31`/`E41`/`E47` entran como `COMPRA` y `E34` sale como `DEVOLUCION` (devolución al
+proveedor), con `referencia_tipo = 'gasto'`. Se valoriza al precio de la línea, así que la
+compra alimenta el costo promedio de la sección siguiente. Reglas completas en
+[gastos.md](gastos.md#inventario).
+
 ## Valor de inventario
 
 `GET /api/inventario/valor` — cuánto vale lo que hay en almacén, producto por

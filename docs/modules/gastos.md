@@ -3,13 +3,17 @@
 Gestiona los gastos de la empresa en dos categorías:
 
 1. **Gastos Menores** — pagos del personal (peajes, suministros). Tipo `E43`.
-2. **Facturas de Proveedores** — comprobantes emitidos por la empresa a proveedores (`E41`, `E47`) y notas recibidas del proveedor (`E33`, `E34`).
+2. **Facturas de Proveedores** — comprobantes emitidos por la empresa a proveedores (`E41`, `E47`) y comprobantes recibidos del proveedor: Crédito Fiscal (`E31`) y notas (`E33`, `E34`).
 
-La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secuencia interna) y como **receptor** para `E33/E34` (el usuario digita el NCF que entregó el proveedor).
+La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secuencia interna) y como **receptor** para `E31/E33/E34` (el usuario digita el NCF que entregó el proveedor; es un registro interno, **no se envía a la DGII**).
 
-> **2026-06-12:** `E31`/`B01` (Crédito Fiscal recibido) **ya no se registran como
-> gasto** — esas facturas llegan por la recepción e-CF. El alta devuelve 400;
-> las filas históricas se conservan en la tabla pero **quedan fuera de `/stats`**.
+> **2026-09-14:** `E31` (Crédito Fiscal recibido) **vuelve a registrarse como compra**.
+> Se había bloqueado el 2026-06-12 suponiendo que toda factura de crédito fiscal
+> llega por la recepción e-CF, pero no todos los sistemas de los proveedores la
+> envían. Se registra **sin mirar la recepción**: si la misma factura también llega
+> por ahí, el 606 la declara una sola vez (gana la de recepción, que trae el XML
+> firmado). `B01` sigue bloqueado (400); sus filas históricas se conservan y quedan
+> fuera de `/stats`.
 
 ---
 
@@ -20,6 +24,7 @@ La empresa actúa como **emisor** para `E41/E43/E47` (el sistema genera la secue
 | `gastos_menores` | `E43` | 13 | **true** | secuencia interna (ncfModel) |
 | `facturas_proveedores` | `E41` | 11 | **true** | secuencia interna (ncfModel) |
 | `facturas_proveedores` | `E47` | 17 | **true** | secuencia interna (ncfModel) |
+| `facturas_proveedores` | `E31` | 01 | false | lo digita el usuario (Crédito Fiscal recibido; `E31` + 10 dígitos) |
 | `facturas_proveedores` | `E33` | 03 | false | lo digita el usuario (Nota de Débito recibida) |
 | `facturas_proveedores` | `E34` | 04 | false | lo digita el usuario (Nota de Crédito recibida) |
 
@@ -72,7 +77,7 @@ La lista también filtra por **ambiente activo** (`DGII_ECF_ENVIRONMENT`), igual
 | `tipo_bienes_servicios` | sí | **Tipo de Costos y Gastos** DGII (`'01'`..`'11'`). Cadena de 2 dígitos, no número. Se declara en el campo 3 del 606. Catálogo: `GET /api/tipos-bienes-servicios` |
 | `rnc_proveedor` | sí | RNC/Cédula. En Compras (11/E41) = proveedor informal |
 | `nombre_proveedor` | sí | |
-| `ncf` | solo si recibido (E33/E34) | el que entregó el proveedor. En auto-emisión se ignora y se genera |
+| `ncf` | solo si recibido (E31/E33/E34) | el que entregó el proveedor; se guarda en mayúsculas. `E31` debe ser `E31` + 10 dígitos (400 si no). En auto-emisión se ignora y se genera |
 | `items[]` | sí (≥1) | líneas del gasto |
 | `fecha` | no | default: hoy (`Y-m-d`) |
 | `subtotal` | no | default: suma de `subtotal` de los items |
@@ -88,6 +93,8 @@ La lista también filtra por **ambiente activo** (`DGII_ECF_ENVIRONMENT`), igual
 | `quantity` | no | default 1 (también `cantidad`) |
 | `subtotal` | no | default `amount * quantity` |
 | `itbis_amount` | no | default 0 |
+| `indicador_bien_servicio` | no | `1` = Bien, `2` = Servicio (default `2`). En el 606 separa bienes (campo 9) de servicios (campo 8) |
+| `product_id` | no | producto del catálogo. En compras mueve inventario — ver [Inventario](#inventario) |
 
 ---
 
@@ -154,11 +161,34 @@ curl -X POST http://localhost/api/gastos \
 
 ---
 
+## Inventario
+
+Las líneas con `product_id` mueven existencias **al registrar** (requiere la migración
+`db/migrations/024_add_gasto_items_product_id.sql`). Lo hace el controlador después de
+guardar, con `inventoryModel::registrarCompra`:
+
+| Tipo | Efecto | `tipo_movimiento` |
+|---|---|---|
+| `E31`, `E41`, `E47` | entra (+) | `COMPRA` |
+| `E34` | sale (−): devolución al proveedor | `DEVOLUCION` |
+| `E33`, `E43` | no mueve | — |
+
+- Solo líneas de productos tipo **bien** según el catálogo: un servicio no tiene existencias.
+- Se valoriza al `amount` de la línea (costo real de compra), que alimenta el costo promedio
+  de *Valor de inventario*. `products.costo` **no** se modifica.
+- Una compra que nace en `ERROR` o `RECHAZADO` no mueve inventario. Un rechazo posterior
+  (vía `/estado`) no revierte el movimiento: se corrige con un ajuste, igual que en facturas.
+- Nunca tumba el registro: si el inventario falla, la compra queda guardada y el error va al log.
+- Una `E34` que solo es un descuento (sin devolver mercancía) se registra con líneas **sin**
+  producto.
+- Las cantidades del inventario son enteras: una cantidad fraccionada se redondea (y se anota
+  en el log).
+
 ## Emisión a DGII (auto-emision)
 
 Los gastos que **emite la empresa** (E41/E43/E47) se envían a la DGII como e-CF real,
 reusando el mismo pipeline de facturas (`ECFEmissionService`: build XML → firmar →
-token → enviar). Los **recibidos** (E33/E34) solo se registran — ya los
+token → enviar). Los **recibidos** (E31/E33/E34) solo se registran — ya los
 emitió el proveedor.
 
 ### Guard de seguridad — `DGII_ECF_EMISSION_ENABLED`
@@ -190,8 +220,8 @@ no se envía `itbis_amount`.
 
 Análogo a `GET /api/facturas/stats`, pero sobre la tabla `gastos`. Cada comprobante
 usa su propio tipo: `E41` (Compras/11), `E43` (Gastos Menores/13), `E47` (Pagos
-Exterior/17), `E33`/`E34` (notas recibidas). Las filas históricas `E31`/`B01`
-(Crédito Fiscal/01, alta bloqueada) se **excluyen de todas las agregaciones**.
+Exterior/17), `E31` (Crédito Fiscal/01, recibido) y `E33`/`E34` (notas recibidas).
+Las filas históricas `B01` (alta bloqueada) se **excluyen de todas las agregaciones**.
 Filtra por ambiente activo.
 
 Devuelve:
@@ -228,8 +258,8 @@ Devuelve:
 
 > Nota INGRESOS vs GASTOS: `/api/facturas/stats` cubre lo que la empresa **emite al
 > vender** (01/E31, 02/E32, 15/E45, 14/E44, 16/E46, 03/E33, 04/E34). `/api/gastos/stats`
-> cubre lo que **justifica costos** (11/E41, 13/E43, 17/E47, 03/E33, 04/E34
-> recibidas; 01/E31 solo histórico). Notas de Débito/Crédito aparecen en ambos lados.
+> cubre lo que **justifica costos** (11/E41, 13/E43, 17/E47 emitidos; 01/E31, 03/E33,
+> 04/E34 recibidos). Crédito Fiscal y Notas de Débito/Crédito aparecen en ambos lados.
 
 ## Respuestas
 
@@ -287,6 +317,7 @@ Formato de error: `{ "status": false, "error": "<mensaje>" }`.
 |---|---|
 | `db/migrations/007_add_gastos_module.sql` | tablas `gastos` + `gasto_items` |
 | `db/migrations/008_add_gastos_ecf_emission.sql` | columnas de tracking DGII + indicadores fiscales |
+| `db/migrations/024_add_gasto_items_product_id.sql` | `gasto_items.product_id` (vínculo con el catálogo / inventario) |
 | `src/Models/gastoModel.php` | CRUD + emisión e-CF + stats |
 | `src/Controllers/gastosController.php` | GET lista/id/stats/estado/xml, POST |
 | `src/Router.php` | case `gastos` |
@@ -313,7 +344,8 @@ UNIQUE `(rnc_proveedor, ncf)`. Índices: `categoria`, `tipo_gasto`, `rnc_proveed
 
 **`gasto_items`**: `id`, `gasto_id` (FK → `gastos.id` ON DELETE CASCADE),
 `description`, `amount`, `quantity`, `subtotal`, `itbis_amount` + (008)
-`indicador_facturacion`, `indicador_bien_servicio`.
+`indicador_facturacion`, `indicador_bien_servicio` + (024) `product_id`
+(FK → `products.id` ON DELETE SET NULL).
 
 ### Flujo de emisión
 La emisión real reusa `ECFEmissionService::emitir()` — que internamente **dispensa
@@ -344,6 +376,9 @@ expone — un e-CF emitido es inmutable, se corrige emitiendo una E34.)
 - Correr las migraciones `db/migrations/007_add_gastos_module.sql` y
   `db/migrations/008_add_gastos_ecf_emission.sql` (007 = registro, 008 = columnas
   de emisión e-CF).
+- Correr `db/migrations/024_add_gasto_items_product_id.sql` **antes** de desplegar el PHP
+  que la usa. Sin ella se siguen registrando gastos sin productos, pero una compra con
+  productos falla.
 - Para auto-emisión (`E41/E43/E47`): `ncf_sequences` debe tener la fila del tipo en
   el ambiente activo (ya viene de `tools/migration_ncf_ambiente.sql`).
 - ⚠️ **Producción `ecf`**: dejar `DGII_ECF_EMISSION_ENABLED=false` hasta probar en

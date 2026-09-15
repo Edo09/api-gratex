@@ -260,10 +260,10 @@ En multi-tenant viven en el master; en el tenant existen para el fallback single
 `codigo_seguridad`, `fecha_emision_dgii`, `xml_firmado`, `respuesta_dgii`,
 `secuencia_utilizada`. UNIQUE `(rnc_proveedor, ncf)`.
 
-### `gasto_items` (007 + 008/016)
+### `gasto_items` (007 + 008/016/024)
 `id`, `gasto_id` (FK CASCADE), `description`, `amount`, `quantity`, `subtotal`,
 `itbis_amount` + (008) `indicador_facturacion`, `indicador_bien_servicio` + (016)
-`unidad_medida`.
+`unidad_medida` + (024) `product_id` (FK `products`, SET NULL).
 
 Detalle del módulo: [../modules/gastos.md](../modules/gastos.md).
 

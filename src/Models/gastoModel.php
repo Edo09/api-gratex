@@ -11,8 +11,11 @@ require_once(__DIR__ . '/tipoBienesServiciosModel.php');
  *     interna via ncfModel. Tipos electronicos: E41 (Compras / NCF 11),
  *     E43 (Gastos Menores / NCF 13), E47 (Pagos al Exterior / NCF 17).
  *   - Recibido (0): el proveedor entrego el comprobante; el usuario digita el
- *     NCF. Hoy: E33/E34 (notas). E31/B01 ya no se dan de alta como gasto
- *     (solo quedan filas historicas).
+ *     NCF. Hoy: E31 (Credito Fiscal) y E33/E34 (notas). Es un registro interno:
+ *     no se envia a la DGII. B01 no se da de alta (solo quedan filas historicas).
+ *
+ * Las lineas con `product_id` mueven inventario al registrar; eso lo hace el
+ * controlador despues de guardar (inventoryModel::registrarCompra).
  */
 class gastoModel
 {
@@ -23,24 +26,26 @@ class gastoModel
      * Tipos de NCF/e-CF permitidos por categoria de gasto:
      *   - gastos_menores       -> E43 (Gastos Menores: peajes, suministros, personal).
      *   - facturas_proveedores -> E41 (Compras informal) y E47 (Pagos al Exterior)
-     *                             emitidos por la empresa; mas E33 (Nota de Debito)
-     *                             y E34 (Nota de Credito) recibidas del proveedor.
-     *                             La nota referencia un comprobante previo, por eso
-     *                             el usuario digita su NCF.
+     *                             emitidos por la empresa; mas E31 (Credito Fiscal),
+     *                             E33 (Nota de Debito) y E34 (Nota de Credito)
+     *                             recibidos del proveedor, cuyo NCF digita el usuario.
      *
-     * E31/B01 (Credito Fiscal) ya NO se registran como gasto (decision
-     * 2026-06-12): esas facturas llegan del proveedor por la recepcion e-CF.
-     * Las filas historicas con esos tipos se conservan (solo se bloquea el alta).
+     * E31 volvio el 2026-09-14. Se habia bloqueado el 2026-06-12 suponiendo que
+     * todo Credito Fiscal llega por la recepcion e-CF, pero no todos los sistemas
+     * de los proveedores lo envian. Se registra como compra interna SIN mirar la
+     * recepcion: si la misma factura tambien llega por ahi, el 606 la declara una
+     * sola vez (Reporte606Model::deduplicar). B01 sigue bloqueado; sus filas
+     * historicas se conservan.
      */
     private const CATEGORIAS = [
         'gastos_menores' => ['E43'],
-        'facturas_proveedores' => ['E41', 'E47', 'E33', 'E34'],
+        'facturas_proveedores' => ['E41', 'E47', 'E31', 'E33', 'E34'],
     ];
 
     /**
      * Tipos que EMITE la empresa: para ellos el sistema genera la secuencia
-     * interna (es_auto_emision = true). El resto (E33/E34 notas) son recibidos
-     * y el usuario digita el NCF del proveedor.
+     * interna (es_auto_emision = true). El resto (E31 y las notas E33/E34) son
+     * recibidos y el usuario digita el NCF del proveedor.
      */
     private const AUTO_EMISION_TYPES = ['E41', 'E43', 'E47'];
 
@@ -77,9 +82,9 @@ class gastoModel
     public function getGastoItems(int $gastoId): array
     {
         try {
-            $sql = 'SELECT id, description, amount, quantity, subtotal, itbis_amount,
-                           indicador_facturacion, indicador_bien_servicio, unidad_medida
-                    FROM gasto_items WHERE gasto_id = :id ORDER BY id ASC';
+            // SELECT * y no la lista de columnas: product_id (migracion 024) sale
+            // cuando existe, y un servidor sin la migracion no pierde las lineas.
+            $sql = 'SELECT * FROM gasto_items WHERE gasto_id = :id ORDER BY id ASC';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':id' => $gastoId]);
             return $stmt->fetchAll();
@@ -223,11 +228,18 @@ class gastoModel
         }
 
         // es_auto_emision se DERIVA del tipo: E41/E43/E47 los emite la empresa;
-        // E33/E34 son recibidos (el usuario digita el NCF del proveedor).
+        // E31/E33/E34 son recibidos (el usuario digita el NCF del proveedor).
         $esAutoEmision = in_array($tipoGasto, self::AUTO_EMISION_TYPES, true);
-        $ncf = trim((string) ($data['ncf'] ?? ''));
+        // Mayusculas: un "e31..." digitado a mano es el mismo comprobante, y tanto
+        // el duplicado (rnc_proveedor, ncf) como el cruce del 606 comparan exacto.
+        $ncf = strtoupper(trim((string) ($data['ncf'] ?? '')));
         if (!$esAutoEmision && $ncf === '') {
             return ['error', 'ncf requerido para gastos recibidos (no auto-emision)'];
+        }
+        // E31 se copia de una factura impresa: un digito de mas o de menos no
+        // saltaria hasta generar el 606, cuando ya toca corregir a destiempo.
+        if ($tipoGasto === 'E31' && !preg_match('/^E31\d{10}$/', $ncf)) {
+            return ['error', "ncf {$ncf} no es un e-NCF E31 valido (E31 + 10 digitos, ej. E310000000123)"];
         }
 
         // Totales: se respetan los del body; si no vienen se calculan de las lineas.
@@ -495,8 +507,8 @@ class gastoModel
      * Estadisticas de gastos, analogas a facturaModel::getECFStats pero sobre la
      * tabla `gastos`. Cada comprobante usa su propio tipo:
      *   E41 (Compras/11), E43 (Gastos Menores/13), E47 (Pagos Exterior/17),
-     *   E33/E34 (notas recibidas). Las filas historicas E31/B01 (alta bloqueada
-     *   2026-06-12) se EXCLUYEN de todas las agregaciones.
+     *   E31 (Credito Fiscal recibido) y E33/E34 (notas recibidas). Las filas
+     *   historicas B01 (alta bloqueada) se EXCLUYEN de todas las agregaciones.
      * Agrupa por tipo_gasto, por categoria y por mes; ademas reporta el estado de
      * las secuencias internas de los tipos que emite la empresa (E41/E43/E47).
      */
@@ -505,8 +517,10 @@ class gastoModel
         try {
             $ambiente = $this->ncfModel->resolveActiveAmbiente();
             $ambFilter = $ambiente !== null ? "AND ambiente = '{$ambiente}'" : '';
-            // E31/B01 ya no son gastos: fuera de stats aunque existan filas viejas.
-            $tipoFilter = "AND tipo_gasto NOT IN ('E31','B01')";
+            // B01 ya no se registra: fuera de stats aunque existan filas viejas.
+            // E31 SI cuenta (volvio como compra recibida el 2026-09-14), tambien
+            // sus filas historicas: eran compras reales registradas a mano.
+            $tipoFilter = "AND tipo_gasto <> 'B01'";
 
             $resumen = $this->conexion->query(
                 "SELECT COUNT(*) as total_gastos,
@@ -824,7 +838,12 @@ class gastoModel
             } else {
                 $itbis = 0.0;
             }
+            // Vinculo con el catalogo: sin esto la compra no suma al inventario.
+            $productId = isset($raw['product_id']) && is_numeric($raw['product_id']) && (int) $raw['product_id'] > 0
+                ? (int) $raw['product_id']
+                : null;
             $normalized[] = [
+                'product_id' => $productId,
                 'description' => (string) ($raw['description'] ?? $raw['descripcion'] ?? ''),
                 'amount' => $amount,
                 'quantity' => $quantity,
@@ -841,15 +860,27 @@ class gastoModel
 
     private function insertItems(int $gastoId, array $items): void
     {
-        $sql = 'INSERT INTO gasto_items
-                (gasto_id, description, amount, quantity, subtotal, itbis_amount,
-                 indicador_facturacion, indicador_bien_servicio, unidad_medida)
-                VALUES
-                (:gasto_id, :description, :amount, :quantity, :subtotal, :itbis_amount,
-                 :indicador_facturacion, :indicador_bien_servicio, :unidad_medida)';
-        $stmt = $this->conexion->prepare($sql);
+        // product_id solo entra en el INSERT si alguna linea lo trae. Asi un
+        // servidor al que aun no se le corrio la migracion 024 sigue registrando
+        // gastos sin productos, en vez de fallar todos por una columna que no existe.
+        $conProducto = false;
         foreach ($items as $it) {
-            $stmt->execute([
+            if (!empty($it['product_id'])) {
+                $conProducto = true;
+                break;
+            }
+        }
+        $columnas = 'gasto_id, description, amount, quantity, subtotal, itbis_amount,
+                     indicador_facturacion, indicador_bien_servicio, unidad_medida';
+        $valores = ':gasto_id, :description, :amount, :quantity, :subtotal, :itbis_amount,
+                    :indicador_facturacion, :indicador_bien_servicio, :unidad_medida';
+        if ($conProducto) {
+            $columnas .= ', product_id';
+            $valores .= ', :product_id';
+        }
+        $stmt = $this->conexion->prepare("INSERT INTO gasto_items ({$columnas}) VALUES ({$valores})");
+        foreach ($items as $it) {
+            $params = [
                 ':gasto_id' => $gastoId,
                 ':description' => $it['description'],
                 ':amount' => $it['amount'],
@@ -859,7 +890,11 @@ class gastoModel
                 ':indicador_facturacion' => $it['indicador_facturacion'],
                 ':indicador_bien_servicio' => $it['indicador_bien_servicio'],
                 ':unidad_medida' => $it['unidad_medida'] ?? '43',
-            ]);
+            ];
+            if ($conProducto) {
+                $params[':product_id'] = !empty($it['product_id']) ? (int) $it['product_id'] : null;
+            }
+            $stmt->execute($params);
         }
     }
 

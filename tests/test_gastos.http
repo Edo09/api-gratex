@@ -2,13 +2,14 @@
 ### Modulo de Gastos -> /api/gastos
 ### Dos categorias:
 ###   - gastos_menores       -> E43 (peajes, suministros, personal)
-###   - facturas_proveedores -> E41/E47 (emite la empresa) + E33/E34 (recibido)
+###   - facturas_proveedores -> E41/E47 (emite la empresa) + E31/E33/E34 (recibido)
 ###
 ### Auto-emision (E41/E43/E47): se emite a DGII como e-CF SOLO si
 ###   DGII_ECF_EMISSION_ENABLED=true. Con el guard apagado (default) se guarda como
 ###   estado_dgii=PENDIENTE_EMISION sin tocar DGII ni consumir secuencia.
-### Recibido (E33/E34): solo se registra; el usuario digita el NCF.
-### E31/B01 ya NO se registran como gasto (2026-06-12) -> 400.
+### Recibido (E31/E33/E34): solo se registra (no va a DGII); el usuario digita el NCF.
+### E31 volvio el 2026-09-14. B01 sigue bloqueado -> 400.
+### Lineas con product_id mueven inventario (migracion 024): E31/E41/E47 suman, E34 resta.
 ###
 ### Requiere migraciones 007 y 008 corridas.
 ### ============================================================================
@@ -59,7 +60,9 @@ Content-Type: application/json
   ]
 }
 
-### E31 ya no permitido -> 400 (Credito Fiscal no se registra como gasto)
+### Credito Fiscal recibido (E31) - registro interno, NO va a DGII -> 201
+### Linea 1 con producto (bien): suma 10 al inventario, valorizadas a 350 c/u.
+### Linea 2 libre (flete, servicio): no mueve inventario.
 POST http://localhost:8000/api/gastos
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 Content-Type: application/json
@@ -67,7 +70,27 @@ Content-Type: application/json
 {
   "categoria": "facturas_proveedores",
   "tipo_gasto": "E31",
+  "tipo_bienes_servicios": "09",
   "ncf": "E310000000123",
+  "rnc_proveedor": "131880681",
+  "nombre_proveedor": "Suplidora XYZ SRL",
+  "fecha": "2026-09-14",
+  "items": [
+    { "description": "Cemento (fundas)", "product_id": 1, "amount": 350, "quantity": 10, "itbis_amount": 630, "indicador_bien_servicio": 1 },
+    { "description": "Flete", "amount": 500, "quantity": 1, "itbis_amount": 90, "indicador_bien_servicio": 2 }
+  ]
+}
+
+### E31 con e-NCF mal digitado (11 digitos tras E31) -> 400
+POST http://localhost:8000/api/gastos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "categoria": "facturas_proveedores",
+  "tipo_gasto": "E31",
+  "tipo_bienes_servicios": "09",
+  "ncf": "E3100000001234",
   "rnc_proveedor": "131880681",
   "nombre_proveedor": "Suplidora XYZ SRL",
   "items": [
