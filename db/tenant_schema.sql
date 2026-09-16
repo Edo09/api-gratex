@@ -2,14 +2,21 @@
 -- tenant_schema.sql — Esquema COMPLETO (consolidado) para un DB de tenant nuevo.
 -- ============================================================================
 -- Snapshot del esquema de negocio final: equivale a la base original MAS las
--- migraciones 001..011 ya aplicadas (hoy en db/migrations/deprecated/, solo
--- como historial de los DBs que se actualizaron incrementalmente, ej. Gratex).
+-- migraciones ya aplicadas:
+--   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
+--               se actualizaron incrementalmente, ej. Gratex).
+--   - 012..024  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
 --
 -- Cambios futuros de esquema: crear db/migrations/NNN_*.sql (para DBs de
--- tenant ya desplegados) Y reflejar el cambio aqui (para tenants nuevos).
+-- tenant ya desplegados) Y reflejar el cambio aqui (para tenants nuevos), con
+-- los mismos nombres de indices y FKs que la migracion.
+--
+-- ORDEN: aqui no se desactiva FOREIGN_KEY_CHECKS, asi que toda tabla referenciada
+-- por una FK se crea ANTES que quien la referencia. Por eso el catalogo
+-- (categories, warehouses, products) va antes de facturas, gastos e inventario.
 --
 -- SIN users / api_tokens / landing_* (viven en gratex_master). NO incluye
 -- CREATE DATABASE / USE: el onboarding crea el DB y selecciona su conexion.
@@ -64,7 +71,89 @@ CREATE TABLE IF NOT EXISTS cotizacion_items (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 3) Facturas (con tracking e-CF, RFCE, secuencia y notas E33/E34)
+-- 2b) Inventario: Categorias + Almacenes (DB del tenant = empresa; sin company_id).
+--     Van antes de products (sus FKs), y products antes de facturas/gastos.
+--     Ver db/migrations/017_add_inventory.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS categories (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  nombre VARCHAR(100) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cat_nombre (nombre),
+  KEY idx_cat_estado (estado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS warehouses (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  nombre VARCHAR(100) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_wh_nombre (nombre),
+  KEY idx_wh_estado (estado)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Almacen por defecto de la empresa (los productos sin almacen caen aqui).
+INSERT INTO warehouses (nombre, descripcion)
+SELECT 'Almacén Principal', 'Almacén por defecto de la empresa'
+FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE nombre = 'Almacén Principal');
+
+-- ----------------------------------------------------------------------------
+-- 2c) Catalogo de productos/servicios (para la facturacion). `indicador_facturacion`
+--     define el gravamen ITBIS igual que en factura_items (1=18% gravado, 4=Exento).
+--     category_id (FK categories, opcional) + warehouse_id (FK warehouses, obligatorio).
+--     Lo referencian por FK factura_items, gasto_items e inventory_movements: por
+--     eso se crea antes que ellas.
+--     Ver db/migrations/012_add_products.sql, 017_add_inventory.sql y
+--     019_add_product_precios.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS products (
+  id INT(11) NOT NULL AUTO_INCREMENT,
+  sku VARCHAR(50) NULL,
+  nombre VARCHAR(150) NOT NULL,
+  descripcion VARCHAR(255) NULL,
+  category_id INT(11) NULL,
+  warehouse_id INT(11) NOT NULL,
+  indicador_bien_servicio TINYINT NOT NULL DEFAULT 1
+    COMMENT '1=Bien | 2=Servicio',
+  indicador_facturacion TINYINT NOT NULL DEFAULT 1
+    COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=Tasa cero | 4=Exento (gravado=1, exento=4)',
+  precio DECIMAL(18,2) NOT NULL DEFAULT 0.00
+    COMMENT 'Lista de precio 1 (la que usan facturas y cotizaciones)',
+  precio_2 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 2 (NULL = no aplica)',
+  precio_3 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 3 (NULL = no aplica)',
+  precio_4 DECIMAL(18,2) NULL DEFAULT NULL
+    COMMENT 'Lista de precio 4 (NULL = no aplica)',
+  costo DECIMAL(18,2) NOT NULL DEFAULT 0.00,
+  unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
+    COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
+  stock INT(11) NULL COMMENT 'NULL para servicios (sin inventario)',
+  stock_minimo INT(11) NULL,
+  activo TINYINT(1) NOT NULL DEFAULT 1,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_sku (sku),
+  KEY idx_products_category (category_id),
+  KEY idx_products_warehouse (warehouse_id),
+  KEY idx_activo (activo),
+  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL,
+  CONSTRAINT fk_products_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 3) Facturas (con tracking e-CF, RFCE, secuencia y notas E33/E34).
+--    factura_items.product_id = vinculo opcional al catalogo (NULL = linea libre).
+--    Ver db/migrations/023_add_factura_items_product_id.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS facturas (
   id           INT(11)        NOT NULL AUTO_INCREMENT,
@@ -115,6 +204,8 @@ CREATE TABLE IF NOT EXISTS facturas (
 CREATE TABLE IF NOT EXISTS factura_items (
   id          INT(11)        NOT NULL AUTO_INCREMENT,
   factura_id  INT(11)        NOT NULL,
+  product_id  INT(11)        NULL DEFAULT NULL
+                 COMMENT 'FK al catalogo; NULL = linea libre (no mueve inventario)',
   description TEXT           NOT NULL,
   amount      DECIMAL(10,2)  NOT NULL,
   quantity    INT(11)        NOT NULL DEFAULT 1,
@@ -130,7 +221,9 @@ CREATE TABLE IF NOT EXISTS factura_items (
   itbis_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   PRIMARY KEY (id),
   KEY factura_id (factura_id),
-  CONSTRAINT factura_items_ibfk_1 FOREIGN KEY (factura_id) REFERENCES facturas (id) ON DELETE CASCADE
+  KEY idx_factura_items_product (product_id),
+  CONSTRAINT factura_items_ibfk_1 FOREIGN KEY (factura_id) REFERENCES facturas (id) ON DELETE CASCADE,
+  CONSTRAINT factura_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
@@ -387,6 +480,8 @@ CREATE TABLE IF NOT EXISTS auth_tokens_emitidos (
 -- ----------------------------------------------------------------------------
 -- 10) Modulo de Gastos (emitidos E41/E43/E47 con emision e-CF; recibidos
 --     B01/E31/E33/E34 registrados)
+--     gastos.tipo_bienes_servicios = campo 3 del 606 (catalogo en el MASTER:
+--     dgii_tipo_bienes_servicios). Ver tools/migration_tipo_bienes_servicios.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS gastos (
   id INT(11) NOT NULL AUTO_INCREMENT,
@@ -394,6 +489,8 @@ CREATE TABLE IF NOT EXISTS gastos (
     COMMENT 'gastos_menores (E43) | facturas_proveedores (E41, E47, E31, B01, E33, E34)',
   tipo_gasto VARCHAR(3) NOT NULL
     COMMENT 'E41, E43, E47 (auto-emision) | B01, E31, E33, E34 (recibido)',
+  tipo_bienes_servicios CHAR(2) NULL DEFAULT NULL
+    COMMENT 'Codigo DGII 01..11 (campo 3 del 606). NULL = historico previo al campo',
   ncf VARCHAR(19) NULL
     COMMENT 'Auto-emision: secuencia interna generada. Recibido: NCF del proveedor',
   rnc_proveedor VARCHAR(11) NOT NULL
@@ -427,12 +524,17 @@ CREATE TABLE IF NOT EXISTS gastos (
   KEY idx_rnc_proveedor (rnc_proveedor),
   KEY idx_ambiente (ambiente),
   KEY idx_estado_dgii (estado_dgii),
-  KEY idx_track_id (track_id)
+  KEY idx_track_id (track_id),
+  KEY idx_tipo_bienes_servicios (tipo_bienes_servicios)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- gasto_items.product_id = vinculo opcional al catalogo (NULL = linea libre); las
+-- compras con producto mueven inventario. Ver db/migrations/024_add_gasto_items_product_id.sql.
 CREATE TABLE IF NOT EXISTS gasto_items (
   id INT(11) NOT NULL AUTO_INCREMENT,
   gasto_id INT(11) NOT NULL,
+  product_id INT(11) NULL DEFAULT NULL
+    COMMENT 'FK al catalogo; NULL = linea libre (no mueve inventario)',
   description TEXT NOT NULL,
   amount DECIMAL(18,2) NOT NULL,
   quantity INT(11) NOT NULL DEFAULT 1,
@@ -446,83 +548,76 @@ CREATE TABLE IF NOT EXISTS gasto_items (
     COMMENT 'Codigo DGII de unidad de medida (id del catalogo unidades_medida; 43 = Unidad)',
   PRIMARY KEY (id),
   KEY idx_gasto_id (gasto_id),
-  CONSTRAINT gasto_items_ibfk_1 FOREIGN KEY (gasto_id) REFERENCES gastos (id) ON DELETE CASCADE
+  KEY idx_gasto_items_product (product_id),
+  CONSTRAINT gasto_items_ibfk_1 FOREIGN KEY (gasto_id) REFERENCES gastos (id) ON DELETE CASCADE,
+  CONSTRAINT gasto_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 10b) Inventario: Categorias + Almacenes (DB del tenant = empresa; sin company_id).
---      Ver db/migrations/017_add_inventory.sql.
+-- 11) Inventario: Ajustes + libro de movimientos (ledger). Requiere warehouses y
+--     products (secciones 2b/2c).
+--     inventory_adjustments = el documento (cabecera: motivo, nota, totales).
+--     inventory_movements   = el ledger Y las lineas del ajuste; cantidad CON
+--     signo y foto del saldo antes/despues. El saldo sigue siendo products.stock.
+--     Un ajuste no se edita ni se borra: se anula con un ajuste inverso (anula_a_id).
+--     Ver db/migrations/022_add_inventory_movements.sql (contexto y decisiones).
 -- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS categories (
-  id INT(11) NOT NULL AUTO_INCREMENT,
-  nombre VARCHAR(100) NOT NULL,
-  descripcion VARCHAR(255) NULL,
-  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS inventory_adjustments (
+  id            INT(11)      NOT NULL AUTO_INCREMENT,
+  codigo        VARCHAR(20)  NOT NULL
+                  COMMENT 'Consecutivo visible: AJ-000001',
+  fecha         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP
+                  COMMENT 'Siempre el momento de captura (no hay retroactivos)',
+  motivo        VARCHAR(20)  NOT NULL
+                  COMMENT 'CONTEO_FISICO | MERMA | DANO | ROBO | DEVOLUCION | ERROR_CAPTURA | ANULACION | OTRO',
+  nota          VARCHAR(500) NULL
+                  COMMENT 'Detalle libre: "conteo del 03/09, pasillo 4"',
+  warehouse_id  INT(11)      NOT NULL,
+  user_id       INT(11)      NULL
+                  COMMENT 'Referencia a gratex_master.users.id (sin FK cross-DB)',
+  total_lineas  INT(11)         NOT NULL DEFAULT 0,
+  total_valor   DECIMAL(18,2)   NOT NULL DEFAULT 0.00
+                  COMMENT 'Suma con signo de valor_movimiento: el "Total RD$" de la pantalla',
+  anula_a_id    INT(11)      NULL
+                  COMMENT 'Este ajuste es la anulacion de aquel',
+  anulado_por_id INT(11)     NULL
+                  COMMENT 'Ajuste que anulo a este (se llena al anular)',
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uk_cat_nombre (nombre),
-  KEY idx_cat_estado (estado)
+  UNIQUE KEY uk_codigo (codigo),
+  KEY idx_fecha (fecha),
+  KEY idx_motivo (motivo),
+  KEY idx_warehouse (warehouse_id),
+  CONSTRAINT inv_adj_warehouse_fk FOREIGN KEY (warehouse_id) REFERENCES warehouses (id),
+  CONSTRAINT inv_adj_anula_fk FOREIGN KEY (anula_a_id) REFERENCES inventory_adjustments (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS warehouses (
-  id INT(11) NOT NULL AUTO_INCREMENT,
-  nombre VARCHAR(100) NOT NULL,
-  descripcion VARCHAR(255) NULL,
-  estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+CREATE TABLE IF NOT EXISTS inventory_movements (
+  id            INT(11)      NOT NULL AUTO_INCREMENT,
+  product_id    INT(11)      NOT NULL,
+  warehouse_id  INT(11)      NOT NULL,
+  tipo_movimiento VARCHAR(20) NOT NULL DEFAULT 'AJUSTE'
+                  COMMENT 'AJUSTE hoy. Manana: VENTA | COMPRA | DEVOLUCION | TRASLADO',
+  referencia_tipo VARCHAR(20) NULL
+                  COMMENT 'ajuste | factura | gasto',
+  referencia_id INT(11)      NULL,
+  cantidad      INT(11)      NOT NULL
+                  COMMENT 'Con signo: positivo suma al stock, negativo resta',
+  cantidad_anterior INT(11)  NOT NULL,
+  cantidad_nueva    INT(11)  NOT NULL,
+  costo_unitario DECIMAL(18,2) NOT NULL DEFAULT 0.00
+                  COMMENT 'Costo con que se valoriza el movimiento (NO cambia products.costo)',
+  valor_movimiento DECIMAL(18,2) NOT NULL DEFAULT 0.00
+                  COMMENT 'cantidad * costo_unitario, con signo',
+  user_id       INT(11)      NULL,
+  created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uk_wh_nombre (nombre),
-  KEY idx_wh_estado (estado)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Almacen por defecto de la empresa (los productos sin almacen caen aqui).
-INSERT INTO warehouses (nombre, descripcion)
-SELECT 'Almacén Principal', 'Almacén por defecto de la empresa'
-FROM DUAL
-WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE nombre = 'Almacén Principal');
-
--- ----------------------------------------------------------------------------
--- 11) Catalogo de productos/servicios (para la facturacion). `indicador_facturacion`
---     define el gravamen ITBIS igual que en factura_items (1=18% gravado, 4=Exento).
---     category_id (FK categories, opcional) + warehouse_id (FK warehouses, obligatorio).
---     Ver db/migrations/012_add_products.sql y 017_add_inventory.sql.
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS products (
-  id INT(11) NOT NULL AUTO_INCREMENT,
-  sku VARCHAR(50) NULL,
-  nombre VARCHAR(150) NOT NULL,
-  descripcion VARCHAR(255) NULL,
-  category_id INT(11) NULL,
-  warehouse_id INT(11) NOT NULL,
-  indicador_bien_servicio TINYINT NOT NULL DEFAULT 1
-    COMMENT '1=Bien | 2=Servicio',
-  indicador_facturacion TINYINT NOT NULL DEFAULT 1
-    COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=Tasa cero | 4=Exento (gravado=1, exento=4)',
-  precio DECIMAL(18,2) NOT NULL DEFAULT 0.00
-    COMMENT 'Lista de precio 1 (la que usan facturas y cotizaciones)',
-  precio_2 DECIMAL(18,2) NULL DEFAULT NULL
-    COMMENT 'Lista de precio 2 (NULL = no aplica)',
-  precio_3 DECIMAL(18,2) NULL DEFAULT NULL
-    COMMENT 'Lista de precio 3 (NULL = no aplica)',
-  precio_4 DECIMAL(18,2) NULL DEFAULT NULL
-    COMMENT 'Lista de precio 4 (NULL = no aplica)',
-  costo DECIMAL(18,2) NOT NULL DEFAULT 0.00,
-  unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
-    COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
-  stock INT(11) NULL COMMENT 'NULL para servicios (sin inventario)',
-  stock_minimo INT(11) NULL,
-  activo TINYINT(1) NOT NULL DEFAULT 1,
-  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id),
-  UNIQUE KEY uk_sku (sku),
-  KEY idx_products_category (category_id),
-  KEY idx_products_warehouse (warehouse_id),
-  KEY idx_activo (activo),
-  CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL,
-  CONSTRAINT fk_products_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT
+  KEY idx_producto_fecha (product_id, created_at)
+                  COMMENT 'Kardex de un producto en orden cronologico',
+  KEY idx_referencia (referencia_tipo, referencia_id),
+  KEY idx_tipo (tipo_movimiento),
+  CONSTRAINT inv_mov_product_fk FOREIGN KEY (product_id) REFERENCES products (id),
+  CONSTRAINT inv_mov_warehouse_fk FOREIGN KEY (warehouse_id) REFERENCES warehouses (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------

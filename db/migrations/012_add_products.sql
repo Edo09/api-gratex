@@ -2,7 +2,7 @@
 -- 012_add_products.sql — Catálogo de productos/servicios del tenant.
 -- ============================================================================
 -- Para DBs de tenant YA desplegados. Los tenants nuevos lo reciben vía
--- db/tenant_schema.sql (sección 11 — refleja exactamente este CREATE TABLE).
+-- db/tenant_schema.sql (sección 2c — refleja exactamente este CREATE TABLE).
 --
 -- `indicador_facturacion` alinea el producto con DGII y con factura_items:
 --   1=ITBIS 18% (gravado) · 4=Exento · 2=16% · 3=Tasa cero · 0=No facturable.
