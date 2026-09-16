@@ -2,7 +2,7 @@
 /**
  * Carga las librerias de PDF (FPDF y phpqrcode) para cualquier generador de
  * Representacion Impresa: la de carta (FacturaPdfGenerator, CotizacionPdf-
- * Generator) y la de tirilla POS (ReciboPos80). Un solo lugar donde mirar si
+ * Generator) y la de tirilla POS (ReciboPos). Un solo lugar donde mirar si
  * manana se mueve el vendor o entra Composer.
  *
  * phpqrcode es opcional a proposito: sin el (o sin GD) el timbre se imprime

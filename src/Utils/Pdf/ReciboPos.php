@@ -5,16 +5,20 @@ require_once __DIR__ . '/BrandingResolver.php';
 require_once __DIR__ . '/FacturaTemplateFactory.php';
 
 /**
- * Representacion Impresa en tirilla POS de 80 mm (impresora termica).
+ * Representacion Impresa en tirilla POS (impresora de rollo): 80, 76 o 72 mm.
  *
  * Mismo contenido que la RI de carta — lo dicta EcfDocumento, no esta clase —
- * pero en una sola columna de 72 mm y en rollo continuo. Todo lo que la norma
- * DGII exige que aparezca aparece: titulo del documento, e-NCF, RNC y razon
- * social del emisor, fechas de emision y vencimiento, comprador, el detalle con
- * sus seis datos (cantidad, descripcion, unidad, precio, ITBIS, valor), los
- * totales con sus etiquetas exactas, y el timbre (QR + codigo de seguridad +
- * fecha de firma). En 72 mm no caben seis columnas, asi que cada linea se
- * apila en dos renglones; el dato no se pierde, cambia de sitio.
+ * pero en una sola columna y en rollo continuo. Todo lo que la norma DGII exige
+ * que aparezca aparece: titulo del documento, e-NCF, RNC y razon social del
+ * emisor, fechas de emision y vencimiento, comprador, el detalle con sus seis
+ * datos (cantidad, descripcion, unidad, precio, ITBIS, valor), los totales con
+ * sus etiquetas exactas, y el timbre (QR + codigo de seguridad + fecha de
+ * firma). En una tirilla no caben seis columnas, asi que cada linea se apila en
+ * dos renglones; el dato no se pierde, cambia de sitio.
+ *
+ * ANCHO: la pagina mide lo que el rollo, y el contenido va dentro del ancho que
+ * el cabezal realmente imprime (ver MARGENES). Que la pagina coincida con el
+ * papel es lo que deja imprimir al 100 % sin que el driver reescale ni recorte.
  *
  * ALTO VARIABLE: una tirilla no tiene "hoja". Se dibuja dos veces — una pasada
  * de medicion sobre un lienzo largo para saber donde termina el contenido, y la
@@ -22,27 +26,71 @@ require_once __DIR__ . '/FacturaTemplateFactory.php';
  * termica alimenta papel en blanco hasta completar la pagina y corta lejos del
  * ultimo renglon.
  */
-final class ReciboPos80
+final class ReciboPos
 {
-    /** Ancho del rollo (mm). El estandar de las termicas de tirilla. */
-    private const ANCHO = 80.0;
-    /** Margen lateral: casi ninguna termica de 80 mm imprime mas de 72 mm. */
-    private const MARGEN = 4.0;
-    private const UTIL = self::ANCHO - 2 * self::MARGEN;
+    /** Lo que se imprime cuando se pide la tirilla sin decir el ancho. */
+    public const ANCHO_POR_DEFECTO = 80;
+
+    /**
+     * Ancho del rollo (mm) => margen lateral (mm). El ancho util es el rollo
+     * menos dos margenes, y tiene que caber en lo que imprime el cabezal: si se
+     * amplia, el PDF se ve bien en pantalla pero el papel sale recortado.
+     *
+     *  - 80: termicas de 80 mm; casi ninguna imprime mas de 72 mm (576 puntos
+     *        a 203 dpi).
+     *  - 76: rollo de 76 mm, el de las de impacto tipo TM-U220, que imprimen
+     *        ~63,5 mm.
+     *  - 72: rollo angosto; se deja el mismo margen que en 80 mm para no
+     *        depender de un cabezal que imprima hasta el borde.
+     *
+     * Para ajustar un modelo que corte o deje demasiado blanco, se toca solo
+     * esta tabla: todo el dibujo sale del ancho util.
+     */
+    private const MARGENES = [
+        80 => 4.0,
+        76 => 6.0,
+        72 => 4.0,
+    ];
+
+    /**
+     * Anchos internos, pensados sobre los 72 mm utiles del rollo de 80 y
+     * escalados al ancho util de cada rollo. En 80 mm salen identicos a los de
+     * siempre.
+     */
+    private const REFERENCIA_UTIL = 72.0;
+    private const DETALLE_IZQUIERDA = 44.0;
+    private const TOTALES_ETIQUETA = 38.0;
+
     /** Lienzo de la pasada de medicion. */
     private const ALTO_MEDICION = 4000.0;
     /** Tope del formato PDF: 14400 unidades de 1/72" = 5080 mm. */
     private const ALTO_MAXIMO = 5000.0;
-    /** Alto minimo para que la tirilla no salga ridiculamente corta. */
+    /**
+     * Alto minimo para que la tirilla no salga ridiculamente corta. Nunca menor
+     * que el ancho: FPDF ordena [ancho, alto] de menor a mayor, y una pagina mas
+     * ancha que alta saldria girada.
+     */
     private const ALTO_MINIMO = 80.0;
 
     private EcfDocumento $doc;
     private string $fuente;
     private ?string $qrPng = null;
+    private float $ancho;
+    private float $margen;
+    private float $util;
 
-    public function __construct(EcfDocumento $doc)
+    public function __construct(EcfDocumento $doc, int $ancho = self::ANCHO_POR_DEFECTO)
     {
+        if (!self::anchoValido($ancho)) {
+            throw new InvalidArgumentException(
+                "Ancho de tirilla no soportado: {$ancho} mm (validos: " . implode(', ', self::anchos()) . ').'
+            );
+        }
         $this->doc = $doc;
+        $this->ancho = (float) $ancho;
+        $this->margen = self::MARGENES[$ancho];
+        $this->util = $this->ancho - 2 * $this->margen;
+
         // Familia core de FPDF que pide la plantilla del tenant (Arial por
         // defecto). El acento y los rellenos de color no se usan: una termica
         // imprime en un solo tono y un fondo oscuro solo gasta cabezal.
@@ -55,14 +103,30 @@ final class ReciboPos80
         $this->fuente = in_array($fam, ['Arial', 'Times', 'Courier'], true) ? $fam : 'Arial';
     }
 
+    /** @return int[] Anchos de rollo soportados, en mm. */
+    public static function anchos(): array
+    {
+        return array_keys(self::MARGENES);
+    }
+
+    public static function anchoValido(int $ancho): bool
+    {
+        return isset(self::MARGENES[$ancho]);
+    }
+
     /**
      * @param array $factura       Fila de facturas + 'items' (+ 'xml_firmado').
      * @param array $cliente       Fila de clients (vacio = se resuelve por client_id).
      * @param bool  $noElectronica Factura simple / NCF tradicional.
+     * @param int   $ancho         Ancho del rollo en mm (ver anchos()).
      */
-    public static function paraFactura(array $factura, array $cliente = [], bool $noElectronica = false): self
-    {
-        return new self(new EcfDocumento($factura, $cliente, $noElectronica));
+    public static function paraFactura(
+        array $factura,
+        array $cliente = [],
+        bool $noElectronica = false,
+        int $ancho = self::ANCHO_POR_DEFECTO
+    ): self {
+        return new self(new EcfDocumento($factura, $cliente, $noElectronica), $ancho);
     }
 
     /** @return string Contenido del PDF. */
@@ -77,8 +141,8 @@ final class ReciboPos80
 
         try {
             $medicion = $this->dibujar(self::ALTO_MEDICION, $timbre);
-            $alto = $medicion->GetY() + self::MARGEN;
-            $alto = max(self::ALTO_MINIMO, min(self::ALTO_MAXIMO, $alto));
+            $alto = $medicion->GetY() + $this->margen;
+            $alto = max(self::ALTO_MINIMO, $this->ancho, min(self::ALTO_MAXIMO, $alto));
 
             return $this->dibujar($alto, $timbre)->Output('S');
         } finally {
@@ -90,16 +154,16 @@ final class ReciboPos80
     }
 
     /**
-     * Dibuja la tirilla completa sobre una pagina de 80 x $alto mm.
+     * Dibuja la tirilla completa sobre una pagina de ancho x $alto mm.
      * @param array{url:string,codigo_seguridad:string,fecha_firma:string,preview:bool}|null $timbre
      */
     private function dibujar(float $alto, ?array $timbre): FPDF
     {
-        $pdf = new FPDF('P', 'mm', [self::ANCHO, $alto]);
+        $pdf = new FPDF('P', 'mm', [$this->ancho, $alto]);
         // Sin salto automatico: la tirilla es una sola pagina, y en la pasada de
         // medicion un salto falsearia el alto que estamos calculando.
         $pdf->SetAutoPageBreak(false);
-        $pdf->SetMargins(self::MARGEN, self::MARGEN, self::MARGEN);
+        $pdf->SetMargins($this->margen, $this->margen, $this->margen);
         $pdf->AddPage();
         $pdf->SetTextColor(0, 0, 0);
 
@@ -129,22 +193,22 @@ final class ReciboPos80
 
         if (trim($emisor['razon_social']) !== '') {
             $pdf->SetFont($this->fuente, 'B', 9);
-            $pdf->MultiCell(self::UTIL, 4, $this->enc($emisor['razon_social']), 0, 'C');
+            $pdf->MultiCell($this->util, 4, $this->enc($emisor['razon_social']), 0, 'C');
         }
 
         $pdf->SetFont($this->fuente, '', 6.5);
         if (trim($emisor['rnc']) !== '') {
-            $pdf->Cell(self::UTIL, 3, $this->enc('RNC: ' . $emisor['rnc']), 0, 1, 'C');
+            $pdf->Cell($this->util, 3, $this->enc('RNC: ' . $emisor['rnc']), 0, 1, 'C');
         }
         if (trim($emisor['direccion']) !== '') {
-            $pdf->MultiCell(self::UTIL, 3, $this->enc($emisor['direccion']), 0, 'C');
+            $pdf->MultiCell($this->util, 3, $this->enc($emisor['direccion']), 0, 'C');
         }
         $contacto = array_filter([
             trim($emisor['telefono']) !== '' ? 'Tel.: ' . $emisor['telefono'] : '',
             trim($emisor['correo']),
         ]);
         if ($contacto !== []) {
-            $pdf->MultiCell(self::UTIL, 3, $this->enc(implode(' - ', $contacto)), 0, 'C');
+            $pdf->MultiCell($this->util, 3, $this->enc(implode(' - ', $contacto)), 0, 'C');
         }
 
         $this->separador($pdf);
@@ -155,7 +219,7 @@ final class ReciboPos80
         $doc = $this->doc;
 
         $pdf->SetFont($this->fuente, 'B', 8);
-        $pdf->MultiCell(self::UTIL, 3.6, $this->enc(mb_strtoupper($doc->titulo(), 'UTF-8')), 0, 'C');
+        $pdf->MultiCell($this->util, 3.6, $this->enc(mb_strtoupper($doc->titulo(), 'UTF-8')), 0, 'C');
         $pdf->Ln(1);
 
         $pares = [];
@@ -197,7 +261,7 @@ final class ReciboPos80
         $this->bloquePares($pdf, $pares);
         if ($r['contacto'] !== '') {
             $pdf->SetFont($this->fuente, '', 7);
-            $pdf->MultiCell(self::UTIL, 3.2, $this->enc($r['contacto']), 0, 'L');
+            $pdf->MultiCell($this->util, 3.2, $this->enc($r['contacto']), 0, 'L');
         }
 
         $this->separador($pdf);
@@ -206,13 +270,14 @@ final class ReciboPos80
     /**
      * Detalle. Cada linea ocupa dos renglones: la descripcion completa arriba y,
      * debajo, "cantidad UND x precio" a la izquierda con el valor a la derecha
-     * (y el ITBIS de la linea cuando lo hay). Asi caben en 72 mm los seis datos
-     * que la norma pide por linea sin recortar la descripcion.
+     * (y el ITBIS de la linea cuando lo hay). Asi caben en el ancho de la
+     * tirilla los seis datos que la norma pide por linea sin recortar la
+     * descripcion.
      */
     private function detalle(FPDF $pdf): void
     {
-        $anchoIzq = 44.0;
-        $anchoDer = self::UTIL - $anchoIzq;
+        $anchoIzq = $this->escalado(self::DETALLE_IZQUIERDA);
+        $anchoDer = $this->util - $anchoIzq;
 
         $pdf->SetFont($this->fuente, 'B', 6.5);
         $pdf->Cell($anchoIzq, 3.2, $this->enc('CANT. x PRECIO'), 0, 0, 'L');
@@ -221,7 +286,7 @@ final class ReciboPos80
 
         foreach ($this->doc->lineas() as $linea) {
             $pdf->SetFont($this->fuente, '', 7);
-            $pdf->MultiCell(self::UTIL, 3.2, $this->enc(html_entity_decode($linea['descripcion'])), 0, 'L');
+            $pdf->MultiCell($this->util, 3.2, $this->enc(html_entity_decode($linea['descripcion'])), 0, 'L');
 
             $pdf->SetFont($this->fuente, '', 6.5);
             $izq = $linea['cantidad'] . ' ' . $linea['unidad'] . ' x ' . number_format($linea['precio'], 2);
@@ -239,7 +304,7 @@ final class ReciboPos80
             $pdf->Cell($anchoDer, 3.2, number_format($linea['valor'], 2), 0, 1, 'R');
             if ($itbis !== '' && !$cabeJunto) {
                 $pdf->SetFont($this->fuente, '', 6.5);
-                $pdf->Cell(self::UTIL, 3.2, $this->enc($itbis), 0, 1, 'R');
+                $pdf->Cell($this->util, 3.2, $this->enc($itbis), 0, 1, 'R');
             }
             $pdf->Ln(0.8);
         }
@@ -248,7 +313,7 @@ final class ReciboPos80
         $motivo = $this->doc->motivoEnFilaAparte();
         if ($motivo !== '') {
             $pdf->SetFont($this->fuente, '', 6.5);
-            $pdf->MultiCell(self::UTIL, 3.2, $this->enc('Motivo: ' . $motivo), 0, 'L');
+            $pdf->MultiCell($this->util, 3.2, $this->enc('Motivo: ' . $motivo), 0, 'L');
         }
 
         $this->separador($pdf);
@@ -256,13 +321,29 @@ final class ReciboPos80
 
     private function totales(FPDF $pdf): void
     {
-        $anchoEtiqueta = 38.0;
-        $anchoValor = self::UTIL - $anchoEtiqueta;
-
+        $filas = [];
+        $valorMasAncho = 0.0;
         foreach ($this->doc->filasTotales() as [$etiqueta, $valor, $esTotal]) {
+            $texto = ($esTotal ? 'RD$' : '') . number_format((float) $valor, 2);
+            $pdf->SetFont($this->fuente, $esTotal ? 'B' : '', $esTotal ? 9 : 7);
+            $valorMasAncho = max($valorMasAncho, $pdf->GetStringWidth($texto));
+            $filas[] = [$etiqueta, $texto, $esTotal];
+        }
+
+        // La columna de etiquetas solo cede cuando un monto no cabe en la suya:
+        // en Courier, "RD$99,999,999.99" en negrita ocupa 30,5 mm y en 64 mm
+        // utiles no entra en la proporcion de siempre. Las etiquetas son cortas
+        // ("Subtotal Gravado:" tiene holgura de sobra); los montos no se recortan.
+        $anchoEtiqueta = min(
+            $this->escalado(self::TOTALES_ETIQUETA),
+            $this->util - ($valorMasAncho + 2)
+        );
+        $anchoValor = $this->util - $anchoEtiqueta;
+
+        foreach ($filas as [$etiqueta, $texto, $esTotal]) {
             $pdf->SetFont($this->fuente, $esTotal ? 'B' : '', $esTotal ? 9 : 7);
             $pdf->Cell($anchoEtiqueta, $esTotal ? 5 : 3.6, $this->enc($etiqueta . ':'), 0, 0, 'R');
-            $pdf->Cell($anchoValor, $esTotal ? 5 : 3.6, $this->enc(($esTotal ? 'RD$' : '') . number_format((float) $valor, 2)), 0, 1, 'R');
+            $pdf->Cell($anchoValor, $esTotal ? 5 : 3.6, $this->enc($texto), 0, 1, 'R');
         }
 
         $this->separador($pdf);
@@ -280,25 +361,27 @@ final class ReciboPos80
         }
 
         if ($this->qrPng !== null) {
+            // El QR no se achica con el rollo: su tamano es el que asegura que
+            // el lector lo tome, y 26 mm caben en el ancho util mas angosto.
             $lado = 26.0;
-            $pdf->Image($this->qrPng, self::MARGEN + (self::UTIL - $lado) / 2, $pdf->GetY(), $lado, $lado, 'PNG');
+            $pdf->Image($this->qrPng, $this->margen + ($this->util - $lado) / 2, $pdf->GetY(), $lado, $lado, 'PNG');
             $pdf->SetY($pdf->GetY() + $lado + 1.5);
         }
 
         if ($timbre['preview']) {
             $pdf->SetFont($this->fuente, 'B', 7);
-            $pdf->MultiCell(self::UTIL, 3.2, $this->enc('VISTA PREVIA - SIN VALIDEZ FISCAL'), 0, 'C');
+            $pdf->MultiCell($this->util, 3.2, $this->enc('VISTA PREVIA - SIN VALIDEZ FISCAL'), 0, 'C');
         }
 
         $pdf->SetFont($this->fuente, 'B', 6.5);
-        $pdf->Cell(self::UTIL, 3.2, $this->enc('Código de Seguridad'), 0, 1, 'C');
+        $pdf->Cell($this->util, 3.2, $this->enc('Código de Seguridad'), 0, 1, 'C');
         $pdf->SetFont($this->fuente, '', 8);
-        $pdf->Cell(self::UTIL, 3.6, $this->enc($timbre['codigo_seguridad']), 0, 1, 'C');
+        $pdf->Cell($this->util, 3.6, $this->enc($timbre['codigo_seguridad']), 0, 1, 'C');
 
         $pdf->SetFont($this->fuente, 'B', 6.5);
-        $pdf->Cell(self::UTIL, 3.2, 'Fecha de Firma', 0, 1, 'C');
+        $pdf->Cell($this->util, 3.2, 'Fecha de Firma', 0, 1, 'C');
         $pdf->SetFont($this->fuente, '', 7);
-        $pdf->Cell(self::UTIL, 3.2, $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D', 0, 1, 'C');
+        $pdf->Cell($this->util, 3.2, $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D', 0, 1, 'C');
 
         $this->separador($pdf);
     }
@@ -307,15 +390,21 @@ final class ReciboPos80
     {
         $pdf->SetFont($this->fuente, '', 6);
         if ($this->doc->esElectronica()) {
-            $pdf->MultiCell(self::UTIL, 2.8, $this->enc('Consulte la validez de este comprobante escaneando el código QR en el portal de la DGII.'), 0, 'C');
+            $pdf->MultiCell($this->util, 2.8, $this->enc('Consulte la validez de este comprobante escaneando el código QR en el portal de la DGII.'), 0, 'C');
         }
         $pdf->Ln(1);
-        $pdf->MultiCell(self::UTIL, 2.8, $this->enc('¡Gracias por su compra!'), 0, 'C');
+        $pdf->MultiCell($this->util, 2.8, $this->enc('¡Gracias por su compra!'), 0, 'C');
     }
 
     // ------------------------------------------------------------------
     // Utilidades de dibujo
     // ------------------------------------------------------------------
+
+    /** Un ancho pensado para 72 mm utiles, llevado al ancho util de este rollo. */
+    private function escalado(float $mm): float
+    {
+        return $mm * $this->util / self::REFERENCIA_UTIL;
+    }
 
     /**
      * Bloque de pares "Etiqueta: valor", alineados entre si.
@@ -325,6 +414,10 @@ final class ReciboPos80
      * "Identificación Tributaria" (E47) se comian el valor con un ancho fijo.
      * Se topa en el 55% del papel para que al valor siempre le quede sitio.
      *
+     * Una etiqueta que no cabe ni en ese tope (en Courier, "Identificación
+     * Tributaria:" mide 38,5 mm y en 64 mm utiles el tope es 35,2) va en su
+     * propio renglon con el valor debajo: montada sobre el valor no se leeria.
+     *
      * @param array<int,array{0:string,1:string}> $pares
      */
     private function bloquePares(FPDF $pdf, array $pares): void
@@ -332,20 +425,30 @@ final class ReciboPos80
         if ($pares === []) {
             return;
         }
+        $tope = $this->util * 0.55;
         $pdf->SetFont($this->fuente, 'B', 7);
         $ancho = 0.0;
         foreach ($pares as [$etiqueta, ]) {
-            $ancho = max($ancho, $pdf->GetStringWidth($this->enc($etiqueta . ':')));
+            $medida = $pdf->GetStringWidth($this->enc($etiqueta . ':'));
+            if ($medida + 1 <= $tope) {
+                $ancho = max($ancho, $medida);
+            }
         }
-        $ancho = min($ancho + 1.5, self::UTIL * 0.55);
+        $ancho = min($ancho + 1.5, $tope);
 
         foreach ($pares as [$etiqueta, $valor]) {
             $y = $pdf->GetY();
             $pdf->SetFont($this->fuente, 'B', 7);
-            $pdf->SetXY(self::MARGEN, $y);
+            $pdf->SetXY($this->margen, $y);
+            if ($pdf->GetStringWidth($this->enc($etiqueta . ':')) + 1 > $tope) {
+                $pdf->Cell($this->util, 3.2, $this->enc($etiqueta . ':'), 0, 1, 'L');
+                $pdf->SetFont($this->fuente, '', 7);
+                $pdf->MultiCell($this->util, 3.2, $this->enc($valor), 0, 'L');
+                continue;
+            }
             $pdf->Cell($ancho, 3.2, $this->enc($etiqueta . ':'), 0, 0, 'L');
             $pdf->SetFont($this->fuente, '', 7);
-            $pdf->MultiCell(self::UTIL - $ancho, 3.2, $this->enc($valor), 0, 'L');
+            $pdf->MultiCell($this->util - $ancho, 3.2, $this->enc($valor), 0, 'L');
         }
     }
 
@@ -354,7 +457,7 @@ final class ReciboPos80
         $y = $pdf->GetY() + $espacio;
         $pdf->SetDrawColor(0, 0, 0);
         $pdf->SetLineWidth(0.15);
-        $pdf->Line(self::MARGEN, $y, self::ANCHO - self::MARGEN, $y);
+        $pdf->Line($this->margen, $y, $this->ancho - $this->margen, $y);
         $pdf->SetY($y + $espacio);
     }
 
@@ -372,7 +475,7 @@ final class ReciboPos80
                 $w = $maxH / $ratio;
             }
         }
-        $pdf->Image($ruta, self::MARGEN + (self::UTIL - $w) / 2, $pdf->GetY(), $w, $h);
+        $pdf->Image($ruta, $this->margen + ($this->util - $w) / 2, $pdf->GetY(), $w, $h);
         $pdf->SetY($pdf->GetY() + $h + 1.5);
     }
 

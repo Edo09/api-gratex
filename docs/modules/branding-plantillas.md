@@ -5,7 +5,7 @@ predefinida + un color de acento + su logo. Para clientes que pidan un diseño
 totalmente a la medida existe la vía `custom:*` (sección final).
 
 > Esto describe la **hoja carta**. La misma factura se puede imprimir en tirilla
-> térmica de 80 mm con `?formato=pos`; el branding (plantilla, acento) no aplica
+> de 80, 76 o 72 mm con `?formato=pos` / `pos76` / `pos72`; el branding (plantilla, acento) no aplica
 > ahí. Ver [representacion-impresa-pos.md](representacion-impresa-pos.md).
 
 ## Arquitectura

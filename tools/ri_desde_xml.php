@@ -3,7 +3,7 @@
  * Representacion Impresa (RI) a partir de un e-CF XML FIRMADO.
  *
  * Uso:
- *   php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos]
+ *   php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72]
  *                              [--ambiente=ecf|certecf|testecf]
  *
  * Para que sirve: reimprimir un comprobante teniendo solo su XML — respaldos,
@@ -44,7 +44,7 @@ foreach (array_slice($argv, 1) as $a) {
 }
 
 if ($rutaXml === null || !is_file($rutaXml)) {
-    fwrite(STDERR, "Uso: php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos] [--ambiente=ecf|certecf|testecf]\n");
+    fwrite(STDERR, "Uso: php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72] [--ambiente=ecf|certecf|testecf]\n");
     exit(1);
 }
 
@@ -54,7 +54,8 @@ if (trim($xmlRaw) === '') {
     exit(1);
 }
 
-$pos = in_array(strtolower((string) ($opciones['formato'] ?? 'carta')), ['pos', '80mm', '80', 'tirilla', 'termica'], true);
+// Mismos valores que ?formato= en la API: pos = 80 mm; pos76/pos72 = ese ancho.
+$anchoPos = RepresentacionImpresa::interpretarFormato((string) ($opciones['formato'] ?? 'carta'));
 
 // ---------------------------------------------------------------------------
 // Lectura del XML
@@ -226,7 +227,7 @@ $cliente = [
 
 $out = trim((string) ($opciones['out'] ?? ''));
 if ($out === '') {
-    $out = dirname($rutaXml) . DIRECTORY_SEPARATOR . $eNcf . RepresentacionImpresa::sufijo($pos) . '.pdf';
+    $out = dirname($rutaXml) . DIRECTORY_SEPARATOR . $eNcf . RepresentacionImpresa::sufijo($anchoPos) . '.pdf';
 }
 
 $ecfDoc = new EcfDocumento($factura, $cliente);
@@ -237,7 +238,7 @@ $ecfDoc = new EcfDocumento($factura, $cliente);
 // social donde iria el logo), nunca con la marca de otra empresa.
 BrandingResolver::sinMarcaGlobal();
 
-$pdf = RepresentacionImpresa::generar($factura, $cliente, false, $pos);
+$pdf = RepresentacionImpresa::generar($factura, $cliente, false, $anchoPos);
 if (file_put_contents($out, $pdf) === false) {
     fwrite(STDERR, "No se pudo escribir {$out}\n");
     exit(1);
@@ -248,7 +249,7 @@ if (file_put_contents($out, $pdf) === false) {
 $timbre = $ecfDoc->timbre();
 echo "e-NCF:    {$eNcf} (tipo {$tipoEcf})\n";
 echo "Ambiente: {$ambiente} ({$origenAmbiente})\n";
-echo 'PDF:      ' . $out . ' (' . strlen($pdf) . ' bytes, ' . ($pos ? 'tirilla 80 mm' : 'hoja carta') . ")\n";
+echo 'PDF:      ' . $out . ' (' . strlen($pdf) . ' bytes, ' . ($anchoPos !== null ? "tirilla {$anchoPos} mm" : 'hoja carta') . ")\n";
 if ($timbre !== null) {
     echo "Timbre:   {$timbre['url']}\n";
 }

@@ -649,10 +649,10 @@ function handlePreview(clientModel $clientModel): void
     ];
 
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
-    $pos = RepresentacionImpresa::esPos($input);
-    $pdfContent = RepresentacionImpresa::generar($factura, $client ?? [], false, $pos);
+    $anchoPos = RepresentacionImpresa::anchoPos($input);
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?? [], false, $anchoPos);
 
-    $filenameBase = ($input['ncf'] ?? 'preview') . RepresentacionImpresa::sufijo($pos);
+    $filenameBase = ($input['ncf'] ?? 'preview') . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? $input['format'] ?? 'base64';
 
     if ($format === 'download') {
@@ -725,12 +725,13 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
         }
     }
 
-    // ?formato=pos -> tirilla termica de 80 mm; por defecto, la hoja carta.
+    // ?formato=pos (80 mm), pos76 o pos72 -> tirilla termica de ese ancho; por
+    // defecto, la hoja carta.
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
-    $pos = RepresentacionImpresa::esPos();
-    $pdfContent = RepresentacionImpresa::generar($factura, $client, false, $pos);
+    $anchoPos = RepresentacionImpresa::anchoPos();
+    $pdfContent = RepresentacionImpresa::generar($factura, $client, false, $anchoPos);
 
-    $filenameBase = ($factura['e_ncf'] ?? $factura['no_factura']) . RepresentacionImpresa::sufijo($pos);
+    $filenameBase = ($factura['e_ncf'] ?? $factura['no_factura']) . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? 'download';
     if ($format === 'base64') {
         echo json_encode([

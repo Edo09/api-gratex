@@ -1,0 +1,44 @@
+### ============================================================================
+### Tirilla POS en 80, 76 y 72 mm -> ?formato= en los endpoints de PDF
+### El `filename` dice que ancho salio (_POS80 / _POS76 / _POS72). Para medir la
+### pagina: decodificar `content` y leer /MediaBox (226.77 pt = 80 mm,
+### 215.43 pt = 76 mm, 204.09 pt = 72 mm). Ver docs/modules/representacion-impresa-pos.md
+### ============================================================================
+
+### pos a secas -> 80 mm (lo de siempre) -> Factura_..._POS80.pdf
+GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### 76 mm -> Factura_..._POS76.pdf
+GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos76
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### 72 mm -> Factura_..._POS72.pdf
+GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos72
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Alias con mm -> 72 mm
+GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=72mm
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Ancho no soportado -> hoja carta (sin sufijo), como cualquier formato desconocido
+GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos58
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Factura simple guardada en 76 mm
+GET http://localhost:8000/api/facturas-simples/1/pdf?format=base64&formato=pos76
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### Vista previa de factura simple en 72 mm (formato en el cuerpo)
+POST http://localhost:8000/api/facturas-simples/preview
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "formato": "pos72",
+  "client_name": "Cliente de mostrador",
+  "date": "2026-09-16",
+  "items": [
+    { "description": "Producto de prueba con una descripcion larga para ver el salto de linea", "quantity": 2, "amount": 1250.5 }
+  ]
+}
