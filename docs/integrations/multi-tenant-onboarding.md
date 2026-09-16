@@ -344,6 +344,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 | Ruta | Qué hace | Token |
 |---|---|---|
 | `GET/POST /api/public/import_recibido.php` | Importa manualmente e-CF recibidos a `ecf_recibidos` (sube los XML firmados). Para e-CF que un emisor te envió sin completar el handshake de auth y que tu recepción no guardó. Resuelve el tenant por RNCComprador; los deja `estado=RECIBIDO`, pendientes de aprobar/rechazar | `IMPORT_RECIBIDO_TOKEN` |
+| `GET /api/public/audit_logs.html` → `audit_logs.php` | Bitácora de auditoría (`audit_logs`) de **todos** los tenants sin entrar a la DB: filtros por tenant, módulo, acción, resultado, fechas y texto; detalle con valores antes/después. Solo lectura. Ver [../modules/auditoria.md](../modules/auditoria.md) | `AUDIT_LOGS_TOKEN` |
 
 ### Preexistentes
 
@@ -373,6 +374,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 | `PLANTILLAS_TOKEN` | `.env` |
 | `CERT_RUN_TOKEN` | `.env` |
 | `READLOG_TOKEN` | `.env` |
+| `AUDIT_LOGS_TOKEN` | `.env` |
 | `ENCRYPT_TOKEN` | `.env` (cae a `READLOG_TOKEN` si no está) |
 | `UPLOAD_LOGO_TOKEN` | **const en `public/upload_logo.php`** — el único que sigue hardcodeado; el repo trae un placeholder, hay que editarlo en el server |
 | "Token API del tenant" | no es fijo: sale del login del usuario del tenant (`POST /api/auth/login`) |

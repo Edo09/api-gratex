@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Gratex — Bitácora de auditoría</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; --field:#0b1220; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); padding:24px; }
+  .wrap { max-width:1400px; margin:0 auto; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:0 0 4px; }
+  input, select { width:100%; padding:10px 12px; background:var(--field); color:var(--txt);
+                  border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  input[type=date] { color-scheme:dark; }
+  button { padding:10px 14px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .b-main { background:var(--accent); color:#06283d; }
+  .b-sec { background:#334155; color:var(--txt); }
+  .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  .hidden { display:none !important; }
+  .conn { display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap; }
+  .conn > div { flex:1; min-width:220px; }
+  .conn button { margin-bottom:21px; }
+  .filters { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:12px; }
+  .filters .wide { grid-column:1 / -1; }
+  .actions { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:14px; }
+  .presets { display:flex; gap:6px; margin-left:auto; flex-wrap:wrap; }
+  .presets button { padding:6px 10px; font-size:12px; background:var(--field); color:var(--mut);
+                    border:1px solid var(--line); }
+  .presets button:hover { color:var(--txt); border-color:var(--accent); }
+  .msg { margin-top:12px; padding:10px 12px; border-radius:8px; font-size:13px;
+         border:1px solid var(--err); color:#fecaca; white-space:pre-wrap; }
+  /* resultados */
+  .summary { display:flex; justify-content:space-between; align-items:center; gap:12px;
+             flex-wrap:wrap; margin-bottom:10px; font-size:13px; color:var(--mut); }
+  .pager { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+  .pager select { width:auto; padding:7px 10px; }
+  .pager button { padding:7px 12px; }
+  .table-wrap { overflow-x:auto; border:1px solid var(--line); border-radius:10px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { background:var(--field); color:var(--mut); font-weight:600; }
+  tbody tr:last-child td { border-bottom:none; }
+  #rows tr[data-id] { cursor:pointer; }
+  #rows tr[data-id]:hover { background:#243247; }
+  #rows tr.sel { background:#1c3a52; }
+  td.desc { max-width:340px; overflow:hidden; text-overflow:ellipsis; }
+  .mono { font-family:ui-monospace,SFMono-Regular,Consolas,monospace; font-size:12px; }
+  .dim { color:var(--mut); }
+  .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; border:1px solid; }
+  .badge.ok { color:var(--ok); border-color:var(--ok); }
+  .badge.err { color:var(--err); border-color:var(--err); }
+  .empty { padding:28px; text-align:center; color:var(--mut); white-space:normal; }
+  /* detalle */
+  .detail-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
+  .detail-head h2 { font-size:15px; margin:0; }
+  .kv { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px 18px; font-size:13px; }
+  .kv span { display:block; color:var(--mut); font-size:12px; margin-bottom:2px; }
+  .kv b { font-weight:500; word-break:break-word; }
+  h3 { font-size:13px; color:var(--accent); margin:20px 0 8px; }
+  table.diff td { white-space:pre-wrap; word-break:break-word; vertical-align:top; }
+  table.diff td.k { color:var(--mut); width:22%; }
+  table.diff tr.changed td { background:rgba(56,189,248,.10); }
+  pre { background:var(--field); border:1px solid var(--line); border-radius:8px; padding:12px;
+        white-space:pre-wrap; word-break:break-word; font-size:12px; margin:0 0 8px; max-height:320px; overflow:auto; }
+  @media (max-width: 640px) {
+    body { padding:16px; }
+    .presets { margin-left:0; }
+    .conn button { margin-bottom:0; width:100%; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Bitácora de auditoría</h1>
+  <p class="sub">Quién hizo qué y cuándo, en todos los tenants, sin entrar a la base de datos. Solo lectura.</p>
+
+  <div class="card">
+    <div class="conn">
+      <div>
+        <label for="token">Token de operaciones</label>
+        <input type="password" id="token" autocomplete="off">
+        <div class="hint">El valor de AUDIT_LOGS_TOKEN en el .env del server</div>
+      </div>
+      <button class="b-main" id="btnConnect">Conectar</button>
+    </div>
+    <div class="msg hidden" id="connMsg"></div>
+  </div>
+
+  <div class="card hidden" id="filtersCard">
+    <div class="filters">
+      <div id="tenantBox"><label for="fTenant">Tenant</label><select id="fTenant"></select></div>
+      <div><label for="fModule">Módulo</label><select id="fModule"></select></div>
+      <div><label for="fAction">Acción</label><select id="fAction"></select></div>
+      <div><label for="fSuccess">Resultado</label>
+        <select id="fSuccess">
+          <option value="">Todos</option>
+          <option value="1">Correcto</option>
+          <option value="0">Fallido</option>
+        </select>
+      </div>
+      <div><label for="fFrom">Desde</label><input type="date" id="fFrom"></div>
+      <div><label for="fTo">Hasta</label><input type="date" id="fTo"></div>
+      <div class="wide"><label for="fQ">Buscar texto</label>
+        <input id="fQ" maxlength="100" placeholder="Usuario, email, id de entidad, descripción, endpoint o IP — Enter para buscar">
+      </div>
+    </div>
+    <div class="actions">
+      <button class="b-main" id="btnSearch">Buscar</button>
+      <button class="b-sec" id="btnClear">Limpiar filtros</button>
+      <div class="presets">
+        <button type="button" data-days="0">Hoy</button>
+        <button type="button" data-days="7">Últimos 7 días</button>
+        <button type="button" data-days="30">Últimos 30 días</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card hidden" id="resultsCard">
+    <div class="summary">
+      <span id="summary"></span>
+      <div class="pager">
+        <label for="pageSize" style="margin:0">Por página</label>
+        <select id="pageSize">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+        </select>
+        <button class="b-sec" id="btnPrev">← Anterior</button>
+        <span id="pageInfo"></span>
+        <button class="b-sec" id="btnNext">Siguiente →</button>
+      </div>
+    </div>
+    <div class="msg hidden" id="searchMsg" style="margin:0 0 10px"></div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Fecha</th><th>Tenant</th><th>Usuario</th><th>Módulo</th><th>Acción</th>
+              <th>Entidad</th><th>Descripción</th><th>Resultado</th><th>IP</th></tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="hint">Clic en una fila para ver el detalle y los valores antes/después.</div>
+  </div>
+
+  <div class="card hidden" id="detailCard">
+    <div class="detail-head">
+      <h2 id="detailTitle"></h2>
+      <button class="b-sec" id="btnCloseDetail">Cerrar</button>
+    </div>
+    <div class="kv" id="detailKv"></div>
+    <div id="detailError"></div>
+    <h3>Cambios</h3>
+    <div id="detailDiff"></div>
+  </div>
+</div>
+
+<script>
+// Todo lo que viene de la bitacora (usuario, user-agent, descripcion, valores) es
+// texto controlado por terceros: se pinta SIEMPRE como texto (textContent /
+// append de strings), nunca con innerHTML.
+const $ = (id) => document.getElementById(id);
+const state = { pagination: null, busy: false, seq: 0 };
+
+function el(tag, attrs, ...children) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === 'class') n.className = v; else n.setAttribute(k, v);
+  }
+  for (const c of children) {
+    if (c !== null && c !== undefined) n.append(c instanceof Node ? c : String(c));
+  }
+  return n;
+}
+const blank = (v) => v === null || v === undefined || v === '';
+const dim = (text) => el('span', { class: 'dim' }, text);
+
+function showMsg(box, text) { box.textContent = text; box.classList.remove('hidden'); }
+function hideMsg(box) { box.classList.add('hidden'); }
+
+async function post(action, extra) {
+  const body = new FormData();
+  body.append('token', $('token').value);
+  body.append('action', action);
+  for (const [k, v] of Object.entries(extra || {})) body.append(k, v);
+  const res = await fetch('audit_logs.php', { method: 'POST', body, cache: 'no-store' });
+  let json = null;
+  try { json = await res.json(); } catch (_) { /* respuesta no JSON (p. ej. fatal de PHP) */ }
+  if (!res.ok || !json || json.status !== true) {
+    throw new Error((json && json.error) || ('Error HTTP ' + res.status));
+  }
+  return json;
+}
+
+function fillSelect(select, options) {
+  select.replaceChildren(...options.map(o => el('option', { value: o.value }, o.label)));
+}
+
+// ---- Conectar ---------------------------------------------------------------
+async function connect() {
+  hideMsg($('connMsg'));
+  const btn = $('btnConnect');
+  btn.disabled = true;
+  try {
+    const { data } = await post('meta');
+    const tenantOpts = [{ value: '', label: 'Todos' }];
+    if (data.multi_tenant) {
+      tenantOpts.push({ value: 'none', label: 'Sin tenant (login fallido, DGII entrante)' });
+    }
+    for (const t of data.tenants) {
+      tenantOpts.push({ value: String(t.id), label: '#' + t.id + ' ' + t.nombre + (t.activo ? '' : ' (inactivo)') });
+    }
+    fillSelect($('fTenant'), tenantOpts);
+    $('tenantBox').classList.toggle('hidden', !data.multi_tenant);
+    fillSelect($('fModule'), [{ value: '', label: 'Todos' }, ...data.modules.map(m => ({ value: m, label: m }))]);
+    fillSelect($('fAction'), [{ value: '', label: 'Todas' }, ...data.actions.map(a => ({ value: a, label: a }))]);
+    $('filtersCard').classList.remove('hidden');
+    $('resultsCard').classList.remove('hidden');
+    await search(1);
+  } catch (e) {
+    showMsg($('connMsg'), e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+$('btnConnect').addEventListener('click', connect);
+$('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
+
+// ---- Buscar -----------------------------------------------------------------
+function filterValues() {
+  return {
+    tenant: $('fTenant').value, module: $('fModule').value, action: $('fAction').value,
+    success: $('fSuccess').value, from: $('fFrom').value, to: $('fTo').value, q: $('fQ').value.trim(),
+  };
+}
+
+async function search(page) {
+  const seq = ++state.seq; // solo la ultima busqueda pinta (respuestas fuera de orden)
+  hideMsg($('searchMsg'));
+  setBusy(true);
+  try {
+    const json = await post('search', { ...filterValues(), page: String(page), page_size: $('pageSize').value });
+    if (seq !== state.seq) return;
+    state.pagination = json.pagination;
+    closeDetail();
+    renderRows(json.data);
+  } catch (e) {
+    if (seq === state.seq) showMsg($('searchMsg'), e.message);
+  } finally {
+    if (seq === state.seq) setBusy(false);
+  }
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  $('btnSearch').disabled = busy;
+  updatePager();
+}
+
+function updatePager() {
+  const p = state.pagination;
+  $('btnPrev').disabled = state.busy || !p || p.page <= 1;
+  $('btnNext').disabled = state.busy || !p || p.page >= p.totalPages;
+  $('pageInfo').textContent = p ? 'Página ' + p.page + ' de ' + Math.max(1, p.totalPages) : '';
+  $('summary').textContent = p ? p.total.toLocaleString('es-DO') + (p.total === 1 ? ' registro' : ' registros') : '';
+}
+
+$('btnSearch').addEventListener('click', () => search(1));
+$('fQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') search(1); });
+['fTenant', 'fModule', 'fAction', 'fSuccess', 'fFrom', 'fTo', 'pageSize']
+  .forEach(id => $(id).addEventListener('change', () => search(1)));
+$('btnPrev').addEventListener('click', () => state.pagination && search(state.pagination.page - 1));
+$('btnNext').addEventListener('click', () => state.pagination && search(state.pagination.page + 1));
+
+$('btnClear').addEventListener('click', () => {
+  ['fTenant', 'fModule', 'fAction', 'fSuccess'].forEach(id => { $(id).selectedIndex = 0; });
+  ['fFrom', 'fTo', 'fQ'].forEach(id => { $(id).value = ''; });
+  search(1);
+});
+
+function isoDate(d) {
+  const z = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate());
+}
+document.querySelectorAll('.presets button').forEach(b => b.addEventListener('click', () => {
+  const from = new Date();
+  from.setDate(from.getDate() - Number(b.dataset.days));
+  $('fFrom').value = isoDate(from);
+  $('fTo').value = isoDate(new Date());
+  search(1);
+}));
+
+// ---- Tabla ------------------------------------------------------------------
+function tenantText(r) {
+  if (r.tenant_id === null) return null;
+  return '#' + r.tenant_id + (r.tenant_nombre ? ' ' + r.tenant_nombre : '');
+}
+function userText(r) {
+  return r.username || r.email || (r.user_id !== null ? '#' + r.user_id : null);
+}
+function entityText(r) {
+  return [r.entity_type, r.entity_id].filter(v => !blank(v)).join(' ') || null;
+}
+
+function renderRows(rows) {
+  const tbody = $('rows');
+  tbody.replaceChildren();
+  if (!rows.length) {
+    tbody.append(el('tr', {}, el('td', { colspan: '9', class: 'empty' }, 'Sin registros para estos filtros.')));
+    return;
+  }
+  for (const r of rows) {
+    const tr = el('tr', { 'data-id': String(r.id) },
+      el('td', { class: 'mono' }, r.created_at),
+      el('td', {}, tenantText(r) ?? dim('sin tenant')),
+      el('td', {}, userText(r) ?? dim('—')),
+      el('td', {}, r.module),
+      el('td', { class: 'mono' }, r.action),
+      el('td', {}, entityText(r) ?? dim('—')),
+      el('td', { class: 'desc', title: r.description || '' }, r.description || dim('—')),
+      el('td', {}, el('span', { class: 'badge ' + (r.success ? 'ok' : 'err') }, r.success ? 'OK' : 'Fallo')),
+      el('td', { class: 'mono' }, r.ip_address || dim('—')),
+    );
+    tr.addEventListener('click', () => showDetail(r, tr));
+    tbody.append(tr);
+  }
+}
+
+// ---- Detalle ----------------------------------------------------------------
+function showDetail(r, tr) {
+  document.querySelectorAll('#rows tr.sel').forEach(x => x.classList.remove('sel'));
+  tr.classList.add('sel');
+  $('detailTitle').textContent = r.action + ' · ' + r.module + ' · registro #' + r.id;
+
+  const fields = [
+    ['Fecha', r.created_at],
+    ['Tenant', tenantText(r) ?? 'sin tenant'],
+    ['Usuario', r.username],
+    ['Email', r.email],
+    ['User ID', r.user_id],
+    ['Resultado', r.success ? 'Correcto' : 'Fallido'],
+    ['Entidad', r.entity_type],
+    ['ID de entidad', r.entity_id],
+    ['Descripción', r.description],
+    ['Método y endpoint', [r.http_method, r.endpoint].filter(v => !blank(v)).join(' ')],
+    ['IP', r.ip_address],
+    ['Navegador · SO · dispositivo', [r.browser, r.os, r.device_type].filter(v => !blank(v)).join(' · ')],
+    ['User-Agent', r.user_agent],
+  ];
+  $('detailKv').replaceChildren(...fields.map(([k, v]) =>
+    el('div', {}, el('span', {}, k), el('b', {}, blank(v) ? '—' : String(v)))));
+
+  const errBox = $('detailError');
+  errBox.replaceChildren();
+  if (!blank(r.error_message)) errBox.append(el('h3', {}, 'Error'), el('pre', {}, r.error_message));
+
+  $('detailDiff').replaceChildren(renderDiff(r.old_values, r.new_values));
+  $('detailCard').classList.remove('hidden');
+  $('detailCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeDetail() {
+  $('detailCard').classList.add('hidden');
+  document.querySelectorAll('#rows tr.sel').forEach(x => x.classList.remove('sel'));
+}
+$('btnCloseDetail').addEventListener('click', closeDetail);
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+function fmt(v) {
+  if (v === null) return 'null';
+  return typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
+}
+
+// Tabla campo | antes | despues; resalta lo que cambio cuando hay ambos lados.
+function renderDiff(oldV, newV) {
+  const hasOld = !blank(oldV), hasNew = !blank(newV);
+  if (!hasOld && !hasNew) {
+    return el('div', { class: 'hint' }, 'Este evento no guarda valores anteriores ni nuevos.');
+  }
+  if ((hasOld && !isPlainObject(oldV)) || (hasNew && !isPlainObject(newV))) {
+    const box = el('div');
+    if (hasOld) box.append(el('div', { class: 'hint' }, 'Antes'), el('pre', {}, fmt(oldV)));
+    if (hasNew) box.append(el('div', { class: 'hint' }, 'Después'), el('pre', {}, fmt(newV)));
+    return box;
+  }
+  const o = hasOld ? oldV : {}, n = hasNew ? newV : {};
+  const keys = [...new Set([...Object.keys(o), ...Object.keys(n)])];
+  const tbody = el('tbody');
+  let changed = 0;
+  for (const k of keys) {
+    const inO = Object.prototype.hasOwnProperty.call(o, k);
+    const inN = Object.prototype.hasOwnProperty.call(n, k);
+    const a = inO ? fmt(o[k]) : null, b = inN ? fmt(n[k]) : null;
+    const isChanged = hasOld && hasNew && a !== b;
+    if (isChanged) changed++;
+    tbody.append(el('tr', { class: isChanged ? 'changed' : '' },
+      el('td', { class: 'k mono' }, k),
+      el('td', { class: 'mono' }, a ?? dim('—')),
+      el('td', { class: 'mono' }, b ?? dim('—'))));
+  }
+  const note = hasOld && hasNew
+    ? (changed ? changed + (changed === 1 ? ' campo cambió (resaltado).' : ' campos cambiaron (resaltados).') : 'Ningún campo cambió.')
+    : (hasNew ? 'Solo valores nuevos (creación).' : 'Solo valores anteriores (eliminación).');
+  return el('div', {},
+    el('div', { class: 'hint', style: 'margin:0 0 8px' }, note),
+    el('div', { class: 'table-wrap' },
+      el('table', { class: 'diff' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'Campo'), el('th', {}, 'Antes'), el('th', {}, 'Después'))),
+        tbody)));
+}
+</script>
+</body>
+</html>

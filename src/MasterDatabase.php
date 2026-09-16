@@ -153,6 +153,18 @@ class MasterDatabase
     }
 
     /**
+     * All tenants, active AND inactive, with only the fields safe to display.
+     * For ops tools that label rows by tenant (public/audit_logs.php): the audit
+     * log keeps rows of tenants that were later deactivated, so no activo filter.
+     */
+    public function listTenants(): array
+    {
+        return $this->conexion->query(
+            'SELECT id, nombre, rnc, tipo, activo FROM tenants ORDER BY id'
+        )->fetchAll() ?: [];
+    }
+
+    /**
      * Update branding fields of a tenant (Representacion Impresa).
      * Only whitelisted columns; values may be null to clear them.
      * @param array $fields Subset of: pdf_template, pdf_accent_color, logo_path

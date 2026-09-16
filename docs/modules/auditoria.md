@@ -30,6 +30,7 @@ DDL: `db/master_migrations/006_add_audit_logs.sql`, espejado en
 | `UserAgentParser` | `src/Utils/UserAgentParser.php` | Parser ligero de User-Agent (sin Composer) |
 | `AuditMiddleware` | `src/Middleware/AuditMiddleware.php` | Capa fina opcional (boot + `logAccessDenied`) |
 | `auditLogController` | `src/Controllers/auditLogController.php` | `GET /api/audit-logs` (solo lectura, admin) |
+| Vista web de operaciones | `public/audit_logs.html` + `public/audit_logs.php` | Consulta de **todos** los tenants con `AUDIT_LOGS_TOKEN` (solo lectura) |
 
 Flujo: `AuthMiddleware::validateRequest()` puebla `RequestContext` en cada
 resultado válido (un solo punto cubre todos los controllers). El controller llama
@@ -94,6 +95,27 @@ hay `UPDATE`/`DELETE` sobre comprobantes emitidos.
 solicitante. Filtros: `user_id`, `module`, `action`, `entity_type`, `entity_id`,
 `success`, `from`, `to` (fecha/datetime), `page`, `pageSize` (máx 200).
 `old_values`/`new_values` se devuelven decodificados a objeto.
+
+## Vista web de operaciones
+
+`/api/public/audit_logs.html` — para consultar la bitácora **sin entrar a la base
+de datos**. A diferencia del endpoint anterior, ve **todos los tenants** (es una
+herramienta de operaciones, no del cliente). Solo lectura.
+
+- **Acceso:** token `AUDIT_LOGS_TOKEN` del `.env` del server (sin valor, o con el
+  placeholder `CAMBIAR`, responde 403). Viaja por POST, nunca en la URL. La
+  bitácora trae emails, IPs y valores de todos los tenants: token largo y
+  aleatorio, HTTPS, y considerar Basic Auth de cPanel sobre `/api/public/`.
+- **Filtros:** tenant (todos, uno, o "sin tenant" = login fallido / DGII
+  entrante), módulo, acción, resultado, rango de fechas (días completos) y texto
+  libre sobre usuario, email, id de entidad, descripción, endpoint e IP.
+- **Detalle:** clic en una fila → todos los campos + tabla campo / antes / después
+  con lo que cambió resaltado.
+- **Backend:** `public/audit_logs.php` (acciones `meta` y `search`, JSON). Usa
+  `AuditLogModel::searchAllTenants()` / `countAllTenants()`, las únicas lecturas
+  sin aislamiento por tenant — **no** usarlas desde controllers de la API.
+- Todo valor de la bitácora se pinta como texto (nunca `innerHTML`): un login
+  fallido puede traer HTML en el usuario.
 
 ## Cobertura actual
 

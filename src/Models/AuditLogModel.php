@@ -67,8 +67,60 @@ class AuditLogModel
      */
     public function search(array $filters, int $offset, int $limit): array
     {
-        [$where, $params] = self::buildWhere($filters);
-        $sql = 'SELECT ' . self::SELECT_COLS . ' FROM audit_logs WHERE ' . $where
+        return $this->fetchPage(self::buildWhere($filters, true), $offset, $limit);
+    }
+
+    /** Total de filas que cumplen los filtros (para paginacion). */
+    public function count(array $filters): int
+    {
+        return $this->fetchCount(self::buildWhere($filters, true));
+    }
+
+    // ------------------------------------------------------------------
+    // Vista de operaciones (TODOS los tenants) — solo public/audit_logs.php
+    // ------------------------------------------------------------------
+
+    /**
+     * Como search() pero SIN forzar el aislamiento por tenant: la usa la
+     * herramienta de operaciones public/audit_logs.php (token de ops del .env),
+     * que ve la bitacora de todos los tenants. NUNCA llamarla desde un controller
+     * de la API: esos usan search()/count() con el tenant del solicitante.
+     *
+     * tenant_id es opcional: ausente = todos; null = solo filas sin tenant (login
+     * fallido, DGII entrante); int = ese tenant. Ademas de los filtros de search()
+     * acepta `q`: texto libre sobre usuario, email, entidad, descripcion,
+     * endpoint e IP.
+     */
+    public function searchAllTenants(array $filters, int $offset, int $limit): array
+    {
+        return $this->fetchPage(self::buildWhere($filters, false), $offset, $limit);
+    }
+
+    /** Total para searchAllTenants() (misma semantica de filtros). */
+    public function countAllTenants(array $filters): int
+    {
+        return $this->fetchCount(self::buildWhere($filters, false));
+    }
+
+    /**
+     * Valores distintos de `module` o `action` en toda la bitacora, para poblar
+     * los filtros de la vista de operaciones. Columna por whitelist (va al SQL).
+     */
+    public function distinctValues(string $column): array
+    {
+        if (!in_array($column, ['module', 'action'], true)) {
+            throw new InvalidArgumentException("Columna no permitida: {$column}");
+        }
+        return $this->conexion
+            ->query("SELECT DISTINCT {$column} FROM audit_logs ORDER BY {$column}")
+            ->fetchAll(PDO::FETCH_COLUMN);
+    }
+
+    /** @param array{0:string,1:array} $where */
+    private function fetchPage(array $where, int $offset, int $limit): array
+    {
+        [$clause, $params] = $where;
+        $sql = 'SELECT ' . self::SELECT_COLS . ' FROM audit_logs WHERE ' . $clause
             . ' ORDER BY id DESC LIMIT :limit OFFSET :offset';
         $stmt = $this->conexion->prepare($sql);
         foreach ($params as $k => $v) {
@@ -80,26 +132,30 @@ class AuditLogModel
         return $stmt->fetchAll();
     }
 
-    /** Total de filas que cumplen los filtros (para paginacion). */
-    public function count(array $filters): int
+    /** @param array{0:string,1:array} $where */
+    private function fetchCount(array $where): int
     {
-        [$where, $params] = self::buildWhere($filters);
-        $stmt = $this->conexion->prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE ' . $where);
+        [$clause, $params] = $where;
+        $stmt = $this->conexion->prepare('SELECT COUNT(*) AS c FROM audit_logs WHERE ' . $clause);
         $stmt->execute($params);
         $row = $stmt->fetch();
         return (int) ($row['c'] ?? 0);
     }
 
-    /** @return array{0:string,1:array} clausula WHERE + parametros. */
-    private static function buildWhere(array $filters): array
+    /**
+     * @param bool $isolate true = tenant_id SIEMPRE presente (API, por tenant).
+     *                      false = solo si viene en $filters (vista de operaciones).
+     * @return array{0:string,1:array} clausula WHERE + parametros.
+     */
+    private static function buildWhere(array $filters, bool $isolate): array
     {
         $clauses = [];
         $params = [];
 
-        // tenant_id SIEMPRE presente para aislar (NULL valido para auditorias globales).
+        // Con $isolate, tenant_id SIEMPRE presente para aislar (NULL valido para auditorias globales).
         if (array_key_exists('tenant_id', $filters) && $filters['tenant_id'] === null) {
             $clauses[] = 'tenant_id IS NULL';
-        } else {
+        } elseif ($isolate || array_key_exists('tenant_id', $filters)) {
             $clauses[] = 'tenant_id = :tenant_id';
             $params[':tenant_id'] = (int) ($filters['tenant_id'] ?? 0);
         }
@@ -119,6 +175,20 @@ class AuditLogModel
             $clauses[] = 'created_at <= :to';
             $params[':to'] = $filters['to'];
         }
-        return [implode(' AND ', $clauses), $params];
+
+        // Texto libre. Un placeholder por columna: con prepares nativos un mismo
+        // :q repetido no es valido. % y _ del usuario se escapan (literal, no comodin).
+        $q = trim((string) ($filters['q'] ?? ''));
+        if ($q !== '') {
+            $like = '%' . addcslashes($q, '%_\\') . '%';
+            $ors = [];
+            foreach (['username', 'email', 'entity_id', 'description', 'endpoint', 'ip_address'] as $i => $col) {
+                $ors[] = "{$col} LIKE :q{$i}";
+                $params[":q{$i}"] = $like;
+            }
+            $clauses[] = '(' . implode(' OR ', $ors) . ')';
+        }
+
+        return [$clauses ? implode(' AND ', $clauses) : '1=1', $params];
     }
 }
