@@ -237,9 +237,11 @@ $('btnConnect').addEventListener('click', connect);
 $('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') connect(); });
 
 // ---- Buscar -----------------------------------------------------------------
+// El filtro de accion va como log_action, NO como action: "action" ya identifica
+// la operacion del handler (meta | search) y el segundo valor pisaria al primero.
 function filterValues() {
   return {
-    tenant: $('fTenant').value, module: $('fModule').value, action: $('fAction').value,
+    tenant: $('fTenant').value, module: $('fModule').value, log_action: $('fAction').value,
     success: $('fSuccess').value, from: $('fFrom').value, to: $('fTo').value, q: $('fQ').value.trim(),
   };
 }

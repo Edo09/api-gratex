@@ -14,9 +14,10 @@
  * Acciones (POST, campo "action"; responde JSON):
  *   meta   -> tenants + modulos y acciones distintos (para poblar los filtros)
  *   search -> filas paginadas. Filtros: tenant ('' todos | 'none' sin tenant |
- *             id), module, action, success ('' | 1 | 0), from / to (YYYY-MM-DD,
- *             dias completos), q (texto: usuario, email, entidad, descripcion,
- *             endpoint, IP), page, page_size (25 | 50 | 100)
+ *             id), module, log_action (el filtro por accion; se llama asi porque
+ *             `action` ya nombra la operacion de arriba), success ('' | 1 | 0),
+ *             from / to (YYYY-MM-DD, dias completos), q (texto: usuario, email,
+ *             entidad, descripcion, endpoint, IP), page, page_size (25 | 50 | 100)
  *
  * El token se lee de AUDIT_LOGS_TOKEN en el .env del server (nunca hardcodeado en
  * el repo). La bitacora trae emails, IPs y valores antes/despues de todos los
@@ -109,13 +110,16 @@ try {
                 $filters['tenant_id'] = (int) $tenant;
             }
 
-            foreach (['module', 'action'] as $f) {
-                $v = trim((string) ($_POST[$f] ?? ''));
+            // El filtro de accion llega como log_action: "action" ya identifica la
+            // operacion (meta | search), y con el mismo nombre el segundo valor del
+            // formulario pisa al primero y el handler se queda sin operacion.
+            foreach (['module' => 'module', 'log_action' => 'action'] as $campo => $filtro) {
+                $v = trim((string) ($_POST[$campo] ?? ''));
                 if (strlen($v) > 60) {
-                    alFail(422, "{$f} demasiado largo.");
+                    alFail(422, "{$campo} demasiado largo.");
                 }
                 if ($v !== '') {
-                    $filters[$f] = $v;
+                    $filters[$filtro] = $v;
                 }
             }
 
