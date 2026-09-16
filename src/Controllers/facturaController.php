@@ -650,10 +650,23 @@ function handlePreview(clientModel $clientModel): void
 
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
     $anchoPos = RepresentacionImpresa::anchoPos($input);
-    $pdfContent = RepresentacionImpresa::generar($factura, $client ?? [], false, $anchoPos);
-
     $filenameBase = ($input['ncf'] ?? 'preview') . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? $input['format'] ?? 'base64';
+
+    // format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
+    if ($format === 'datos') {
+        if ($anchoPos === null) {
+            respond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            return;
+        }
+        echo json_encode([
+            'status' => true,
+            'data'   => RepresentacionImpresa::datosRecibo($factura, $client ?? [], false, $anchoPos, 'Preview_' . $filenameBase),
+        ]);
+        return;
+    }
+
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?? [], false, $anchoPos);
 
     if ($format === 'download') {
         header('Content-Type: application/pdf');
@@ -729,10 +742,25 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
     // defecto, la hoja carta.
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
     $anchoPos = RepresentacionImpresa::anchoPos();
-    $pdfContent = RepresentacionImpresa::generar($factura, $client, false, $anchoPos);
-
     $filenameBase = ($factura['e_ncf'] ?? $factura['no_factura']) . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? 'download';
+
+    // ?format=datos -> datos del recibo de tirilla para imprimirlo como pagina
+    // web en vez de PDF (el navegador fija el largo del papel). Ver
+    // RepresentacionImpresa::datosRecibo.
+    if ($format === 'datos') {
+        if ($anchoPos === null) {
+            respond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            return;
+        }
+        echo json_encode([
+            'status' => true,
+            'data'   => RepresentacionImpresa::datosRecibo($factura, $client, false, $anchoPos, 'Factura_' . $filenameBase),
+        ]);
+        return;
+    }
+
+    $pdfContent = RepresentacionImpresa::generar($factura, $client, false, $anchoPos);
     if ($format === 'base64') {
         echo json_encode([
             'status' => true,

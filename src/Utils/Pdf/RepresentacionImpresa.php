@@ -72,6 +72,19 @@ final class RepresentacionImpresa
     }
 
     /**
+     * Datos del recibo de tirilla para imprimirlo como pagina web
+     * (?format=datos en los endpoints de PDF). Con un PDF, el largo del papel
+     * lo decide el tamano elegido en el driver; una pagina web le dice al
+     * navegador el largo exacto. Mismos textos que el PDF: ReciboPos::datos().
+     *
+     * @param string $nombre Nombre del documento sin extension (titulo de la pagina).
+     */
+    public static function datosRecibo(array $factura, array $cliente, bool $noElectronica, int $anchoPos, string $nombre): array
+    {
+        return ['nombre' => $nombre] + ReciboPos::paraFactura($factura, $cliente, $noElectronica, $anchoPos)->datos();
+    }
+
+    /**
      * Sufijo del nombre de archivo (_POS80, _POS76, _POS72). Sin el, descargar
      * dos formatos de la misma factura deja dos archivos con el mismo nombre y
      * el segundo pisa al primero (o el navegador lo renombra a "(1)", que no

@@ -4,9 +4,9 @@
 //   GET    /api/facturas-simples              -> lista paginada (?page,?pageSize,?query)
 //   GET    /api/facturas-simples/{id}          -> una factura con sus lineas
 //   GET    /api/facturas-simples?id={id}       -> idem
-//   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64, ?formato=pos|pos76|pos72)
+//   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64|datos, ?formato=pos|pos76|pos72)
 //   POST   /api/facturas-simples              -> crear
-//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64, ?formato=pos|pos76|pos72)
+//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64|datos, ?formato=pos|pos76|pos72)
 //   PUT    /api/facturas-simples/{id}          -> actualizar (id tambien valido en el body)
 //   DELETE /api/facturas-simples/{id}          -> eliminar (id tambien valido en el body)
 //
@@ -15,7 +15,8 @@
 //
 // ?formato=pos (o 80mm/tirilla) devuelve la tirilla termica de 80 mm en vez de
 // la hoja carta; pos76 y pos72, la de ese ancho. Mismo contenido, otro papel.
-// Ver RepresentacionImpresa.
+// Con format=datos, en vez del PDF de la tirilla devuelve sus datos para
+// imprimirla como pagina web. Ver RepresentacionImpresa.
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
@@ -185,10 +186,21 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
     // defecto, la hoja carta. true = diseño NCF, sin timbre ni etiquetas de e-CF.
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
     $anchoPos = RepresentacionImpresa::anchoPos($body);
-    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $anchoPos);
-    $nombre = 'Preview_factura_simple' . RepresentacionImpresa::sufijo($anchoPos) . '.pdf';
-
+    $base = 'Preview_factura_simple' . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? $body['format'] ?? 'base64';
+
+    // format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
+    if ($format === 'datos') {
+        if ($anchoPos === null) {
+            fsRespond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            return;
+        }
+        fsRespond(true, RepresentacionImpresa::datosRecibo($factura, $client ?: [], true, $anchoPos, $base));
+        return;
+    }
+
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $anchoPos);
+    $nombre = $base . '.pdf';
     if ($format === 'download') {
         header('Content-Type: application/pdf');
         header('Content-Disposition: attachment; filename="' . $nombre . '"');
@@ -234,10 +246,21 @@ function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientMod
     // defecto, la hoja carta. true = diseño NCF, sin timbre ni etiquetas de e-CF.
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
     $anchoPos = RepresentacionImpresa::anchoPos();
-    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $anchoPos);
-
-    $filename = 'Factura_' . ($factura['no_factura'] ?? $id) . RepresentacionImpresa::sufijo($anchoPos) . '.pdf';
+    $base = 'Factura_' . ($factura['no_factura'] ?? $id) . RepresentacionImpresa::sufijo($anchoPos);
     $format = $_GET['format'] ?? 'base64';
+
+    // ?format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
+    if ($format === 'datos') {
+        if ($anchoPos === null) {
+            fsRespond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            return;
+        }
+        fsRespond(true, RepresentacionImpresa::datosRecibo($factura, $client ?: [], true, $anchoPos, $base));
+        return;
+    }
+
+    $pdfContent = RepresentacionImpresa::generar($factura, $client ?: [], true, $anchoPos);
+    $filename = $base . '.pdf';
     if ($format === 'download') {
         header('Content-Type: application/pdf');
         header('Content-Disposition: attachment; filename="' . $filename . '"');

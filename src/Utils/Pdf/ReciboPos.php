@@ -38,32 +38,41 @@ final class ReciboPos
      * La pagina tiene que medir lo que el DRIVER deja imprimir, no lo que mide
      * el rollo: con "Tamano real", Chrome pega la pagina del PDF al borde
      * izquierdo del area imprimible y corta lo que pase de su ancho, sin
-     * centrar. Verificado con una TM-U220 (papel "76(63.5) x 3276 mm"): una
-     * pagina de 76 mm con 6 mm de margen salio con 6 mm en blanco a la
-     * izquierda y 6,5 mm cortados a la derecha, justo donde van los montos.
+     * centrar. Visto en dos impresoras: con una pagina del ancho del rollo,
+     * la TM-U220 ("76(63.5) x 3276 mm") y una termica de 80 ("80(72.1) x
+     * 297 mm") salieron con los montos cortados a la derecha.
      *
-     *  - 80: pagina de rollo completo, 72 mm utiles (sin verificar en papel).
+     *  - 80: termica; el driver imprime 72,1 mm. Verificado.
      *  - 76: impacto tipo TM-U220; el driver imprime 63,5 mm. Verificado.
-     *  - 72: rollo angosto, 64 mm utiles (sin verificar en papel).
+     *  - 72: rollo angosto; se supone que imprime 8 mm menos que el rollo, como
+     *        la de 80 (sin verificar en papel).
+     *
+     * Pagina de 72 y no 72,1 en la de 80: si otro driver dice 72,0 tambien
+     * cabe, y si dice 80 solo sobra blanco a la derecha. Quedarse corto deja
+     * blanco; pasarse corta montos.
      *
      * Para ajustar un modelo que corte o deje demasiado blanco, se toca solo
      * esta tabla: el numero entre parentesis del papel en el dialogo de
      * impresion es el ancho de pagina correcto. Todo el dibujo sale de aqui.
      */
     private const MEDIDAS = [
-        80 => [80.0, 4.0],
+        80 => [72.0, 1.0],
         76 => [63.5, 1.0],
-        72 => [72.0, 4.0],
+        72 => [64.0, 1.0],
     ];
 
     /**
-     * Anchos internos, pensados sobre los 72 mm utiles del rollo de 80 y
-     * escalados al ancho util de cada rollo. En 80 mm salen identicos a los de
-     * siempre.
+     * Anchos internos, pensados sobre 72 mm utiles (el primer diseno) y
+     * escalados al ancho util de cada opcion.
      */
     private const REFERENCIA_UTIL = 72.0;
     private const DETALLE_IZQUIERDA = 44.0;
     private const TOTALES_ETIQUETA = 38.0;
+
+    /** Textos fijos: los usan el PDF y datos(), para que digan lo mismo. */
+    private const AVISO_PREVIEW = 'VISTA PREVIA - SIN VALIDEZ FISCAL';
+    private const LEYENDA_QR = 'Consulte la validez de este comprobante escaneando el código QR en el portal de la DGII.';
+    private const GRACIAS = '¡Gracias por su compra!';
 
     /** Lienzo de la pasada de medicion. */
     private const ALTO_MEDICION = 4000.0;
@@ -79,6 +88,7 @@ final class ReciboPos
     private EcfDocumento $doc;
     private string $fuente;
     private ?string $qrPng = null;
+    private int $opcion;
     private float $anchoPagina;
     private float $margen;
     private float $util;
@@ -91,6 +101,7 @@ final class ReciboPos
             );
         }
         $this->doc = $doc;
+        $this->opcion = $ancho;
         [$this->anchoPagina, $this->margen] = self::MEDIDAS[$ancho];
         $this->util = $this->anchoPagina - 2 * $this->margen;
 
@@ -157,6 +168,82 @@ final class ReciboPos
     }
 
     /**
+     * Lo mismo que dibuja generar(), como datos, para imprimir el recibo como
+     * pagina web. Imprimiendo un PDF el largo del papel lo decide el tamano
+     * elegido en el driver (sobra papel en blanco, o se corta una factura
+     * larga); una pagina web le dice al navegador el largo exacto.
+     *
+     * Los textos salen ya formateados y de los mismos helpers que usa el PDF:
+     * las dos salidas dicen lo mismo, solo cambia quien las dibuja. El logo y
+     * el QR van como data URI para que la pagina no dependa de otra peticion.
+     */
+    public function datos(): array
+    {
+        $emisor = $this->doc->emisor();
+        $receptor = $this->doc->receptor();
+        $timbre = $this->doc->timbre();
+
+        $qr = null;
+        if ($timbre !== null) {
+            $png = EcfDocumento::generarQrPng($timbre['url']);
+            if ($png !== null) {
+                $contenido = @file_get_contents($png);
+                @unlink($png);
+                if ($contenido !== false && $contenido !== '') {
+                    $qr = 'data:image/png;base64,' . base64_encode($contenido);
+                }
+            }
+        }
+
+        $lineas = [];
+        foreach ($this->doc->lineas() as $linea) {
+            $lineas[] = [
+                'descripcion'     => html_entity_decode($linea['descripcion']),
+                'cantidad_precio' => $this->textoCantidadPrecio($linea),
+                'itbis'           => $this->textoItbis($linea),
+                'valor'           => number_format($linea['valor'], 2),
+            ];
+        }
+
+        $totales = [];
+        foreach ($this->doc->filasTotales() as [$etiqueta, $valor, $esTotal]) {
+            $totales[] = [
+                'etiqueta' => $etiqueta,
+                'valor'    => $this->textoTotal($valor, (bool) $esTotal),
+                'total'    => (bool) $esTotal,
+            ];
+        }
+
+        return [
+            'papel'  => ['opcion' => $this->opcion, 'ancho_mm' => $this->anchoPagina, 'margen_mm' => $this->margen],
+            'fuente' => $this->fuente,
+            'logo'   => $this->logoDataUri(),
+            'emisor' => [
+                'razon_social' => trim($emisor['razon_social']),
+                'rnc'          => trim($emisor['rnc']) !== '' ? 'RNC: ' . $emisor['rnc'] : '',
+                'direccion'    => trim($emisor['direccion']),
+                'contacto'     => $this->contactoEmisor($emisor),
+            ],
+            'titulo'         => mb_strtoupper($this->doc->titulo(), 'UTF-8'),
+            'identificacion' => $this->paresIdentificacion(),
+            'receptor'       => $receptor['mostrar']
+                ? ['pares' => $this->paresReceptor($receptor), 'contacto' => $receptor['contacto']]
+                : null,
+            'lineas'  => $lineas,
+            'motivo'  => $this->doc->motivoEnFilaAparte(),
+            'totales' => $totales,
+            'timbre'  => $timbre === null ? null : [
+                'qr'               => $qr,
+                'aviso_preview'    => $timbre['preview'] ? self::AVISO_PREVIEW : '',
+                'codigo_seguridad' => $timbre['codigo_seguridad'],
+                'fecha_firma'      => $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D',
+            ],
+            'leyenda_qr' => $this->doc->esElectronica() ? self::LEYENDA_QR : '',
+            'gracias'    => self::GRACIAS,
+        ];
+    }
+
+    /**
      * Dibuja la tirilla completa sobre una pagina de anchoPagina x $alto mm.
      * @param array{url:string,codigo_seguridad:string,fecha_firma:string,preview:bool}|null $timbre
      */
@@ -206,12 +293,9 @@ final class ReciboPos
         if (trim($emisor['direccion']) !== '') {
             $pdf->MultiCell($this->util, 3, $this->enc($emisor['direccion']), 0, 'C');
         }
-        $contacto = array_filter([
-            trim($emisor['telefono']) !== '' ? 'Tel.: ' . $emisor['telefono'] : '',
-            trim($emisor['correo']),
-        ]);
-        if ($contacto !== []) {
-            $pdf->MultiCell($this->util, 3, $this->enc(implode(' - ', $contacto)), 0, 'C');
+        $contacto = $this->contactoEmisor($emisor);
+        if ($contacto !== '') {
+            $pdf->MultiCell($this->util, 3, $this->enc($contacto), 0, 'C');
         }
 
         $this->separador($pdf);
@@ -225,26 +309,7 @@ final class ReciboPos
         $pdf->MultiCell($this->util, 3.6, $this->enc(mb_strtoupper($doc->titulo(), 'UTF-8')), 0, 'C');
         $pdf->Ln(1);
 
-        $pares = [];
-        if ($doc->esElectronica()) {
-            // La norma DGII prohibe rotular el e-NCF como "Factura No.".
-            $pares[] = ['e-NCF', $doc->eNcf()];
-            $pares[] = ['Fecha de Emisión', $doc->fechaLarga()];
-            $pares[] = ['Fecha de Vencimiento', $doc->fechaVencimiento()];
-        } else {
-            $pares[] = ['Factura No.', $doc->noFactura()];
-            if ($doc->ncfTradicional() !== '') {
-                $pares[] = ['NCF', $doc->ncfTradicional()];
-            }
-            $pares[] = ['Fecha', $doc->fechaLarga()];
-        }
-
-        // Notas E33/E34: el NCF modificado es obligatorio en la RI.
-        $nota = $doc->notaModificacion();
-        if ($nota !== null && $nota['ncf'] !== '') {
-            $pares[] = ['NCF Modificado', $nota['ncf'] . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : '')];
-        }
-        $this->bloquePares($pdf, $pares);
+        $this->bloquePares($pdf, $this->paresIdentificacion());
 
         $this->separador($pdf);
     }
@@ -256,12 +321,7 @@ final class ReciboPos
             return;
         }
 
-        $pares = [];
-        if ($r['rnc'] !== '') {
-            $pares[] = [$r['label_id'], $r['rnc']];
-        }
-        $pares[] = ['Razón Social', $r['razon_social']];
-        $this->bloquePares($pdf, $pares);
+        $this->bloquePares($pdf, $this->paresReceptor($r));
         if ($r['contacto'] !== '') {
             $pdf->SetFont($this->fuente, '', 7);
             $pdf->MultiCell($this->util, 3.2, $this->enc($r['contacto']), 0, 'L');
@@ -292,8 +352,8 @@ final class ReciboPos
             $pdf->MultiCell($this->util, 3.2, $this->enc(html_entity_decode($linea['descripcion'])), 0, 'L');
 
             $pdf->SetFont($this->fuente, '', 6.5);
-            $izq = $linea['cantidad'] . ' ' . $linea['unidad'] . ' x ' . number_format($linea['precio'], 2);
-            $itbis = $linea['itbis'] > 0 ? 'ITBIS ' . number_format($linea['itbis'], 2) : '';
+            $izq = $this->textoCantidadPrecio($linea);
+            $itbis = $this->textoItbis($linea);
             // Con montos de siete cifras "cant x precio (ITBIS ...)" se sale de
             // su columna y se monta sobre el valor. Si no cabe, el ITBIS baja a
             // su propio renglon en vez de recortarse: es un dato obligatorio.
@@ -327,7 +387,7 @@ final class ReciboPos
         $filas = [];
         $valorMasAncho = 0.0;
         foreach ($this->doc->filasTotales() as [$etiqueta, $valor, $esTotal]) {
-            $texto = ($esTotal ? 'RD$' : '') . number_format((float) $valor, 2);
+            $texto = $this->textoTotal($valor, (bool) $esTotal);
             $pdf->SetFont($this->fuente, $esTotal ? 'B' : '', $esTotal ? 9 : 7);
             $valorMasAncho = max($valorMasAncho, $pdf->GetStringWidth($texto));
             $filas[] = [$etiqueta, $texto, $esTotal];
@@ -373,7 +433,7 @@ final class ReciboPos
 
         if ($timbre['preview']) {
             $pdf->SetFont($this->fuente, 'B', 7);
-            $pdf->MultiCell($this->util, 3.2, $this->enc('VISTA PREVIA - SIN VALIDEZ FISCAL'), 0, 'C');
+            $pdf->MultiCell($this->util, 3.2, $this->enc(self::AVISO_PREVIEW), 0, 'C');
         }
 
         $pdf->SetFont($this->fuente, 'B', 6.5);
@@ -393,10 +453,100 @@ final class ReciboPos
     {
         $pdf->SetFont($this->fuente, '', 6);
         if ($this->doc->esElectronica()) {
-            $pdf->MultiCell($this->util, 2.8, $this->enc('Consulte la validez de este comprobante escaneando el código QR en el portal de la DGII.'), 0, 'C');
+            $pdf->MultiCell($this->util, 2.8, $this->enc(self::LEYENDA_QR), 0, 'C');
         }
         $pdf->Ln(1);
-        $pdf->MultiCell($this->util, 2.8, $this->enc('¡Gracias por su compra!'), 0, 'C');
+        $pdf->MultiCell($this->util, 2.8, $this->enc(self::GRACIAS), 0, 'C');
+    }
+
+    // ------------------------------------------------------------------
+    // Textos (compartidos por el PDF y datos())
+    // ------------------------------------------------------------------
+
+    /** "Tel.: 809... - correo", o '' si no hay ninguno de los dos. */
+    private function contactoEmisor(array $emisor): string
+    {
+        return implode(' - ', array_filter([
+            trim($emisor['telefono']) !== '' ? 'Tel.: ' . $emisor['telefono'] : '',
+            trim($emisor['correo']),
+        ]));
+    }
+
+    /** @return array<int,array{0:string,1:string}> */
+    private function paresIdentificacion(): array
+    {
+        $doc = $this->doc;
+        $pares = [];
+        if ($doc->esElectronica()) {
+            // La norma DGII prohibe rotular el e-NCF como "Factura No.".
+            $pares[] = ['e-NCF', $doc->eNcf()];
+            $pares[] = ['Fecha de Emisión', $doc->fechaLarga()];
+            $pares[] = ['Fecha de Vencimiento', $doc->fechaVencimiento()];
+        } else {
+            $pares[] = ['Factura No.', $doc->noFactura()];
+            if ($doc->ncfTradicional() !== '') {
+                $pares[] = ['NCF', $doc->ncfTradicional()];
+            }
+            $pares[] = ['Fecha', $doc->fechaLarga()];
+        }
+
+        // Notas E33/E34: el NCF modificado es obligatorio en la RI.
+        $nota = $doc->notaModificacion();
+        if ($nota !== null && $nota['ncf'] !== '') {
+            $pares[] = ['NCF Modificado', $nota['ncf'] . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : '')];
+        }
+        return $pares;
+    }
+
+    /**
+     * @param array{label_id:string,rnc:string,razon_social:string} $r EcfDocumento::receptor()
+     * @return array<int,array{0:string,1:string}>
+     */
+    private function paresReceptor(array $r): array
+    {
+        $pares = [];
+        if ($r['rnc'] !== '') {
+            $pares[] = [$r['label_id'], $r['rnc']];
+        }
+        $pares[] = ['Razón Social', $r['razon_social']];
+        return $pares;
+    }
+
+    /** "2 UND x 950.00" */
+    private function textoCantidadPrecio(array $linea): string
+    {
+        return $linea['cantidad'] . ' ' . $linea['unidad'] . ' x ' . number_format($linea['precio'], 2);
+    }
+
+    /** "ITBIS 171.00", o '' si la linea no lleva. */
+    private function textoItbis(array $linea): string
+    {
+        return $linea['itbis'] > 0 ? 'ITBIS ' . number_format($linea['itbis'], 2) : '';
+    }
+
+    /** El total lleva la moneda; las demas filas, solo el monto. */
+    private function textoTotal($valor, bool $esTotal): string
+    {
+        return ($esTotal ? 'RD$' : '') . number_format((float) $valor, 2);
+    }
+
+    /** Logo del tenant como data URI (PNG o JPG), o null si no hay o no se puede leer. */
+    private function logoDataUri(): ?string
+    {
+        $ruta = BrandingResolver::logoPath();
+        if ($ruta === null) {
+            return null;
+        }
+        $info = @getimagesize($ruta);
+        $mime = is_array($info) ? (string) ($info['mime'] ?? '') : '';
+        if (!in_array($mime, ['image/png', 'image/jpeg'], true)) {
+            return null;
+        }
+        $contenido = @file_get_contents($ruta);
+        if ($contenido === false || $contenido === '') {
+            return null;
+        }
+        return 'data:' . $mime . ';base64,' . base64_encode($contenido);
     }
 
     // ------------------------------------------------------------------
@@ -418,7 +568,7 @@ final class ReciboPos
      * Se topa en el 55% del papel para que al valor siempre le quede sitio.
      *
      * Una etiqueta que no cabe ni en ese tope (en Courier, "Identificación
-     * Tributaria:" mide 38,5 mm y en 61,5 mm utiles el tope es 33,8) va en su
+     * Tributaria:" mide 38,5 mm y con 70 mm utiles el tope es 38,5) va en su
      * propio renglon con el valor debajo: montada sobre el valor no se leeria.
      *
      * @param array<int,array{0:string,1:string}> $pares

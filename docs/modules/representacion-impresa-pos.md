@@ -32,6 +32,36 @@ Valores aceptados (`RepresentacionImpresa::interpretarFormato`):
 El archivo descargado lleva el sufijo `_POS80`, `_POS76` o `_POS72` para que los
 formatos de la misma factura no se pisen y el nombre diga qué ancho salió.
 
+### `format=datos`: el recibo como datos
+
+Con `format=datos` (query o cuerpo) y un `formato` de tirilla, los cuatro
+endpoints devuelven, en vez del PDF, los datos del recibo para
+[imprimirlo como página web](#impresión-como-página-web):
+`{status:true, data: ReciboDatos}`. Sin `formato` de tirilla responden `422`.
+
+`ReciboPos::datos()` arma los textos **ya formateados** con los mismos helpers
+que dibujan el PDF (`paresIdentificacion`, `paresReceptor`, `textoCantidadPrecio`,
+`textoItbis`, `textoTotal`, `contactoEmisor`), así que las dos salidas dicen lo
+mismo. El logo y el QR van como data URI (PNG/JPG), para que la página no tenga
+que pedir nada más. Forma (tipo `ReciboDatos` en `src/api/types.ts` del front):
+
+```
+nombre            "Factura_E310000000011_POS80"
+papel             { opcion: 80, ancho_mm: 72, margen_mm: 1 }
+fuente            "Arial" | "Times" | "Courier"
+logo              data URI | null
+emisor            { razon_social, rnc: "RNC: …", direccion, contacto: "Tel.: … - correo" }
+titulo            "FACTURA DE CRÉDITO FISCAL ELECTRÓNICA"
+identificacion    [["e-NCF","E31…"], ["Fecha de Emisión","…"], …]
+receptor          { pares: [["RNC Cliente","…"], ["Razón Social","…"]], contacto } | null
+lineas            [{ descripcion, cantidad_precio: "1 UND x 950.00", itbis: "ITBIS 171.00" | "", valor: "950.00" }]
+motivo            "" | motivo E33/E34 que no cupo en una línea
+totales           [{ etiqueta: "Total", valor: "RD$1,121.00", total: true }, …]
+timbre            { qr: data URI | null, aviso_preview, codigo_seguridad, fecha_firma } | null
+leyenda_qr        "Consulte la validez…" | "" (no electrónica)
+gracias           "¡Gracias por su compra!"
+```
+
 ## Arquitectura
 
 ```
@@ -73,36 +103,40 @@ factura de 60 líneas da ≈ 72 cm.
 **La página tiene que medir lo que el driver deja imprimir, no lo que mide el
 rollo.** Con "Tamaño real", Chrome pega la página del PDF al borde izquierdo del
 área imprimible y corta lo que pase de su ancho: no la centra ni la reescala.
-Se vio con una Epson TM-U220, cuyo papel en el diálogo es `76(63.5) x 3276 mm`:
-la primera versión, con página de 76 mm y 6 mm de margen, salió con 6 mm en
-blanco a la izquierda y 6,5 mm cortados a la derecha — el nombre del emisor, la
-columna VALOR y el total.
+Se vio en dos impresoras con la primera versión, que usaba página del ancho del
+rollo con 4–6 mm de margen:
+
+- Epson TM-U220, papel `76(63.5) x 3276 mm`: 6 mm en blanco a la izquierda y
+  6,5 mm cortados a la derecha — el nombre del emisor, la columna VALOR y el total.
+- Térmica de 80 mm, papel `80(72.1) x 297 mm`: 4 mm en blanco a la izquierda y
+  la columna VALOR y el total cortados.
 
 | Opción | Página | Margen por lado | Ancho útil | Estado |
 |---|---|---|---|---|
-| 80 mm | 80 mm | 4 mm | 72 mm | sin verificar en papel |
+| 80 mm | 72 mm | 1 mm | 70 mm | verificado (`80(72.1)`) |
 | 76 mm | 63,5 mm | 1 mm | 61,5 mm | verificado con TM-U220 (`76(63.5)`) |
-| 72 mm | 72 mm | 4 mm | 64 mm | sin verificar en papel |
+| 72 mm | 64 mm | 1 mm | 62 mm | supuesto: 8 mm menos que el rollo, como la de 80 — sin verificar |
 
 **Para ajustar un modelo** se toca solo `ReciboPos::MEDIDAS`: el número entre
 paréntesis del papel en el diálogo de impresión (`76(63.5)`, `80(72.1)`…) es el
-ancho de página correcto. Si un driver de 80 mm muestra `80(72.1)`, la página de
-80 mm se cortará igual que la de 76 y hay que bajarla a ese ancho. Para agregar
-una opción basta una fila ahí (y el valor en `AnchoTirilla` del frontend).
+ancho de página correcto. Ante la duda, quedarse corto: una página más angosta
+que el área imprimible solo deja blanco a la derecha; una más ancha corta los
+montos. Por eso la de 80 usa 72 y no 72,1. Para agregar una opción basta una
+fila ahí (y el valor en `AnchoTirilla` del frontend).
 
 Qué cambia con el ancho y qué no:
 
 - **Escalan** las dos columnas con medida fija, pensadas sobre 72 mm útiles: el
   detalle (44 mm para "cant × precio", el resto para el valor) y los totales
-  (38 mm para la etiqueta). En 80 mm salen idénticas a las de antes.
+  (38 mm para la etiqueta).
 - **No escalan** el QR (26 mm: su tamaño es lo que asegura que el lector lo
-  tome, y cabe en 64 mm), el logo (caja de 34 × 14 mm) ni los tamaños de letra.
+  tome, y cabe en el ancho útil más angosto, 61,5 mm), el logo (caja de 34 × 14 mm) ni los tamaños de letra.
 - **Totales:** la columna de etiquetas cede cuando un monto no cabe en la suya.
   En Courier, `RD$99,999,999.99` en negrita mide 30,5 mm y en 64 mm útiles no
   entra en la proporción de 61,5 mm; las etiquetas son cortas y sí caben en lo que queda.
 - **Pares etiqueta: valor** (e-NCF, fechas, comprador): una etiqueta que no cabe
   en el 55 % del ancho va en su propio renglón con el valor debajo. Solo pasa con
-  "Identificación Tributaria" (E47) en Courier en 64 y 61,5 mm.
+  "Identificación Tributaria" (E47) en Courier, en las tres opciones.
 
 Medido con las métricas de FPDF para Arial, Times y Courier (montos de hasta
 `99,999,999.99`): todo cabe en los tres anchos.
@@ -142,9 +176,11 @@ por si un cliente quiere Courier para que parezca ticket.
 
 ## Frontend
 
-`FormatoImpresion = 'carta' | 'pos'` y `AnchoTirilla = 72 | 76 | 80` en
-`src/api/types.ts`. Botón **Imprimir recibo {ancho} mm** (icono `printer`) junto
-al de PDF en:
+`FormatoImpresion = 'carta' | 'pos'`, `AnchoTirilla = 72 | 76 | 80`,
+`ModoImpresion = 'web' | 'pdf'` y `ReciboDatos` en `src/api/types.ts`. Botón
+**Imprimir recibo {ancho} mm** (icono `printer`) junto al de PDF en los sitios de
+abajo; los tres llaman a `imprimirRecibo()` (`src/features/invoices/imprimirRecibo.ts`),
+que decide entre página web y PDF según el modo configurado:
 
 - `InvoiceDetailView` — factura e-CF ya emitida (adonde lleva el formulario tras
   emitir, que es el momento en que se entrega el papel al cliente).
@@ -154,7 +190,8 @@ al de PDF en:
 
 ### Ancho por equipo
 
-El ancho se elige en **Configuración → Impresora de recibos** y se guarda en el
+El ancho y el modo (página web, por defecto, o PDF) se eligen en
+**Configuración → Impresora de recibos** y se guardan en el
 navegador (`src/stores/impresora.ts`, clave `fiscalo.impresora`), **no** en el
 backend: el rollo es de la impresora conectada a cada caja, y un mismo negocio
 puede tener una térmica de 80 mm en una caja y una de impacto de 76 en otra. Por
@@ -171,10 +208,49 @@ frontend.**
 ## Impresión
 
 El botón de tirilla **abre el diálogo de impresión directamente** — en mostrador,
-"abrir pestaña, Ctrl+P, volver" son dos pasos de más con el cliente delante. Lo
-hace `printDocument()` (`src/lib/file.ts`): carga el PDF en un iframe oculto y
-llama a `print()` sobre él. La hoja carta sigue abriéndose en una pestaña, que es
-lo que se quiere cuando se trata de revisarla.
+"abrir pestaña, Ctrl+P, volver" son dos pasos de más con el cliente delante. La
+hoja carta sigue abriéndose en una pestaña, que es lo que se quiere cuando se
+trata de revisarla.
+
+### Impresión como página web
+
+Es el modo por defecto. Imprimiendo un PDF, Chrome usa el **tamaño de papel del
+driver** (ver [Ajustes](#ajustes-de-la-impresora-una-sola-vez)): sale papel en
+blanco hasta completar la hoja, o se corta una factura más larga que ella. Una
+página HTML puede decirle al navegador el tamaño de la hoja con `@page { size }`.
+
+1. `imprimirRecibo()` pide `format=datos` y `reciboHtml()`
+   (`src/features/invoices/reciboHtml.ts`) arma la página: mismos tamaños de letra
+   y altos de renglón que `ReciboPos`, todo el texto escapado, y solo imágenes
+   `data:image/png|jpeg;base64`. El texto que no cabe se parte solo, así que no hay
+   que medir etiquetas ni montos como en el PDF.
+2. `printHtml()` (`src/lib/printHtml.ts`) la carga en un iframe **con el ancho del
+   papel** (los saltos de línea dependen de él), espera imágenes y fuentes, mide
+   el alto de `.recibo` y agrega `@page { size: <ancho>mm <alto>mm; margin: 0 }`
+   (`reglaPagina`: alto redondeado hacia arriba + 1 mm, para que una fracción de
+   más no abra una segunda hoja casi vacía; nunca menor que el ancho).
+3. Llama a `print()` sobre el iframe. Si el navegador no lo deja, abre la página
+   —ya con la regla `@page`— en otra pestaña para imprimirla con Ctrl+P.
+
+Verificado con Chrome 152 headless (`--print-to-pdf`, que usa el mismo motor de
+impresión) sobre el HTML real, con datos de la factura E310000000011:
+
+| Caso | Alto medido | Hoja resultante |
+|---|---|---|
+| opción 80 (72 mm), 1 línea, Times | 143,3 mm | **1 hoja** de 71,97 × 144,95 mm |
+| opción 76 (63,5 mm), 1 línea, Courier | 153,1 mm | **1 hoja** de 63,50 × 154,86 mm |
+| opción 72 (64 mm), 40 líneas con montos de 10 cifras, Arial | 491,6 mm | **1 hoja** de 63,84 × 492,84 mm |
+
+Chrome redondea a píxeles enteros: la hoja puede quedar una fracción de milímetro
+más angosta que lo pedido, nunca más ancha. **Lo que falta verificar es el driver**:
+que la impresora use ese tamaño de hoja en vez del papel configurado. Si en algún
+equipo no lo hace, el modo **PDF** de Configuración vuelve al comportamiento
+anterior sin desplegar nada.
+
+### Impresión como PDF
+
+`printDocument()` (`src/lib/file.ts`) carga el PDF en un iframe oculto y llama a
+`print()` sobre él.
 
 Dos trampas que ya están resueltas ahí, no volver a caer:
 
@@ -191,12 +267,32 @@ aparenta funcionar y no imprime nada.
 
 ### Ajustes de la impresora (una sola vez)
 
-La página del PDF ya mide el ancho del rollo × lo que ocupe, así que en el
-diálogo hay que poner **escala 100 % / tamaño real** (no "ajustar a la página")
-y, en el driver de la impresora, papel en rollo del mismo ancho y márgenes en
-cero. Con el papel puesto en A4 o carta el navegador reescala: el recibo sale
-diminuto en medio de la hoja, o enorme si se reimprime a carta con "ajustar"
-(ese PDF lo delata: `Producer` de Windows y `MediaBox` de 612 × 792 pt).
+En modo **página web**, dejar la escala en «Predeterminado» (100 %). Lo que sigue
+es para el modo **PDF**.
+
+La página del PDF ya mide el ancho que imprime el driver × lo que ocupe, así que
+en el diálogo hay que poner **escala 100 % / tamaño real** (no "ajustar a la
+página") y el papel en rollo de esa impresora. Con el papel puesto en A4 o carta
+el navegador reescala: el recibo sale diminuto en medio de la hoja, o enorme si
+se reimprime a carta con "ajustar" (ese PDF lo delata: `Producer` de Windows y
+`MediaBox` de 612 × 792 pt).
+
+**El largo lo decide el papel del driver, no el PDF.** El PDF mide lo que ocupa
+el contenido (una factura de una línea, ≈148 mm), pero Chrome imprime sobre una
+hoja del tamaño de papel elegido: con `80(72.1) x 297 mm` la impresora saca
+297 mm aunque el recibo mida 148. Imprimiendo un PDF, la aplicación no puede
+fijar ese largo. Se resuelve en las preferencias del driver, activando la opción
+que elimina el blanco del final (en los drivers de Epson suele llamarse «Paper
+Reduction» / «Reducción de papel», margen inferior). Con eso activo conviene el
+papel largo (`x 3276 mm`). Con `x 297 mm` no cabe una factura de más de 297 mm:
+~148 mm de encabezado, totales y timbre más 7,2 mm por línea (10,4 si la
+descripción ocupa dos renglones), o sea unas 21 líneas, 15 con descripciones
+largas. El PDF es **una sola página**, y Chrome imprime una hoja por página: no
+la reparte en dos hojas. Con "Tamaño real" se pierde lo que pase de la hoja —
+el final, donde van los totales, el QR y el código de seguridad—; con "Ajustar"
+encoge todo el recibo para que quepa. Se comprueba sin gastar papel en la vista
+previa del diálogo con una factura larga. Sin la opción de reducción, el papel
+largo sacaría metros en blanco: probar primero.
 
 ## Reimprimir desde el XML firmado (CLI)
 

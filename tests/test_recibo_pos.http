@@ -1,8 +1,9 @@
 ### ============================================================================
 ### Tirilla POS en 80, 76 y 72 mm -> ?formato= en los endpoints de PDF
 ### El `filename` dice que ancho salio (_POS80 / _POS76 / _POS72). Para medir la
-### pagina: decodificar `content` y leer /MediaBox (226.77 pt = 80 mm,
-### 180.00 pt = 63,5 mm para la opcion 76, 204.09 pt = 72 mm).
+### pagina: decodificar `content` y leer /MediaBox. Ancho esperado por opcion
+### (la pagina mide lo que imprime el driver): 80 -> 204.09 pt = 72 mm,
+### 76 -> 180.00 pt = 63,5 mm, 72 -> 181.42 pt = 64 mm.
 ### Ver docs/modules/representacion-impresa-pos.md
 ### ============================================================================
 
@@ -29,6 +30,33 @@ X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 ### Factura simple guardada en 76 mm
 GET http://localhost:8000/api/facturas-simples/1/pdf?format=base64&formato=pos76
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### format=datos -> datos del recibo para imprimirlo como pagina web (factura e-CF, 80 mm)
+GET http://localhost:8000/api/facturas/1/pdf?format=datos&formato=pos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### format=datos de una factura simple guardada, 76 mm
+GET http://localhost:8000/api/facturas-simples/1/pdf?format=datos&formato=pos76
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### format=datos sin formato de tirilla -> 422
+GET http://localhost:8000/api/facturas/1/pdf?format=datos
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+
+### format=datos de la vista previa de una factura simple (en el cuerpo)
+POST http://localhost:8000/api/facturas-simples/preview
+X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
+Content-Type: application/json
+
+{
+  "formato": "pos72",
+  "format": "datos",
+  "client_name": "Cliente de mostrador",
+  "date": "2026-09-16",
+  "items": [
+    { "description": "Producto de prueba", "quantity": 1, "amount": 950 }
+  ]
+}
 
 ### Vista previa de factura simple en 72 mm (formato en el cuerpo)
 POST http://localhost:8000/api/facturas-simples/preview
