@@ -16,9 +16,9 @@ require_once __DIR__ . '/FacturaTemplateFactory.php';
  * firma). En una tirilla no caben seis columnas, asi que cada linea se apila en
  * dos renglones; el dato no se pierde, cambia de sitio.
  *
- * ANCHO: la pagina mide lo que el rollo, y el contenido va dentro del ancho que
- * el cabezal realmente imprime (ver MARGENES). Que la pagina coincida con el
- * papel es lo que deja imprimir al 100 % sin que el driver reescale ni recorte.
+ * ANCHO: la pagina mide lo que el driver deja imprimir, no lo que mide el rollo
+ * (ver MEDIDAS). Que la pagina coincida con esa area es lo que deja imprimir al
+ * 100 % sin que el navegador reescale ni recorte.
  *
  * ALTO VARIABLE: una tirilla no tiene "hoja". Se dibuja dos veces — una pasada
  * de medicion sobre un lienzo largo para saber donde termina el contenido, y la
@@ -32,24 +32,28 @@ final class ReciboPos
     public const ANCHO_POR_DEFECTO = 80;
 
     /**
-     * Ancho del rollo (mm) => margen lateral (mm). El ancho util es el rollo
-     * menos dos margenes, y tiene que caber en lo que imprime el cabezal: si se
-     * amplia, el PDF se ve bien en pantalla pero el papel sale recortado.
+     * Rollo que se elige (mm) => [ancho de la pagina, margen lateral] (mm). El
+     * ancho util es la pagina menos dos margenes.
      *
-     *  - 80: termicas de 80 mm; casi ninguna imprime mas de 72 mm (576 puntos
-     *        a 203 dpi).
-     *  - 76: rollo de 76 mm, el de las de impacto tipo TM-U220, que imprimen
-     *        ~63,5 mm.
-     *  - 72: rollo angosto; se deja el mismo margen que en 80 mm para no
-     *        depender de un cabezal que imprima hasta el borde.
+     * La pagina tiene que medir lo que el DRIVER deja imprimir, no lo que mide
+     * el rollo: con "Tamano real", Chrome pega la pagina del PDF al borde
+     * izquierdo del area imprimible y corta lo que pase de su ancho, sin
+     * centrar. Verificado con una TM-U220 (papel "76(63.5) x 3276 mm"): una
+     * pagina de 76 mm con 6 mm de margen salio con 6 mm en blanco a la
+     * izquierda y 6,5 mm cortados a la derecha, justo donde van los montos.
+     *
+     *  - 80: pagina de rollo completo, 72 mm utiles (sin verificar en papel).
+     *  - 76: impacto tipo TM-U220; el driver imprime 63,5 mm. Verificado.
+     *  - 72: rollo angosto, 64 mm utiles (sin verificar en papel).
      *
      * Para ajustar un modelo que corte o deje demasiado blanco, se toca solo
-     * esta tabla: todo el dibujo sale del ancho util.
+     * esta tabla: el numero entre parentesis del papel en el dialogo de
+     * impresion es el ancho de pagina correcto. Todo el dibujo sale de aqui.
      */
-    private const MARGENES = [
-        80 => 4.0,
-        76 => 6.0,
-        72 => 4.0,
+    private const MEDIDAS = [
+        80 => [80.0, 4.0],
+        76 => [63.5, 1.0],
+        72 => [72.0, 4.0],
     ];
 
     /**
@@ -75,7 +79,7 @@ final class ReciboPos
     private EcfDocumento $doc;
     private string $fuente;
     private ?string $qrPng = null;
-    private float $ancho;
+    private float $anchoPagina;
     private float $margen;
     private float $util;
 
@@ -87,9 +91,8 @@ final class ReciboPos
             );
         }
         $this->doc = $doc;
-        $this->ancho = (float) $ancho;
-        $this->margen = self::MARGENES[$ancho];
-        $this->util = $this->ancho - 2 * $this->margen;
+        [$this->anchoPagina, $this->margen] = self::MEDIDAS[$ancho];
+        $this->util = $this->anchoPagina - 2 * $this->margen;
 
         // Familia core de FPDF que pide la plantilla del tenant (Arial por
         // defecto). El acento y los rellenos de color no se usan: una termica
@@ -106,12 +109,12 @@ final class ReciboPos
     /** @return int[] Anchos de rollo soportados, en mm. */
     public static function anchos(): array
     {
-        return array_keys(self::MARGENES);
+        return array_keys(self::MEDIDAS);
     }
 
     public static function anchoValido(int $ancho): bool
     {
-        return isset(self::MARGENES[$ancho]);
+        return isset(self::MEDIDAS[$ancho]);
     }
 
     /**
@@ -142,7 +145,7 @@ final class ReciboPos
         try {
             $medicion = $this->dibujar(self::ALTO_MEDICION, $timbre);
             $alto = $medicion->GetY() + $this->margen;
-            $alto = max(self::ALTO_MINIMO, $this->ancho, min(self::ALTO_MAXIMO, $alto));
+            $alto = max(self::ALTO_MINIMO, $this->anchoPagina, min(self::ALTO_MAXIMO, $alto));
 
             return $this->dibujar($alto, $timbre)->Output('S');
         } finally {
@@ -154,12 +157,12 @@ final class ReciboPos
     }
 
     /**
-     * Dibuja la tirilla completa sobre una pagina de ancho x $alto mm.
+     * Dibuja la tirilla completa sobre una pagina de anchoPagina x $alto mm.
      * @param array{url:string,codigo_seguridad:string,fecha_firma:string,preview:bool}|null $timbre
      */
     private function dibujar(float $alto, ?array $timbre): FPDF
     {
-        $pdf = new FPDF('P', 'mm', [$this->ancho, $alto]);
+        $pdf = new FPDF('P', 'mm', [$this->anchoPagina, $alto]);
         // Sin salto automatico: la tirilla es una sola pagina, y en la pasada de
         // medicion un salto falsearia el alto que estamos calculando.
         $pdf->SetAutoPageBreak(false);
@@ -331,7 +334,7 @@ final class ReciboPos
         }
 
         // La columna de etiquetas solo cede cuando un monto no cabe en la suya:
-        // en Courier, "RD$99,999,999.99" en negrita ocupa 30,5 mm y en 64 mm
+        // en Courier, "RD$99,999,999.99" en negrita ocupa 30,5 mm y en 61,5 mm
         // utiles no entra en la proporcion de siempre. Las etiquetas son cortas
         // ("Subtotal Gravado:" tiene holgura de sobra); los montos no se recortan.
         $anchoEtiqueta = min(
@@ -415,7 +418,7 @@ final class ReciboPos
      * Se topa en el 55% del papel para que al valor siempre le quede sitio.
      *
      * Una etiqueta que no cabe ni en ese tope (en Courier, "Identificación
-     * Tributaria:" mide 38,5 mm y en 64 mm utiles el tope es 35,2) va en su
+     * Tributaria:" mide 38,5 mm y en 61,5 mm utiles el tope es 33,8) va en su
      * propio renglon con el valor debajo: montada sobre el valor no se leeria.
      *
      * @param array<int,array{0:string,1:string}> $pares
@@ -457,7 +460,7 @@ final class ReciboPos
         $y = $pdf->GetY() + $espacio;
         $pdf->SetDrawColor(0, 0, 0);
         $pdf->SetLineWidth(0.15);
-        $pdf->Line($this->margen, $y, $this->ancho - $this->margen, $y);
+        $pdf->Line($this->margen, $y, $this->anchoPagina - $this->margen, $y);
         $pdf->SetY($y + $espacio);
     }
 

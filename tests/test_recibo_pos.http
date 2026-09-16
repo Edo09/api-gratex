@@ -2,14 +2,15 @@
 ### Tirilla POS en 80, 76 y 72 mm -> ?formato= en los endpoints de PDF
 ### El `filename` dice que ancho salio (_POS80 / _POS76 / _POS72). Para medir la
 ### pagina: decodificar `content` y leer /MediaBox (226.77 pt = 80 mm,
-### 215.43 pt = 76 mm, 204.09 pt = 72 mm). Ver docs/modules/representacion-impresa-pos.md
+### 180.00 pt = 63,5 mm para la opcion 76, 204.09 pt = 72 mm).
+### Ver docs/modules/representacion-impresa-pos.md
 ### ============================================================================
 
 ### pos a secas -> 80 mm (lo de siempre) -> Factura_..._POS80.pdf
 GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 
-### 76 mm -> Factura_..._POS76.pdf
+### 76 mm -> Factura_..._POS76.pdf (pagina de 63,5 mm: lo que imprime el driver)
 GET http://localhost:8000/api/facturas/1/pdf?format=base64&formato=pos76
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 

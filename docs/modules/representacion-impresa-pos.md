@@ -70,19 +70,25 @@ factura de 60 líneas da ≈ 72 cm.
 
 ## Anchos
 
-La página mide lo mismo que el rollo, y el contenido va dentro del ancho que el
-cabezal realmente imprime. Que la página coincida con el papel es lo que deja
-imprimir al 100 % sin que el driver reescale ni recorte.
+**La página tiene que medir lo que el driver deja imprimir, no lo que mide el
+rollo.** Con "Tamaño real", Chrome pega la página del PDF al borde izquierdo del
+área imprimible y corta lo que pase de su ancho: no la centra ni la reescala.
+Se vio con una Epson TM-U220, cuyo papel en el diálogo es `76(63.5) x 3276 mm`:
+la primera versión, con página de 76 mm y 6 mm de margen, salió con 6 mm en
+blanco a la izquierda y 6,5 mm cortados a la derecha — el nombre del emisor, la
+columna VALOR y el total.
 
-| Rollo | Margen por lado | Ancho útil | Pensado para |
-|---|---|---|---|
-| 80 mm | 4 mm | 72 mm | térmicas de 80 mm: casi ninguna imprime más de 72 mm (576 puntos a 203 dpi) |
-| 76 mm | 6 mm | 64 mm | impresoras de impacto tipo Epson TM-U220, que imprimen ~63,5 mm |
-| 72 mm | 4 mm | 64 mm | rollo angosto; el mismo margen que en 80 mm para no depender de un cabezal que imprima hasta el borde |
+| Opción | Página | Margen por lado | Ancho útil | Estado |
+|---|---|---|---|---|
+| 80 mm | 80 mm | 4 mm | 72 mm | sin verificar en papel |
+| 76 mm | 63,5 mm | 1 mm | 61,5 mm | verificado con TM-U220 (`76(63.5)`) |
+| 72 mm | 72 mm | 4 mm | 64 mm | sin verificar en papel |
 
-**Para ajustar un modelo** que corte por los lados o deje demasiado blanco se toca
-solo `ReciboPos::MARGENES`: todo el dibujo sale del ancho útil. Para agregar un
-ancho nuevo basta una fila ahí (y el valor en `AnchoTirilla` del frontend).
+**Para ajustar un modelo** se toca solo `ReciboPos::MEDIDAS`: el número entre
+paréntesis del papel en el diálogo de impresión (`76(63.5)`, `80(72.1)`…) es el
+ancho de página correcto. Si un driver de 80 mm muestra `80(72.1)`, la página de
+80 mm se cortará igual que la de 76 y hay que bajarla a ese ancho. Para agregar
+una opción basta una fila ahí (y el valor en `AnchoTirilla` del frontend).
 
 Qué cambia con el ancho y qué no:
 
@@ -93,13 +99,19 @@ Qué cambia con el ancho y qué no:
   tome, y cabe en 64 mm), el logo (caja de 34 × 14 mm) ni los tamaños de letra.
 - **Totales:** la columna de etiquetas cede cuando un monto no cabe en la suya.
   En Courier, `RD$99,999,999.99` en negrita mide 30,5 mm y en 64 mm útiles no
-  entra en la proporción; las etiquetas son cortas y sí caben en lo que queda.
+  entra en la proporción de 61,5 mm; las etiquetas son cortas y sí caben en lo que queda.
 - **Pares etiqueta: valor** (e-NCF, fechas, comprador): una etiqueta que no cabe
   en el 55 % del ancho va en su propio renglón con el valor debajo. Solo pasa con
-  "Identificación Tributaria" (E47) en Courier en 64 mm.
+  "Identificación Tributaria" (E47) en Courier en 64 y 61,5 mm.
 
 Medido con las métricas de FPDF para Arial, Times y Courier (montos de hasta
 `99,999,999.99`): todo cabe en los tres anchos.
+
+**QR en impresoras de impacto.** La URL del timbre (~190 caracteres, corrección
+M) da un QR de unos 57 módulos: en 26 mm, ≈0,44 mm por módulo. Una TM-U220
+imprime a 72 dpi verticales (0,35 mm por punto), poco más de un punto por
+módulo, así que hay que comprobar con el celular que el QR impreso escanee. El
+Código de Seguridad y la Fecha de Firma salen igual aunque el QR no se lea.
 
 ## Qué cambia respecto a la hoja carta
 
