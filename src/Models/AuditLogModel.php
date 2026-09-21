@@ -76,6 +76,93 @@ class AuditLogModel
         return $this->fetchCount(self::buildWhere($filters, true));
     }
 
+    /**
+     * Resumen de las filas que cumplen los filtros (tarjetas de la bitacora):
+     * totales, fallidos, accesos denegados, logins fallidos, usuarios distintos,
+     * los 5 usuarios con mas actividad y el conteo por modulo. Mismos filtros y
+     * mismo aislamiento por tenant que search().
+     */
+    public function summary(array $filters): array
+    {
+        [$clause, $params] = self::buildWhere($filters, true);
+
+        $stmt = $this->conexion->prepare(
+            'SELECT COUNT(*) AS total,'
+            . ' COALESCE(SUM(success = 0), 0) AS fallidos,'
+            . " COALESCE(SUM(action = 'ACCESS_DENIED'), 0) AS accesos_denegados,"
+            . " COALESCE(SUM(action = 'LOGIN_FAILED'), 0) AS logins_fallidos,"
+            . ' COUNT(DISTINCT user_id) AS usuarios'
+            . ' FROM audit_logs WHERE ' . $clause
+        );
+        $stmt->execute($params);
+        $tot = $stmt->fetch() ?: [];
+
+        $stmt = $this->conexion->prepare(
+            'SELECT user_id, MAX(username) AS username, MAX(email) AS email, COUNT(*) AS total'
+            . ' FROM audit_logs WHERE ' . $clause . ' AND user_id IS NOT NULL'
+            . ' GROUP BY user_id ORDER BY total DESC LIMIT 5'
+        );
+        $stmt->execute($params);
+        $usuarios = $stmt->fetchAll();
+
+        $stmt = $this->conexion->prepare(
+            'SELECT module, COUNT(*) AS total FROM audit_logs WHERE ' . $clause
+            . ' GROUP BY module ORDER BY total DESC'
+        );
+        $stmt->execute($params);
+        $modulos = $stmt->fetchAll();
+
+        return [
+            'total'             => (int) ($tot['total'] ?? 0),
+            'fallidos'          => (int) ($tot['fallidos'] ?? 0),
+            'accesos_denegados' => (int) ($tot['accesos_denegados'] ?? 0),
+            'logins_fallidos'   => (int) ($tot['logins_fallidos'] ?? 0),
+            'usuarios'          => (int) ($tot['usuarios'] ?? 0),
+            'top_usuarios'      => array_map(static fn($r) => [
+                'user_id'  => (int) $r['user_id'],
+                'username' => $r['username'],
+                'email'    => $r['email'],
+                'total'    => (int) $r['total'],
+            ], $usuarios),
+            'por_modulo'        => array_map(static fn($r) => [
+                'module' => $r['module'],
+                'total'  => (int) $r['total'],
+            ], $modulos),
+        ];
+    }
+
+    /**
+     * Valores que existen en la bitacora de UN tenant, para los desplegables de
+     * filtros: modulos, acciones y usuarios (solo los que tienen filas, asi no
+     * se ofrece un filtro que siempre da vacio).
+     */
+    public function facets(?int $tenantId): array
+    {
+        [$clause, $params] = self::buildWhere(['tenant_id' => $tenantId], true);
+
+        $valores = function (string $col) use ($clause, $params): array {
+            $stmt = $this->conexion->prepare("SELECT DISTINCT {$col} FROM audit_logs WHERE {$clause} ORDER BY {$col}");
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_COLUMN);
+        };
+
+        $stmt = $this->conexion->prepare(
+            'SELECT user_id, MAX(username) AS username, MAX(email) AS email FROM audit_logs'
+            . ' WHERE ' . $clause . ' AND user_id IS NOT NULL GROUP BY user_id ORDER BY username'
+        );
+        $stmt->execute($params);
+
+        return [
+            'modulos'  => $valores('module'),
+            'acciones' => $valores('action'),
+            'usuarios' => array_map(static fn($r) => [
+                'user_id'  => (int) $r['user_id'],
+                'username' => $r['username'],
+                'email'    => $r['email'],
+            ], $stmt->fetchAll()),
+        ];
+    }
+
     // ------------------------------------------------------------------
     // Vista de operaciones (TODOS los tenants) — solo public/audit_logs.php
     // ------------------------------------------------------------------

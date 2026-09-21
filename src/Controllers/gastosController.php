@@ -351,8 +351,21 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body['user_id'] = $authUserId ?? ($body['user_id'] ?? null);
 
         $result = $gastoModel->createGasto($body);
+        $auto = in_array(strtoupper(trim((string) ($body['tipo_gasto'] ?? ''))), ['E41', 'E43', 'E47'], true);
+        if ($result[0] !== 'success') {
+            // Sin esto un gasto que la DGII rechaza (o que no pasa la validacion)
+            // desaparece sin rastro: el usuario ve el error y la bitacora nada.
+            AuditLogger::log([
+                'module' => 'gastos', 'action' => $auto ? 'EMIT' : 'CREATE',
+                'entity_type' => 'gasto',
+                'new_values' => $body,
+                'success' => false,
+                'error_message' => is_string($result[1]) ? $result[1] : json_encode($result[1]),
+                'description' => ($auto ? 'Fallo emitiendo gasto como e-CF ' : 'Fallo registrando gasto ')
+                    . (string) ($body['tipo_gasto'] ?? '') . '.',
+            ]);
+        }
         if ($result[0] === 'success') {
-            $auto = in_array(strtoupper(trim((string) ($body['tipo_gasto'] ?? ''))), ['E41', 'E43', 'E47'], true);
             AuditLogger::log([
                 'module' => 'gastos', 'action' => $auto ? 'EMIT' : 'CREATE',
                 'entity_type' => 'gasto',

@@ -13,12 +13,31 @@ Tabla **`audit_logs`**, centralizada y aislada por `tenant_id`:
 - **Multi-tenant** (`MULTI_TENANT_ENABLED=true`, producción): en el MASTER
   (`gratex_master`), igual que `users`/`roles`. El MASTER es independiente del
   switch de DB por-tenant (`TenantResolver`), así que la escritura siempre llega
-  a una conexión viva, sirve a tenants `app` e `integracion`, y los logins
-  fallidos (sin tenant resuelto aún) caben en la misma tabla.
+  a una conexión viva, sirve a tenants `app` e `integracion`, y los eventos sin
+  empresa (ver abajo) caben en la misma tabla.
 - **Single-tenant** (fallback): en la DB del tenant, `tenant_id` queda NULL.
 
 DDL: `db/master_migrations/006_add_audit_logs.sql`, espejado en
 `db/master_schema.sql` y `db/tenant_schema.sql`.
+
+### Qué fila le toca a qué empresa
+
+El admin solo ve las filas de SU `tenant_id`. Quedan **sin empresa** (solo las ve
+la [vista de operaciones](#vista-web-de-operaciones)):
+
+- **Login de un usuario que no existe**: no se sabe a quién iba. En cambio, un
+  usuario existente con la clave equivocada queda en la empresa de ese usuario
+  (`authModel::loginUser` devuelve un tercer elemento, solo para la bitácora, con
+  `tenant_id`/`user_id`). Hasta el 2026-09-21 **todos** los logins, exitosos y
+  fallidos, quedaban sin empresa: el tenant se tomaba del cuerpo del POST, que el
+  front ya no manda.
+- **Autenticación DGII entrante** (`DGII_AUTH_IN_*`): el handshake semilla→token
+  llega por una URL compartida, antes de saber a qué tenant va el e-CF (se
+  resuelve después por `RNCComprador`). Para que el admin igual sepa quién le
+  entregó un e-CF, el handshake guarda el token hasheado en `session_token_hash`
+  y `ECF_RECEIVED` / `ACECF_RECEIVED` registran el mismo hash más
+  `new_values.autenticacion` (`metodo`, `rnc_del_token`, `token_expedido`): las
+  dos filas quedan ligadas.
 
 ## Arquitectura
 
@@ -84,17 +103,40 @@ contenga: `password`, `pass`, `secret`, `api_secret`, `token`, `authorization`,
 `CREATE`, `UPDATE`, `DELETE`, `ASSIGN`, `EMIT`, `STATUS_CHANGE`, `ECF_RECEIVED`,
 `ACECF_SENT`, `ACECF_RECEIVED`, `INTEGRACION_EMIT`, `INTEGRACION_ACECF`,
 `NCF_RANGE_REGISTER`, `NCF_SEQUENCE_UPDATE`, `LOGO_UPLOAD`, `LOGO_DELETE`,
-`LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`.
+`AJUSTE_CREAR`, `AJUSTE_ANULAR`, `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`,
+`ACCESS_DENIED`, `DGII_AUTH_IN_OK`, `DGII_AUTH_IN_FAILED`, `DGII_AUTH_OUT_FAILED`.
+
+| Acción | Módulo | Cuándo |
+|---|---|---|
+| `ACCESS_DENIED` | el módulo al que se intentó entrar | Un usuario con sesión válida pide un módulo que su rol no tiene (**403**). Lo registran `PermissionGate::deny` y `auditLogController`. `new_values.bloqueado=false` = modo sombra (`PERMISSIONS_ENFORCE=false`): se anotó pero no se bloqueó. Los **401** (token vencido o falso) no se registran a propósito: cada sesión que expira con la app abierta dejaría filas sin usuario. |
+| `DGII_AUTH_IN_OK` | `dgii-auth` | Token emitido a quien se autentica contra nuestro receptor (incluye los reintentos sobre una semilla ya canjeada). Sin empresa. |
+| `DGII_AUTH_IN_FAILED` | `dgii-auth` | Handshake rechazado: sin XML, firma inválida, semilla no reconocida / expirada / canjeada por otro RNC, error interno. Sin empresa. |
+| `DGII_AUTH_OUT_FAILED` | `dgii-auth` | La DGII no nos entregó el token (`DgiiAuthService::autenticar`), con el paso que falló. Solo los fallos: se pide un token por emisión y registrar los éxitos sería una fila por factura. |
 
 Inmutabilidad e-CF: un e-CF emitido solo genera `EMIT`/`STATUS_CHANGE`; **nunca**
 hay `UPDATE`/`DELETE` sobre comprobantes emitidos.
 
 ## Endpoint de lectura
 
-`GET /api/audit-logs` — solo admin (módulo `audit`), siempre acotado al tenant del
-solicitante. Filtros: `user_id`, `module`, `action`, `entity_type`, `entity_id`,
-`success`, `from`, `to` (fecha/datetime), `page`, `pageSize` (máx 200).
-`old_values`/`new_values` se devuelven decodificados a objeto.
+Solo el **rol `admin`** (por nombre de rol), siempre acotado al tenant del
+solicitante. No alcanza con el permiso `*` —`RoleModel` deja crear roles
+personalizados con todos los módulos— ni con el módulo `audit`, que por API se
+puede asignar a cualquier rol. Un intento de otro rol queda como `ACCESS_DENIED`.
+
+| Endpoint | Devuelve |
+|---|---|
+| `GET /api/audit-logs` | Filas paginadas (`page`, `pageSize` máx 200). `old_values`/`new_values` decodificados a objeto. |
+| `GET /api/audit-logs/resumen` | `total`, `fallidos`, `accesos_denegados`, `logins_fallidos`, `usuarios`, `top_usuarios` (5) y `por_modulo`. |
+| `GET /api/audit-logs/facetas` | `modulos`, `acciones` y `usuarios` que tienen filas en el tenant (para los filtros). |
+
+Filtros de lista y resumen: `user_id`, `module`, `action`, `entity_type`,
+`entity_id`, `success` (1/0), `from`, `to` y `q` (texto libre sobre usuario,
+email, entidad, descripción, endpoint e IP). Una fecha sola en `to` incluye el día
+completo (antes `to=2026-09-21` dejaba fuera todo lo de ese día después de las
+00:00).
+
+En el front: **Administración → Bitácora** (`src/features/audit/` en fiscalo),
+visible solo para el rol admin.
 
 ## Vista web de operaciones
 
@@ -121,10 +163,14 @@ herramienta de operaciones, no del cliente). Solo lectura.
 
 Mutaciones (CREATE/UPDATE/DELETE) de: clients, products, categories, warehouses,
 proveedores, users, roles (+ASSIGN), branding, landing, ncf (rangos/secuencia),
-cotizaciones. Ciclo e-CF: emisión (facturas/gastos), transiciones de estado, ACECF
-saliente/entrante, recepción, emisión/aprobación por integración. Auth: login
-ok/fallido, logout.
+cotizaciones y **facturas simples** (`facturas-simples`, entidad `factura_simple`,
+con antes/después). Gastos: alta/emisión exitosa **y fallida** (`success=0` con el
+motivo: un E41 que la DGII rechaza ya no desaparece sin rastro). Inventario:
+ajustes. Ciclo e-CF: emisión, transiciones de estado, ACECF saliente/entrante,
+recepción (ligada al token DGII), emisión/aprobación por integración. Auth: login
+ok/fallido (en la empresa del usuario), logout. Accesos denegados (403).
+Autenticación DGII entrante (todo) y saliente (fallos).
 
 **Fuera de alcance** (futuro, trivial con la misma línea): auditar lecturas
 (descargas XML/PDF, consultas de estado, reportes 606/607), escritura asíncrona,
-exportación a Excel/PDF, retención/particionado, y la UI de timeline.
+exportación a Excel/PDF y retención/particionado.

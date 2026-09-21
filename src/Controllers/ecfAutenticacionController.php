@@ -6,6 +6,7 @@ header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
 require_once __DIR__ . '/../Models/authSeedModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlValidator.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/IncomingXmlExtractor.php';
+require_once __DIR__ . '/../AuditLogger.php';
 
 $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isSemillaRequest = preg_match('#/semilla/?$#i', $endpoint);
@@ -73,6 +74,7 @@ function handleValidarSemilla(): void
         handleValidarSemillaInternal();
     } catch (Throwable $e) {
         error_log('[ecfAutenticacion] ValidarSemilla fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+        autenticacionAuditar(false, 'Error interno validando la semilla.', [], $e->getMessage());
         http_response_code(500);
         echo json_encode(['status' => false, 'error' => 'Error interno: ' . $e->getMessage()]);
     }
@@ -108,7 +110,7 @@ function handleValidarSemillaInternal(): void
     $seed = $seedModel->getBySeedValue($valor);
     if (!$seed) {
         error_log('[ecfAutenticacion] ValidarSemilla 401: semilla no reconocida, valor=' . $valor);
-        autenticacionResponderError('Semilla no reconocida.', 401);
+        autenticacionResponderError('Semilla no reconocida.', 401, ['rnc' => $validation['firma_rnc'] ?? null]);
         return;
     }
     // El RNC del firmante se necesita antes que los chequeos de la semilla: es
@@ -116,7 +118,7 @@ function handleValidarSemillaInternal(): void
     $rnc = $validation['firma_rnc'] ?? '';
     if ($rnc === '') {
         error_log('[ecfAutenticacion] ValidarSemilla 401: RNC vacio, subject=' . json_encode($validation['firma_subject'] ?? []));
-        autenticacionResponderError('No se pudo extraer RNC del certificado firmante.', 401);
+        autenticacionResponderError('No se pudo extraer RNC del certificado firmante.', 401, ['semilla_id' => (int) $seed['id']]);
         return;
     }
 
@@ -126,7 +128,7 @@ function handleValidarSemillaInternal(): void
     }
     if (strtotime($seed['expira_at']) < time()) {
         error_log('[ecfAutenticacion] ValidarSemilla 401: semilla expirada, id=' . $seed['id']);
-        autenticacionResponderError('La semilla expiro.', 401);
+        autenticacionResponderError('La semilla expiro.', 401, ['rnc' => $rnc, 'semilla_id' => (int) $seed['id']]);
         return;
     }
 
@@ -134,6 +136,9 @@ function handleValidarSemillaInternal(): void
     $seedModel->markConsumed((int) $seed['id'], $rnc, $token);
     $seedModel->saveToken($token, $rnc, 3600);
 
+    autenticacionAuditar(true, 'Token DGII emitido a ' . $rnc . '.', [
+        'rnc' => $rnc, 'semilla_id' => (int) $seed['id'], 'reintento' => false,
+    ], null, $token);
     autenticacionResponderToken(
         $token,
         (new DateTime())->format('Y-m-d\TH:i:s'),
@@ -164,7 +169,9 @@ function autenticacionReemitirToken(authSeedModel $seedModel, array $seed, strin
     if ($consumidor !== '' && $consumidor !== $rnc) {
         error_log('[ecfAutenticacion] ValidarSemilla 401: semilla id=' . $seed['id']
             . ' fue consumida por ' . $consumidor . ' y la reenvia ' . $rnc);
-        autenticacionResponderError('La semilla ya fue consumida.', 401);
+        autenticacionResponderError('La semilla ya fue consumida.', 401, [
+            'rnc' => $rnc, 'semilla_id' => (int) $seed['id'], 'rnc_que_la_canjeo' => $consumidor,
+        ]);
         return;
     }
 
@@ -174,6 +181,9 @@ function autenticacionReemitirToken(authSeedModel $seedModel, array $seed, strin
     if ($vigente !== null) {
         error_log('[ecfAutenticacion] ValidarSemilla: reintento sobre semilla id=' . $seed['id']
             . '; se reenvia el token vigente de ' . $rnc);
+        autenticacionAuditar(true, 'Reintento: se reenvio el token DGII vigente de ' . $rnc . '.', [
+            'rnc' => $rnc, 'semilla_id' => (int) $seed['id'], 'reintento' => true,
+        ], null, $token);
         autenticacionResponderToken(
             $token,
             (new DateTime((string) $vigente['expedido_at']))->format('Y-m-d\TH:i:s'),
@@ -187,6 +197,9 @@ function autenticacionReemitirToken(authSeedModel $seedModel, array $seed, strin
     $seedModel->saveToken($token, $rnc, 3600);
     error_log('[ecfAutenticacion] ValidarSemilla: reintento sobre semilla id=' . $seed['id']
         . '; el token anterior ya vencio, se emite uno nuevo para ' . $rnc);
+    autenticacionAuditar(true, 'Reintento: token DGII vencido, se emitio uno nuevo a ' . $rnc . '.', [
+        'rnc' => $rnc, 'semilla_id' => (int) $seed['id'], 'reintento' => true,
+    ], null, $token);
 
     autenticacionResponderToken(
         $token,
@@ -253,8 +266,34 @@ function autenticacionTokenSecret(): string
     return $ephemeral;
 }
 
-function autenticacionResponderError(string $mensaje, int $code): void
+function autenticacionResponderError(string $mensaje, int $code, array $detalle = []): void
 {
+    autenticacionAuditar(false, 'Autenticacion DGII rechazada: ' . $mensaje, $detalle + ['http' => $code], $mensaje);
     http_response_code($code);
     echo json_encode(['status' => false, 'error' => $mensaje]);
+}
+
+/**
+ * Bitacora del handshake entrante (quien se autentica contra nuestro receptor).
+ *
+ * Queda SIN empresa: el handshake llega por una URL compartida, antes de saber
+ * a que tenant va el e-CF (se resuelve despues por RNCComprador), asi que
+ * ningun admin lo ve en su modulo; solo la herramienta de operaciones. Para que
+ * el admin igual sepa quien le entrego un e-CF, el token se guarda hasheado en
+ * session_token_hash, y la recepcion (ECF_RECEIVED / ACECF_RECEIVED) registra el
+ * mismo hash y el RNC dueno del token: las dos filas quedan ligadas.
+ */
+function autenticacionAuditar(bool $ok, string $descripcion, array $detalle, ?string $error = null, ?string $token = null): void
+{
+    AuditLogger::log([
+        'module'             => 'dgii-auth',
+        'action'             => $ok ? 'DGII_AUTH_IN_OK' : 'DGII_AUTH_IN_FAILED',
+        'entity_type'        => 'auth_seed',
+        'entity_id'          => $detalle['semilla_id'] ?? null,
+        'session_token_hash' => $token !== null ? hash('sha256', $token) : null,
+        'new_values'         => $detalle ?: null,
+        'success'            => $ok,
+        'error_message'      => $error,
+        'description'        => $descripcion,
+    ]);
 }

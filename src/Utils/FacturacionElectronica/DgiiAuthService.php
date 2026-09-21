@@ -2,6 +2,7 @@
 
 require_once(__DIR__ . '/DgiiXmlSigner.php');
 require_once(__DIR__ . '/../../AmbienteResolver.php');
+require_once(__DIR__ . '/../../AuditLogger.php');
 
 class DgiiAuthService
 {
@@ -79,9 +80,29 @@ class DgiiAuthService
 
     public function autenticar(array $options = []): array
     {
-        $semilla = $this->obtenerSemilla($options);
-        $signedXml = $this->firmarSemilla($semilla['xml'], $options);
-        $token = $this->validarSemillaFirmada($signedXml, $options);
+        // Bitacora: solo los FALLOS. Se pide un token nuevo en cada emision, asi
+        // que registrar los exitos seria una fila extra por factura; un fallo, en
+        // cambio, es lo que explica un lote de emisiones caidas. La excepcion
+        // sigue su curso: el emisor la registra ademas como EMIT fallido.
+        $paso = 'pedir la semilla';
+        try {
+            $semilla = $this->obtenerSemilla($options);
+            $paso = 'firmar la semilla';
+            $signedXml = $this->firmarSemilla($semilla['xml'], $options);
+            $paso = 'validar la semilla firmada';
+            $token = $this->validarSemillaFirmada($signedXml, $options);
+        } catch (Throwable $e) {
+            AuditLogger::log([
+                'module'        => 'dgii-auth',
+                'action'        => 'DGII_AUTH_OUT_FAILED',
+                'entity_type'   => 'dgii_token',
+                'new_values'    => ['paso' => $paso],
+                'success'       => false,
+                'error_message' => $e->getMessage(),
+                'description'   => 'La DGII no entrego el token de autenticacion (fallo al ' . $paso . ').',
+            ]);
+            throw $e;
+        }
 
         $token['semilla_fecha'] = $semilla['fecha'];
 

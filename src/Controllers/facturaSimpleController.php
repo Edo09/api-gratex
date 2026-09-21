@@ -26,6 +26,7 @@ header('content-type: application/json; charset=utf-8');
 require_once __DIR__ . '/../Models/facturaModel.php';
 require_once __DIR__ . '/../Models/clientModel.php';
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
+require_once __DIR__ . '/../AuditLogger.php';
 
 $facturaModel = new facturaModel();
 $clientModel = new clientModel();
@@ -351,6 +352,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 null,
                 $userId
             );
+            AuditLogger::log([
+                'module' => 'facturas-simples', 'action' => 'CREATE',
+                'entity_type' => 'factura_simple', 'entity_id' => $result[1]['id'] ?? null,
+                'new_values' => $result[1],
+                'description' => 'Factura simple ' . ($result[1]['no_factura'] ?? '') . ' creada.',
+            ]);
         }
         fsRespond($result[0] === 'success', $result[1], $result[0] === 'success' ? 201 : 400);
         break;
@@ -392,6 +399,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $inventario?->revertirVenta($id, $previa['items'] ?? [], $authUserId);
             $inventario?->registrarVenta($id, $result[1]['items'] ?? [], null, $authUserId);
         }
+        if ($result[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'facturas-simples', 'action' => 'UPDATE',
+                'entity_type' => 'factura_simple', 'entity_id' => $id,
+                'old_values' => $previa,
+                'new_values' => $result[1],
+                'description' => 'Factura simple ' . ($previa['no_factura'] ?? $id) . ' actualizada.',
+            ]);
+        }
         $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
         fsRespond($result[0] === 'success', $result[1], $code);
         break;
@@ -411,6 +427,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // La venta se deshizo: lo que salio del almacen vuelve.
         if ($result[0] === 'success' && $previa !== null) {
             fsInventario()?->revertirVenta($id, $previa['items'] ?? [], $authUserId);
+        }
+        if ($result[0] === 'success') {
+            AuditLogger::log([
+                'module' => 'facturas-simples', 'action' => 'DELETE',
+                'entity_type' => 'factura_simple', 'entity_id' => $id,
+                'old_values' => $previa,
+                'description' => 'Factura simple ' . ($previa['no_factura'] ?? $id) . ' eliminada.',
+            ]);
         }
         $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
         fsRespond($result[0] === 'success', $result[1], $code);

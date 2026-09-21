@@ -133,13 +133,18 @@ function handleAprobacionComercial(): void
         'module' => 'ecf', 'action' => 'ACECF_RECEIVED',
         'entity_type' => 'aprobacion_comercial', 'entity_id' => $eNcf,
         'tenant_id' => $tenantId,
+        'session_token_hash' => $bearer['token_hash'] ?? null,
         'new_values' => [
             'rnc_emisor' => $rncEmisor, 'rnc_comprador' => $rncComprador,
             'estado_comercial' => $estadoNormalizado, 'detalle_motivo' => $detalle,
             'validacion_firma' => $validation['firma'] ?? null,
+            'autenticacion' => $hasValidBearer
+                ? ['metodo' => 'token DGII', 'rnc_del_token' => $bearer['rnc'] ?? null, 'token_expedido' => $bearer['expedido_at'] ?? null]
+                : ['metodo' => 'solo firma (sin token)'],
         ],
         'success' => ($validation['firma'] ?? '') === 'OK',
-        'description' => 'Aprobacion comercial recibida del comprador (' . $estadoNormalizado . ').',
+        'description' => 'Aprobacion comercial recibida del comprador (' . $estadoNormalizado . ')'
+            . ($hasValidBearer ? ', autenticada con token DGII de ' . ($bearer['rnc'] ?? '?') . '.' : ', sin token: validada por firma.'),
     ]);
 
     http_response_code(200);
@@ -210,7 +215,11 @@ function aprobacionRequireBearer(bool $soft = false): array
         }
         return ['ok' => false];
     }
-    return ['ok' => true, 'rnc' => $valid['rnc_consumidor']];
+    // Liga esta entrega al handshake DGII_AUTH_IN_OK (ver ecfAutenticacionController).
+    return [
+        'ok' => true, 'rnc' => $valid['rnc_consumidor'],
+        'expedido_at' => $valid['expedido_at'] ?? null, 'token_hash' => hash('sha256', $token),
+    ];
 }
 
 function respondAprobacion(bool $status, string $message, int $code = 200): void

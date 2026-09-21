@@ -123,9 +123,14 @@ class authModel
             $stmt->execute([':eu' => $email_or_username]);
             $user = $stmt->fetch();
 
-            // Verify user exists and password is correct
+            // Verify user exists and password is correct. El tercer elemento es
+            // solo para la bitacora (no va en la respuesta): con el usuario
+            // encontrado, el intento fallido queda en SU empresa y el admin lo
+            // ve. Usuario inexistente = sin empresa (no se sabe a quien iba).
             if (!$user || !password_verify($password, $user['password'])) {
-                return ['error', 'Invalid email or password'];
+                return ['error', 'Invalid email or password', $user
+                    ? ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null, 'user_id' => (int) $user['id']]
+                    : ['tenant_id' => null, 'user_id' => null]];
             }
 
             // Generate new token for this login
@@ -163,7 +168,9 @@ class authModel
                 'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role']),
             ];
 
-            return ['success', ['token' => $token, 'user' => $user_data]];
+            // Tercer elemento: empresa del usuario, solo para la bitacora.
+            return ['success', ['token' => $token, 'user' => $user_data],
+                ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null]];
         } catch (PDOException $e) {
             return ['error', 'Database error: ' . $e->getMessage()];
         }

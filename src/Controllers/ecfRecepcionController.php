@@ -193,13 +193,18 @@ function handleRecepcionEcf(): void
         'module' => 'ecf', 'action' => 'ECF_RECEIVED',
         'entity_type' => 'ecf_recibido', 'entity_id' => $trackId,
         'tenant_id' => $tenantId,
+        'session_token_hash' => $bearerCheck['token_hash'] ?? null,
         'new_values' => [
             'tipo_ecf' => $tipoEcf, 'e_ncf' => $eNcf, 'rnc_emisor' => $rncEmisor,
             'rnc_comprador' => $rncComprador, 'monto_total' => $montoTotal,
             'estado' => $estado, 'validacion_firma' => $validation['firma'] ?? null,
+            'autenticacion' => $hasValidBearer
+                ? ['metodo' => 'token DGII', 'rnc_del_token' => $bearerCheck['rnc'] ?? null, 'token_expedido' => $bearerCheck['expedido_at'] ?? null]
+                : ['metodo' => 'solo firma (sin token)'],
         ],
         'success' => ($validation['firma'] ?? '') === 'OK',
-        'description' => 'e-CF recibido del emisor ' . $rncEmisor . '.',
+        'description' => 'e-CF recibido del emisor ' . $rncEmisor
+            . ($hasValidBearer ? ' (autenticado con token DGII de ' . ($bearerCheck['rnc'] ?? '?') . ').' : ' (sin token: validado por firma).'),
     ]);
 
     $nuestroRnc = $emisor['rnc'] ?? '';
@@ -331,7 +336,12 @@ function ecfRecepcionRequireBearer(bool $soft = false): array
         }
         return ['ok' => false];
     }
-    return ['ok' => true, 'rnc' => $valid['rnc_consumidor']];
+    // expedido_at y el hash ligan esta entrega al handshake DGII_AUTH_IN_OK de
+    // la bitacora (que queda sin empresa, ver ecfAutenticacionController).
+    return [
+        'ok' => true, 'rnc' => $valid['rnc_consumidor'],
+        'expedido_at' => $valid['expedido_at'] ?? null, 'token_hash' => hash('sha256', $token),
+    ];
 }
 
 function buildSignedAECF(string $rncEmisor, string $rncComprador, string $eNcf, int $estado, ?int $motivo): string

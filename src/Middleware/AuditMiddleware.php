@@ -27,17 +27,24 @@ class AuditMiddleware
     }
 
     /**
-     * Registra un acceso denegado/no autorizado (uso opcional desde el gate o
-     * controllers). module describe el recurso; reason el motivo.
+     * Registra un acceso denegado: un usuario con sesion valida intento usar un
+     * modulo que su rol no tiene (403). Los 401 (token vencido o falso) NO se
+     * registran: cada sesion que expira con la app abierta dejaria filas sin
+     * usuario identificado, y los intentos de credenciales ya quedan como
+     * LOGIN_FAILED. module = modulo al que se intento entrar; reason = motivo.
+     *
+     * @param array       $detalle     Ruta, metodo, permiso requerido... (new_values).
+     * @param string|null $descripcion Texto para la bitacora; por defecto generico.
      */
-    public static function logAccessDenied(string $module, string $reason): void
+    public static function logAccessDenied(string $module, string $reason, array $detalle = [], ?string $descripcion = null): void
     {
         AuditLogger::log([
             'module'        => $module,
             'action'        => 'ACCESS_DENIED',
             'success'       => false,
             'error_message' => $reason,
-            'description'   => 'Acceso denegado.',
+            'new_values'    => $detalle ?: null,
+            'description'   => $descripcion ?? 'Acceso denegado.',
         ]);
     }
 }

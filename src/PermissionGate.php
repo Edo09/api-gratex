@@ -154,6 +154,22 @@ class PermissionGate
      */
     private static function deny(string $route, string $method, string $required, string $reason, int $code, string $msg): void
     {
+        // Bitacora: solo los 403 (sesion valida sin permiso), ver
+        // AuditMiddleware::logAccessDenied. Tambien en modo sombra, rotulado:
+        // ahi no se bloquea, pero sigue siendo un rol entrando donde no deberia.
+        if ($code === 403) {
+            require_once __DIR__ . '/Middleware/AuditMiddleware.php';
+            $bloqueado = self::enforcing();
+            AuditMiddleware::logAccessDenied(
+                $required,
+                $reason,
+                ['ruta' => $route, 'metodo' => $method, 'permiso_requerido' => $required, 'bloqueado' => $bloqueado],
+                $bloqueado
+                    ? "Acceso denegado: el rol no tiene el modulo {$required}."
+                    : "Acceso sin permiso permitido (modo sombra): el rol no tiene el modulo {$required}."
+            );
+        }
+
         if (!self::enforcing()) {
             error_log("[PermissionGate][SHADOW] denegaria {$route} {$method} (req={$required}, {$reason})");
             return;

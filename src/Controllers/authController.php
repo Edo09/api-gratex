@@ -43,7 +43,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
                         'user_id'            => $u['id'] ?? null,
                         'username'           => $u['username'] ?? null,
                         'email'              => $u['email'] ?? null,
-                        'tenant_id'          => $tenantId !== null ? (int) $tenantId : null,
+                        // La empresa sale del usuario: el front ya no manda tenant_id y
+                        // sin esto ningun login quedaba en la bitacora de su empresa.
+                        'tenant_id'          => $login_result[2]['tenant_id'] ?? ($tenantId !== null ? (int) $tenantId : null),
                         'session_token_hash' => isset($login_result[1]['token']) ? hash('sha256', $login_result[1]['token']) : null,
                         'success'            => true,
                         'description'        => 'Inicio de sesion exitoso.',
@@ -58,7 +60,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
                         'action'        => 'LOGIN_FAILED',
                         'username'      => $isEmail ? null : $_POST->emailOrUsername,
                         'email'         => $isEmail ? $_POST->emailOrUsername : null,
-                        'tenant_id'     => $tenantId !== null ? (int) $tenantId : null,
+                        // Usuario existente con clave equivocada: queda en su empresa
+                        // (su admin ve el intento). Usuario inexistente: sin empresa.
+                        'user_id'       => $login_result[2]['user_id'] ?? null,
+                        'tenant_id'     => $login_result[2]['tenant_id'] ?? ($tenantId !== null ? (int) $tenantId : null),
                         'success'       => false,
                         'error_message' => $login_result[1],
                         'description'   => 'Intento de inicio de sesion fallido.',
