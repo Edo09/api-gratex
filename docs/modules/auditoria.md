@@ -30,7 +30,9 @@ la [vista de operaciones](#vista-web-de-operaciones)):
   (`authModel::loginUser` devuelve un tercer elemento, solo para la bitácora, con
   `tenant_id`/`user_id`). Hasta el 2026-09-21 **todos** los logins, exitosos y
   fallidos, quedaban sin empresa: el tenant se tomaba del cuerpo del POST, que el
-  front ya no manda.
+  front ya no manda. Las filas viejas se corrigen con
+  `db/master_migrations/009_backfill_audit_login_tenant.sql` (con respaldo y
+  forma de deshacer).
 - **Autenticación DGII entrante** (`DGII_AUTH_IN_*`): el handshake semilla→token
   llega por una URL compartida, antes de saber a qué tenant va el e-CF (se
   resuelve después por `RNCComprador`). Para que el admin igual sepa quién le
