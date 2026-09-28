@@ -2,6 +2,7 @@
 // CRUD de facturas NO electronicas (no e-CF).
 // Ruta: /api/facturas-simples
 //   GET    /api/facturas-simples              -> lista paginada (?page,?pageSize,?query)
+//   GET    /api/facturas-simples/stats         -> cuantas hay y cuanto suman (total, por mes y por dia), para el dashboard
 //   GET    /api/facturas-simples/{id}          -> una factura con sus lineas
 //   GET    /api/facturas-simples?id={id}       -> idem
 //   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64|datos, ?formato=pos|pos76|pos72)
@@ -49,6 +50,9 @@ $pathId = preg_match('#/facturas-simples/(\d+)#', $path, $m) ? (int) $m[1] : nul
 $isPreview = (bool) preg_match('#/facturas-simples/preview$#', $path);
 // GET /api/facturas-simples/{id}/pdf -> PDF de la factura guardada.
 $isPdf = (bool) preg_match('#/facturas-simples/\d+/pdf$#', $path);
+// GET /api/facturas-simples/stats -> resumen para el dashboard. Como "preview",
+// no es numerico: no colisiona con /{id}.
+$isStats = (bool) preg_match('#/facturas-simples/stats$#', $path);
 
 function fsBody(): array
 {
@@ -277,8 +281,36 @@ function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientMod
     ]);
 }
 
+/**
+ * GET /api/facturas-simples/stats
+ * Mismos nombres de campo que /api/facturas/stats (total, monto_total, mes)
+ * para que el dashboard los sume sin traducir. Ver facturaModel::getFacturasSimplesStats.
+ */
+function fsHandleStats(facturaModel $facturaModel): void
+{
+    $stats = $facturaModel->getFacturasSimplesStats();
+
+    if ($stats['resumen']) {
+        $stats['resumen']['total'] = (int) $stats['resumen']['total'];
+        $stats['resumen']['monto_total'] = (float) $stats['resumen']['monto_total'];
+    }
+    foreach (['por_mes', 'por_dia'] as $serie) {
+        foreach ($stats[$serie] as &$fila) {
+            $fila['total'] = (int) $fila['total'];
+            $fila['monto_total'] = (float) $fila['monto_total'];
+        }
+        unset($fila);
+    }
+
+    fsRespond(true, $stats);
+}
+
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
+        if ($isStats) {
+            fsHandleStats($facturaModel);
+            break;
+        }
         if ($isPdf && $pathId !== null) {
             fsHandlePdf($pathId, $facturaModel, $clientModel);
             break;

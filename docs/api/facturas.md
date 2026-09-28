@@ -193,6 +193,13 @@ X-API-KEY: <key>
       { "mes": "2026-05", "total": 45, "monto_total": 1250000.00 },
       { "mes": "2026-04", "total": 30, "monto_total": 800000.00 }
     ],
+    "ventas_por_mes": [
+      { "mes": "2026-05", "total": 40, "monto_total": 1180000.00 },
+      { "mes": "2026-04", "total": 27, "monto_total": 760000.00 }
+    ],
+    "ventas_por_dia": [
+      { "dia": "2026-05-28", "total": 3, "monto_total": 45000.00 }
+    ],
     "secuencias": [
       { "type": "E31", "nombre": "Factura de Crédito Fiscal", "secuencia_actual": 12, "total_emitidos": 12 },
       { "type": "E32", "nombre": "Factura de Consumo",         "secuencia_actual": 8,  "total_emitidos": 8  }
@@ -214,7 +221,9 @@ X-API-KEY: <key>
 | `por_tipo[].aceptados` | Cuántos tienen `estado_dgii = ACEPTADO` |
 | `por_tipo[].rfce` | Cuántos pasaron por flujo RFCE (E32 < 250k) |
 | `por_tipo[].rechazados` | Cuántos fueron rechazados por DGII |
-| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses |
+| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses. e-CF emitidos de **todos** los tipos (incluye E41/E43/E47 de compras), sin rechazados, por `fecha_emision_dgii`. No son ventas |
+| `ventas_por_mes[]` | Ventas en e-CF por mes (`mes`, `total` = documentos, `monto_total` neto), últimos 12 meses. Mismas reglas que el reporte de ventas (`ReporteVentasModel`): suman E31/E32/E44/E45/E46 y E33, **resta** E34, no entran E41/E43/E47 ni los rechazados. Por `date`, como el reporte. No incluye facturas simples (ver `GET /api/facturas-simples/stats`) |
+| `ventas_por_dia[]` | Igual que `ventas_por_mes`, por día (`dia` = `YYYY-MM-DD`), últimos 31 días. Los días sin ventas no vienen |
 | `secuencias[].secuencia_actual` | Último número de secuencia asignado |
 | `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo |
 

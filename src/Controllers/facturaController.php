@@ -914,11 +914,13 @@ function handleECFStats(facturaModel $facturaModel): void
     }
     unset($estado);
 
-    foreach ($stats['por_mes'] as &$mes) {
-        $mes['total'] = (int) $mes['total'];
-        $mes['monto_total'] = (float) $mes['monto_total'];
+    foreach (['por_mes', 'ventas_por_mes', 'ventas_por_dia'] as $serie) {
+        foreach ($stats[$serie] as &$fila) {
+            $fila['total'] = (int) $fila['total'];
+            $fila['monto_total'] = (float) $fila['monto_total'];
+        }
+        unset($fila);
     }
-    unset($mes);
 
     foreach ($stats['secuencias'] as &$seq) {
         $seq['secuencia_actual'] = (int) $seq['secuencia_actual'];

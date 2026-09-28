@@ -19,15 +19,18 @@ require_once __DIR__ . '/../AmbienteResolver.php';
  *     son documentos que el emisor genera por lo que COMPRA, no por lo que
  *     vende. Meterlos inflaria las ventas con gasto propio.
  *   - Los RECHAZADOS quedan fuera: nunca llegaron a ser una venta valida.
+ *
+ * Los tipos son publicos porque facturaModel::getECFStats los usa para las
+ * ventas del dashboard: asi la regla vive en un solo lugar y los dos cuadran.
  */
 class ReporteVentasModel
 {
     /** e-CF que representan una venta. */
-    private const TIPOS_VENTA = ['31', '32', '44', '45', '46'];
+    public const TIPOS_VENTA = ['31', '32', '44', '45', '46'];
     /** Notas que ajustan ventas ya hechas. */
-    private const TIPOS_NOTA = ['33', '34'];
+    public const TIPOS_NOTA = ['33', '34'];
     /** Nota de credito: resta del total vendido. */
-    private const TIPO_RESTA = '34';
+    public const TIPO_RESTA = '34';
 
     /** Catalogo de tipo_pago (ver docs/api/facturas.md). */
     public const FORMAS_PAGO = [

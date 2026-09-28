@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../AmbienteResolver.php');
+require_once(__DIR__ . '/ReporteVentasModel.php');
 
 class facturaModel
 {
@@ -534,6 +535,50 @@ class facturaModel
     }
 
     /**
+     * Cuantas facturas simples hay y cuanto suman, para el dashboard: en total,
+     * por mes (ultimos 12) y por dia (ultimos 31). getECFStats solo mira e-CF
+     * (tipo_ecf IS NOT NULL), asi que sin esto las ventas de mostrador no
+     * aparecian en "Ventas del dia/mes" ni en el grafico.
+     *
+     * Se agrupan por `date`, la fecha de la factura: una simple nunca tiene
+     * fecha_emision_dgii. Sin filtro de ambiente, igual que ReporteVentasModel:
+     * no se envian a la DGII, asi que no pertenecen a ninguno. Por dia y no solo
+     * "hoy": el "hoy" lo decide el navegador, y el reloj del server puede ir
+     * en otra zona horaria.
+     */
+    public function getFacturasSimplesStats(): array
+    {
+        try {
+            $resumen = $this->conexion->query(
+                "SELECT COUNT(*) AS total, COALESCE(SUM(total), 0) AS monto_total
+                 FROM facturas WHERE tipo_ecf IS NULL"
+            )->fetch(PDO::FETCH_ASSOC);
+
+            $porMes = $this->conexion->query(
+                "SELECT DATE_FORMAT(date, '%Y-%m') AS mes,
+                        COUNT(*) AS total,
+                        COALESCE(SUM(total), 0) AS monto_total
+                 FROM facturas
+                 WHERE tipo_ecf IS NULL AND date >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                 GROUP BY mes ORDER BY mes DESC"
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            $porDia = $this->conexion->query(
+                "SELECT DATE_FORMAT(date, '%Y-%m-%d') AS dia,
+                        COUNT(*) AS total,
+                        COALESCE(SUM(total), 0) AS monto_total
+                 FROM facturas
+                 WHERE tipo_ecf IS NULL AND date >= DATE_SUB(CURDATE(), INTERVAL 31 DAY)
+                 GROUP BY dia ORDER BY dia DESC"
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            return ['resumen' => $resumen, 'por_mes' => $porMes, 'por_dia' => $porDia];
+        } catch (PDOException $e) {
+            return ['resumen' => null, 'por_mes' => [], 'por_dia' => []];
+        }
+    }
+
+    /**
      * Actualiza una factura no electronica. Campos no enviados conservan su valor.
      * Si se envia `items`, reemplaza todas las lineas. Rechaza e-CF emitidos.
      * @return array ['success', payload] | ['error', mensaje]
@@ -982,10 +1027,10 @@ class facturaModel
                  GROUP BY estado_dgii ORDER BY total DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 
-            // Un comprobante rechazado no es ingreso: se excluye de las ventas por
-            // mes. Cubre RECHAZADO, RECHAZADO_ARCHIVADO y RFCE_RECHAZADO; conserva
-            // NULL/PENDIENTE. (El front usa por_mes.monto_total como "ventas" sin
-            // restar nada, a diferencia de resumen.monto_total.)
+            // e-CF emitidos por mes, de todos los tipos (compras E41/E43/E47
+            // incluidas). Sin los rechazados: cubre RECHAZADO, RECHAZADO_ARCHIVADO
+            // y RFCE_RECHAZADO; conserva NULL/PENDIENTE. NO son ventas: para eso
+            // estan ventas_por_mes / ventas_por_dia.
             $notRechazado = "AND (estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%')";
             $porMes = $this->conexion->query(
                 "SELECT DATE_FORMAT(fecha_emision_dgii, '%Y-%m') as mes,
@@ -995,6 +1040,38 @@ class facturaModel
                  WHERE tipo_ecf IS NOT NULL {$ambFilter} {$notRechazado}
                    AND fecha_emision_dgii >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
                  GROUP BY mes ORDER BY mes DESC"
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            // Ventas en e-CF para el dashboard, con las reglas de ReporteVentasModel
+            // (sus constantes, no una copia): suman los tipos de venta y las notas,
+            // la nota de credito resta y E41/E43/E47 no entran. Agrupa por `date`
+            // como el reporte, para que "Ventas del mes" cuadre con el. Las simples
+            // no van aqui: las suma /api/facturas-simples/stats. Por dia y no solo
+            // "hoy" por lo mismo que alli: el "hoy" lo decide el navegador.
+            $tiposVenta = implode(',', array_map(
+                [$this->conexion, 'quote'],
+                array_merge(ReporteVentasModel::TIPOS_VENTA, ReporteVentasModel::TIPOS_NOTA)
+            ));
+            $tipoResta = $this->conexion->quote(ReporteVentasModel::TIPO_RESTA);
+            $esVenta = "tipo_ecf IN ({$tiposVenta}) {$ambFilter} {$notRechazado}";
+            $montoVenta = "COALESCE(SUM(CASE WHEN tipo_ecf = {$tipoResta} THEN -total ELSE total END), 0)";
+
+            $ventasPorMes = $this->conexion->query(
+                "SELECT DATE_FORMAT(date, '%Y-%m') as mes,
+                        COUNT(*) as total,
+                        {$montoVenta} as monto_total
+                 FROM facturas
+                 WHERE {$esVenta} AND date >= DATE_SUB(NOW(), INTERVAL 12 MONTH)
+                 GROUP BY mes ORDER BY mes DESC"
+            )->fetchAll(PDO::FETCH_ASSOC);
+
+            $ventasPorDia = $this->conexion->query(
+                "SELECT DATE_FORMAT(date, '%Y-%m-%d') as dia,
+                        COUNT(*) as total,
+                        {$montoVenta} as monto_total
+                 FROM facturas
+                 WHERE {$esVenta} AND date >= DATE_SUB(CURDATE(), INTERVAL 31 DAY)
+                 GROUP BY dia ORDER BY dia DESC"
             )->fetchAll(PDO::FETCH_ASSOC);
 
             $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
@@ -1047,6 +1124,8 @@ class facturaModel
                 'por_tipo'  => $porTipo,
                 'por_estado' => $porEstado,
                 'por_mes'   => $porMes,
+                'ventas_por_mes' => $ventasPorMes,
+                'ventas_por_dia' => $ventasPorDia,
                 'secuencias' => $secuencias,
             ];
         } catch (PDOException $e) {
@@ -1055,6 +1134,8 @@ class facturaModel
                 'por_tipo'  => [],
                 'por_estado' => [],
                 'por_mes'   => [],
+                'ventas_por_mes' => [],
+                'ventas_por_dia' => [],
                 'secuencias' => [],
             ];
         }
