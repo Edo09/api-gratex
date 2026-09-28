@@ -6,6 +6,7 @@ header('content-type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ACECFEmissionService.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
 require_once __DIR__ . '/../Models/ecfRecibidoModel.php';
 
 $auth = new AuthMiddleware();
@@ -29,23 +30,34 @@ function handleEnvioACECF(): void
 {
     $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
-        respondACECF(false, 'JSON body invalido', 400);
+        respondACECF(false, 'No se pudieron leer los datos de tu respuesta. Inténtalo de nuevo.', 400);
         return;
     }
 
-    $required = ['rnc_emisor', 'e_ncf', 'fecha_emision', 'monto_total', 'estado'];
-    foreach ($required as $field) {
+    // Los datos del comprobante salen del e-CF recibido, no los teclea el
+    // usuario: si falta uno, el recibido llego incompleto y no hay nada que
+    // corregir en el formulario. La decision (estado) si es del usuario.
+    $required = [
+        'rnc_emisor'    => 'el RNC del emisor',
+        'e_ncf'         => 'el e-NCF',
+        'fecha_emision' => 'la fecha de emisión',
+        'monto_total'   => 'el monto total',
+        'estado'        => null,
+    ];
+    foreach ($required as $field => $etiqueta) {
         if (!isset($input[$field]) || $input[$field] === '') {
-            respondACECF(false, "Campo requerido faltante: $field", 422);
+            respondACECF(false, $etiqueta === null
+                ? 'Elige si apruebas o rechazas el comprobante.'
+                : "Al comprobante recibido le falta {$etiqueta}, por eso no se puede enviar tu respuesta a la DGII. Comunícate con soporte.", 422);
             return;
         }
     }
     if (!in_array((string) $input['estado'], ['1', '2'], true)) {
-        respondACECF(false, 'estado debe ser 1 (Aceptado) o 2 (Rechazado)', 422);
+        respondACECF(false, 'Elige si apruebas o rechazas el comprobante.', 422);
         return;
     }
     if ((string) $input['estado'] === '2' && empty($input['detalle_motivo'])) {
-        respondACECF(false, 'detalle_motivo requerido cuando estado=2', 422);
+        respondACECF(false, 'Escribe el motivo del rechazo.', 422);
         return;
     }
 
@@ -84,7 +96,13 @@ function handleEnvioACECF(): void
             'success' => false, 'error_message' => $e->getMessage(),
             'description' => 'Fallo enviando aprobacion comercial (ACECF) a DGII.',
         ]);
-        respondACECF(false, 'Fallo enviando ACECF a DGII: ' . $e->getMessage(), 502);
+        // La bitacora guarda el texto crudo (arriba); al usuario nunca: puede
+        // traer rutas del certificado, nombres de variables de entorno o el
+        // detalle del transporte HTTP. Se le muestra lo que dijo la DGII si se
+        // pudo extraer, o un texto generico.
+        error_log('[aprobacionComercialOutgoing] fallo enviando ACECF ('
+            . ($input['e_ncf'] ?? '?') . '): ' . $e->getMessage());
+        respondACECF(false, mensajeUsuarioFalloACECF($e, $dgii), 502);
         return;
     }
 
@@ -169,6 +187,26 @@ function parseDgiiAprobacionResponse(string $message): array
         }
     }
     return $out;
+}
+
+/**
+ * Texto para la pantalla cuando el envio del ACECF falla.
+ *   - EcfUsuarioException: el servicio ya trae un texto para el usuario (caso
+ *     que el usuario o soporte puede resolver: datos fiscales, fechas...).
+ *   - La DGII respondio con su propio mensaje (parseado de la excepcion de
+ *     DgiiAuthService, sin cambiar ese formato): se muestra ese mensaje.
+ *   - Cualquier otro fallo (certificado, conexion, firma): generico.
+ */
+function mensajeUsuarioFalloACECF(Throwable $e, array $dgii): string
+{
+    if ($e instanceof EcfUsuarioException) {
+        return $e->getMensajeUsuario();
+    }
+    $mensajeDgii = trim((string) ($dgii['mensaje'] ?? ''));
+    if ($mensajeDgii !== '') {
+        return 'La DGII no aceptó tu respuesta: ' . $mensajeDgii;
+    }
+    return 'No se pudo enviar tu respuesta a la DGII. Inténtalo de nuevo en unos minutos y, si sigue pasando, avisa a soporte.';
 }
 
 function respondACECF(bool $status, string $message, int $code = 200): void

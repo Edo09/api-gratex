@@ -75,7 +75,8 @@ class authModel
             $stmt->execute([':token_hash' => $token_hash]);
             return ['success', 'Signed out successfully'];
         } catch (PDOException $e) {
-            return ['error', 'Failed to sign out'];
+            error_log('[authModel] revokeTokenByHash: ' . $e->getMessage());
+            return ['error', 'No se pudo cerrar la sesión. Inténtalo de nuevo.'];
         }
     }
 
@@ -106,6 +107,8 @@ class authModel
      *        globales, asi que el tenant se resuelve sin el. Se acepta por
      *        compatibilidad con clientes viejos, pero ya no se usa.
      * @return array ['success', ['token' => token, 'user' => user_data]] or ['error', message]
+     *         El tercer elemento (tenant_id, user_id y, ante un fallo de DB,
+     *         'detalle' con el texto crudo) es solo para la bitacora.
      */
     public function loginUser($email_or_username, $password, $tenant_id = null)
     {
@@ -127,8 +130,10 @@ class authModel
             // solo para la bitacora (no va en la respuesta): con el usuario
             // encontrado, el intento fallido queda en SU empresa y el admin lo
             // ve. Usuario inexistente = sin empresa (no se sabe a quien iba).
+            // El mismo texto para usuario inexistente y clave equivocada, a
+            // proposito: no revela si la cuenta existe.
             if (!$user || !password_verify($password, $user['password'])) {
-                return ['error', 'Invalid email or password', $user
+                return ['error', 'El usuario o la contraseña no son correctos. Revísalos e inténtalo de nuevo.', $user
                     ? ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null, 'user_id' => (int) $user['id']]
                     : ['tenant_id' => null, 'user_id' => null]];
             }
@@ -172,7 +177,11 @@ class authModel
             return ['success', ['token' => $token, 'user' => $user_data],
                 ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null]];
         } catch (PDOException $e) {
-            return ['error', 'Database error: ' . $e->getMessage()];
+            // El texto de PDO no se le muestra al usuario (puede traer SQL o datos
+            // del servidor). Va al log y, en 'detalle', a la bitacora del intento.
+            error_log('[authModel] loginUser: ' . $e->getMessage());
+            return ['error', 'No se pudo iniciar sesión por un problema del sistema. Inténtalo de nuevo en unos minutos.',
+                ['tenant_id' => null, 'user_id' => null, 'detalle' => 'Database error: ' . $e->getMessage()]];
         }
     }
 
@@ -227,7 +236,9 @@ class authModel
     {
         try {
             if (self::multiTenant() && $tenant_id === null) {
-                return ['error', 'tenant_id es requerido en modo multi-tenant'];
+                // Solo pasa si la sesion no trae empresa; volver a entrar la renueva.
+                error_log('[authModel] registerUser sin tenant_id en modo multi-tenant');
+                return ['error', 'No se pudo identificar tu empresa. Cierra sesión y vuelve a entrar.'];
             }
             // El rol es server-side; default 'user'. El llamador (admin) puede
             // pasar otro nombre de rol existente del tenant.
@@ -238,7 +249,7 @@ class authModel
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':email' => $email]);
             if ($stmt->fetch()) {
-                return ['error', 'Email already registered'];
+                return ['error', 'Ya existe un usuario con ese correo. Usa otro correo.'];
             }
 
             // Check if username already exists (username is globally unique across
@@ -247,7 +258,7 @@ class authModel
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':username' => $username]);
             if ($stmt->fetch()) {
-                return ['error', 'Username already taken'];
+                return ['error', 'Ese nombre de usuario ya está en uso. Elige otro.'];
             }
 
             // Split full name into first name and last name
@@ -296,7 +307,8 @@ class authModel
 
             return ['success', $user_data];
         } catch (PDOException $e) {
-            return ['error', 'Database error: ' . $e->getMessage()];
+            error_log('[authModel] registerUser: ' . $e->getMessage());
+            return ['error', 'No se pudo crear el usuario. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 }

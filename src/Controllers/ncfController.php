@@ -94,7 +94,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $body = InputSanitizer::jsonInput(false);
             if (!is_object($body)) {
                 http_response_code(400);
-                echo json_encode(['status' => false, 'error' => 'JSON body invalido']);
+                echo json_encode(['status' => false, 'error' => 'No se pudieron leer los datos del rango. Inténtalo de nuevo.']);
                 break;
             }
             $type = strtoupper(trim((string) ($body->type ?? '')));
@@ -103,7 +103,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $venc = trim((string) ($body->fecha_vencimiento ?? ''));
             if ($type === '' || !is_numeric($desde) || !is_numeric($hasta) || $venc === '') {
                 http_response_code(422);
-                echo json_encode(['status' => false, 'error' => 'type, numero_desde, numero_hasta y fecha_vencimiento son requeridos']);
+                echo json_encode(['status' => false, 'error' => 'Completa el tipo de comprobante, el número inicial, el número final y la fecha de vencimiento.']);
                 break;
             }
             $result = $ncfModel->registerRange(

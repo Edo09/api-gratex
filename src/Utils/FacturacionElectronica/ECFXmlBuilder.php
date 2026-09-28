@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/EcfUsuarioException.php';
+
 /**
  * Builds the e-CF XML according to DGII XSD (e-CF 31, 32, 33, 34, 41, 43, 44, 45, 46, 47).
  *
@@ -96,7 +98,12 @@ class ECFXmlBuilder
         }
         foreach (['ncf_modificado', 'fecha_ncf_modificado', 'codigo_modificacion'] as $key) {
             if (($ref[$key] ?? '') === '') {
-                throw new RuntimeException('InformacionReferencia.' . $key . ' es requerido para e-CF tipo ' . $tipoEcf . '.');
+                // Mismo texto tecnico de siempre (integradores y audit); la app
+                // muestra el segundo. Ver EcfUsuarioException.
+                throw new EcfUsuarioException(
+                    'InformacionReferencia.' . $key . ' es requerido para e-CF tipo ' . $tipoEcf . '.',
+                    'Para emitir una nota de crédito o de débito tienes que indicar el comprobante que modifica (su e-NCF y su fecha) y el motivo del cambio.'
+                );
             }
         }
 
@@ -289,7 +296,10 @@ class ECFXmlBuilder
         } elseif (!empty($comprador['identificador_extranjero'])) {
             $node->appendChild($this->el($doc, 'IdentificadorExtranjero', (string) $comprador['identificador_extranjero']));
         } elseif ($tipoEcf === '31') {
-            throw new RuntimeException('RNC del comprador es requerido para e-CF tipo 31 (Credito Fiscal).');
+            throw new EcfUsuarioException(
+                'RNC del comprador es requerido para e-CF tipo 31 (Credito Fiscal).',
+                'Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo.'
+            );
         }
 
         $node->appendChild($this->el($doc, 'RazonSocialComprador', $comprador['razon_social'] ?? ''));
@@ -683,7 +693,12 @@ class ECFXmlBuilder
         }
         $ts = strtotime($date);
         if ($ts === false) {
-            throw new RuntimeException('Fecha invalida: ' . $date);
+            // Pasan por aqui todas las fechas del e-CF (emision, vencimiento,
+            // la del comprobante que modifica una nota...), no solo una.
+            throw new EcfUsuarioException(
+                'Fecha invalida: ' . $date,
+                'Alguna de las fechas del comprobante no es válida. Revísalas e inténtalo de nuevo.'
+            );
         }
         return date('d-m-Y', $ts);
     }

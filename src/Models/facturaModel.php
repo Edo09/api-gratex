@@ -7,6 +7,16 @@ class facturaModel
 {
     private $conexion;
 
+    /**
+     * Tercer elemento de ['error', mensaje, codigo] cuando la factura simple no
+     * existe. facturaSimpleController decide el 404 por este codigo y no por el
+     * texto, para que el mensaje se pueda reescribir sin romper nada.
+     */
+    public const ERROR_NO_ENCONTRADA = 'no_encontrada';
+
+    /** La factura simple desaparecio entre que se abrio y se guardo/elimino. */
+    public const MSG_SIMPLE_YA_NO_EXISTE = 'Esta factura ya no existe. Puede que la hayan eliminado; vuelve al listado.';
+
     public function __construct()
     {
         $this->conexion = Database::getInstance()->getConnection();
@@ -329,7 +339,7 @@ class facturaModel
     {
         $items = $this->normalizeSimpleItems($data['items'] ?? []);
         if (empty($items)) {
-            return ['error', 'items requerido (al menos una linea)'];
+            return ['error', 'Agrega al menos una línea a la factura.'];
         }
         $total = isset($data['total']) && $data['total'] !== ''
             ? (float) $data['total']
@@ -360,7 +370,8 @@ class facturaModel
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $noFactura,
-                ':date' => $data['date'] ?? date('Y-m-d H:i:s'),
+                // '' cuenta como sin fecha: MySQL lo rechaza y la venta no se guardaria.
+                ':date' => ($data['date'] ?? '') !== '' ? $data['date'] : date('Y-m-d H:i:s'),
                 ':client_id' => $data['client_id'] ?? null,
                 ':client_name' => $data['client_name'] ?? '',
                 ':user_id' => $data['user_id'],
@@ -379,7 +390,9 @@ class facturaModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo crear la factura: ' . $e->getMessage()];
+            // El texto de PDO (SQL, tablas) solo al log; al usuario, uno claro.
+            error_log('[facturas] no se pudo crear la factura simple: ' . $e->getMessage());
+            return ['error', 'No se pudo guardar la factura. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         } finally {
             // Se suelta pase lo que pase: si una excepcion se lo llevara puesto,
             // la conexion quedaria con el candado tomado y la siguiente venta
@@ -581,7 +594,7 @@ class facturaModel
     /**
      * Actualiza una factura no electronica. Campos no enviados conservan su valor.
      * Si se envia `items`, reemplaza todas las lineas. Rechaza e-CF emitidos.
-     * @return array ['success', payload] | ['error', mensaje]
+     * @return array ['success', payload] | ['error', mensaje] | ['error', mensaje, self::ERROR_NO_ENCONTRADA]
      */
     public function updateFacturaSimple(int $id, array $data): array
     {
@@ -590,14 +603,14 @@ class facturaModel
             $cur->execute([':id' => $id]);
             $row = $cur->fetch();
             if (!$row) {
-                return ['error', 'Factura no encontrada'];
+                return ['error', self::MSG_SIMPLE_YA_NO_EXISTE, self::ERROR_NO_ENCONTRADA];
             }
             if ($row['tipo_ecf'] !== null) {
-                return ['error', 'Esta factura es un e-CF emitido; no puede editarse por esta via'];
+                return ['error', 'Esta factura electrónica ya se envió a la DGII y no se puede editar. Si hay que corregirla, emite una nota de crédito.'];
             }
 
             $noFactura = $data['no_factura'] ?? $row['no_factura'];
-            $date = $data['date'] ?? $row['date'];
+            $date = ($data['date'] ?? '') !== '' ? $data['date'] : $row['date'];
             $clientId = array_key_exists('client_id', $data) ? $data['client_id'] : $row['client_id'];
             $clientName = $data['client_name'] ?? $row['client_name'];
             $ncf = array_key_exists('NCF', $data) ? $data['NCF'] : $row['NCF'];
@@ -644,13 +657,14 @@ class facturaModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo actualizar la factura: ' . $e->getMessage()];
+            error_log('[facturas] no se pudo actualizar la factura simple ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron guardar los cambios de la factura. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
     /**
      * Elimina una factura no electronica y sus lineas. Rechaza e-CF emitidos.
-     * @return array ['success', mensaje] | ['error', mensaje]
+     * @return array ['success', mensaje] | ['error', mensaje] | ['error', mensaje, self::ERROR_NO_ENCONTRADA]
      */
     public function deleteFacturaSimple(int $id): array
     {
@@ -659,10 +673,10 @@ class facturaModel
             $cur->execute([':id' => $id]);
             $row = $cur->fetch();
             if (!$row) {
-                return ['error', 'Factura no encontrada'];
+                return ['error', 'Esta factura ya no existe. Puede que otra persona la haya eliminado; actualiza el listado.', self::ERROR_NO_ENCONTRADA];
             }
             if ($row['tipo_ecf'] !== null) {
-                return ['error', 'Esta factura es un e-CF emitido; no puede eliminarse'];
+                return ['error', 'Esta factura electrónica ya se envió a la DGII y no se puede eliminar. Para anularla, emite una nota de crédito.'];
             }
 
             $this->conexion->beginTransaction();
@@ -674,7 +688,8 @@ class facturaModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo eliminar la factura: ' . $e->getMessage()];
+            error_log('[facturas] no se pudo eliminar la factura simple ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar la factura. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -800,7 +815,11 @@ class facturaModel
      * Save a factura together with its e-CF emission result.
      * @param array $factura {date, client_id, client_name, total, items[], user_id?, tipo_ecf}
      * @param array $ecf {e_ncf, track_id, estado, codigo_seguridad, fecha_emision_dgii, ambiente, signed_xml, dgii_response}
-     * @return array ['success'|'error', payload]
+     * @return array ['success', payload] | ['error', mensaje para el usuario, detalle tecnico para el audit]
+     *
+     * Ojo con los errores: se llama DESPUES de que la DGII recibio el e-CF. Por
+     * eso el mensaje pide NO volver a emitirla (saldria otro e-NCF para la misma
+     * venta) y trae el e-NCF para que soporte la ubique.
      */
     public function saveFacturaConECF(array $factura, array $ecf): array
     {
@@ -844,9 +863,13 @@ class facturaModel
                     $estadosRechazo = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
                     if (!in_array((string) ($prevRow['estado_dgii'] ?? ''), $estadosRechazo, true)) {
                         $this->conexion->rollBack();
-                        return ['error', 'Ya existe una factura con e-NCF ' . $ecf['e_ncf']
+                        $detalle = 'Ya existe una factura con e-NCF ' . $ecf['e_ncf']
                             . ' en estado ' . ($prevRow['estado_dgii'] ?? 'desconocido')
-                            . '; no se puede re-emitir (solo se permite reintentar e-CF rechazados).'];
+                            . '; no se puede re-emitir (solo se permite reintentar e-CF rechazados).';
+                        error_log('[ECF] saveFacturaConECF: ' . $detalle);
+                        return ['error', 'La DGII recibió la factura ' . $ecf['e_ncf']
+                            . ', pero ese número ya estaba usado en el sistema y no se pudo guardar. '
+                            . 'No la emitas de nuevo: avisa a soporte con el número ' . $ecf['e_ncf'] . '.', $detalle];
                     }
                     $delId = (int) $prevRow['id'];
                     // Archive the rejected attempt to maintain history for the client,
@@ -939,7 +962,14 @@ class facturaModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'Failed to save factura with e-CF: ' . $e->getMessage()];
+            $detalle = 'Failed to save factura with e-CF: ' . $e->getMessage();
+            error_log('[ECF] saveFacturaConECF e_ncf=' . ($ecf['e_ncf'] ?? '') . ': ' . $detalle);
+            $eNcf = (string) ($ecf['e_ncf'] ?? '');
+            return ['error', $eNcf !== ''
+                ? 'La factura ' . $eNcf . ' se envió a la DGII, pero no se pudo guardar en el sistema. '
+                    . 'No la emitas de nuevo: avisa a soporte con el número ' . $eNcf . '.'
+                : 'La factura se envió a la DGII, pero no se pudo guardar en el sistema. No la emitas de nuevo: avisa a soporte.',
+                $detalle];
         }
     }
 
@@ -1154,6 +1184,144 @@ class facturaModel
         } catch (PDOException $e) {
             return null;
         }
+    }
+
+    /** Estados en que la DGII acepto el e-CF: los unicos que una nota puede modificar. */
+    public const ESTADOS_MODIFICABLES = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO'];
+
+    /**
+     * Facturas de un cliente que una nota (E33/E34) puede modificar: de venta
+     * (ReporteVentasModel::TIPOS_VENTA), aceptadas por la DGII y del ambiente
+     * activo, de la mas reciente a la mas vieja. Ver mapReferencia().
+     *
+     * @param string|null $query parte del e-NCF
+     * @return array|null null si fallo la consulta (no es lo mismo que "no hay")
+     */
+    public function getFacturasModificables(int $clientId, ?string $query = null, int $limit = 20): ?array
+    {
+        try {
+            $where = ['f.client_id = :client_id', 'f.e_ncf IS NOT NULL'];
+            $params = [];
+            foreach (ReporteVentasModel::TIPOS_VENTA as $i => $t) {
+                $params[":t{$i}"] = $t;
+            }
+            $where[] = 'f.tipo_ecf IN (' . implode(',', array_keys($params)) . ')';
+            $marcasEstado = [];
+            foreach (self::ESTADOS_MODIFICABLES as $i => $e) {
+                $marcasEstado[] = ":e{$i}";
+                $params[":e{$i}"] = $e;
+            }
+            $where[] = 'f.estado_dgii IN (' . implode(',', $marcasEstado) . ')';
+
+            $ambiente = $this->resolveActiveAmbiente();
+            if ($ambiente !== null) {
+                $where[] = 'f.ambiente_dgii = :ambiente';
+                $params[':ambiente'] = $ambiente;
+            }
+            // Un e-NCF es alfanumerico: se descarta lo demas (tambien % y _).
+            $query = preg_replace('/[^A-Za-z0-9]/', '', (string) $query);
+            if ($query !== '') {
+                $where[] = 'f.e_ncf LIKE :query';
+                $params[':query'] = '%' . $query . '%';
+            }
+
+            $sql = $this->sqlReferencia() . ' WHERE ' . implode(' AND ', $where)
+                . ' ORDER BY f.id DESC LIMIT :limit';
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->bindValue(':client_id', $clientId, PDO::PARAM_INT);
+            foreach ($params as $key => $val) {
+                $stmt->bindValue($key, $val, PDO::PARAM_STR);
+            }
+            $stmt->bindValue(':limit', max(1, min($limit, 50)), PDO::PARAM_INT);
+            $stmt->execute();
+            return array_map([$this, 'mapReferencia'], $stmt->fetchAll(PDO::FETCH_ASSOC));
+        } catch (PDOException $e) {
+            error_log('[facturas] getFacturasModificables client_id=' . $clientId . ': ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * La factura que modifica una nota, buscada por su e-NCF en el ambiente
+     * activo (ver mapReferencia()). null si no esta en la base, p.ej. porque se
+     * emitio en otro sistema: esa la valida la DGII.
+     */
+    public function getReferenciaOriginal(string $eNcf): ?array
+    {
+        try {
+            $sql = $this->sqlReferencia() . ' WHERE f.e_ncf = :e_ncf';
+            $params = [':e_ncf' => $eNcf];
+            $ambiente = $this->resolveActiveAmbiente();
+            if ($ambiente !== null) {
+                $sql .= ' AND f.ambiente_dgii = :ambiente';
+                $params[':ambiente'] = $ambiente;
+            }
+            $stmt = $this->conexion->prepare($sql . ' LIMIT 1');
+            $stmt->execute($params);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $row ? $this->mapReferencia($row) : null;
+        } catch (PDOException $e) {
+            error_log('[facturas] getReferenciaOriginal ' . $eNcf . ': ' . $e->getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Factura + lo que ya le ajustaron las notas que la referencian. Solo
+     * cuentan las notas aceptadas o en proceso en la DGII: una rechazada, en
+     * ERROR o NO_ENCONTRADO no ajusto nada y el usuario debe poder reintentarla.
+     */
+    private function sqlReferencia(): string
+    {
+        // FechaEmision se lee del XML firmado: es la que tiene la DGII y la que
+        // pide FechaNCFModificado. SUBSTRING/LOCATE evita traer el XML entero.
+        return "SELECT f.id, f.client_id, f.tipo_ecf, f.e_ncf, f.date, f.fecha_emision_dgii,
+                       f.total, f.estado_dgii,
+                       SUBSTRING(f.xml_firmado, LOCATE('<FechaEmision>', f.xml_firmado) + 14, 10) AS fecha_xml,
+                       COALESCE(n.notas_credito, 0) AS notas_credito,
+                       COALESCE(n.notas_debito, 0) AS notas_debito
+                FROM facturas f
+                LEFT JOIN (
+                    SELECT ncf_modificado, ambiente_dgii,
+                           SUM(CASE WHEN tipo_ecf = '34' THEN total ELSE 0 END) AS notas_credito,
+                           SUM(CASE WHEN tipo_ecf = '33' THEN total ELSE 0 END) AS notas_debito
+                    FROM facturas
+                    WHERE tipo_ecf IN ('33', '34') AND ncf_modificado IS NOT NULL
+                      -- Solo notas que la DGII tiene: aceptadas o en proceso. Una en ERROR o
+                      -- NO_ENCONTRADO (o su intento archivado) no llego a valer, y contarla
+                      -- bloquearia el reintento que el propio mensaje le pide al usuario.
+                      AND estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO')
+                    GROUP BY ncf_modificado, ambiente_dgii
+                ) n ON n.ncf_modificado = f.e_ncf AND n.ambiente_dgii <=> f.ambiente_dgii";
+    }
+
+    /**
+     * Fila de sqlReferencia() para la API: fecha_emision en dd-mm-aaaa (la de
+     * FechaNCFModificado) y saldo = total + notas de debito - notas de credito.
+     */
+    private function mapReferencia(array $r): array
+    {
+        $fecha = (string) ($r['fecha_xml'] ?? '');
+        if (!preg_match('/^\d{2}-\d{2}-\d{4}$/', $fecha)) {
+            // Sin XML legible: la fecha de firma es del mismo dia que FechaEmision.
+            $ts = strtotime((string) ($r['fecha_emision_dgii'] ?: $r['date']));
+            $fecha = $ts ? date('d-m-Y', $ts) : '';
+        }
+        $total = round((float) $r['total'], 2);
+        $credito = round((float) $r['notas_credito'], 2);
+        $debito = round((float) $r['notas_debito'], 2);
+        return [
+            'id' => (int) $r['id'],
+            'client_id' => $r['client_id'] !== null ? (int) $r['client_id'] : null,
+            'tipo_ecf' => (string) $r['tipo_ecf'],
+            'e_ncf' => (string) $r['e_ncf'],
+            'fecha_emision' => $fecha,
+            'estado_dgii' => (string) $r['estado_dgii'],
+            'total' => $total,
+            'notas_credito' => $credito,
+            'notas_debito' => $debito,
+            'saldo' => round($total + $debito - $credito, 2),
+        ];
     }
 
     /**

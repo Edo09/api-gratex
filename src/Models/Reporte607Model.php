@@ -58,7 +58,9 @@ class Reporte607Model
         // EN_PROCESO, NO_ENCONTRADO, ERROR (un e-CF aceptado tarde aparece cuando su
         // estado se actualiza).
         // 'date' es DATETIME -> rango [ini, primer dia del mes siguiente).
-        $sql = "SELECT f.id, f.tipo_ecf, f.e_ncf, f.NCF, f.client_id, f.client_name,
+        // no_factura solo se usa en las advertencias: es el numero que el usuario
+        // reconoce, no el id interno.
+        $sql = "SELECT f.id, f.no_factura, f.tipo_ecf, f.e_ncf, f.NCF, f.client_id, f.client_name,
                        f.date, f.total, f.estado_dgii, f.ambiente_dgii,
                        f.ncf_modificado, f.fecha_ncf_modificado, f.xml_firmado,
                        c.rnc AS cliente_rnc, c.razon_social AS cliente_razon
@@ -115,21 +117,25 @@ class Reporte607Model
         $formas = $this->resolverFormas($x, $esEcf, $totalConItbis);
         $r2 = static fn ($v) => round((float) $v, 2); // limpia ruido de float en el preview JSON
 
-        // Advertencias.
+        // Advertencias. Las lee el contador: se nombra el comprobante por su NCF
+        // (o por el numero de factura si no tiene) y el dato que falta por su
+        // nombre, no por el numero de campo del formato 607.
         if ($ncf === '') {
-            $advertencias[] = "Factura id {$f['id']}: sin NCF/e-NCF.";
+            $advertencias[] = "Factura {$this->refFactura($f)}: no tiene NCF ni e-NCF.";
         } else {
             $this->validarNcf($ncf, $advertencias);
         }
+        $cualNcf = $ncf !== '' ? "NCF {$ncf}" : "Factura {$this->refFactura($f)}";
         if ($rnc === '' && (string) $f['tipo_ecf'] !== '32') {
             // E32 (consumo) menor al limite legal puede ir sin RNC; el resto no.
-            $advertencias[] = "NCF {$ncf}: venta sin RNC/Cedula de cliente.";
+            $advertencias[] = "{$cualNcf}: la venta no tiene el RNC o la cédula del cliente.";
         }
         if ($esNota && (string) ($f['ncf_modificado'] ?? '') === '') {
-            $advertencias[] = "NCF {$ncf} (nota {$f['tipo_ecf']}): falta NCF modificado (campo 4).";
+            $nota = (string) $f['tipo_ecf'] === '33' ? 'nota de débito' : 'nota de crédito';
+            $advertencias[] = "{$cualNcf}: es una {$nota} y le falta el NCF de la factura que modifica.";
         }
         if (($x['itbis_retenido'] > 0 || $x['retencion_renta'] > 0) && $x['fecha_retencion'] === '') {
-            $advertencias[] = "NCF {$ncf}: tiene retencion (ITBIS/ISR) pero falta Fecha de Retencion (campo 7).";
+            $advertencias[] = "{$cualNcf}: tiene retención de ITBIS o ISR, pero le falta la fecha de retención.";
         }
 
         return [
@@ -283,7 +289,18 @@ class Reporte607Model
         $okEcf    = (bool) preg_match('/^E\d{12}$/', $ncf);   // e-NCF
         $okLegacy = (bool) preg_match('/^[A-B]\d{10}$/', $ncf); // NCF legacy
         if (!$okEcf && !$okLegacy) {
-            $advertencias[] = "NCF {$ncf}: formato no valido o no autorizado — revisar.";
+            $advertencias[] = "NCF {$ncf}: el número no tiene el formato de un NCF o e-NCF válido. Revísalo.";
         }
+    }
+
+    /** Numero de factura que ve el usuario; si no hay, su fecha (dd/mm/aaaa). */
+    private function refFactura(array $f): string
+    {
+        $no = trim((string) ($f['no_factura'] ?? ''));
+        if ($no !== '') {
+            return $no;
+        }
+        $ts = !empty($f['date']) ? strtotime((string) $f['date']) : false;
+        return $ts ? 'del ' . date('d/m/Y', $ts) : 'sin número';
     }
 }

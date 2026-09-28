@@ -52,6 +52,9 @@ class provinciaMunicipioModel
             $stmt->execute($params);
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
+            // Vacio y no error: el selector queda sin opciones en vez de romper
+            // la pantalla. Sin el log no habria forma de saber por que.
+            error_log('[catalogos] dgii_provincia_municipio: ' . $e->getMessage());
             return [];
         }
     }
@@ -73,6 +76,7 @@ class provinciaMunicipioModel
                     ->fetchAll(PDO::FETCH_COLUMN);
                 self::$validCache = array_fill_keys($codes, true);
             } catch (PDOException $e) {
+                error_log('[catalogos] dgii_provincia_municipio (validacion, fail-open): ' . $e->getMessage());
                 self::$validCache = [];
             }
         }

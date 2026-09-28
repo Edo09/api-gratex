@@ -68,7 +68,8 @@ class LandingModel
             $item = $stmt->fetch();
 
             if (!$item) {
-                return ['error', 'Item not found'];
+                // Estado propio: el controller responde 404 en vez de 500.
+                return ['not_found', 'Item not found'];
             }
 
             $sql = "DELETE FROM landing_carousel WHERE id = :id";
@@ -131,7 +132,8 @@ class LandingModel
             $item = $stmt->fetch();
 
             if (!$item) {
-                return ['error', 'Item not found'];
+                // Estado propio: el controller responde 404 en vez de 500.
+                return ['not_found', 'Item not found'];
             }
 
             $sql = "DELETE FROM landing_services WHERE id = :id";

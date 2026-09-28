@@ -118,7 +118,8 @@ class cotizacionModel
                 $attempts++;
             } while ($exists && $attempts < $maxAttempts);
             if ($exists) {
-                return ['error', 'Failed to generate unique code after multiple attempts'];
+                error_log('[cotizaciones] no se encontro un codigo libre tras ' . $maxAttempts . ' intentos');
+                return ['error', 'No se pudo guardar la cotización. Inténtalo de nuevo.'];
             }
 
             // Use provided date or current date
@@ -194,8 +195,14 @@ class cotizacionModel
 
             return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => 'Cotization saved and emailed']];
         } catch (PDOException $e) {
-            $this->conexion->rollBack();
-            return ['error', 'Failed to save cotization: ' . $e->getMessage()];
+            // inTransaction: el fallo puede venir de la busqueda del codigo, antes
+            // del beginTransaction, y un rollBack sin transaccion lanza otra excepcion.
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            // El texto de PDO (SQL, tablas) solo al log; al usuario, uno claro.
+            error_log('[cotizaciones] no se pudo guardar la cotizacion: ' . $e->getMessage());
+            return ['error', 'No se pudo guardar la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -204,7 +211,7 @@ class cotizacionModel
         try {
             $existe = $this->getCotizaciones($id);
             if (count($existe) == 0) {
-                return ['error', "There is no cotization with ID {$id}"];
+                return ['error', 'Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.'];
             }
             
             // Begin transaction
@@ -287,8 +294,11 @@ class cotizacionModel
 
             return ['success', 'Cotization updated and emailed'];
         } catch (PDOException $e) {
-            $this->conexion->rollBack();
-            return ['error', 'Failed to update cotization: ' . $e->getMessage()];
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            error_log('[cotizaciones] no se pudo actualizar la cotizacion ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron guardar los cambios de la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -302,7 +312,7 @@ class cotizacionModel
             $existe = $stmt->fetch();
             
             if (!$existe) {
-                return ['error', "Cotization not found {$id}"];
+                return ['error', 'Esta cotización ya no existe. Puede que otra persona la haya eliminado; actualiza el listado.'];
             }
             
             // Delete cotizacion (items will be deleted via CASCADE)
@@ -311,7 +321,8 @@ class cotizacionModel
             $stmt->execute([':id' => $id]);
             return ['success', 'Cotization deleted'];
         } catch (PDOException $e) {
-            return ['error', 'Failed to delete cotization: ' . $e->getMessage()];
+            error_log('[cotizaciones] no se pudo eliminar la cotizacion ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 

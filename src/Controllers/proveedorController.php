@@ -20,24 +20,28 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     }
 }
 
-/** Valida los campos comunes de un proveedor en POST/PUT. Devuelve string de error o null. */
+/**
+ * Valida los campos comunes de un proveedor en POST/PUT. Devuelve string de error o null.
+ * Los textos llegan tal cual al formulario de proveedor (tambien al "crear
+ * proveedor" de Registrar compra): se escriben para quien lo llena.
+ */
 function validateProveedor($p): ?string
 {
     if (!isset($p->nombre) || is_null($p->nombre) || empty(trim($p->nombre)) || strlen($p->nombre) > 150) {
-        return 'Nombre must not be empty and no more than 150 characters';
+        return 'El nombre o razón social es obligatorio y puede tener hasta 150 caracteres.';
     }
     if (isset($p->rnc) && $p->rnc !== null && $p->rnc !== '') {
         $digits = preg_replace('/\D/', '', (string) $p->rnc);
         if (strlen($digits) !== 9 && strlen($digits) !== 11) {
-            return 'RNC must have 9 digits (RNC) or 11 (Cedula)';
+            return 'El RNC debe tener 9 dígitos, u 11 si es una cédula.';
         }
     }
     if (isset($p->correo) && $p->correo !== null && trim((string) $p->correo) !== ''
         && !filter_var(trim((string) $p->correo), FILTER_VALIDATE_EMAIL)) {
-        return 'Correo must be a valid email';
+        return 'El correo no es válido. Revísalo (ej. compras@proveedor.do).';
     }
     if (isset($p->telefono) && strlen((string) $p->telefono) > 20) {
-        return 'Telefono must be no more than 20 characters';
+        return 'El teléfono puede tener hasta 20 caracteres.';
     }
     return null;
 }
@@ -48,7 +52,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $proveedores = $proveedorModel->getProveedores($_GET['id']);
             if (empty($proveedores)) {
                 http_response_code(404);
-                $respuesta = ['status' => false, 'error' => 'Proveedor not found'];
+                $respuesta = ['status' => false, 'error' => 'Este proveedor no existe.'];
             } else {
                 $respuesta = ['status' => true, 'data' => $proveedores[0]];
             }
@@ -99,7 +103,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'PUT':
         $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
-            $respuesta = ['status' => false, 'error' => 'Proveedor ID is empty'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar el proveedor. Cierra la ventana y ábrelo de nuevo.'];
         } else if (($error = validateProveedor($_PUT)) !== null) {
             $respuesta = ['status' => false, 'error' => $error];
         } else {
@@ -123,7 +127,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'DELETE':
         $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
-            $respuesta = ['status' => false, 'error' => 'Proveedor ID is empty'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar el proveedor. Cierra la ventana y ábrelo de nuevo.'];
         } else {
             $oldProveedor = $proveedorModel->getProveedores($_DELETE->id)[0] ?? null;
             $result = $proveedorModel->deleteProveedor($_DELETE->id);

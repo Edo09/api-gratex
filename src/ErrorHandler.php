@@ -84,9 +84,11 @@ class ErrorHandler
         }
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
+        // El texto lo lee el cajero en un toast: dice que hacer y lleva el codigo
+        // para que soporte encuentre la linea en el error_log.
         echo json_encode([
             'status' => false,
-            'error' => 'Error interno del servidor. Referencia: ' . $id,
+            'error' => 'Ocurrió un problema en el sistema. Inténtalo de nuevo y, si sigue pasando, avisa a soporte con el código ' . $id . '.',
             'error_id' => $id,
         ]);
     }

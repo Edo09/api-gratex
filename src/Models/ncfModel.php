@@ -17,6 +17,17 @@ class ncfModel
         return AmbienteResolver::active();
     }
 
+    /**
+     * Nombre del ambiente para los mensajes al usuario. testecf/certecf/ecf son
+     * claves internas; los nombres son los mismos que muestra Configuracion en
+     * el front (AMBIENTES de SettingsView.tsx).
+     */
+    private static function ambienteLabel(string $amb): string
+    {
+        $labels = ['ecf' => 'Producción', 'certecf' => 'Certificación', 'testecf' => 'Pruebas'];
+        return $labels[$amb] ?? $amb;
+    }
+
     public function getCurrentSequence($type = 'B01')
     {
         try {
@@ -264,16 +275,17 @@ class ncfModel
         ?string $ambiente = null
     ): array {
         if (!preg_match('/^E\d{2}$/', $type)) {
-            return ['error', 'type invalido: use E31..E47'];
+            return ['error', 'El tipo de comprobante no es válido. Elige uno de la lista.'];
         }
         if ($numeroDesde < 1 || $numeroHasta < $numeroDesde) {
-            return ['error', 'Rango invalido: numero_desde >= 1 y numero_hasta >= numero_desde'];
+            return ['error', 'El rango no es válido: el número inicial debe ser 1 o mayor, y el número final no puede ser menor que el inicial.'];
         }
         $venc = DateTime::createFromFormat('Y-m-d', $fechaVencimiento);
         if (!$venc || $venc->format('Y-m-d') !== $fechaVencimiento) {
-            return ['error', 'fecha_vencimiento invalida: use formato YYYY-MM-DD'];
+            return ['error', 'La fecha de vencimiento no es válida. Elígela en el calendario.'];
         }
         $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+        $ambLabel = self::ambienteLabel($amb);
 
         try {
             $this->conexion->beginTransaction();
@@ -318,7 +330,8 @@ class ncfModel
             }
             if ($numeroDesde <= $tope) {
                 $this->conexion->rollBack();
-                return ['error', "numero_desde debe ser mayor que {$tope} (ultimo numero usado/autorizado de {$type} en {$amb})"];
+                return ['error', "El número inicial debe ser mayor que {$tope}, que es el último número de {$type} ya usado o autorizado en {$ambLabel}."
+                    . ' Revisa el rango que te autorizó la DGII.'];
             }
 
             if ($convertir) {
@@ -327,8 +340,9 @@ class ncfModel
                 $cv = max((int) $sinLimite['current_value'], $numeroDesde - 1);
                 if ($cv > $numeroHasta) {
                     $this->conexion->rollBack();
-                    return ['error', "{$type} en {$amb} ya dispenso hasta {$cv}, fuera del rango"
-                        . " {$numeroDesde}-{$numeroHasta} que intenta registrar."];
+                    return ['error', "Ya se emitieron comprobantes {$type} hasta el número {$cv} en {$ambLabel}, y el rango"
+                        . " {$numeroDesde}–{$numeroHasta} que intentas registrar termina antes."
+                        . ' Revisa los números del rango que te autorizó la DGII.'];
                 }
                 $upd = $this->conexion->prepare(
                     'UPDATE ncf_sequences
@@ -407,11 +421,11 @@ class ncfModel
                 $this->conexion->rollBack();
             }
             if ($e->getCode() === '23000') {
-                return ['error', 'Ya existe un rango de ' . $type . ' que inicia en ' . $numeroDesde
-                    . ' para ' . $amb . '. Consulta GET /api/ncf/rangos?type=' . $type
-                    . ' y registra el siguiente rango a partir de donde termina ese.'];
+                return ['error', 'Ya hay un rango de ' . $type . ' registrado en ' . $ambLabel . ' que empieza en '
+                    . $numeroDesde . '. Revisa la lista de rangos y registra el nuevo a partir de donde termina el último.'];
             }
-            return ['error', 'No se pudo registrar el rango'];
+            error_log('[ncfModel] registerRange ' . $type . ' ' . $numeroDesde . '-' . $numeroHasta . ': ' . $e->getMessage());
+            return ['error', 'No se pudo registrar el rango. Inténtalo de nuevo.'];
         }
     }
 }

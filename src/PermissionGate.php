@@ -14,6 +14,8 @@ require_once(__DIR__ . '/Models/RoleModel.php');
  *                            controller hace su propia validacion (firma/secret).
  *   '<permiso>'          -> ruta de usuario-app: 401 si no hay user valido, 403 si
  *                            el rol del user no tiene el permiso.
+ *   'authenticated'      -> ruta de usuario-app sin modulo: 401 si no hay user
+ *                            valido, 403 si es principal maquina; cualquier rol pasa.
  *
  * Rollout en sombra: con PERMISSIONS_ENFORCE=false (default) NO bloquea; solo
  * registra en error_log lo que se denegaria. Con true aplica de verdad.
@@ -66,7 +68,13 @@ class PermissionGate
         if ($userId === null) {
             // Principal maquina (integracion) sobre una ruta de app: prohibido.
             self::deny($route, $method, $required, 'principal no-usuario en ruta de app', 403,
-                'Esta ruta requiere una sesion de usuario.');
+                'Para hacer esto necesitas iniciar sesión con tu usuario.');
+            return;
+        }
+
+        // Sesion de usuario valida y la ruta no pide modulo (lecturas que todo
+        // rol necesita, ej. GET /api/emisor): no hay rol que consultar.
+        if ($required === 'authenticated') {
             return;
         }
 
@@ -76,8 +84,10 @@ class PermissionGate
         );
 
         if (!self::permMatches($perms, $required)) {
+            // Texto generico a proposito: el gate no sabe que pantalla hizo la
+            // llamada, y el modulo requerido ya queda en la bitacora (deny()).
             self::deny($route, $method, $required, 'rol sin permiso', 403,
-                'No tiene permiso para esta accion.');
+                'No tienes permiso para hacer esto. Pídeselo a un administrador.');
             return;
         }
         // Autorizado: continua al controller.

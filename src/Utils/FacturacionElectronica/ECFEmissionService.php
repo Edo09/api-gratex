@@ -6,6 +6,8 @@ require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ECFXmlBuilder.php';
 require_once __DIR__ . '/RFCEXmlBuilder.php';
 require_once __DIR__ . '/EcfItemMapper.php';
+require_once __DIR__ . '/EcfUsuarioException.php';
+require_once __DIR__ . '/InformacionReferencia.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
@@ -23,6 +25,21 @@ require_once __DIR__ . '/../../Models/provinciaMunicipioModel.php';
 class ECFEmissionService
 {
     private const RFCE_THRESHOLD = 250000.00;
+
+    // Nombre de cada tipo como lo ve el usuario, para los mensajes de
+    // EcfUsuarioException (el texto tecnico sigue diciendo "E31").
+    private const NOMBRES_TIPO = [
+        '31' => 'Factura de Crédito Fiscal',
+        '32' => 'Factura de Consumo',
+        '33' => 'Nota de Débito',
+        '34' => 'Nota de Crédito',
+        '41' => 'Comprobante de Compras',
+        '43' => 'Gastos Menores',
+        '44' => 'Regímenes Especiales',
+        '45' => 'Gubernamental',
+        '46' => 'Comprobante de Exportaciones',
+        '47' => 'Comprobante para Pagos al Exterior',
+    ];
 
     private DgiiAuthService $auth;
     private DgiiXmlSigner $signer;
@@ -152,9 +169,26 @@ class ECFEmissionService
         } else {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
-                throw new RuntimeException('emisor_config no configurado. Insertar registro id=1 con datos fiscales.');
+                // EcfUsuarioException: mismo texto tecnico para integradores y
+                // audit; la app muestra el segundo (ver la clase).
+                throw new EcfUsuarioException(
+                    'emisor_config no configurado. Insertar registro id=1 con datos fiscales.',
+                    'Faltan los datos fiscales de tu empresa, así que todavía no puedes emitir comprobantes electrónicos. Avisa a soporte para que los configuren.'
+                );
             }
             $ambienteEarly = $this->ncfModel()->resolveActiveAmbiente() ?? 'certecf';
+
+            // Notas E33/E34: la referencia se valida ANTES de reservar el e-NCF.
+            // Si fallaba recien en el builder, el numero ya estaba dispensado y
+            // cada intento quemaba uno del rango. Solo en modo app: en
+            // integracion el cliente trae su e_ncf (no se reserva nada) y el
+            // builder sigue validando como siempre, con el mismo mensaje.
+            $payload['informacion_referencia'] = InformacionReferencia::normalizar(
+                $tipoEcf,
+                $payload['informacion_referencia'] ?? null,
+                !empty($payload['strict_input']),
+                (string) ($payload['fecha_emision'] ?? date('d-m-Y'))
+            );
         }
 
         $eNcfOverride = $payload['e_ncf'] ?? null;
@@ -164,7 +198,10 @@ class ECFEmissionService
         $rangoVencimiento = null; // vencimiento del rango autorizado que dispensa
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
-                throw new RuntimeException('e_ncf override invalido: debe ser E' . $tipoEcf . ' + 10 digitos. Recibido: ' . $eNcfOverride);
+                throw new EcfUsuarioException(
+                    'e_ncf override invalido: debe ser E' . $tipoEcf . ' + 10 digitos. Recibido: ' . $eNcfOverride,
+                    'El número de comprobante (e-NCF) indicado no es válido. Revísalo.'
+                );
             }
             $eNcf = (string) $eNcfOverride;
         } else {
@@ -178,10 +215,13 @@ class ECFEmissionService
             do {
                 $disp = $this->ncfModel()->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
                 if ($disp === null) {
-                    throw new RuntimeException(
+                    throw new EcfUsuarioException(
                         'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
                         . ': el rango autorizado esta agotado o vencido. Solicite un nuevo rango a la DGII '
-                        . 'y registrelo en la app (POST /api/ncf/rangos).'
+                        . 'y registrelo en la app (POST /api/ncf/rangos).',
+                        'Se acabaron o vencieron los números que la DGII te autorizó para '
+                        . (self::NOMBRES_TIPO[$tipoEcf] ?? ('e-CF ' . $tipoEcf))
+                        . '. Solicita un rango nuevo a la DGII y regístralo en Configuración → Numeraciones e-CF → Gestionar rangos.'
                     );
                 }
                 $ocupado = $this->eNcfYaUsado((string) $disp['e_ncf']);
@@ -190,9 +230,14 @@ class ECFEmissionService
                 }
             } while ($ocupado && ++$intentos < 100);
             if ($ocupado) {
-                throw new RuntimeException(
+                // No es un fallo pasajero: reintentar no lo arregla, hay que
+                // corregir la numeracion. Por eso lleva su propio texto.
+                throw new EcfUsuarioException(
                     'No se encontro un e-NCF libre para E' . $tipoEcf . ' tras 100 intentos: la secuencia'
-                    . ' esta muy por detras de las facturas ya emitidas. Sincroniza ncf_sequences.current_value.'
+                    . ' esta muy por detras de las facturas ya emitidas. Sincroniza ncf_sequences.current_value.',
+                    'No se pudo asignar un número de comprobante para '
+                    . (self::NOMBRES_TIPO[$tipoEcf] ?? ('e-CF ' . $tipoEcf))
+                    . '. Avisa a soporte para que revisen la numeración.'
                 );
             }
             $eNcf = $disp['e_ncf'];
@@ -271,29 +316,51 @@ class ECFEmissionService
         // (ProvinciaMunicipioType). Los datos guardados suelen ser nombres libres
         // ("Santiago"); se resuelven al código del catálogo. Fail-open: si no hay
         // match se deja el valor tal cual (lo valida el XSD de la DGII).
-        $this->resolveUbicaciones($xmlData);
+        // Hasta recibir() nada de este e-CF sale hacia la DGII (autenticar solo
+        // firma la semilla). Si armar, firmar o autenticar falla, el e-NCF que
+        // dispensamos no se uso: se devuelve para que el proximo intento lo
+        // reutilice en vez de dejar un hueco en el rango.
+        try {
+            $this->resolveUbicaciones($xmlData);
 
-        $fechaEmisionDgii = DateTime::createFromFormat('d-m-Y H:i:s', $xmlData['fecha_hora_firma'])->format('Y-m-d H:i:s');
+            $fechaEmisionDgii = DateTime::createFromFormat('d-m-Y H:i:s', $xmlData['fecha_hora_firma'])->format('Y-m-d H:i:s');
 
-        $unsignedXml = $this->builder->build($xmlData);
+            $unsignedXml = $this->builder->build($xmlData);
 
-        // Cert del tenant resuelto (multi-tenant) o el global del .env (fallback).
-        $cert = CertResolver::resolve();
-        $certContent = $cert['content'];
-        $certPassword = $cert['password'];
-        if ($certPassword === '') {
-            throw new RuntimeException('Password del certificado no configurado (DGII_ECF_CERT_PASSWORD o cert del tenant).');
+            // Cert del tenant resuelto (multi-tenant) o el global del .env (fallback).
+            $cert = CertResolver::resolve();
+            $certContent = $cert['content'];
+            $certPassword = $cert['password'];
+            if ($certPassword === '') {
+                // Configuracion, no un fallo pasajero: el usuario debe avisar a
+                // soporte en vez de reintentar.
+                throw new EcfUsuarioException(
+                    'Password del certificado no configurado (DGII_ECF_CERT_PASSWORD o cert del tenant).',
+                    'El certificado digital de tu empresa no está configurado, así que no se puede firmar el comprobante. Avisa a soporte.'
+                );
+            }
+
+            $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
+            $codigoSeguridad = $this->extractCodigoSeguridad($signedXml);
+
+            // El mismo cert firma la semilla de autenticacion DGII.
+            $tokenInfo = $this->auth->autenticar([
+                'environment' => $payload['ambiente'] ?? null,
+                'certificate_content' => $certContent,
+                'certificate_password' => $certPassword,
+            ]);
+        } catch (Throwable $e) {
+            if ($dispensamosSecuencia) {
+                $devuelto = $this->ncfModel()->rollbackECFSequence(
+                    $secuenciaType, $secuenciaValor, $ambienteEarly, $secuenciaRangoId
+                );
+                error_log(sprintf(
+                    '[ECF] fallo antes de enviar a DGII (%s): e-NCF %s %s',
+                    get_class($e), $eNcf, $devuelto ? 'devuelto a la secuencia' : 'no se pudo devolver (rollback sin coincidencia)'
+                ));
+            }
+            throw $e;
         }
-
-        $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
-        $codigoSeguridad = $this->extractCodigoSeguridad($signedXml);
-
-        // El mismo cert firma la semilla de autenticacion DGII.
-        $tokenInfo = $this->auth->autenticar([
-            'environment' => $payload['ambiente'] ?? null,
-            'certificate_content' => $certContent,
-            'certificate_password' => $certPassword,
-        ]);
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];
 
@@ -463,7 +530,10 @@ class ECFEmissionService
         if ($rncEmisor === null) {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
-                throw new RuntimeException('emisor_config no configurado.');
+                throw new EcfUsuarioException(
+                    'emisor_config no configurado.',
+                    'Faltan los datos fiscales de tu empresa, así que no se puede consultar el estado en la DGII. Avisa a soporte.'
+                );
             }
             $rncEmisor = $emisor['rnc'];
         }
@@ -495,7 +565,10 @@ class ECFEmissionService
         if ($rncEmisor === null) {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
-                throw new RuntimeException('emisor_config no configurado.');
+                throw new EcfUsuarioException(
+                    'emisor_config no configurado.',
+                    'Faltan los datos fiscales de tu empresa, así que no se puede consultar el estado en la DGII. Avisa a soporte.'
+                );
             }
             $rncEmisor = $emisor['rnc'];
         }

@@ -19,13 +19,18 @@ header('content-type: application/json; charset=utf-8');
 
 // En el hosting compartido no siempre se puede leer el error_log, y un require
 // fallido responde un 500 con el cuerpo vacio: imposible de diagnosticar desde
-// el navegador. Se comprueba antes para devolver algo legible.
+// el navegador. Se comprueba antes para devolver algo legible. El usuario ve un
+// texto llano (la ruta del archivo no le dice nada y no debe salir del
+// servidor); el diagnostico va al error_log y, para quien mira la respuesta en
+// las herramientas del navegador, en `codigo`.
 $rutaModelo = __DIR__ . '/../Models/inventoryModel.php';
 if (!is_file($rutaModelo)) {
+    error_log('[inventario] falta src/Models/inventoryModel.php: el despliegue del modulo de inventario quedo incompleto.');
     http_response_code(500);
     echo json_encode([
         'status' => false,
-        'error' => 'Falta src/Models/inventoryModel.php en el servidor: el despliegue del modulo de inventario quedo incompleto.',
+        'error' => 'El módulo de inventario no está disponible en este momento. Avisa a soporte.',
+        'codigo' => 'INVENTARIO_MODELO_FALTANTE',
     ]);
     return;
 }
@@ -83,7 +88,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($esMovimientos) {
             $productId = isset($_GET['product_id']) ? (int) $_GET['product_id'] : 0;
             if ($productId <= 0) {
-                invRespond(false, 'product_id requerido', 422);
+                invRespond(false, 'Elige un producto para ver sus movimientos.', 422);
                 break;
             }
             [$page, $pageSize, $offset] = invPaginacion();
@@ -102,12 +107,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($esValor) {
             $estado = strtolower(trim((string) ($_GET['estado'] ?? 'activos')));
             if (!in_array($estado, ['activos', 'inactivos', 'todos'], true)) {
-                invRespond(false, 'estado invalido. Use: activos, inactivos o todos.', 422);
+                invRespond(false, 'El filtro de estado no es válido. Elige una opción de la lista.', 422);
                 break;
             }
             $hasta = trim((string) ($_GET['hasta'] ?? ''));
             if ($hasta !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $hasta)) {
-                invRespond(false, 'hasta invalido. Formato: AAAA-MM-DD.', 422);
+                invRespond(false, 'La fecha «Hasta» no es válida. Elígela en el calendario.', 422);
                 break;
             }
             [$page, $pageSize, $offset] = invPaginacion();
@@ -132,7 +137,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
 
         if (!$esAjustes) {
-            invRespond(false, 'Sub-ruta no encontrada. Use /inventario/ajustes, /inventario/movimientos o /inventario/valor.', 404);
+            invRespond(false, 'Esta opción del inventario no existe.', 404);
             break;
         }
 
@@ -164,7 +169,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         if (!$esAjustes) {
-            invRespond(false, 'Sub-ruta no encontrada. Use /inventario/ajustes.', 404);
+            invRespond(false, 'Esta opción del inventario no existe.', 404);
             break;
         }
 
@@ -215,6 +220,6 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     default:
-        invRespond(false, 'Metodo no soportado', 405);
+        invRespond(false, 'Esta acción no está disponible.', 405);
         break;
 }

@@ -96,8 +96,11 @@ Mismas rutas/forma que categorías (`id`, `nombre`, `descripcion?`, `estado`, `c
 **Almacén por defecto:** cada empresa tiene `Almacén Principal` (los productos sin almacén caen ahí).
 
 Reglas de borrado (mostrar el error al usuario):
-- Borrar `Almacén Principal` → **`400`** `"No se puede eliminar el almacen por defecto (Almacén Principal)."`
-- Borrar un almacén **con productos** → **`400`** `"El almacen tiene productos asignados; reasignalos antes de eliminarlo."`
+- Borrar `Almacén Principal` → **`400`** `"No se puede eliminar el almacén por defecto (Almacén Principal)."`
+- Borrar un almacén **con productos** → **`400`** `"No puedes eliminar este almacén porque tiene productos asignados. Pásalos a otro almacén o, si ya no lo usas, desactívalo."`
+- Borrar un almacén **con ajustes o movimientos de inventario** (aunque ya no le queden productos) → **`400`**
+  `"No puedes eliminar este almacén porque ya tiene movimientos de inventario (ajustes, ventas o compras). Si ya no lo usas, desactívalo y guarda los cambios."`
+  Reasignar los productos no lo arregla: el historial no se borra.
 
 ---
 
@@ -146,7 +149,7 @@ descripción. Un `category_id` no numérico o `<= 0` se ignora (no filtra, no da
 | `403` | el rol no tiene el módulo `categories` / `warehouses` |
 | `404` | `?id=` no existe |
 | `422` | falta `nombre` (o > 100 chars) / falta `id` en PUT/DELETE / `descripcion` > 255 |
-| `400` | nombre duplicado, o guarda de borrado (almacén por defecto / con productos) |
+| `400` | nombre duplicado, o guarda de borrado (almacén por defecto / con productos / con movimientos de inventario) |
 
 Formato de error: `{ "status": false, "error": "<mensaje>" }`.
 
@@ -157,6 +160,6 @@ Formato de error: `{ "status": false, "error": "<mensaje>" }`.
 1. **Listas (Categorías / Almacenes):** `GET ?page&pageSize&query` → tabla con paginación,
    búsqueda, loading y empty state. Columnas: `nombre`, `descripcion`, `estado` (badge activo/inactivo).
 2. **Crear/Editar:** modal/form con `nombre` (req), `descripcion`, `estado` (toggle) → `POST`/`PUT`.
-3. **Eliminar:** confirmar; mostrar el `error` del backend si vuelve `400` (almacén por defecto o con productos).
+3. **Eliminar:** confirmar; mostrar el `error` del backend si vuelve `400` (almacén por defecto, con productos o con movimientos).
 4. **Producto:** agregar selects `Categoría` (opcional) y `Almacén` (default `Almacén Principal`);
    en tablas/detalle mostrar `categoria_nombre`/`almacen_nombre`.

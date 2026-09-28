@@ -37,7 +37,7 @@ registran cuando llegan **de un proveedor**.
 tipos emitidos por la empresa = `E41, E43, E47`. El resto se considera recibido.
 
 Combinación inválida → `400`. Ej:
-`tipo_gasto E41 no permitido para la categoria gastos_menores. Permitidos: E43`
+`El tipo de comprobante E41 no se puede usar en gastos menores. Elige otro.`
 
 ---
 
@@ -202,7 +202,9 @@ La emisión real solo corre si la variable de entorno `DGII_ECF_EMISSION_ENABLED
 ### Estados (`estado_dgii`)
 `REGISTRADO` (recibido) · `PENDIENTE_EMISION` (guard apagado) · `ENVIADO` ·
 `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `RECHAZADO` · `EN_PROCESO` · `NO_ENCONTRADO` ·
-`ERROR` (falló la emisión; se guarda igual para trazabilidad).
+`ERROR` (falló la emisión; se guarda igual para trazabilidad). La respuesta `201` trae un
+`aviso` en español llano para el usuario (el caso que él puede resolver, como el rango
+e-NCF agotado, o un texto genérico); el detalle técnico queda en `respuesta_dgii` y en el log.
 
 ### Consultar estado / XML
 ```
@@ -292,7 +294,7 @@ más `track_id` y `codigo_seguridad`.
     "items": [
       { "id": 1, "description": "Peaje Las Americas", "amount": "60.00", "quantity": 2, "subtotal": "120.00", "itbis_amount": "0.00", "indicador_facturacion": 4, "indicador_bien_servicio": 2 }
     ],
-    "aviso": "Emision DGII deshabilitada (DGII_ECF_EMISSION_ENABLED=false). Gasto guardado como PENDIENTE_EMISION; no se envio a DGII ni se consumio secuencia."
+    "aviso": "El gasto se guardó, pero no se envió a la DGII porque el envío de comprobantes electrónicos está desactivado. No se usó ningún número de comprobante."
   }
 }
 ```
@@ -304,7 +306,7 @@ más `track_id` y `codigo_seguridad`.
 | `404` | `GET /api/gastos/{id}` no existe |
 | `405` | método no soportado |
 | `422` | falta `categoria`, `tipo_gasto`, `rnc_proveedor`, `nombre_proveedor` o `items` |
-| `400` | `tipo_gasto` no permitido para la categoría, falta `ncf` en recibido, o no hay secuencia disponible |
+| `400` | `tipo_gasto` no permitido para la categoría, falta `ncf` en recibido, NCF ya registrado para ese proveedor, o fallo al guardar (la bitácora guarda el detalle técnico; el `error` es texto para el usuario) |
 
 Formato de error: `{ "status": false, "error": "<mensaje>" }`.
 

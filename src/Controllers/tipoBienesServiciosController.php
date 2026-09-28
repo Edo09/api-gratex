@@ -23,7 +23,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);
-    echo json_encode(['status' => false, 'error' => 'Método no soportado']);
+    echo json_encode(['status' => false, 'error' => 'Esta acción no está disponible.']);
     exit;
 }
 

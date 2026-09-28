@@ -27,7 +27,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['status' => false, 'error' => 'Metodo no permitido. Use GET.']);
+    echo json_encode(['status' => false, 'error' => 'Esta acción no está disponible.'], JSON_UNESCAPED_UNICODE);
     return;
 }
 
@@ -54,29 +54,29 @@ $hasta = trim((string) ($_GET['hasta'] ?? date('Y-m-d')));
 $desdeOk = $rvFecha($desde);
 $hastaOk = $rvFecha($hasta);
 if ($desdeOk === null || $hastaOk === null) {
-    $rvError('Fechas invalidas. Formato: AAAA-MM-DD (ej: 2026-09-01).');
+    $rvError('Alguna de las fechas del reporte no es válida. Revísalas.');
     return;
 }
 if ($desdeOk > $hastaOk) {
-    $rvError('El rango esta invertido: "desde" es posterior a "hasta".');
+    $rvError('La fecha inicial es posterior a la final. Corrige el rango de fechas.');
     return;
 }
 // Tope de rango: el server es compartido y un rango abierto puede tumbar la
 // consulta. Cinco anos cubre cualquier consulta real de un negocio.
 if ((strtotime($hastaOk) - strtotime($desdeOk)) > 5 * 366 * 86400) {
-    $rvError('El rango no puede pasar de 5 anos. Divide la consulta por periodos.');
+    $rvError('El reporte puede abarcar como máximo 5 años. Elige un rango más corto.');
     return;
 }
 
 $agrupar = strtolower(trim((string) ($_GET['agrupar'] ?? 'documento')));
 if (!in_array($agrupar, ReporteVentasModel::AGRUPACIONES, true)) {
-    $rvError('Agrupacion invalida. Use: ' . implode(', ', ReporteVentasModel::AGRUPACIONES) . '.');
+    $rvError('Esa forma de agrupar el reporte no existe. Elige otra en la lista.');
     return;
 }
 
 $formato = strtolower(trim((string) ($_GET['format'] ?? 'json')));
 if (!in_array($formato, ['json', 'pdf', 'xlsx'], true)) {
-    $rvError('Formato invalido. Use: json, pdf o xlsx.');
+    $rvError('Solo puedes descargar el reporte en PDF o en Excel.');
     return;
 }
 

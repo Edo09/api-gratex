@@ -10,6 +10,32 @@ require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
 $cotizacionModel = new cotizacionModel();
 $auth = new AuthMiddleware();
 
+/**
+ * Valida las lineas de una cotizacion (crear y editar usan la misma regla).
+ * Devuelve el mensaje para el usuario, o null si todas estan bien. Las lineas
+ * se numeran desde 1, como las ve el usuario en el formulario.
+ */
+function cotValidarItems(array $items): ?string
+{
+    foreach (array_values($items) as $index => $item) {
+        $linea = $index + 1;
+        if (!isset($item->description) || empty(trim($item->description))) {
+            return 'La línea ' . $linea . ' no tiene descripción. Escríbela o quita esa línea.';
+        }
+        if (!isset($item->amount) || !is_numeric($item->amount)) {
+            return 'El precio de la línea ' . $linea . ' no es válido. Revísalo.';
+        }
+        if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
+            return 'La cantidad de la línea ' . $linea . ' debe ser 1 o más.';
+        }
+    }
+    return null;
+}
+
+const COT_SIN_CLIENTE = 'Elige un cliente para la cotización.';
+const COT_SIN_LINEAS = 'Agrega al menos una línea a la cotización.';
+const COT_TOTAL_INVALIDO = 'El total de la cotización no es válido. Revisa los precios y las cantidades.';
+
 // Validate token for all requests except OPTIONS
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $validation = $auth->validateRequest();
@@ -31,9 +57,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $cotizacionId = $pdfMatches[1];
             $cotizaciones = $cotizacionModel->getCotizaciones($cotizacionId);
             if (empty($cotizaciones)) {
-                header('content-type: application/json; charset=utf-8');
-                echo json_encode(['status' => false, 'error' => 'Cotizacion not found']);
+                // El codigo antes del echo: despues de enviar el cuerpo ya no se
+                // puede cambiar si no hay buffer de salida.
                 http_response_code(404);
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode(['status' => false, 'error' => 'No encontramos esta cotización. Puede que la hayan eliminado; actualiza el listado.']);
                 break;
             }
             $cotizacionData = $cotizaciones[0];
@@ -99,11 +127,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $_POST = InputSanitizer::jsonInput(false);
             // Validate required fields
             if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
-                $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+                $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
             } else if (!isset($_POST->items) || !is_array($_POST->items)) {
-                $respuesta = ['status' => false, 'error' => 'Items must be an array'];
+                $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
             } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
-                $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+                $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
             } else {
                 // Convert items to associative arrays
                 $items = array_map(function ($item) {
@@ -150,34 +178,14 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Standard Create Cotizacion
         $_POST = InputSanitizer::jsonInput(false);
         if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
-            $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+            $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
         } else if (!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0) {
-            $respuesta = ['status' => false, 'error' => 'At least one item is required'];
+            $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
         } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
-            $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+            $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
         } else {
-            // Validate each item
-            $itemsValid = true;
-            $itemError = '';
-            foreach ($_POST->items as $index => $item) {
-                if (!isset($item->description) || empty(trim($item->description))) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Description is required';
-                    break;
-                }
-                if (!isset($item->amount) || !is_numeric($item->amount)) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
-                    break;
-                }
-                if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
-                    break;
-                }
-            }
-
-            if (!$itemsValid) {
+            $itemError = cotValidarItems($_POST->items);
+            if ($itemError !== null) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
@@ -203,36 +211,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'PUT':
         $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id)) {
-            $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar la cotización que quieres modificar. Ábrela de nuevo desde el listado.'];
         } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id)) {
-            $respuesta = ['status' => false, 'error' => 'Client ID is required'];
+            $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
         } else if (!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0) {
-            $respuesta = ['status' => false, 'error' => 'At least one item is required'];
+            $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
         } else if (!isset($_PUT->total) || !is_numeric($_PUT->total)) {
-            $respuesta = ['status' => false, 'error' => 'Total must be a valid number'];
+            $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
         } else {
-            // Validate each item
-            $itemsValid = true;
-            $itemError = '';
-            foreach ($_PUT->items as $index => $item) {
-                if (!isset($item->description) || empty(trim($item->description))) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Description is required';
-                    break;
-                }
-                if (!isset($item->amount) || !is_numeric($item->amount)) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Amount must be a valid number';
-                    break;
-                }
-                if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
-                    $itemsValid = false;
-                    $itemError = 'Item ' . ($index + 1) . ': Quantity must be at least 1';
-                    break;
-                }
-            }
-
-            if (!$itemsValid) {
+            $itemError = cotValidarItems($_PUT->items);
+            if ($itemError !== null) {
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';
@@ -259,7 +247,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'DELETE':
         $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id)) {
-            $respuesta = ['status' => false, 'error' => 'Cotization ID is required'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar la cotización que quieres eliminar. Actualiza el listado e inténtalo de nuevo.'];
         } else {
             $oldCotizacion = $cotizacionModel->getCotizaciones($_DELETE->id)[0] ?? null;
             $result = $cotizacionModel->deleteCotizacion($_DELETE->id);

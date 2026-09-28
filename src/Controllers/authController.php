@@ -21,9 +21,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // Handle login endpoint
         if (preg_match('/\/api\/auth\/login/', $endpoint)) {
             if (!isset($_POST->emailOrUsername) || is_null($_POST->emailOrUsername) || empty(trim($_POST->emailOrUsername))) {
-                $respuesta = ['success' => false, 'error' => 'Email or username is required'];
+                $respuesta = ['success' => false, 'error' => 'Escribe tu correo o tu usuario.'];
             } else if (!isset($_POST->password) || is_null($_POST->password) || empty(trim($_POST->password))) {
-                $respuesta = ['success' => false, 'error' => 'Password is required'];
+                $respuesta = ['success' => false, 'error' => 'Escribe tu contraseña.'];
             } else {
                 // tenant_id ya no es necesario: email y username son ambos unicos
                 // globales, asi que el login resuelve el tenant sin el. Se sigue
@@ -65,7 +65,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
                         'user_id'       => $login_result[2]['user_id'] ?? null,
                         'tenant_id'     => $login_result[2]['tenant_id'] ?? ($tenantId !== null ? (int) $tenantId : null),
                         'success'       => false,
-                        'error_message' => $login_result[1],
+                        // Un fallo de DB muestra un texto generico al usuario; la
+                        // bitacora conserva el detalle crudo para diagnosticarlo.
+                        'error_message' => $login_result[2]['detalle'] ?? $login_result[1],
                         'description'   => 'Intento de inicio de sesion fallido.',
                     ]);
                 }
@@ -131,7 +133,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
                         http_response_code(500);
                     }
                 } else {
-                    $respuesta = ['success' => false, 'error' => 'Token not found'];
+                    $respuesta = ['success' => false, 'error' => 'No hay una sesión activa para cerrar.'];
                     http_response_code(401);
                 }
             }

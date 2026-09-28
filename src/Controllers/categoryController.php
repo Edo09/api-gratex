@@ -28,7 +28,7 @@ function validateCategory($c): ?string
         return 'El nombre es obligatorio y no debe superar 100 caracteres.';
     }
     if (isset($c->descripcion) && strlen((string) $c->descripcion) > 255) {
-        return 'La descripcion no debe superar 255 caracteres.';
+        return 'La descripción no debe superar 255 caracteres.';
     }
     return null;
 }
@@ -39,7 +39,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $rows = $categoryModel->getAll($_GET['id']);
             if (empty($rows)) {
                 http_response_code(404);
-                $respuesta = ['status' => false, 'error' => 'Categoria no encontrada'];
+                $respuesta = ['status' => false, 'error' => 'Esta categoría no existe.'];
             } else {
                 $respuesta = ['status' => true, 'data' => $rows[0]];
             }
@@ -94,7 +94,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
             http_response_code(422);
-            $respuesta = ['status' => false, 'error' => 'Falta el id de la categoria'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar la categoría. Cierra la ventana y ábrela de nuevo.'];
         } else if (($error = validateCategory($_PUT)) !== null) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
@@ -121,7 +121,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             http_response_code(422);
-            $respuesta = ['status' => false, 'error' => 'Falta el id de la categoria'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar la categoría. Cierra la ventana y ábrela de nuevo.'];
         } else {
             $oldCategory = $categoryModel->getAll($_DELETE->id)[0] ?? null;
             $result = $categoryModel->delete($_DELETE->id);
@@ -142,5 +142,5 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     default:
         http_response_code(405);
-        echo json_encode(['status' => false, 'error' => 'Metodo no soportado']);
+        echo json_encode(['status' => false, 'error' => 'Esta acción no está disponible.']);
 }

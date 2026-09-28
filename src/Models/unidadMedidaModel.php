@@ -29,6 +29,9 @@ class unidadMedidaModel
             );
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
+            // Vacio y no error: el selector queda sin opciones en vez de romper
+            // la pantalla. Sin el log no habria forma de saber por que.
+            error_log('[catalogos] unidades_medida: ' . $e->getMessage());
             return [];
         }
     }
@@ -61,6 +64,7 @@ class unidadMedidaModel
                     ->fetchAll(PDO::FETCH_COLUMN);
                 self::$validCache = array_fill_keys(array_map('intval', $ids), true);
             } catch (PDOException $e) {
+                error_log('[catalogos] unidades_medida (validacion, fail-open): ' . $e->getMessage());
                 self::$validCache = [];
             }
         }

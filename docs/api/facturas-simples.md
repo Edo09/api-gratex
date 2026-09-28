@@ -119,7 +119,11 @@ del cliente (`company_name`, `client_email`, `client_phone`, `client_rnc`).
 ```
 
 **`404`** si no existe o si el id corresponde a un e-CF emitido:
-`{ "status": false, "error": "Factura no encontrada" }`
+`{ "status": false, "error": "No encontramos esta factura. Puede que la hayan eliminado; vuelve al listado." }`
+
+> El `404` del `PUT` y del `DELETE` lo decide el código que devuelve el modelo
+> (`facturaModel::ERROR_NO_ENCONTRADA`), no el texto: el mensaje se puede
+> reescribir sin romper el código HTTP.
 
 ---
 

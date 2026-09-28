@@ -110,11 +110,12 @@ class Reporte606Model
 
             if (isset($vistos[$clave])) {
                 $conservado = $vistos[$clave];
+                $quien = $this->refProveedor($rnc);
                 $advertencias[] = $conservado === $origen
-                    ? "NCF {$ncf} (RNC {$rnc}): registrado dos veces en {$conservado}. Se declara "
-                        . 'una sola vez — revisa si la compra tambien esta duplicada en tus costos.'
-                    : "NCF {$ncf} (RNC {$rnc}): esta en {$conservado} y en {$origen}. Se declara una "
-                        . "sola vez, con el de {$conservado} — revisa si la compra tambien esta "
+                    ? "NCF {$ncf} ({$quien}): está registrado dos veces en {$conservado}. Se declara "
+                        . 'una sola vez; revisa si la compra también está duplicada en tus costos.'
+                    : "NCF {$ncf} ({$quien}): aparece en {$conservado} y en {$origen}. Se declara una "
+                        . "sola vez, con los datos de {$conservado}; revisa si la compra también está "
                         . 'duplicada en tus costos.';
                 continue;
             }
@@ -129,7 +130,16 @@ class Reporte606Model
     /** Nombre en cristiano de la fuente, para las advertencias. */
     private function etiquetaOrigen(string $origen): string
     {
-        return $origen === 'ecf_recibido' ? 'recepcion e-CF' : 'gastos/compras';
+        return $origen === 'ecf_recibido' ? 'e-CF recibidos' : 'gastos y compras';
+    }
+
+    /**
+     * Como se nombra al proveedor en las advertencias. Un gasto puede venir sin
+     * RNC y "RNC " a secas no le dice nada al contador.
+     */
+    private function refProveedor(string $rnc): string
+    {
+        return $rnc !== '' ? "RNC {$rnc}" : 'proveedor sin RNC';
     }
 
     // ---------------------------------------------------------------- fuentes
@@ -256,9 +266,16 @@ class Reporte606Model
         $x   = $this->extractFromXml((string) ($r['xml_firmado'] ?? ''));
         $rnc = preg_replace('/\D/', '', (string) $r['rnc_emisor']);
 
-        if (($r['validacion_firma'] ?? null) !== 'OK') {
-            $advertencias[] = "e-CF {$r['e_ncf']} (RNC {$rnc}): firma '" .
-                ($r['validacion_firma'] ?? 'NULL') . "' — verificar antes de declarar.";
+        // validacion_firma: OK | INVALIDA | NO_VERIFICADA | NULL (p.ej. importado
+        // con public/import_recibido.php). Se explica el problema en vez de
+        // mostrar el codigo guardado.
+        $firma = $r['validacion_firma'] ?? null;
+        if ($firma !== 'OK') {
+            $problema = $firma === 'INVALIDA'
+                ? 'la firma digital del comprobante no es válida'
+                : 'no se pudo verificar la firma digital del comprobante';
+            $advertencias[] = "e-NCF {$r['e_ncf']} ({$this->refProveedor($rnc)}): {$problema}. "
+                . 'Confirma con el proveedor que es auténtico antes de declararlo.';
         }
         $this->validarNcf((string) $r['e_ncf'], $rnc, $advertencias);
 
@@ -274,8 +291,8 @@ class Reporte606Model
         $fechaPago = $x['fecha_pago'];
         // Regla DGII: si hay ITBIS retenido (12) o retencion renta (18), fecha pago (7) obligatoria.
         if (($itbisRet > 0 || $isrRet > 0) && $fechaPago === '') {
-            $advertencias[] = "e-CF {$r['e_ncf']}: tiene retencion (ITBIS/ISR) pero falta " .
-                "Fecha de Pago (campo 7 obligatorio).";
+            $advertencias[] = "e-NCF {$r['e_ncf']}: tiene retención de ITBIS o ISR, pero el comprobante "
+                . 'no trae la fecha de pago, que en ese caso es obligatoria en el 606.';
         }
 
         $totalFacturado = ($bienes + $servicios) > 0 ? ($bienes + $servicios) : $total;
@@ -422,13 +439,14 @@ class Reporte606Model
     {
         $ncf = trim($ncf);
         if ($ncf === '') {
-            $advertencias[] = "RNC {$rnc}: comprobante sin NCF/e-NCF.";
+            $advertencias[] = "Hay un comprobante sin NCF ni e-NCF ({$this->refProveedor($rnc)}).";
             return;
         }
         $okEcf    = (bool) preg_match('/^E\d{12}$/', $ncf);   // e-NCF: E + tipo(2) + sec(10)
         $okLegacy = (bool) preg_match('/^[A-B]\d{10}$/', $ncf); // NCF: B/A + serie(2) + sec(8)
         if (!$okEcf && !$okLegacy) {
-            $advertencias[] = "NCF {$ncf} (RNC {$rnc}): formato no valido o no autorizado — revisar.";
+            $advertencias[] = "NCF {$ncf} ({$this->refProveedor($rnc)}): el número no tiene el formato "
+                . 'de un NCF o e-NCF válido. Revísalo.';
         }
     }
 }

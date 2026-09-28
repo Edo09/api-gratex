@@ -9,6 +9,18 @@ require_once __DIR__ . '/../Models/facturaModel.php';
 require_once __DIR__ . '/../Models/clientModel.php';
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/InformacionReferencia.php';
+
+// Texto para cualquier fallo de la emision que NO sea un caso de negocio
+// (EcfUsuarioException): DGII caida, XML, firma, un Error de PHP... El detalle
+// real va al error_log y al audit log, nunca al cajero.
+const FACTURA_EMISION_FALLO_GENERICO = 'No se pudo emitir la factura en la DGII. Espera unos minutos y vuelve a intentarlo; si sigue fallando, avisa a soporte.';
+
+// format=datos (recibo de tirilla como pagina web) sin ancho de papel: la app
+// siempre manda el ancho que tiene guardado el equipo, asi que si falta es la
+// configuracion de la impresora de ese equipo.
+const FACTURA_RECIBO_SIN_ANCHO = 'No se pudo preparar el recibo. Revisa el ancho de papel en Configuración → Impresora de recibos o imprime en hoja carta.';
 
 $facturaModel = new facturaModel();
 $clientModel = new clientModel();
@@ -28,11 +40,16 @@ $isReenviarRequest = preg_match('/\/api\/facturas\/(\d+)\/reenviar/', $endpoint,
 $isXmlRequest = preg_match('/\/api\/facturas\/(\d+)\/xml/', $endpoint, $xmlMatches);
 $isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
 $isStatsRequest = preg_match('/\/api\/facturas\/stats/', $endpoint);
+$isModificablesRequest = preg_match('/\/api\/facturas\/modificables\/?$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
         if ($isStatsRequest) {
             handleECFStats($facturaModel);
+            break;
+        }
+        if ($isModificablesRequest) {
+            handleFacturasModificables($facturaModel);
             break;
         }
         if ($isPdfRequest) {
@@ -71,12 +88,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $query = $_GET['query'] ?? null;
         $estado = normalizeEstadoFilter($_GET['estado'] ?? null);
         if ($estado === false) {
-            respond(false, "estado invalido: use 'aprobado', 'rechazado' o 'todos'", 422);
+            respond(false, 'Ese filtro de estado no es válido. Elige otro en la lista.', 422);
             break;
         }
         $tipoEcf = normalizeTipoEcfFilter($_GET['tipo_ecf'] ?? null);
         if ($tipoEcf === false) {
-            respond(false, 'tipo_ecf invalido: use E31, E32, E33, E34, E41, E43, E44, E45, E46 o E47', 422);
+            respond(false, 'Ese tipo de comprobante no es válido como filtro. Elige otro en la lista.', 422);
             break;
         }
         $offset = ($page - 1) * $pageSize;
@@ -127,7 +144,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 {
     $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
-        respond(false, 'JSON body invalido', 400);
+        respond(false, 'No se pudieron leer los datos de la factura. Recarga la página e inténtalo de nuevo.', 400);
         return;
     }
 
@@ -136,7 +153,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     $items = $input['items'] ?? null;
 
     if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipoEcf)) {
-        respond(false, 'tipo_ecf requerido (31, 32, 33, 34, 41, 43, 44, 45, 46, 47)', 422);
+        respond(false, 'Elige el tipo de comprobante.', 422);
         return;
     }
     // E32 (Consumo) y E43 (Gastos Menores) pueden emitirse sin comprador: el e-CF
@@ -144,27 +161,29 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     // el client_id sigue siendo obligatorio.
     $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true);
     if (!$clientId && !$permiteSinCliente) {
-        respond(false, 'client_id requerido', 422);
+        respond(false, 'Elige un cliente para esta factura. Solo las facturas de consumo y de gastos menores pueden ir sin cliente.', 422);
         return;
     }
     if (!is_array($items) || count($items) === 0) {
-        respond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+        respond(false, 'Agrega al menos un producto o servicio.', 422);
         return;
     }
-    assertUnidadesMedida($items);
+    if (!assertUnidadesMedida($items)) {
+        return;
+    }
 
     $client = null;
     if ($clientId) {
         $clients = $clientModel->getClients($clientId);
         if (empty($clients)) {
-            respond(false, 'Cliente no encontrado', 404);
+            respond(false, 'No encontramos ese cliente. Puede que lo hayan eliminado; búscalo de nuevo o elige otro.', 404);
             return;
         }
         $client = $clients[0];
     }
 
     if ($tipoEcf === '31' && empty($client['rnc'] ?? null)) {
-        respond(false, 'El cliente no tiene RNC y es requerido para e-CF tipo 31 (Credito Fiscal)', 422);
+        respond(false, 'Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo.', 422);
         return;
     }
 
@@ -172,10 +191,10 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 
     // Credito: solo si el cliente lo tiene habilitado. TipoPago DGII: 1=Contado,
     // 2=Credito. Se valida aqui y no en el front porque es una regla comercial
-    // del cliente, no una preferencia de la pantalla.
+    // del cliente, no una preferencia de la pantalla. El texto sale de
+    // clientModel para que la factura simple diga exactamente lo mismo.
     if ($client && (int) ($input['tipo_pago'] ?? 1) === 2 && (int) ($client['permitir_credito'] ?? 0) !== 1) {
-        respond(false, 'El cliente ' . ($client['client_name'] ?? '') . ' no tiene credito habilitado: '
-            . 'la factura debe ser de contado (tipo_pago = 1).', 422);
+        respond(false, clientModel::mensajeSinCredito($client['client_name'] ?? null), 422);
         return;
     }
 
@@ -237,7 +256,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     if ($compradorRnc !== '') {
         $emisorRnc = (string) ((new EmisorConfigModel())->get()['rnc'] ?? '');
         if ($emisorRnc !== '' && $compradorRnc === $emisorRnc) {
-            respond(false, 'El RNC del comprador (' . $compradorRnc . ') no puede ser igual al RNC del emisor; no se puede facturar a si mismo.', 422);
+            respond(false, 'El RNC de este cliente (' . $compradorRnc . ') es el de tu propia empresa, y no puedes facturarte a ti mismo. Elige otro cliente.', 422);
             return;
         }
     }
@@ -258,6 +277,41 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         $infoReferencia['ncf_modificado'] = preg_replace('/\s+/', '', $infoReferencia['ncf_modificado']);
     }
 
+    // Notas E33/E34: la referencia se valida ANTES de emitir. El servicio la
+    // vuelve a validar antes de reservar el e-NCF (red para cualquier otro
+    // llamador); aqui va primero para responder 422 con un texto que el usuario
+    // entiende, y para las reglas que necesitan la base (ver
+    // validarFacturaModificada).
+    $indicadorNotaCredito = $input['indicador_nota_credito'] ?? null;
+    if (in_array($tipoEcf, InformacionReferencia::TIPOS_NOTA, true)) {
+        $fechaEmisionNota = (string) ($input['fecha_emision'] ?? date('d-m-Y'));
+        try {
+            $infoReferencia = InformacionReferencia::normalizar($tipoEcf, $infoReferencia, $strictInput, $fechaEmisionNota);
+        } catch (EcfUsuarioException $e) {
+            respond(false, $e->getMensajeUsuario(), 422);
+            return;
+        }
+        // En modo estricto (set de pruebas DGII) el set trae sus propias
+        // referencias e indicadores: no se contrasta ni se deriva nada.
+        if (!$strictInput) {
+            $errorReferencia = validarFacturaModificada(
+                $facturaModel, $tipoEcf, $infoReferencia, $clientId, (float) ($totales['monto_total'] ?? 0)
+            );
+            if ($errorReferencia !== null) {
+                respond(false, $errorReferencia, 422);
+                return;
+            }
+            // IndicadorNotaCredito es obligatorio en el E34 y depende de las
+            // fechas (0 = dentro de los 30 dias de la factura, 1 = despues). Sin
+            // esto salia siempre el '0' del builder.
+            if ($tipoEcf === '34' && ($indicadorNotaCredito === null || $indicadorNotaCredito === '')) {
+                $indicadorNotaCredito = InformacionReferencia::indicadorNotaCredito(
+                    $fechaEmisionNota, $infoReferencia['fecha_ncf_modificado']
+                );
+            }
+        }
+    }
+
     $payload = [
         'tipo_ecf' => $tipoEcf,
         'e_ncf' => $eNcf,
@@ -273,8 +327,13 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'fecha_desde' => $input['fecha_desde'] ?? null,
         'fecha_hasta' => $input['fecha_hasta'] ?? null,
         'total_paginas' => $input['total_paginas'] ?? null,
-        'indicador_monto_gravado' => $input['indicador_monto_gravado'] ?? null,
-        'indicador_nota_credito' => $input['indicador_nota_credito'] ?? null,
+        // XSD DGII: 0 = los montos de las lineas NO incluyen ITBIS, 1 = si. Esta
+        // ruta siempre calcula el ITBIS encima del precio (EcfItemMapper), asi
+        // que el XML debe decir 0. El front mandaba "1" con precios sin ITBIS
+        // (al reves); un bundle viejo en cache lo seguiria mandando. El set de
+        // pruebas (strict_input) trae sus propios montos y su indicador.
+        'indicador_monto_gravado' => $strictInput ? ($input['indicador_monto_gravado'] ?? null) : '0',
+        'indicador_nota_credito' => $indicadorNotaCredito,
         'ambiente' => $input['ambiente'] ?? null,
         'strict_input' => $strictInput,
         'emisor_override' => is_array($input['emisor'] ?? null) ? $input['emisor'] : null,
@@ -290,6 +349,8 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         $service = new ECFEmissionService();
         $result = $service->emitir($payload);
     } catch (Throwable $e) {
+        // El audit y el error_log guardan el texto tecnico, como siempre.
+        error_log('[ECF] fallo en emision tipo=' . $tipoEcf . ': ' . get_class($e) . ': ' . $e->getMessage());
         AuditLogger::log([
             'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
             'entity_id' => $input['e_ncf'] ?? null,
@@ -297,7 +358,12 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
             'success' => false, 'error_message' => $e->getMessage(),
             'description' => 'Fallo en emision e-CF a DGII.',
         ]);
-        respond(false, 'Fallo en emision DGII: ' . $e->getMessage(), 502);
+        // Al cajero, solo lo que puede entender: los casos de negocio (rango
+        // agotado, emisor o certificado sin configurar...) traen su propio
+        // texto; cualquier otra cosa es un fallo interno y va el generico.
+        respond(false, $e instanceof EcfUsuarioException
+            ? $e->getMensajeUsuario()
+            : FACTURA_EMISION_FALLO_GENERICO, 502);
         return;
     }
 
@@ -338,6 +404,16 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 
     $saved = $facturaModel->saveFacturaConECF($facturaInput, $result);
     if ($saved[0] !== 'success') {
+        // A esta altura la DGII YA recibio el e-CF: que quede en el audit con el
+        // motivo tecnico ($saved[2]) para que soporte lo pueda cuadrar. Al
+        // usuario va $saved[1], que le pide no volver a emitirla.
+        AuditLogger::log([
+            'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+            'entity_id' => $result['e_ncf'] ?? null,
+            'new_values' => ['tipo_ecf' => $tipoEcf, 'client_id' => $clientId, 'estado_dgii' => $result['estado'] ?? null],
+            'success' => false, 'error_message' => $saved[2] ?? $saved[1],
+            'description' => 'e-CF enviado a DGII pero no se pudo guardar en la base de datos.',
+        ]);
         respond(false, $saved[1], 500);
         return;
     }
@@ -393,7 +469,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         http_response_code(422);
         echo json_encode([
             'status' => false,
-            'error' => dgiiMensajeRechazo($dgiiResp, $estadoFinal),
+            'error' => dgiiMensajeRechazoUsuario($dgiiResp, $estadoFinal),
             'data' => $data,
         ]);
         return;
@@ -412,42 +488,147 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 }
 
 /**
- * Construye un mensaje legible a partir del cuerpo de rechazo de DGII
- * ({"codigo":..,"estado":"Rechazado","mensajes":[{"valor":"..."}]}). Cae a un
- * texto generico si no hay mensajes estructurados.
+ * Motivos que da la DGII en su cuerpo de rechazo
+ * ({"codigo":..,"estado":"Rechazado","mensajes":[{"valor":"..."}]}), o [] si no
+ * trae mensajes estructurados.
+ */
+function dgiiMotivos($dgiiResponse): array
+{
+    if (!is_array($dgiiResponse)) {
+        return [];
+    }
+    $mensajes = $dgiiResponse['mensajes'] ?? $dgiiResponse['mensaje'] ?? null;
+    if (is_array($mensajes)) {
+        $textos = [];
+        foreach ($mensajes as $m) {
+            if (is_array($m) && isset($m['valor']) && $m['valor'] !== '') {
+                $textos[] = (string) $m['valor'];
+            } elseif (is_string($m) && $m !== '') {
+                $textos[] = $m;
+            }
+        }
+        if ($textos) {
+            return $textos;
+        }
+    }
+    if (isset($dgiiResponse['mensaje']) && is_string($dgiiResponse['mensaje']) && $dgiiResponse['mensaje'] !== '') {
+        return [$dgiiResponse['mensaje']];
+    }
+    return [];
+}
+
+/**
+ * Texto TECNICO del rechazo, para el audit log (error_message). Se deja tal
+ * cual estaba: es lo que soporte busca en la bitacora. Al usuario va
+ * dgiiMensajeRechazoUsuario().
  */
 function dgiiMensajeRechazo($dgiiResponse, string $estado): string
 {
     $prefijo = in_array($estado, ['RECHAZADO', 'RFCE_RECHAZADO'], true)
         ? 'e-CF rechazado por DGII'
         : 'e-CF no procesado por DGII (' . $estado . ')';
-    if (is_array($dgiiResponse)) {
-        $mensajes = $dgiiResponse['mensajes'] ?? $dgiiResponse['mensaje'] ?? null;
-        if (is_array($mensajes)) {
-            $textos = [];
-            foreach ($mensajes as $m) {
-                if (is_array($m) && isset($m['valor']) && $m['valor'] !== '') {
-                    $textos[] = (string) $m['valor'];
-                } elseif (is_string($m) && $m !== '') {
-                    $textos[] = $m;
-                }
-            }
-            if ($textos) {
-                return $prefijo . ': ' . implode(' | ', $textos);
-            }
-        }
-        if (isset($dgiiResponse['mensaje']) && is_string($dgiiResponse['mensaje']) && $dgiiResponse['mensaje'] !== '') {
-            return $prefijo . ': ' . $dgiiResponse['mensaje'];
-        }
+    $textos = dgiiMotivos($dgiiResponse);
+    return $textos ? $prefijo . ': ' . implode(' | ', $textos) : $prefijo . '.';
+}
+
+/**
+ * Texto del rechazo para el cajero. En un rechazo se conservan los motivos de
+ * la DGII (son el motivo legal y lo que hay que corregir); cuando la DGII no
+ * dio veredicto (NO_ENCONTRADO / ERROR) no hay nada que corregir todavia, solo
+ * esperar y revisar el estado antes de emitir otra vez.
+ */
+function dgiiMensajeRechazoUsuario($dgiiResponse, string $estado): string
+{
+    if (!in_array($estado, ['RECHAZADO', 'RFCE_RECHAZADO'], true)) {
+        return 'La DGII no pudo procesar la factura. Revisa su estado en el detalle en unos minutos antes de volver a emitirla.';
     }
-    return $prefijo . '.';
+    $textos = dgiiMotivos($dgiiResponse);
+    if (!$textos) {
+        return 'La DGII rechazó la factura sin indicar el motivo. Revisa los datos y vuelve a emitirla; si sigue pasando, avisa a soporte.';
+    }
+    // Sin el punto final de la DGII, para no dejar ".." al unir con la frase.
+    return 'La DGII rechazó la factura: ' . rtrim(implode(' | ', $textos), '. ')
+        . '. Corrige lo que indica y vuelve a emitirla.';
+}
+
+/**
+ * Contrasta la referencia de una nota E33/E34 con la factura que modifica,
+ * cuando esa factura esta en la base (una emitida en otro sistema no se puede
+ * revisar aqui: la valida la DGII). Devuelve el texto para el usuario, o null
+ * si todo cuadra.
+ *
+ * El tope de una nota de credito es el saldo de la factura: su total, mas las
+ * notas de debito, menos las de credito que la DGII acepto o tiene en proceso
+ * (una rechazada, en ERROR o NO_ENCONTRADO no cuenta: se debe poder reintentar). Sin el tope, dos notas por el total restaban la
+ * misma venta dos veces en el reporte y en el dashboard.
+ *
+ * @param int|string|null $clientId
+ */
+function validarFacturaModificada(facturaModel $facturaModel, string $tipoEcf, array $ref, $clientId, float $montoNota): ?string
+{
+    $original = $facturaModel->getReferenciaOriginal((string) $ref['ncf_modificado']);
+    if ($original === null) {
+        return null;
+    }
+    $eNcf = $original['e_ncf'];
+    $nota = $tipoEcf === '34' ? 'nota de crédito' : 'nota de débito';
+
+    if (!in_array($original['estado_dgii'], facturaModel::ESTADOS_MODIFICABLES, true)) {
+        return str_contains($original['estado_dgii'], 'RECHAZADO')
+            ? 'La DGII rechazó la factura ' . $eNcf . ', así que no se le puede hacer una ' . $nota . '.'
+            : 'La DGII todavía no ha aceptado la factura ' . $eNcf . ', así que aún no puedes hacerle una ' . $nota
+                . '. Revisa su estado en el detalle de la factura y vuelve cuando esté aceptada.';
+    }
+    // Una factura a consumidor final no tiene cliente con quien comparar.
+    if ($original['client_id'] !== null && $clientId && $original['client_id'] !== (int) $clientId) {
+        return 'La factura ' . $eNcf . ' es de otro cliente. Elige una factura de este cliente.';
+    }
+    if ($original['fecha_emision'] !== '' && $original['fecha_emision'] !== $ref['fecha_ncf_modificado']) {
+        return 'La factura ' . $eNcf . ' es del ' . $original['fecha_emision'] . ', no del '
+            . $ref['fecha_ncf_modificado'] . '. Vuelve a elegir la factura para que tome su fecha.';
+    }
+    if ($tipoEcf === '34' && $montoNota > $original['saldo'] + 0.005) {
+        $rd = static fn(float $v): string => 'RD$ ' . number_format($v, 2, '.', ',');
+        if ($original['saldo'] <= 0) {
+            return 'La factura ' . $eNcf . ' ya está acreditada por completo con otras notas de crédito: no le queda monto para otra.';
+        }
+        return 'Esta nota de crédito es de ' . $rd($montoNota) . ' y a la factura ' . $eNcf . ' solo le quedan '
+            . $rd($original['saldo']) . ' por acreditar'
+            . ($original['notas_credito'] > 0 ? ' (ya tiene notas de crédito por ' . $rd($original['notas_credito']) . ')' : '')
+            . '. Baja el monto de la nota.';
+    }
+    return null;
+}
+
+/**
+ * GET /api/facturas/modificables?client_id=&query=&limit= — facturas del
+ * cliente que una nota E33/E34 puede modificar: de venta y aceptadas por la
+ * DGII, con la fecha que pide FechaNCFModificado y el saldo que les queda por
+ * acreditar. `query` filtra por parte del e-NCF; `limit` va de 1 a 50 (20).
+ */
+function handleFacturasModificables(facturaModel $facturaModel): void
+{
+    $clientId = filter_var($_GET['client_id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+    if ($clientId === false) {
+        respond(false, 'Elige un cliente para ver sus facturas.', 422);
+        return;
+    }
+    $limit = filter_var($_GET['limit'] ?? 20, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1, 'max_range' => 50]]);
+    $query = is_string($_GET['query'] ?? null) ? $_GET['query'] : null;
+
+    $filas = $facturaModel->getFacturasModificables($clientId, $query, $limit === false ? 20 : $limit);
+    if ($filas === null) {
+        respond(false, 'No se pudieron cargar las facturas de este cliente. Inténtalo de nuevo en unos minutos.', 500);
+        return;
+    }
+    echo json_encode(['status' => true, 'data' => $filas]);
 }
 
 function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
 {
     $ecf = $facturaModel->getECFData($facturaId);
     if (!$ecf) {
-        respond(false, 'Factura no encontrada', 404);
+        respond(false, 'No encontramos esta factura. Puede que ya no exista.', 404);
         return;
     }
 
@@ -459,7 +640,7 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
     }
 
     if (empty($ecf['track_id']) || empty($ecf['e_ncf'])) {
-        respond(false, 'Factura no tiene track_id o e_ncf (no fue emitida a DGII)', 422);
+        respond(false, 'Esta factura no se envió a la DGII, así que no tiene un estado que consultar.', 422);
         return;
     }
     try {
@@ -509,7 +690,10 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
             ],
         ]);
     } catch (Throwable $e) {
-        respond(false, 'Fallo consultando DGII: ' . $e->getMessage(), 502);
+        error_log('[ECF] fallo consultando estado DGII factura_id=' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
+        respond(false, $e instanceof EcfUsuarioException
+            ? $e->getMensajeUsuario()
+            : 'No se pudo consultar el estado en la DGII en este momento. Inténtalo de nuevo en unos minutos.', 502);
     }
 }
 
@@ -532,7 +716,7 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
     ];
 
     if ($codigoSeguridad === '' || empty($ecf['e_ncf'])) {
-        $respuestaGuardada['nota'] = 'RFCE sin codigo de seguridad o e-NCF; no se puede consultar a DGII. Se devuelve estado almacenado.';
+        $respuestaGuardada['nota'] = 'Esta factura no tiene los datos necesarios para consultarla en la DGII. Se muestra el último estado guardado.';
         echo json_encode(['status' => true, 'data' => $respuestaGuardada]);
         return;
     }
@@ -586,7 +770,12 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
             ],
         ]);
     } catch (Throwable $e) {
-        $respuestaGuardada['nota'] = 'Fallo consultando RFCE a DGII (' . $e->getMessage() . '). Se devuelve estado almacenado.';
+        // La nota la puede leer el usuario: el motivo tecnico solo al error_log.
+        error_log('[ECF] fallo consultando RFCE a DGII factura_id=' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
+        $respuestaGuardada['nota'] = ($e instanceof EcfUsuarioException
+            ? $e->getMensajeUsuario()
+            : 'No se pudo consultar el estado en la DGII en este momento.')
+            . ' Se muestra el último estado guardado.';
         echo json_encode(['status' => true, 'data' => $respuestaGuardada]);
     }
 }
@@ -600,7 +789,7 @@ function handlePreview(clientModel $clientModel): void
 {
     $input = InputSanitizer::jsonInput();
     if (!is_array($input)) {
-        respond(false, 'JSON body invalido', 400);
+        respond(false, 'No se pudieron leer los datos de la factura. Recarga la página e inténtalo de nuevo.', 400);
         return;
     }
 
@@ -612,20 +801,22 @@ function handlePreview(clientModel $clientModel): void
     // (consumidor final), igual que en la emisión (ver handleEmisionECF).
     $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true);
     if (!$clientId && !$permiteSinCliente) {
-        respond(false, 'client_id requerido', 422);
+        respond(false, 'Elige un cliente para ver la vista previa. Solo las facturas de consumo y de gastos menores pueden ir sin cliente.', 422);
         return;
     }
     if (!is_array($items) || count($items) === 0) {
-        respond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+        respond(false, 'Agrega al menos un producto o servicio.', 422);
         return;
     }
-    assertUnidadesMedida($items);
+    if (!assertUnidadesMedida($items)) {
+        return;
+    }
 
     $client = null;
     if ($clientId) {
         $clients = $clientModel->getClients($clientId);
         if (empty($clients)) {
-            respond(false, 'Cliente no encontrado', 404);
+            respond(false, 'No encontramos ese cliente. Puede que lo hayan eliminado; búscalo de nuevo o elige otro.', 404);
             return;
         }
         $client = $clients[0];
@@ -647,6 +838,15 @@ function handlePreview(clientModel $clientModel): void
         'company_name'       => $client['company_name'] ?? null,
         'items'              => mapItemsForXml($items),
     ];
+    // Notas: la vista previa muestra a que factura modifican, igual que el
+    // PDF de la nota emitida (EcfDocumento::notaModificacion). Sin validar: es
+    // solo una vista previa.
+    $refPreview = $input['informacion_referencia'] ?? null;
+    if (in_array($tipoEcf, InformacionReferencia::TIPOS_NOTA, true) && is_array($refPreview)) {
+        $factura['ncf_modificado'] = (string) ($refPreview['ncf_modificado'] ?? '');
+        $factura['fecha_ncf_modificado'] = (string) ($refPreview['fecha_ncf_modificado'] ?? '');
+        $factura['razon_modificacion'] = (string) ($refPreview['razon_modificacion'] ?? '');
+    }
 
     require_once __DIR__ . '/../Utils/Pdf/RepresentacionImpresa.php';
     $anchoPos = RepresentacionImpresa::anchoPos($input);
@@ -656,7 +856,7 @@ function handlePreview(clientModel $clientModel): void
     // format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
     if ($format === 'datos') {
         if ($anchoPos === null) {
-            respond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            respond(false, FACTURA_RECIBO_SIN_ANCHO, 422);
             return;
         }
         echo json_encode([
@@ -692,8 +892,8 @@ function handleFacturaXml(int $facturaId, facturaModel $facturaModel): void
     $row = $facturaModel->getXmlFirmado($facturaId, $type);
     if ($row === null) {
         respond(false, $type === 'rfce'
-            ? 'Esta factura no tiene RFCE (no es E32 < 250,000 o no se ha emitido).'
-            : 'Factura no tiene XML firmado.', 404);
+            ? 'Esta factura no tiene XML de resumen para descargar. Solo lo tienen las facturas de consumo de menos de RD$250,000 ya enviadas a la DGII.'
+            : 'Esta factura no tiene XML para descargar porque no se emitió como factura electrónica.', 404);
         return;
     }
 
@@ -723,7 +923,7 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
 {
     $facturas = $facturaModel->getFacturas($facturaId);
     if (empty($facturas)) {
-        respond(false, 'Factura not found', 404);
+        respond(false, 'No encontramos esta factura. Puede que ya no exista; actualiza el listado.', 404);
         return;
     }
     $factura = $facturas[0];
@@ -750,7 +950,7 @@ function handleFacturaPdf(int $facturaId, facturaModel $facturaModel, clientMode
     // RepresentacionImpresa::datosRecibo.
     if ($format === 'datos') {
         if ($anchoPos === null) {
-            respond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            respond(false, FACTURA_RECIBO_SIN_ANCHO, 422);
             return;
         }
         echo json_encode([
@@ -808,9 +1008,13 @@ function computeTotales(array $items): array
 /**
  * Valida que la unidad_medida de cada item sea un código DGII del catálogo
  * (unidades_medida.id). Vacío/ausente se permite (toma el default 43 luego).
- * Responde 422 y corta si alguno es inválido.
+ *
+ * Si alguno es inválido responde 422 y devuelve false: el que llama TIENE que
+ * cortar con `if (!assertUnidadesMedida(...)) return;`. Antes solo respondia y
+ * la ejecucion seguia: el e-CF se emitia igual en la DGII y a la respuesta se
+ * le pegaba un segundo JSON, que el front leia como respuesta no valida.
  */
-function assertUnidadesMedida(array $items): void
+function assertUnidadesMedida(array $items): bool
 {
     require_once __DIR__ . '/../Models/unidadMedidaModel.php';
     static $model = null;
@@ -824,10 +1028,12 @@ function assertUnidadesMedida(array $items): void
             continue;
         }
         if (!$model->isValid($u)) {
-            respond(false, 'Item ' . ($i + 1) . ': unidad_medida invalida (' . $u
-                . '). Use un código DGII del catálogo (/api/unidades-medida).', 422);
+            respond(false, 'La unidad de medida de la línea ' . ($i + 1)
+                . ' no es válida. Elige otra unidad en esa línea.', 422);
+            return false;
         }
     }
+    return true;
 }
 
 function mapItemsForXml(array $items, bool $strict = false): array

@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/TenantResolver.php');
+require_once(__DIR__ . '/Utils/FacturacionElectronica/EcfUsuarioException.php');
 
 /**
  * Resolves the signing certificate (.p12) + password to use for DGII signing.
@@ -13,6 +14,9 @@ require_once(__DIR__ . '/TenantResolver.php');
  */
 class CertResolver
 {
+    /** Texto para el usuario de la app cuando no hay certificado que usar. */
+    private const SIN_CERTIFICADO = 'No se encontró el certificado digital de tu empresa. Avisa a soporte.';
+
     /**
      * @return array{content:string, password:string, path:string}
      */
@@ -24,7 +28,12 @@ class CertResolver
             $path = self::toAbsolute((string) $tenant['cert_path']);
             $content = @file_get_contents($path);
             if ($content === false) {
-                throw new RuntimeException('No se pudo leer el certificado del tenant: ' . $path);
+                // EcfUsuarioException: getMessage() sigue igual (con la ruta, para
+                // integradores y logs); la app muestra el texto sin la ruta.
+                throw new EcfUsuarioException(
+                    'No se pudo leer el certificado del tenant: ' . $path,
+                    self::SIN_CERTIFICADO
+                );
             }
             $password = !empty($tenant['cert_pass_encrypted'])
                 ? TenantResolver::decrypt($tenant['cert_pass_encrypted'])
@@ -35,12 +44,12 @@ class CertResolver
         // Fallback: global env cert (comportamiento actual single-tenant).
         $configured = (string) (getenv('DGII_ECF_CERT_PATH') ?: ($_ENV['DGII_ECF_CERT_PATH'] ?? ''));
         if ($configured === '') {
-            throw new RuntimeException('DGII_ECF_CERT_PATH no configurado.');
+            throw new EcfUsuarioException('DGII_ECF_CERT_PATH no configurado.', self::SIN_CERTIFICADO);
         }
         $path = self::toAbsolute($configured);
         $content = @file_get_contents($path);
         if ($content === false) {
-            throw new RuntimeException('No se puede leer el certificado: ' . $path);
+            throw new EcfUsuarioException('No se puede leer el certificado: ' . $path, self::SIN_CERTIFICADO);
         }
         $password = (string) (getenv('DGII_ECF_CERT_PASSWORD') ?: ($_ENV['DGII_ECF_CERT_PASSWORD'] ?? ''));
         return ['content' => $content, 'password' => $password, 'path' => $path];

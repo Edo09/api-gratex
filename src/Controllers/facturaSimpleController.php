@@ -106,8 +106,30 @@ function fsValidarCredito(array $body, clientModel $clientModel, ?array $previa 
     if ((int) ($client['permitir_credito'] ?? 0) === 1) {
         return null;
     }
-    return 'El cliente ' . ($client['client_name'] ?? '')
-        . ' no tiene credito habilitado: la factura debe ser de contado (tipo_pago = 1).';
+    // Mismo texto que la emision e-CF (facturaController): sale de clientModel.
+    return clientModel::mensajeSinCredito($client['client_name'] ?? null);
+}
+
+/**
+ * La factura simple no se pudo encontrar por su id, al abrirla o al pedir su
+ * PDF. El PUT y el DELETE usan los textos del modelo (facturaModel::MSG_SIMPLE_*).
+ */
+const FS_NO_ENCONTRADA = 'No encontramos esta factura. Puede que la hayan eliminado; vuelve al listado.';
+
+/** Recibo de tirilla como pagina web (format=datos) sin ancho de papel. */
+const FS_RECIBO_SIN_ANCHO = 'No se pudo preparar el recibo. Revisa el ancho de papel en Configuración → Impresora de recibos o imprime en hoja carta.';
+
+/** Sin lineas: mismo texto en la vista previa, al crear y al editar. */
+const FS_SIN_LINEAS = 'Agrega al menos una línea a la factura.';
+
+/**
+ * Codigo HTTP para un fallo del modelo. El modelo marca el "no existe" con un
+ * tercer elemento ('no_encontrada') en vez de que aqui se compare el texto:
+ * asi el mensaje se puede reescribir sin romper el 404.
+ */
+function fsCodigoError(array $result): int
+{
+    return ($result[2] ?? null) === facturaModel::ERROR_NO_ENCONTRADA ? 404 : 400;
 }
 
 /**
@@ -147,11 +169,11 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
     $body = fsBody();
 
     if (empty($body['client_id']) && empty($body['client_name'])) {
-        fsRespond(false, 'client_id o client_name requerido', 422);
+        fsRespond(false, 'Elige un cliente o escribe su nombre para ver la vista previa.', 422);
         return;
     }
     if (!isset($body['items']) || !is_array($body['items']) || count($body['items']) === 0) {
-        fsRespond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+        fsRespond(false, FS_SIN_LINEAS, 422);
         return;
     }
 
@@ -197,7 +219,7 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
     // format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
     if ($format === 'datos') {
         if ($anchoPos === null) {
-            fsRespond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            fsRespond(false, FS_RECIBO_SIN_ANCHO, 422);
             return;
         }
         fsRespond(true, RepresentacionImpresa::datosRecibo($factura, $client ?: [], true, $anchoPos, $base));
@@ -231,7 +253,7 @@ function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientMod
 {
     $factura = $facturaModel->getFacturaSimple($id);
     if ($factura === null) {
-        fsRespond(false, 'Factura no encontrada', 404);
+        fsRespond(false, FS_NO_ENCONTRADA, 404);
         return;
     }
 
@@ -257,7 +279,7 @@ function fsHandlePdf(int $id, facturaModel $facturaModel, clientModel $clientMod
     // ?format=datos -> datos del recibo de tirilla para imprimirlo como pagina web.
     if ($format === 'datos') {
         if ($anchoPos === null) {
-            fsRespond(false, 'format=datos solo aplica a la tirilla: agrega formato=pos, pos76 o pos72', 422);
+            fsRespond(false, FS_RECIBO_SIN_ANCHO, 422);
             return;
         }
         fsRespond(true, RepresentacionImpresa::datosRecibo($factura, $client ?: [], true, $anchoPos, $base));
@@ -319,7 +341,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($id !== null) {
             $factura = $facturaModel->getFacturaSimple($id);
             if ($factura === null) {
-                fsRespond(false, 'Factura no encontrada', 404);
+                fsRespond(false, FS_NO_ENCONTRADA, 404);
                 break;
             }
             fsRespond(true, $factura);
@@ -352,16 +374,18 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // no_factura NO se espera del front: el backend lo genera (ver
         // facturaModel::createFacturaSimple -> nextSimpleFacturaNumber).
         if (empty($body['client_id']) && empty($body['client_name'])) {
-            fsRespond(false, 'client_id o client_name requerido', 422);
+            fsRespond(false, 'Elige un cliente o escribe su nombre antes de guardar la factura.', 422);
             break;
         }
         if (!isset($body['items']) || !is_array($body['items']) || count($body['items']) === 0) {
-            fsRespond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+            fsRespond(false, FS_SIN_LINEAS, 422);
             break;
         }
         $userId = $authUserId ?? ($body['user_id'] ?? null);
         if (!$userId) {
-            fsRespond(false, 'No se pudo determinar el usuario del token', 401);
+            // 401: el front cierra la sesion al recibirlo, asi que el texto
+            // tiene que explicar por que.
+            fsRespond(false, 'Tu sesión no es válida. Vuelve a iniciar sesión.', 401);
             break;
         }
         // Credito: misma regla que la emision e-CF. Una factura simple no va a
@@ -398,11 +422,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body = fsBody();
         $id = $pathId ?? (isset($body['id']) && is_numeric($body['id']) ? (int) $body['id'] : null);
         if (!$id) {
-            fsRespond(false, 'id requerido (en la ruta o el body)', 422);
+            fsRespond(false, 'No se pudo identificar la factura que quieres modificar. Ábrela de nuevo desde el listado.', 422);
             break;
         }
         if (isset($body['items']) && (!is_array($body['items']) || count($body['items']) === 0)) {
-            fsRespond(false, 'items, si se envia, debe ser un arreglo con al menos un elemento', 422);
+            fsRespond(false, FS_SIN_LINEAS, 422);
             break;
         }
         // Estado previo: hace falta para dos cosas distintas. El cliente guardado
@@ -411,7 +435,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         // guardadas son las que hay que devolver al almacen si se reemplazan.
         $previa = $facturaModel->getFacturaSimple($id);
         if ($previa === null) {
-            fsRespond(false, 'Factura no encontrada', 404);
+            fsRespond(false, facturaModel::MSG_SIMPLE_YA_NO_EXISTE, 404);
             break;
         }
 
@@ -440,7 +464,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 'description' => 'Factura simple ' . ($previa['no_factura'] ?? $id) . ' actualizada.',
             ]);
         }
-        $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
+        $code = $result[0] === 'success' ? 200 : fsCodigoError($result);
         fsRespond($result[0] === 'success', $result[1], $code);
         break;
 
@@ -448,7 +472,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body = fsBody();
         $id = $pathId ?? (isset($body['id']) && is_numeric($body['id']) ? (int) $body['id'] : null);
         if (!$id) {
-            fsRespond(false, 'id requerido (en la ruta o el body)', 422);
+            fsRespond(false, 'No se pudo identificar la factura que quieres eliminar. Actualiza el listado e inténtalo de nuevo.', 422);
             break;
         }
         // Las lineas hay que leerlas ANTES: el delete se lleva factura_items por
@@ -468,10 +492,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 'description' => 'Factura simple ' . ($previa['no_factura'] ?? $id) . ' eliminada.',
             ]);
         }
-        $code = $result[0] === 'success' ? 200 : ($result[1] === 'Factura no encontrada' ? 404 : 400);
+        $code = $result[0] === 'success' ? 200 : fsCodigoError($result);
         fsRespond($result[0] === 'success', $result[1], $code);
         break;
 
     default:
-        fsRespond(false, 'Metodo no soportado', 405);
+        fsRespond(false, 'Esta acción no está disponible.', 405);
 }

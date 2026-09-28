@@ -31,6 +31,9 @@ class proveedorModel
             }
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            // Vacio = "no existe" para quien llama: sin el log, una caida de la
+            // DB se confundiria con un proveedor borrado.
+            error_log('[proveedores] getProveedores: ' . $e->getMessage());
             return [];
         }
     }
@@ -52,6 +55,7 @@ class proveedorModel
             $stmt->execute();
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            error_log('[proveedores] getProveedoresPaginated: ' . $e->getMessage());
             return [];
         }
     }
@@ -72,6 +76,7 @@ class proveedorModel
             $row = $stmt->fetch();
             return $row ? (int) $row['total'] : 0;
         } catch (PDOException $e) {
+            error_log('[proveedores] getProveedoresCount: ' . $e->getMessage());
             return 0;
         }
     }
@@ -85,10 +90,12 @@ class proveedorModel
             $stmt->execute($this->bindParams($data));
             return ['success', 'Proveedor saved', (int) $this->conexion->lastInsertId()];
         } catch (PDOException $e) {
+            // uk_rnc es la unica restriccion que un INSERT puede romper.
             if ($e->getCode() === '23000') {
-                return ['error', 'Ya existe un proveedor con ese RNC'];
+                return ['error', 'Ya existe un proveedor con ese RNC.'];
             }
-            return ['error', 'Failed to save proveedor'];
+            error_log('[proveedores] saveProveedor: ' . $e->getMessage());
+            return ['error', 'No se pudo guardar el proveedor. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -96,7 +103,7 @@ class proveedorModel
     {
         try {
             if (count($this->getProveedores($id)) === 0) {
-                return ['error', "There is no proveedor with ID {$id}"];
+                return ['error', 'Este proveedor ya no existe; puede que otra persona lo haya eliminado.'];
             }
             $sql = "UPDATE proveedores SET
                 rnc = :rnc, nombre = :nombre, contacto = :contacto, telefono = :telefono,
@@ -109,9 +116,10 @@ class proveedorModel
             return ['success', 'Proveedor updated'];
         } catch (PDOException $e) {
             if ($e->getCode() === '23000') {
-                return ['error', 'Ya existe un proveedor con ese RNC'];
+                return ['error', 'Ya existe un proveedor con ese RNC.'];
             }
-            return ['error', 'Failed to update proveedor'];
+            error_log('[proveedores] updateProveedor ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo actualizar el proveedor. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -119,13 +127,14 @@ class proveedorModel
     {
         try {
             if (count($this->getProveedores($id)) === 0) {
-                return ['error', "Proveedor not found {$id}"];
+                return ['error', 'Este proveedor ya no existe; puede que otra persona lo haya eliminado.'];
             }
             $stmt = $this->conexion->prepare("DELETE FROM proveedores WHERE id = :id");
             $stmt->execute([':id' => $id]);
             return ['success', 'Proveedor deleted'];
         } catch (PDOException $e) {
-            return ['error', 'Failed to delete proveedor'];
+            error_log('[proveedores] deleteProveedor ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar el proveedor. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 

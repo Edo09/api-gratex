@@ -130,12 +130,17 @@ class RoleModel
     public function createRole(?int $tenantId, string $name, ?string $description, array $permissions): array
     {
         $name = trim($name);
+        // La regla se queda estricta: users.role guarda este NOMBRE y se compara
+        // tal cual (getPermissionsForRole, assignUserRole). El mensaje dice que
+        // caracteres valen porque 'Cajero principal' o 'Diseño' se rechazan.
         if ($name === '' || !preg_match('/^[a-z0-9_-]{2,40}$/i', $name)) {
-            return ['error', 'Nombre de rol invalido (2-40, alfanumerico/_/-).'];
+            return ['error', 'El nombre del rol solo puede tener letras sin tilde ni ñ, números, guion (-) y guion bajo (_), sin espacios, y de 2 a 40 caracteres. Por ejemplo: cajero-principal.'];
         }
         foreach ($permissions as $p) {
             if (!self::isValidPermission((string) $p)) {
-                return ['error', "Permiso no valido: {$p}"];
+                // Solo pasa si el catalogo del front se desalineo del de config/permissions.php.
+                error_log('[RoleModel] createRole: permiso fuera del catalogo: ' . (string) $p);
+                return ['error', 'Uno de los módulos marcados ya no existe. Recarga la página e inténtalo de nuevo.'];
             }
         }
         try {
@@ -153,9 +158,10 @@ class RoleModel
                 $this->conexion->rollBack();
             }
             if ((int) $e->getCode() === 23000) {
-                return ['error', 'Ya existe un rol con ese nombre en este tenant.'];
+                return ['error', 'Ya existe un rol con ese nombre. Usa otro nombre.'];
             }
-            return ['error', 'Error al crear el rol.'];
+            error_log('[RoleModel] createRole: ' . $e->getMessage());
+            return ['error', 'No se pudo crear el rol. Inténtalo de nuevo.'];
         }
     }
 
@@ -175,7 +181,8 @@ class RoleModel
         if ($permissions !== null) {
             foreach ($permissions as $p) {
                 if (!self::isValidPermission((string) $p)) {
-                    return ['error', "Permiso no valido: {$p}"];
+                    error_log('[RoleModel] updateRole: permiso fuera del catalogo: ' . (string) $p);
+                    return ['error', 'Uno de los módulos marcados ya no existe. Recarga la página e inténtalo de nuevo.'];
                 }
             }
         }
@@ -194,7 +201,8 @@ class RoleModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'Error al actualizar el rol.'];
+            error_log('[RoleModel] updateRole ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron guardar los cambios del rol. Inténtalo de nuevo.'];
         }
     }
 
@@ -212,7 +220,7 @@ class RoleModel
         $chk = $this->conexion->prepare('SELECT COUNT(*) c FROM users WHERE tenant_id = :tid AND role = :name');
         $chk->execute([':tid' => $this->tid($tenantId), ':name' => $role['name']]);
         if ((int) $chk->fetch()['c'] > 0) {
-            return ['error', 'Hay usuarios con ese rol; reasignalos antes de borrarlo.'];
+            return ['error', 'Hay usuarios con ese rol; reasígnalos antes de borrarlo.'];
         }
         $this->conexion->prepare('DELETE FROM roles WHERE id = :id')->execute([':id' => $id]);
         return ['success', null];
@@ -234,13 +242,13 @@ class RoleModel
         $params = self::multiTenant() ? [':uid' => $userId, ':tid' => $tid] : [':uid' => $userId];
         $u->execute($params);
         if (!$u->fetch()) {
-            return ['error', 'Usuario no encontrado en este tenant.'];
+            return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
         }
         // El rol debe existir para el tenant.
         $r = $this->conexion->prepare('SELECT id FROM roles WHERE tenant_id = :tid AND name = :name LIMIT 1');
         $r->execute([':tid' => $tid, ':name' => $roleName]);
         if (!$r->fetch()) {
-            return ['error', "El rol '{$roleName}' no existe en este tenant."];
+            return ['error', "El rol «{$roleName}» ya no existe. Recarga la página y elige otro rol."];
         }
         $upd = $this->conexion->prepare('UPDATE users SET role = :role WHERE id = :uid');
         $upd->execute([':role' => $roleName, ':uid' => $userId]);

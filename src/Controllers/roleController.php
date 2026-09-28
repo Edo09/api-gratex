@@ -20,11 +20,11 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
         $auth->sendUnauthorized($v['message'] ?? 'Unauthorized');
     }
     if (($v['user_id'] ?? null) === null) {
-        $auth->sendForbidden('Esta ruta requiere una sesion de usuario.');
+        $auth->sendForbidden('Para hacer esto necesitas iniciar sesión con tu usuario.');
     }
     $myPerms = $roleModel->getPermissionsForRole($v['tenant_id'] ?? null, (string) ($v['role'] ?? ''));
     if (!PermissionGate::permMatches($myPerms, 'roles')) {
-        $auth->sendForbidden('No tiene permiso para gestionar roles.');
+        $auth->sendForbidden('No tienes permiso para gestionar roles. Pídeselo a un administrador.');
     }
 }
 
@@ -66,7 +66,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $desc = isset($body['description']) ? (string) $body['description'] : null;
         $perms = isset($body['permissions']) && is_array($body['permissions']) ? $body['permissions'] : [];
         if ($name === '' || empty($perms)) {
-            roles_respond(['status' => false, 'error' => 'Se requieren name y permissions[]'], 422);
+            roles_respond(['status' => false, 'error' => 'Escribe un nombre para el rol y marca al menos un módulo.'], 422);
         }
         $res = $roleModel->createRole($tenantId, $name, $desc, $perms);
         if ($res[0] === 'success') {
@@ -87,7 +87,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $userId = isset($body['user_id']) ? (int) $body['user_id'] : 0;
             $roleName = isset($body['role']) ? (string) $body['role'] : '';
             if ($userId <= 0 || $roleName === '') {
-                roles_respond(['status' => false, 'error' => 'Se requieren user_id y role'], 422);
+                roles_respond(['status' => false, 'error' => 'Elige el usuario y el rol que le quieres asignar.'], 422);
             }
             $res = $roleModel->assignUserRole($tenantId, $userId, $roleName);
             if ($res[0] === 'success') {
@@ -103,7 +103,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         // Actualizar un rol:  PUT /api/roles/{id} {description?, permissions?}
         if ($sub === null || !ctype_digit((string) $sub)) {
-            roles_respond(['status' => false, 'error' => 'Falta el id del rol'], 422);
+            roles_respond(['status' => false, 'error' => 'No se pudo identificar el rol. Recarga la página e inténtalo de nuevo.'], 422);
         }
         $desc = array_key_exists('description', $body) ? (string) $body['description'] : null;
         $perms = isset($body['permissions']) && is_array($body['permissions']) ? $body['permissions'] : null;
@@ -124,7 +124,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'DELETE':
         if ($sub === null || !ctype_digit((string) $sub)) {
-            roles_respond(['status' => false, 'error' => 'Falta el id del rol'], 422);
+            roles_respond(['status' => false, 'error' => 'No se pudo identificar el rol. Recarga la página e inténtalo de nuevo.'], 422);
         }
         $oldRole = $roleModel->getRoleById($tenantId, (int) $sub);
         $res = $roleModel->deleteRole($tenantId, (int) $sub);

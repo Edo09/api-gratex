@@ -10,6 +10,24 @@ class clientModel
         $this->conexion = Database::getInstance()->getConnection();
     }
 
+    /**
+     * Texto de la regla de credito: un cliente sin permitir_credito solo compra
+     * de contado. Vive aqui porque lo muestran dos controllers (emision e-CF y
+     * factura simple) y el cajero tiene que leer lo mismo en los dos.
+     */
+    public static function mensajeSinCredito(?string $clientName): string
+    {
+        $nombre = trim((string) $clientName);
+        // El nombre va entre comillas y no al inicio: la red de seguridad del front
+        // (fiscalo src/api/errores.ts) ignora lo entrecomillado, y un nombre en
+        // minusculas o con palabras en ingles ("PIZZA AND MORE SRL") haria pasar el
+        // aviso por tecnico. "Habilitado" es la palabra que usa la pantalla.
+        $nombre = str_replace(['«', '»'], '', $nombre);
+        return ($nombre !== '' ? 'El cliente «' . $nombre . '»' : 'Este cliente')
+            . ' no tiene crédito habilitado, así que la factura tiene que ser de contado. '
+            . 'Cambia la forma de pago y vuelve a intentarlo.';
+    }
+
     public function getClients($id = null)
     {
         try {
@@ -41,6 +59,7 @@ class clientModel
      * @param array $d email, client_name, company_name, phone_number, rnc,
      *                 razon_social, direccion, municipio, provincia, descuento,
      *                 permitir_credito
+     * @return array ['success', fila creada (misma forma que getClients), id] | ['error', mensaje]
      */
     public function saveClient(array $d)
     {
@@ -51,7 +70,7 @@ class clientModel
                 $d['company_name'] ?? null,
                 $d['phone_number'] ?? null
             );
-            $resultado = ['error', 'This client already exists'];
+            $resultado = ['error', 'Ya tienes un cliente con el mismo nombre de contacto, correo y teléfono. Búscalo en la lista en vez de crearlo otra vez.'];
             if (count($valida) == 0) {
                 $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc,
                                             razon_social, direccion, municipio, provincia,
@@ -77,11 +96,21 @@ class clientModel
                     ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null) ?? 0.0,
                     ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null) ?? 0
                 ]);
-                $resultado = ['success', 'Client saved', (int) $this->conexion->lastInsertId()];
+                $id = (int) $this->conexion->lastInsertId();
+                // Se devuelve la fila recien creada, no un texto: el front la usa
+                // como cliente elegido (id incluido) en la factura o cotizacion
+                // desde la que se abrio el alta. Con el 'Client saved' de antes
+                // el id llegaba vacio y la factura fallaba por "falta cliente".
+                // Si la relectura fallara, al menos va el id con lo enviado. El
+                // $id > 0 no es adorno: getClients(0) devuelve TODOS los clientes
+                // (0 == null) y [0] seria otro cliente.
+                $fila = ($id > 0 ? ($this->getClients($id)[0] ?? null) : null) ?? (['id' => $id] + $d);
+                $resultado = ['success', $fila, $id];
             }
             return $resultado;
         } catch (PDOException $e) {
-            return ['error', 'Failed to save client'];
+            error_log('[clients] no se pudo crear el cliente: ' . $e->getMessage());
+            return ['error', 'No se pudo guardar el cliente. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -101,7 +130,7 @@ class clientModel
     {
         try {
             $existe = $this->getClients($id);
-            $resultado = ['error', "There is no client with ID {$id}"];
+            $resultado = ['error', 'Este cliente ya no existe. Puede que lo hayan eliminado; actualiza el listado.'];
             if (count($existe) > 0) {
                 $valida = $this->validateClients(
                     $d['email'] ?? null,
@@ -110,7 +139,7 @@ class clientModel
                     $d['phone_number'] ?? null,
                     $id
                 );
-                $resultado = ['error', 'This client already exists'];
+                $resultado = ['error', 'Ya hay otro cliente con el mismo nombre de contacto, correo y teléfono. Cambia alguno de esos datos.'];
                 if (count($valida) == 0) {
                     $sql = "UPDATE clients SET
                         email = COALESCE(:email, email),
@@ -161,7 +190,8 @@ class clientModel
             }
             return $resultado;
         } catch (PDOException $e) {
-            return ['error', 'Failed to update client'];
+            error_log('[clients] no se pudo actualizar el cliente ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron guardar los cambios del cliente. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -169,7 +199,7 @@ class clientModel
     {
         try {
             $valida = $this->getClients($id);
-            $resultado = ['error', "Client not found {$id}"];
+            $resultado = ['error', 'Este cliente ya no existe. Puede que otra persona lo haya eliminado; actualiza el listado.'];
             if (count($valida) > 0) {
                 $sql = "DELETE FROM clients WHERE id = :id";
                 $stmt = $this->conexion->prepare($sql);
@@ -178,7 +208,8 @@ class clientModel
             }
             return $resultado;
         } catch (PDOException $e) {
-            return ['error', 'Failed to delete client'];
+            error_log('[clients] no se pudo eliminar el cliente ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar el cliente. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -242,12 +273,23 @@ class clientModel
      * Busca un cliente ya existente con el mismo email + nombre + telefono.
      *
      * $excludeId: al EDITAR hay que excluir el propio registro. Sin eso el
-     * cliente se encontraba a si mismo y toda edicion moria con "This client
-     * already exists" — y peor con catalogos migrados, donde muchos comparten
-     * email y telefono vacios.
+     * cliente se encontraba a si mismo y toda edicion moria con "ya existe"
+     * — y peor con catalogos migrados, donde muchos comparten email y
+     * telefono vacios.
+     *
+     * Correo Y telefono vacios => nunca es duplicado. Los clientes de mostrador
+     * se guardan con '' en los dos (son opcionales), y entonces la comparacion
+     * quedaba solo en el nombre de contacto: dos "Juan Perez" distintos no se
+     * podian dar de alta. Un nombre solo no prueba que sea la misma persona, asi
+     * que hace falta al menos un dato de contacto que coincida de verdad. Es la
+     * opcion conservadora: no agrega ningun rechazo nuevo (tampoco por RNC, ver
+     * arriba), solo deja de rechazar el caso sin datos de contacto.
      */
     public function validateClients($email, $client_name, $company_name, $phone_number, $excludeId = null)
     {
+        if (trim((string) $email) === '' && trim((string) $phone_number) === '') {
+            return [];
+        }
         try {
             $sql = "SELECT * FROM clients WHERE email = :email AND client_name = :client_name AND phone_number = :phone_number";
             $params = [

@@ -38,7 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
         http_response_code(409);
         echo json_encode([
             'status' => false,
-            'error' => 'El branding por tenant requiere modo multi-tenant.',
+            // Instalacion single-tenant: el branding vive en master.tenants.
+            'error' => 'La personalización del diseño de facturas no está disponible en esta instalación.',
         ]);
         exit;
     }
@@ -66,7 +67,7 @@ function brCurrent(int $tenantId): array
 {
     $tenant = MasterDatabase::getInstance()->getTenantById($tenantId);
     if (!$tenant) {
-        brRespond(false, 'Tenant no encontrado (o inactivo).', 404);
+        brRespond(false, 'No se encontró tu empresa o está desactivada. Comunícate con soporte.', 404);
     }
     return [
         'template'            => $tenant['pdf_template'] ?? BrandingResolver::DEFAULT_TEMPLATE,
@@ -93,15 +94,16 @@ function brValidateBranding(array $body, int $tenantId): array
     $fields = [];
     if (array_key_exists('template', $body)) {
         $template = trim((string) $body['template']);
+        // Sin listar las disponibles en el texto: son claves internas
+        // (custom:tenant<id>) y el front ya las ofrece en su selector.
         if (!BrandingResolver::isValidTemplate($template)) {
-            brRespond(false, 'template invalido. Disponibles: '
-                . implode(', ', BrandingResolver::availableTemplates($tenantId)), 422);
+            brRespond(false, 'Esa plantilla no está disponible. Elige una de la lista.', 422);
         }
         // Una plantilla custom solo puede usarla su propio tenant
         // (custom:tenant<id>); las predefinidas son de todos.
         if (strpos($template, BrandingResolver::CUSTOM_PREFIX) === 0
             && $template !== BrandingResolver::CUSTOM_PREFIX . 'tenant' . $tenantId) {
-            brRespond(false, 'Esa plantilla custom no pertenece a este tenant.', 422);
+            brRespond(false, 'Esa plantilla personalizada no está disponible para tu empresa. Elige otra.', 422);
         }
         $fields['pdf_template'] = $template;
     }
@@ -112,7 +114,7 @@ function brValidateBranding(array $body, int $tenantId): array
         } else {
             $accent = trim((string) $accent);
             if (!BrandingResolver::isValidHex($accent)) {
-                brRespond(false, 'accent_color invalido: debe ser hex #RRGGBB.', 422);
+                brRespond(false, 'El color no es válido. Elígelo en el selector o escribe un código como #1F6FEB.', 422);
             }
             $fields['pdf_accent_color'] = strtoupper($accent);
         }
@@ -133,19 +135,18 @@ function brHandlePreview(int $tenantId): void
     if (array_key_exists('template', $body)) {
         $template = trim((string) $body['template']);
         if (!BrandingResolver::isValidTemplate($template)) {
-            brRespond(false, 'template invalido. Disponibles: '
-                . implode(', ', BrandingResolver::availableTemplates($tenantId)), 422);
+            brRespond(false, 'Esa plantilla no está disponible. Elige una de la lista.', 422);
         }
         if (strpos($template, BrandingResolver::CUSTOM_PREFIX) === 0
             && $template !== BrandingResolver::CUSTOM_PREFIX . 'tenant' . $tenantId) {
-            brRespond(false, 'Esa plantilla custom no pertenece a este tenant.', 422);
+            brRespond(false, 'Esa plantilla personalizada no está disponible para tu empresa. Elige otra.', 422);
         }
     }
     $accent = null;
     if (!empty($body['accent_color'])) {
         $hex = trim((string) $body['accent_color']);
         if (!BrandingResolver::isValidHex($hex)) {
-            brRespond(false, 'accent_color invalido: debe ser hex #RRGGBB.', 422);
+            brRespond(false, 'El color no es válido. Elígelo en el selector o escribe un código como #1F6FEB.', 422);
         }
         $accent = BrandingResolver::hexToRgb(strtoupper($hex));
     }
@@ -254,7 +255,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         $fields = brValidateBranding(brBody(), $tenantId);
         if (!$fields) {
-            brRespond(false, 'Nada que actualizar: envia template y/o accent_color.', 422);
+            brRespond(false, 'No hay cambios para guardar.', 422);
         }
         $oldBranding = brCurrent($tenantId);
         MasterDatabase::getInstance()->updateTenantBranding($tenantId, $fields);

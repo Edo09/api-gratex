@@ -67,25 +67,26 @@ class userModel
     {
         $current = $this->getUser($tenantId, $id);
         if (!$current) {
-            return ['error', 'Usuario no encontrado en este tenant.'];
+            // Otro administrador lo borro mientras se editaba (o no es de esta empresa).
+            return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
         }
 
         // Unicidad: email y username globales (excluyendo al propio usuario).
         if (isset($fields['email']) && $fields['email'] !== $current['email']) {
             if (!filter_var($fields['email'], FILTER_VALIDATE_EMAIL)) {
-                return ['error', 'Email invalido.'];
+                return ['error', 'El correo no es válido. Revísalo (por ejemplo: nombre@empresa.com).'];
             }
             $chk = $this->conexion->prepare('SELECT id FROM users WHERE email = :e AND id <> :id LIMIT 1');
             $chk->execute([':e' => $fields['email'], ':id' => $id]);
             if ($chk->fetch()) {
-                return ['error', 'Ese email ya esta registrado.'];
+                return ['error', 'Ya existe otro usuario con ese correo. Usa otro correo.'];
             }
         }
         if (isset($fields['username']) && $fields['username'] !== $current['username']) {
             $chk = $this->conexion->prepare('SELECT id FROM users WHERE username = :u AND id <> :id LIMIT 1');
             $chk->execute([':u' => $fields['username'], ':id' => $id]);
             if ($chk->fetch()) {
-                return ['error', 'Ese username ya esta en uso.'];
+                return ['error', 'Ese nombre de usuario ya está en uso. Elige otro.'];
             }
         }
 
@@ -111,7 +112,8 @@ class userModel
             $this->conexion->prepare($sql)->execute($params);
             return ['success', null];
         } catch (PDOException $e) {
-            return ['error', 'Error al actualizar el usuario.'];
+            error_log('[userModel] updateUser ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron guardar los cambios del usuario. Inténtalo de nuevo.'];
         }
     }
 
@@ -119,13 +121,14 @@ class userModel
     public function deleteUser(?int $tenantId, int $id): array
     {
         if (!$this->getUser($tenantId, $id)) {
-            return ['error', 'Usuario no encontrado en este tenant.'];
+            return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
         }
         try {
             $this->conexion->prepare('DELETE FROM users WHERE id = :id')->execute([':id' => $id]);
             return ['success', null];
         } catch (PDOException $e) {
-            return ['error', 'Error al borrar el usuario.'];
+            error_log('[userModel] deleteUser ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar el usuario. Inténtalo de nuevo.'];
         }
     }
 }

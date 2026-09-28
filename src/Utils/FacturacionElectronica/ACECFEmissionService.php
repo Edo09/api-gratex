@@ -4,6 +4,7 @@ require_once __DIR__ . '/DgiiAuthService.php';
 require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ACECFXmlBuilder.php';
+require_once __DIR__ . '/EcfUsuarioException.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 
@@ -71,7 +72,11 @@ class ACECFEmissionService
         } else {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
-                throw new RuntimeException('emisor_config no configurado.');
+                // Mismo texto tecnico para integradores; la app muestra el amigable.
+                throw new EcfUsuarioException(
+                    'emisor_config no configurado.',
+                    'Faltan los datos fiscales de tu empresa, así que no se puede enviar tu respuesta a la DGII. Avisa a soporte para que los configuren.'
+                );
             }
         }
 
@@ -93,7 +98,10 @@ class ACECFEmissionService
         $certContent = $cert['content'];
         $certPassword = $cert['password'];
         if ($certPassword === '') {
-            throw new RuntimeException('Password del certificado no configurado.');
+            throw new EcfUsuarioException(
+                'Password del certificado no configurado.',
+                'El certificado digital de tu empresa no está configurado, así que no se puede firmar la respuesta. Avisa a soporte.'
+            );
         }
 
         $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);

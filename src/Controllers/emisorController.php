@@ -49,11 +49,14 @@ if ($tenant && ($tenant['tipo'] ?? 'app') === 'integracion') {
 try {
     $emisor = (new EmisorConfigModel())->get();
 } catch (Throwable $e) {
-    emisorRespond(false, 'No se pudo leer emisor_config: ' . $e->getMessage(), 500);
+    // El texto de la excepcion (SQLSTATE, conexion al DB del tenant) no es para
+    // la pantalla de Configuracion: queda en el log.
+    error_log('[emisor] no se pudo leer emisor_config: ' . $e->getMessage());
+    emisorRespond(false, 'No se pudieron cargar los datos de tu empresa. Inténtalo de nuevo en unos minutos.', 500);
 }
 
 if (!$emisor) {
-    emisorRespond(false, 'emisor_config no configurado en este sistema.', 404);
+    emisorRespond(false, 'Tu empresa todavía no tiene sus datos fiscales configurados. Comunícate con soporte para completarlos.', 404);
 }
 
 unset($emisor['id']); // fila unica, el id no aporta

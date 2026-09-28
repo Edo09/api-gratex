@@ -22,20 +22,29 @@ class LogoStorage
      */
     public static function store(int $tenantId, array $file): array
     {
-        if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
-            return ['ok' => false, 'error' => 'No se recibio el archivo de logo.', 'code' => 422];
+        $uploadError = $file['error'] ?? UPLOAD_ERR_NO_FILE;
+        if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
+            // PHP corto la subida por su propio limite (upload_max_filesize), que
+            // puede ser menor que MAX_BYTES: no se promete una cifra concreta.
+            return ['ok' => false, 'error' => 'El logo pesa más de lo que el servidor permite. Usa una imagen más liviana.', 'code' => 422];
+        }
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            error_log('[LogoStorage] subida de logo fallida, codigo UPLOAD_ERR ' . (int) $uploadError);
+            return ['ok' => false, 'error' => 'No se pudo recibir la imagen. Intenta subir el logo de nuevo.', 'code' => 422];
         }
         $size = (int) ($file['size'] ?? 0);
         if ($size <= 0) {
-            return ['ok' => false, 'error' => 'El archivo de logo esta vacio.', 'code' => 422];
+            return ['ok' => false, 'error' => 'El archivo del logo está vacío.', 'code' => 422];
         }
         if ($size > self::MAX_BYTES) {
-            return ['ok' => false, 'error' => 'El logo excede el maximo de 2 MB.', 'code' => 422];
+            return ['ok' => false, 'error' => 'El logo pesa más de 2 MB. Usa una imagen más liviana.', 'code' => 422];
         }
 
         $ext = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
         if (!in_array($ext, ['png', 'jpg', 'jpeg'], true)) {
-            return ['ok' => false, 'error' => "Extension '{$ext}' no permitida (png/jpg).", 'code' => 422];
+            // El front valida el tipo de imagen, no el nombre: un PNG guardado
+            // sin ".png" llega aqui, por eso el texto explica lo del nombre.
+            return ['ok' => false, 'error' => 'El logo debe ser una imagen PNG o JPG, y el nombre del archivo debe terminar en .png o .jpg.', 'code' => 422];
         }
         $ext = $ext === 'jpeg' ? 'jpg' : $ext;
 
@@ -43,19 +52,21 @@ class LogoStorage
         $info = @getimagesize((string) ($file['tmp_name'] ?? ''));
         $mime = $info['mime'] ?? '';
         if (!in_array($mime, ['image/png', 'image/jpeg'], true)) {
-            return ['ok' => false, 'error' => 'El archivo no es una imagen PNG/JPG valida.', 'code' => 422];
+            return ['ok' => false, 'error' => 'El archivo no es una imagen PNG o JPG válida.', 'code' => 422];
         }
 
         $logosDir = self::logosDir();
         if (!is_dir($logosDir) && !mkdir($logosDir, 0755, true) && !is_dir($logosDir)) {
-            return ['ok' => false, 'error' => 'No se pudo crear la carpeta logos/.', 'code' => 500];
+            error_log('[LogoStorage] no se pudo crear la carpeta logos/: ' . $logosDir);
+            return ['ok' => false, 'error' => 'No se pudo guardar el logo por un problema del servidor. Inténtalo más tarde o avisa a soporte.', 'code' => 500];
         }
 
         self::removeFiles($tenantId);
 
         $dest = $logosDir . '/' . $tenantId . '.' . $ext;
         if (!move_uploaded_file((string) $file['tmp_name'], $dest)) {
-            return ['ok' => false, 'error' => 'No se pudo guardar el logo (revisa permisos de logos/).', 'code' => 500];
+            error_log('[LogoStorage] no se pudo mover el logo a ' . $dest . ' (revisa permisos de logos/)');
+            return ['ok' => false, 'error' => 'No se pudo guardar el logo por un problema del servidor. Inténtalo más tarde o avisa a soporte.', 'code' => 500];
         }
 
         return ['ok' => true, 'logo_path' => 'logos/' . $tenantId . '.' . $ext];

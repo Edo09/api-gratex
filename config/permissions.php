@@ -3,7 +3,9 @@
  * config/permissions.php — Catalogo de modulos + mapa ruta->modulo (RBAC).
  *
  * Modelo: el permiso es ACCESO A MODULO (ver/usar el modulo), no acciones
- * read/write separadas. Un rol = lista de modulos que puede acceder.
+ * read/write separadas. Un rol = lista de modulos que puede acceder. Lo que si
+ * puede separar por metodo es el mapa `routes` (ej. 'emisor': GET abierto a
+ * cualquier usuario, escritura con el modulo).
  *
  * Lo ESTATICO (en codigo, igual para todos los tenants):
  *   - catalog : modulos validos (para validar al asignar permisos a un rol).
@@ -18,6 +20,9 @@
  *
  * Valores del mapa `routes` (por segmento, o por metodo dentro del segmento):
  *   '<modulo>'     -> ruta de usuario-app: exige token valido + acceso a ese modulo
+ *   'authenticated'-> ruta de usuario-app sin modulo: exige token valido de un
+ *                     usuario (no principal maquina), cualquier rol. No esta en
+ *                     el catalogo: no se asigna a roles, solo se usa aqui.
  *   'public'       -> sin auth (login, docs)
  *   'dgii'         -> principal DGII entrante (firma/Bearer); el controller valida
  *   'integration'  -> principal integracion (X-API-SECRET); el controller valida
@@ -40,7 +45,8 @@ $USER_MODULES = [
     'warehouses',
 ];
 
-// Modulos solo-admin (configuracion / administracion).
+// Modulos solo-admin (configuracion / administracion). De 'emisor' y 'branding'
+// solo la escritura: su GET esta abierto a todo usuario (ver 'routes').
 $ADMIN_MODULES = [
     'emisor',
     'branding',
@@ -88,8 +94,15 @@ return [
         'facturacion-electronica'  => 'facturas',
         'aprobaciones-comerciales' => 'aprobaciones',
         'reportes'                 => 'reportes',
-        'emisor'                   => 'emisor',
-        'branding'                 => 'branding',
+        // GET abierto a cualquier usuario-app: navbar, facturas y cotizaciones
+        // muestran nombre, RNC, direccion y logo del emisor a TODO rol. Con el
+        // modulo como requisito, un cajero recibia 403 (la hoja salia "Tu
+        // empresa" sin logo y cada carga dejaba un 403 en la bitacora). Ninguno
+        // de los dos GET trae certificado ni secretos: esos viven en
+        // master.tenants y estos controllers no los leen. La escritura
+        // (PUT/POST/DELETE: logo, plantilla, color, preview) sigue solo-admin.
+        'emisor'                   => ['GET' => 'authenticated', '*' => 'emisor'],
+        'branding'                 => ['GET' => 'authenticated', '*' => 'branding'],
         'users'                    => 'users',
         'roles'                    => 'roles',
         'audit-logs'               => 'audit',

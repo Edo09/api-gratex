@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/EcfUsuarioException.php';
+
 /**
  * Minimal XMLDSig signer for DGII seed XML files.
  *
@@ -22,21 +24,32 @@ class DgiiXmlSigner
             while (($e = openssl_error_string()) !== false) {
                 $errores[] = $e;
             }
-            throw new RuntimeException(
+            // Problemas del CERTIFICADO (este y los dos siguientes): el usuario
+            // no los arregla reintentando, tiene que avisar a soporte. El texto
+            // tecnico (con el largo de la password) queda solo en getMessage(),
+            // para integradores y logs; la app muestra el segundo.
+            throw new EcfUsuarioException(
                 "Unable to read certificate. Verify the password or OpenSSL legacy configuration."
                 . ($errores ? " OpenSSL: " . implode(" | ", $errores) : "")
                 . " [cert: " . strlen($certificateContent) . " bytes, password: "
-                . ($password === "" ? "VACIA" : strlen($password) . " chars") . "]"
+                . ($password === "" ? "VACIA" : strlen($password) . " chars") . "]",
+                'No se pudo usar el certificado digital de tu empresa. Avisa a soporte.'
             );
         }
 
         if (empty($certificates['cert']) || empty($certificates['pkey'])) {
-            throw new RuntimeException('The certificate must include both the X509 certificate and private key.');
+            throw new EcfUsuarioException(
+                'The certificate must include both the X509 certificate and private key.',
+                'No se pudo usar el certificado digital de tu empresa. Avisa a soporte.'
+            );
         }
 
         $privateKey = openssl_pkey_get_private($certificates['pkey']);
         if ($privateKey === false) {
-            throw new RuntimeException('Unable to load the certificate private key.');
+            throw new EcfUsuarioException(
+                'Unable to load the certificate private key.',
+                'No se pudo usar el certificado digital de tu empresa. Avisa a soporte.'
+            );
         }
 
         $document = $this->loadXml($xmlContent);

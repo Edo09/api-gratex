@@ -1077,7 +1077,7 @@ Header: Authorization: Bearer your-token</code></pre>
                     <span class="code-label">Error Response (404)</span>
                     <pre><code>{
   <span class="json-key">"status"</span>: <span class="json-boolean">false</span>,
-  <span class="json-key">"error"</span>: <span class="json-string">"emisor_config no configurado en este sistema."</span>
+  <span class="json-key">"error"</span>: <span class="json-string">"Tu empresa todavía no tiene sus datos fiscales configurados. Comunícate con soporte para completarlos."</span>
 }</code></pre>
                 </div>
             </div>
@@ -1217,13 +1217,14 @@ Header: Authorization: Bearer your-token</code></pre>
                 <div class="endpoint-header" onclick="toggleEndpoint(this)">
                     <span class="method method-post">POST</span>
                     <span class="endpoint-path">/api/landing/carousel</span>
-                    <span class="no-auth-badge">Public</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
                     <span class="endpoint-desc">Add carousel item (multipart/form-data)</span>
                 </div>
                 <div class="endpoint-body">
+                    <p>User session with the <code>landing</code> module (admin).</p>
                     <table>
                         <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-                        <tr><td><code>image</code> <span class="required">*</span></td><td>file</td><td>Image file</td></tr>
+                        <tr><td><code>image</code> <span class="required">*</span></td><td>file</td><td>JPG, PNG or WebP (checked by content), max 5 MB. Stored under a server-generated name.</td></tr>
                         <tr><td><code>title</code></td><td>string</td><td>Slide title</td></tr>
                         <tr><td><code>subtitle</code></td><td>string</td><td>Slide subtitle</td></tr>
                     </table>
@@ -1259,13 +1260,14 @@ Header: Authorization: Bearer your-token</code></pre>
                 <div class="endpoint-header" onclick="toggleEndpoint(this)">
                     <span class="method method-post">POST</span>
                     <span class="endpoint-path">/api/landing/services</span>
-                    <span class="no-auth-badge">Public</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
                     <span class="endpoint-desc">Add service (multipart/form-data)</span>
                 </div>
                 <div class="endpoint-body">
+                    <p>User session with the <code>landing</code> module (admin).</p>
                     <table>
                         <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-                        <tr><td><code>image</code> <span class="required">*</span></td><td>file</td><td>Service image</td></tr>
+                        <tr><td><code>image</code> <span class="required">*</span></td><td>file</td><td>JPG, PNG or WebP (checked by content), max 5 MB. Stored under a server-generated name.</td></tr>
                         <tr><td><code>title</code></td><td>string</td><td>Service title</td></tr>
                         <tr><td><code>description</code></td><td>string</td><td>Service description</td></tr>
                     </table>
@@ -1277,7 +1279,7 @@ Header: Authorization: Bearer your-token</code></pre>
                 <div class="endpoint-header" onclick="toggleEndpoint(this)">
                     <span class="method method-delete">DELETE</span>
                     <span class="endpoint-path">/api/landing/carousel or /services</span>
-                    <span class="no-auth-badge">Public</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
                     <span class="endpoint-desc">Delete carousel item or service</span>
                 </div>
                 <div class="endpoint-body">

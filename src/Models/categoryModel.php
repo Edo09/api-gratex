@@ -27,6 +27,9 @@ class categoryModel
             }
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            // Vacio = "no existe" para quien llama: sin el log, una caida de la
+            // DB se confundiria con una categoria borrada.
+            error_log('[categorias] getAll: ' . $e->getMessage());
             return [];
         }
     }
@@ -45,6 +48,7 @@ class categoryModel
             $stmt->execute();
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            error_log('[categorias] getPaginated: ' . $e->getMessage());
             return [];
         }
     }
@@ -62,6 +66,7 @@ class categoryModel
             $row = $stmt->fetch();
             return $row ? (int) $row['total'] : 0;
         } catch (PDOException $e) {
+            error_log('[categorias] getCount: ' . $e->getMessage());
             return 0;
         }
     }
@@ -74,10 +79,12 @@ class categoryModel
             $stmt->execute($this->bindParams($data));
             return ['success', 'Categoria creada', (int) $this->conexion->lastInsertId()];
         } catch (PDOException $e) {
+            // uk_cat_nombre es la unica restriccion que un INSERT puede romper.
             if ((int) $e->getCode() === 23000) {
-                return ['error', 'Ya existe una categoria con ese nombre.'];
+                return ['error', 'Ya existe una categoría con ese nombre.'];
             }
-            return ['error', 'No se pudo crear la categoria.'];
+            error_log('[categorias] save: ' . $e->getMessage());
+            return ['error', 'No se pudo crear la categoría. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -85,7 +92,7 @@ class categoryModel
     {
         try {
             if (count($this->getAll($id)) === 0) {
-                return ['error', "No existe la categoria {$id}."];
+                return ['error', 'Esta categoría ya no existe; puede que otra persona la haya eliminado.'];
             }
             $sql = 'UPDATE categories SET nombre = :nombre, descripcion = :descripcion, estado = :estado WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
@@ -95,9 +102,10 @@ class categoryModel
             return ['success', 'Categoria actualizada'];
         } catch (PDOException $e) {
             if ((int) $e->getCode() === 23000) {
-                return ['error', 'Ya existe una categoria con ese nombre.'];
+                return ['error', 'Ya existe una categoría con ese nombre.'];
             }
-            return ['error', 'No se pudo actualizar la categoria.'];
+            error_log('[categorias] update ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo actualizar la categoría. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -105,13 +113,14 @@ class categoryModel
     {
         try {
             if (count($this->getAll($id)) === 0) {
-                return ['error', "Categoria no encontrada {$id}."];
+                return ['error', 'Esta categoría ya no existe; puede que otra persona la haya eliminado.'];
             }
             // FK products.category_id ON DELETE SET NULL: los productos quedan sin categoria.
             $this->conexion->prepare('DELETE FROM categories WHERE id = :id')->execute([':id' => (int) $id]);
             return ['success', 'Categoria eliminada'];
         } catch (PDOException $e) {
-            return ['error', 'No se pudo eliminar la categoria.'];
+            error_log('[categorias] delete ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar la categoría. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 

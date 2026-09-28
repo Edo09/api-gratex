@@ -35,6 +35,12 @@ Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`
 `unidades`, `categories`, `warehouses`. **Solo admin** (excluidos de `user`): `emisor`, `branding`, `landing`,
 `users`, `roles`. (Si un `user` necesita un módulo admin, crear/ajustar un rol con `/api/roles`.)
 
+> `emisor` y `branding`: solo la **escritura** es admin. `GET /api/emisor` y `GET /api/branding`
+> están abiertos a **cualquier usuario** (valor `'authenticated'`): navbar, facturas y
+> cotizaciones muestran nombre, RNC, dirección y logo del emisor a todo rol. Ninguno trae
+> certificado ni secretos (viven en `master.tenants`). `PUT/POST/DELETE` (logo, plantilla,
+> color, preview) siguen exigiendo el módulo.
+
 ## Aplicación — `PermissionGate` (Router)
 
 [`src/PermissionGate.php`](../../src/PermissionGate.php) corre en
@@ -46,6 +52,7 @@ valor del mapa de rutas:
 | `'public'` | sin auth (login, docs) |
 | `'dgii'` / `'integration'` | principal externo (firma / `X-API-SECRET`); resuelve tenant, el controller valida |
 | `'<módulo>'` (o por método) | ruta de usuario-app: exige token válido + acceso a ese módulo |
+| `'authenticated'` (o por método) | ruta de usuario-app sin módulo: token válido de un usuario (no principal máquina), cualquier rol. No es del catálogo: no se asigna a roles |
 
 Reglas:
 - **Ruta de app sin el módulo (o sin rol):** → 403 en `enforce` (en sombra solo se registra).

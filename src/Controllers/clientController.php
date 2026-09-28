@@ -40,6 +40,15 @@ function clientCampos(?object $body): array
     return $campos;
 }
 
+// Validaciones del formulario de cliente: el alta y la edicion dicen lo mismo.
+const CLIENTE_CORREO_INVALIDO = 'El correo no es válido. Revísalo.';
+const CLIENTE_CORREO_LARGO = 'El correo puede tener como máximo 100 caracteres.';
+const CLIENTE_CONTACTO_VACIO = 'Escribe el nombre de contacto.';
+const CLIENTE_CONTACTO_LARGO = 'El nombre de contacto puede tener como máximo 100 caracteres.';
+const CLIENTE_EMPRESA_VACIA = 'Escribe el nombre de la empresa o razón social.';
+const CLIENTE_EMPRESA_LARGA = 'El nombre de la empresa puede tener como máximo 100 caracteres.';
+const CLIENTE_TELEFONO_LARGO = 'El teléfono puede tener como máximo 20 caracteres.';
+
 // Validate token for all requests except OPTIONS
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $validation = $auth->validateRequest();
@@ -53,7 +62,7 @@ switch($_SERVER['REQUEST_METHOD']){
         if (isset($_GET['id'])) {
             $clients = $clientModel->getClients($_GET['id']);
             if (empty($clients)) {
-                $respuesta = ['status' => false, 'error' => 'Client not found'];
+                $respuesta = ['status' => false, 'error' => 'No encontramos este cliente. Puede que lo hayan eliminado.'];
                 http_response_code(404);
             } else {
                 $respuesta = [
@@ -103,17 +112,28 @@ switch($_SERVER['REQUEST_METHOD']){
             $_POST->email = trim((string) ($_POST->email ?? ''));
             $_POST->phone_number = trim((string) ($_POST->phone_number ?? ''));
         }
-        if(isset($_POST->email) && $_POST->email !== '' && (!filter_var($_POST->email, FILTER_VALIDATE_EMAIL) || strlen($_POST->email) > 100)){
-            $respuesta= ['status' => false, 'error' => 'Email must be a valid email and no more than 100 characters'];
+        // Las mismas condiciones de siempre, pero con un texto por cada motivo
+        // (vacio / muy largo / mal escrito): el cajero tiene que saber que corregir.
+        if(isset($_POST->email) && $_POST->email !== '' && !filter_var($_POST->email, FILTER_VALIDATE_EMAIL)){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CORREO_INVALIDO];
         }
-        else if(!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name)) || strlen($_POST->client_name) > 100){
-            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
+        else if(isset($_POST->email) && strlen($_POST->email) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CORREO_LARGO];
         }
-        else if(!isset($_POST->company_name) || is_null($_POST->company_name) || empty(trim($_POST->company_name)) || strlen($_POST->company_name) > 100){
-            $respuesta= ['status' => false, 'error' => 'Company name must not be empty and no more than 100 characters'];
+        else if(!isset($_POST->client_name) || is_null($_POST->client_name) || empty(trim($_POST->client_name))){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_VACIO];
+        }
+        else if(strlen($_POST->client_name) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_LARGO];
+        }
+        else if(!isset($_POST->company_name) || is_null($_POST->company_name) || empty(trim($_POST->company_name))){
+            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_VACIA];
+        }
+        else if(strlen($_POST->company_name) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_LARGA];
         }
         else if(strlen($_POST->phone_number) > 20){
-            $respuesta= ['status' => false, 'error' => 'Phone number must be no more than 20 characters'];
+            $respuesta= ['status' => false, 'error' => CLIENTE_TELEFONO_LARGO];
         }
         else{
             // Se pasa el cuerpo completo filtrado por clientCampos(): asi un
@@ -153,24 +173,33 @@ switch($_SERVER['REQUEST_METHOD']){
     case 'PUT':
         $_PUT= InputSanitizer::jsonInput(false);
         if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
-            $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
+            $respuesta= ['status' => false, 'error' => 'No se pudo identificar el cliente que quieres modificar. Ábrelo de nuevo desde el listado.'];
         }
         // PUT parcial: solo se valida lo que venga. Un campo ausente conserva su
         // valor (COALESCE en el modelo), lo que permite corregir un dato suelto
         // —el RNC desde la pantalla de factura, por ejemplo— sin reenviar todo.
         // Exigirlos siempre bloqueaba la edicion de los clientes migrados, que
         // no traen correo ni telefono.
-        else if(isset($_PUT->email) && trim((string) $_PUT->email) !== '' && (!filter_var($_PUT->email, FILTER_VALIDATE_EMAIL) || strlen($_PUT->email) > 100)){
-            $respuesta= ['status' => false, 'error' => 'Email must be a valid email and no more than 100 characters'];
+        else if(isset($_PUT->email) && trim((string) $_PUT->email) !== '' && !filter_var($_PUT->email, FILTER_VALIDATE_EMAIL)){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CORREO_INVALIDO];
         }
-        else if(isset($_PUT->client_name) && (empty(trim((string) $_PUT->client_name)) || strlen($_PUT->client_name) > 100)){
-            $respuesta= ['status' => false, 'error' => 'Client name must not be empty and no more than 100 characters'];
+        else if(isset($_PUT->email) && trim((string) $_PUT->email) !== '' && strlen($_PUT->email) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CORREO_LARGO];
         }
-        else if(isset($_PUT->company_name) && (empty(trim((string) $_PUT->company_name)) || strlen($_PUT->company_name) > 100)){
-            $respuesta= ['status' => false, 'error' => 'Company name must not be empty and no more than 100 characters'];
+        else if(isset($_PUT->client_name) && empty(trim((string) $_PUT->client_name))){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_VACIO];
+        }
+        else if(isset($_PUT->client_name) && strlen($_PUT->client_name) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_LARGO];
+        }
+        else if(isset($_PUT->company_name) && empty(trim((string) $_PUT->company_name))){
+            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_VACIA];
+        }
+        else if(isset($_PUT->company_name) && strlen($_PUT->company_name) > 100){
+            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_LARGA];
         }
         else if(isset($_PUT->phone_number) && strlen((string) $_PUT->phone_number) > 20){
-            $respuesta= ['status' => false, 'error' => 'Phone number must be no more than 20 characters'];
+            $respuesta= ['status' => false, 'error' => CLIENTE_TELEFONO_LARGO];
         }
         else{
             $oldClient = $clientModel->getClients($_PUT->id)[0] ?? null;
@@ -196,7 +225,7 @@ switch($_SERVER['REQUEST_METHOD']){
     case 'DELETE':
         $_DELETE= InputSanitizer::jsonInput(false);
         if(!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim($_DELETE->id))){
-            $respuesta= ['status' => false, 'error' => 'Client ID is empty'];
+            $respuesta= ['status' => false, 'error' => 'No se pudo identificar el cliente que quieres eliminar. Actualiza el listado e inténtalo de nuevo.'];
         }
         else{
             $oldClient = $clientModel->getClients($_DELETE->id)[0] ?? null;

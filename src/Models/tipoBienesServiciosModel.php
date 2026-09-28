@@ -36,6 +36,9 @@ class tipoBienesServiciosModel
             );
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
         } catch (PDOException $e) {
+            // Vacio y no error: el selector queda sin opciones en vez de romper
+            // la pantalla. Sin el log no habria forma de saber por que.
+            error_log('[catalogos] dgii_tipo_bienes_servicios: ' . $e->getMessage());
             return [];
         }
     }
@@ -78,6 +81,7 @@ class tipoBienesServiciosModel
                     ->fetchAll(PDO::FETCH_COLUMN);
                 self::$validCache = array_fill_keys($codigos, true);
             } catch (PDOException $e) {
+                error_log('[catalogos] dgii_tipo_bienes_servicios (validacion, fail-open): ' . $e->getMessage());
                 self::$validCache = [];
             }
         }

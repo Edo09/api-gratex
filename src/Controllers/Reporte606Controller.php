@@ -26,13 +26,13 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
 $periodo = isset($_GET['periodo']) ? trim((string) $_GET['periodo']) : '';
 if (!preg_match('/^\d{6}$/', $periodo)) {
     http_response_code(400);
-    echo json_encode(['status' => false, 'error' => 'Parametro periodo invalido. Formato: AAAAMM (ej: 202606).']);
+    echo json_encode(['status' => false, 'error' => 'El período no es válido. Elige el año y el mes en los selectores.']);
     return;
 }
 $mes = (int) substr($periodo, 4, 2);
 if ($mes < 1 || $mes > 12) {
     http_response_code(400);
-    echo json_encode(['status' => false, 'error' => 'Mes invalido en periodo. Use 01-12.']);
+    echo json_encode(['status' => false, 'error' => 'El mes no es válido. Elige un mes de la lista.']);
     return;
 }
 
@@ -40,7 +40,7 @@ $model  = new Reporte606Model();
 $emisor = $model->getEmisor();
 if (!$emisor || empty($emisor['rnc'])) {
     http_response_code(500);
-    echo json_encode(['status' => false, 'error' => 'No hay RNC del emisor configurado (emisor_config).']);
+    echo json_encode(['status' => false, 'error' => 'Tu empresa no tiene el RNC configurado, por eso no se puede generar el reporte. Comunícate con soporte para completarlo.']);
     return;
 }
 

@@ -27,14 +27,17 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     http_response_code(405);
-    echo json_encode(['status' => false, 'error' => 'Método no soportado']);
+    echo json_encode(['status' => false, 'error' => 'Esta acción no está disponible.']);
     exit;
 }
 
 $path = (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 if (!preg_match('#/rnc/consulta/?$#', $path)) {
+    // Se deja el 404 (no se cambian codigos), con el mismo texto de "no
+    // disponible" del servicio. RncConsultaField no muestra este texto: decide
+    // por el codigo, y hoy lee este 404 como "no inscrito".
     http_response_code(404);
-    echo json_encode(['status' => false, 'error' => 'Endpoint no encontrado. Use GET /api/rnc/consulta?rnc=']);
+    echo json_encode(['status' => false, 'error' => 'La consulta de RNC no está disponible ahora. Completa los datos manualmente.']);
     exit;
 }
 

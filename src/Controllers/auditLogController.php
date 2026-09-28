@@ -32,7 +32,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
         $auth->sendUnauthorized($me['message'] ?? 'Unauthorized');
     }
     if (($me['user_id'] ?? null) === null) {
-        $auth->sendForbidden('Esta ruta requiere una sesion de usuario.');
+        $auth->sendForbidden('Para hacer esto necesitas iniciar sesión con tu usuario.');
     }
     if (strtolower((string) ($me['role'] ?? '')) !== AUDIT_ROL_PERMITIDO) {
         AuditMiddleware::logAccessDenied(
@@ -41,7 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
             ['ruta' => 'audit-logs', 'metodo' => $_SERVER['REQUEST_METHOD'], 'rol' => (string) ($me['role'] ?? ''), 'bloqueado' => true],
             'Acceso denegado a la bitacora: solo el rol admin puede verla.'
         );
-        $auth->sendForbidden('Solo el rol admin puede ver la bitacora.');
+        $auth->sendForbidden('Solo el administrador de la empresa puede ver la bitácora.');
     }
 }
 
@@ -106,7 +106,7 @@ try {
 } catch (Throwable $e) {
     error_log('[auditLog] consulta fallo: ' . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['status' => false, 'error' => 'No se pudo consultar la bitacora.']);
+    echo json_encode(['status' => false, 'error' => 'No se pudo cargar la bitácora. Inténtalo de nuevo en unos minutos.']);
     return;
 }
 

@@ -2,6 +2,9 @@
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/ncfModel.php');
 require_once(__DIR__ . '/tipoBienesServiciosModel.php');
+// Arriba y no junto a ECFEmissionService: el catch de createGasto tiene que
+// reconocer la clase aunque la emision falle antes de cargar el servicio.
+require_once(__DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php');
 
 /**
  * Modulo de Gastos.
@@ -75,6 +78,9 @@ class gastoModel
             $row['items'] = $this->getGastoItems($id);
             return $row;
         } catch (PDOException $e) {
+            // Null = "no existe" para quien llama: sin el log, una caida de la
+            // DB se confundiria con un gasto inexistente.
+            error_log('[gastos] getGasto ' . $id . ': ' . $e->getMessage());
             return null;
         }
     }
@@ -89,6 +95,7 @@ class gastoModel
             $stmt->execute([':id' => $gastoId]);
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            error_log('[gastos] getGastoItems ' . $gastoId . ': ' . $e->getMessage());
             return [];
         }
     }
@@ -122,6 +129,7 @@ class gastoModel
             $stmt->execute();
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            error_log('[gastos] getGastosPaginated: ' . $e->getMessage());
             return [];
         }
     }
@@ -151,6 +159,7 @@ class gastoModel
             $row = $stmt->fetch();
             return $row ? (int) $row['total'] : 0;
         } catch (PDOException $e) {
+            error_log('[gastos] getGastosCount: ' . $e->getMessage());
             return 0;
         }
     }
@@ -173,24 +182,28 @@ class gastoModel
      * auto-emision NO se envian a DGII ni consumen secuencia; se guardan como
      * PENDIENTE_EMISION. Protege el ambiente de produccion `ecf`.
      *
+     * Los mensajes de error llegan tal cual al formulario de gasto/compra: se
+     * escriben para quien lo llena. Cuando hay un detalle tecnico (excepcion de
+     * la DB) viaja aparte, como tercer elemento, para la bitacora.
+     *
      * @param array $data {categoria, tipo_gasto, rnc_proveedor, nombre_proveedor,
      *                     ncf?, fecha?, subtotal?, itbis?, total?, user_id?, items[]}
-     * @return array ['success', payload] | ['error', mensaje]
+     * @return array ['success', payload] | ['error', mensaje, detalle tecnico?]
      */
     public function createGasto(array $data): array
     {
         $categoria = strtolower(trim((string) ($data['categoria'] ?? '')));
         if (!isset(self::CATEGORIAS[$categoria])) {
-            return ['error', 'categoria invalida. Use gastos_menores o facturas_proveedores'];
+            return ['error', 'Elige si es un gasto menor o una compra a proveedor.'];
         }
 
         $tipoGasto = strtoupper(trim((string) ($data['tipo_gasto'] ?? '')));
         if ($tipoGasto === '') {
-            return ['error', 'tipo_gasto requerido'];
+            return ['error', 'Elige el tipo de comprobante.'];
         }
         if (!in_array($tipoGasto, self::CATEGORIAS[$categoria], true)) {
-            return ['error', "tipo_gasto {$tipoGasto} no permitido para la categoria {$categoria}. "
-                . 'Permitidos: ' . implode(', ', self::CATEGORIAS[$categoria])];
+            $donde = $categoria === 'gastos_menores' ? 'gastos menores' : 'compras a proveedores';
+            return ['error', "El tipo de comprobante {$tipoGasto} no se puede usar en {$donde}. Elige otro."];
         }
 
         // Tipo de Bienes y Servicios Comprados: campo 3 del 606. Es el dato que
@@ -199,23 +212,23 @@ class gastoModel
         // inventado hasta el momento de declarar.
         $tipoBienes = tipoBienesServiciosModel::normalizar($data['tipo_bienes_servicios'] ?? null);
         if ($tipoBienes === null) {
-            return ['error', 'tipo_bienes_servicios requerido (codigo DGII 01..11)'];
+            return ['error', 'Elige el tipo de costo o gasto.'];
         }
         if (!(new tipoBienesServiciosModel())->isValid($tipoBienes)) {
-            return ['error', "tipo_bienes_servicios {$tipoBienes} no existe en el catalogo DGII"];
+            return ['error', 'El tipo de costo o gasto que elegiste ya no es válido. Elige otro de la lista.'];
         }
 
         // RNC/Cedula del proveedor: requerido salvo Gastos Menores (E43), que suele
         // sustentar peajes/parqueos/suministros sin RNC formal.
         $rncProveedor = trim((string) ($data['rnc_proveedor'] ?? ''));
         if ($rncProveedor === '' && $tipoGasto !== 'E43') {
-            return ['error', 'rnc_proveedor requerido (excepto Gastos Menores E43)'];
+            return ['error', 'Elige un proveedor que tenga RNC. Solo los gastos menores se pueden registrar sin proveedor.'];
         }
 
         $nombreProveedor = trim((string) ($data['nombre_proveedor'] ?? ''));
         if ($nombreProveedor === '') {
             if ($tipoGasto !== 'E43') {
-                return ['error', 'nombre_proveedor requerido (excepto Gastos Menores E43)'];
+                return ['error', 'Falta el nombre del proveedor. Complétalo en Proveedores y vuelve a intentarlo.'];
             }
             // E43 sin proveedor formal: etiqueta neutra (la columna es NOT NULL y
             // el e-CF 43 se emite SIN comprador, ver buildEcfPayload).
@@ -224,7 +237,7 @@ class gastoModel
 
         $items = $this->normalizeItems($data['items'] ?? []);
         if (empty($items)) {
-            return ['error', 'items requerido (al menos una linea)'];
+            return ['error', 'Agrega al menos una línea con descripción e importe.'];
         }
 
         // es_auto_emision se DERIVA del tipo: E41/E43/E47 los emite la empresa;
@@ -234,12 +247,12 @@ class gastoModel
         // el duplicado (rnc_proveedor, ncf) como el cruce del 606 comparan exacto.
         $ncf = strtoupper(trim((string) ($data['ncf'] ?? '')));
         if (!$esAutoEmision && $ncf === '') {
-            return ['error', 'ncf requerido para gastos recibidos (no auto-emision)'];
+            return ['error', 'Digita el NCF que te entregó el proveedor.'];
         }
         // E31 se copia de una factura impresa: un digito de mas o de menos no
         // saltaria hasta generar el 606, cuando ya toca corregir a destiempo.
         if ($tipoGasto === 'E31' && !preg_match('/^E31\d{10}$/', $ncf)) {
-            return ['error', "ncf {$ncf} no es un e-NCF E31 valido (E31 + 10 digitos, ej. E310000000123)"];
+            return ['error', "El e-NCF {$ncf} no es válido: debe ser E31 seguido de 10 dígitos (ej. E310000000123)."];
         }
 
         // Totales: se respetan los del body; si no vienen se calculan de las lineas.
@@ -263,7 +276,8 @@ class gastoModel
             'ncf' => $ncf !== '' ? $ncf : null,
             'rnc_proveedor' => $rncProveedor !== '' ? $rncProveedor : null,
             'nombre_proveedor' => $nombreProveedor !== '' ? $nombreProveedor : null,
-            'fecha' => $data['fecha'] ?? date('Y-m-d'),
+            // '' cuenta como sin fecha: MySQL lo rechaza con un error de formato.
+            'fecha' => ($data['fecha'] ?? '') !== '' ? $data['fecha'] : date('Y-m-d'),
             'subtotal' => $subtotal,
             'itbis' => $itbis,
             'total' => $total,
@@ -290,8 +304,10 @@ class gastoModel
             $g['ncf'] = null;
             $result = $this->persistGasto($g, $items);
             if ($result[0] === 'success') {
-                $result[1]['aviso'] = 'Emision DGII deshabilitada (DGII_ECF_EMISSION_ENABLED=false). '
-                    . 'Gasto guardado como PENDIENTE_EMISION; no se envio a DGII ni se consumio secuencia.';
+                // El aviso lo ve el usuario (toast y detalle del gasto): sin el
+                // nombre de la variable de entorno ni estados internos.
+                $result[1]['aviso'] = 'El gasto se guardó, pero no se envió a la DGII porque el envío de comprobantes '
+                    . 'electrónicos está desactivado. No se usó ningún número de comprobante.';
             }
             return $result;
         }
@@ -300,12 +316,15 @@ class gastoModel
         try {
             $ecf = $this->emitirGastoDgii($tipoGasto, $rncProveedor, $nombreProveedor, $items, $data);
         } catch (Throwable $e) {
-            // Se guarda igual con estado ERROR para trazabilidad (punto 3).
+            // Se guarda igual con estado ERROR para trazabilidad (punto 3). El
+            // texto tecnico queda en respuesta_dgii (y con el gasto, en la
+            // bitacora) y en el log; el aviso que ve el usuario es llano.
+            error_log('[ECF GASTO] emision ' . $tipoGasto . ' fallo: ' . $e->getMessage());
             $g['estado_dgii'] = 'ERROR';
             $g['respuesta_dgii'] = json_encode(['error' => $e->getMessage()]);
             $result = $this->persistGasto($g, $items);
             if ($result[0] === 'success') {
-                $result[1]['aviso'] = 'Fallo emision DGII: ' . $e->getMessage();
+                $result[1]['aviso'] = $this->avisoFalloEmision($e);
             }
             return $result;
         }
@@ -317,13 +336,48 @@ class gastoModel
         $g['fecha_emision_dgii'] = $ecf['fecha_emision_dgii'] ?? null;
         $g['xml_firmado'] = $ecf['signed_xml'] ?? null;
         $g['respuesta_dgii'] = isset($ecf['dgii_response']) ? json_encode($ecf['dgii_response']) : null;
-        return $this->persistGasto($g, $items);
+        $result = $this->persistGasto($g, $items);
+        if ($result[0] !== 'success') {
+            // El comprobante YA esta en la DGII y la secuencia consumida: el
+            // "intentalo de nuevo" de siempre emitiria un segundo e-CF por la
+            // misma compra. Hay que conciliarlo a mano, con el numero a la vista.
+            error_log(sprintf(
+                '[ECF GASTO] emitido pero NO guardado: ncf=%s track_id=%s detalle=%s',
+                (string) $g['ncf'], (string) ($g['track_id'] ?? ''), (string) ($result[2] ?? $result[1])
+            ));
+            return ['error',
+                'El comprobante ' . $g['ncf'] . ' se envió a la DGII, pero no se pudo guardar en el sistema. '
+                . 'No lo registres de nuevo: avisa a soporte con el número ' . $g['ncf'] . '.',
+                $result[2] ?? $result[1]];
+        }
+        return $result;
+    }
+
+    /**
+     * Aviso (con el gasto ya guardado en ERROR) de por que no salio a la DGII.
+     *
+     * EcfUsuarioException trae un texto que el usuario entiende y puede
+     * resolver (rango e-NCF agotado, emisor sin configurar...). Cualquier otra
+     * excepcion es un fallo interno o de la DGII: su texto (rutas, codigos HTTP,
+     * nombres de variables) no le dice nada a quien registra el gasto.
+     */
+    private function avisoFalloEmision(Throwable $e): string
+    {
+        $base = 'El gasto se guardó, pero no se pudo enviar a la DGII.';
+        if ($e instanceof EcfUsuarioException) {
+            return $base . ' ' . $e->getMensajeUsuario();
+        }
+        // El gasto YA quedo guardado (estado ERROR): registrarlo otra vez lo
+        // duplicaria en los totales y en el 606, y si la DGII alcanzo a recibir el
+        // e-CF antes de fallar, le llegaria un segundo comprobante por la misma compra.
+        return $base . ' No lo registres de nuevo: avisa a soporte.';
     }
 
     /**
      * Inserta el gasto (cabecera + lineas) en una transaccion.
      * @param array $g Cabecera completa (todas las columnas de `gastos`).
-     * @return array ['success', payload] | ['error', mensaje]
+     * @return array ['success', payload] | ['error', mensaje para el usuario, detalle tecnico]
+     *               El detalle (tercer elemento) es lo que va a la bitacora.
      */
     private function persistGasto(array $g, array $items): array
     {
@@ -339,7 +393,13 @@ class gastoModel
                     $estadosRechazo = ['RECHAZADO', 'NO_ENCONTRADO'];
                     if (!in_array((string) ($prevRow['estado_dgii'] ?? ''), $estadosRechazo, true)) {
                         $this->conexion->rollBack();
-                        return ['error', 'Ya existe un gasto con NCF ' . $g['ncf'] . ' para este proveedor en estado ' . ($prevRow['estado_dgii'] ?? 'desconocido')];
+                        // El estado (REGISTRADO, PENDIENTE_EMISION...) es un codigo
+                        // interno: al usuario le basta saber que ya lo registro; el
+                        // estado queda en el detalle para la bitacora.
+                        return ['error',
+                            'Ya registraste el comprobante ' . $g['ncf'] . ' de este proveedor. Búscalo en la lista.',
+                            'Ya existe un gasto con NCF ' . $g['ncf'] . ' para este proveedor en estado '
+                                . ($prevRow['estado_dgii'] ?? 'desconocido')];
                     }
                     $delId = (int) $prevRow['id'];
                     $this->conexion->prepare(
@@ -389,7 +449,13 @@ class gastoModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo crear el gasto: ' . $e->getMessage()];
+            // El texto de PDO (columnas, SQL) no es para el formulario: va al
+            // log y, como detalle, a la bitacora (gastosController lo copia a
+            // error_message). El usuario recibe el generico.
+            error_log('[gastos] persistGasto: ' . $e->getMessage());
+            return ['error',
+                'No se pudo guardar el gasto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.',
+                'No se pudo crear el gasto: ' . $e->getMessage()];
         }
     }
 
@@ -405,12 +471,12 @@ class gastoModel
             $cur->execute([':id' => $id]);
             $row = $cur->fetch();
             if (!$row) {
-                return ['error', 'Gasto no encontrado'];
+                return ['error', 'Este gasto ya no existe.'];
             }
 
             $rncProveedor = $data['rnc_proveedor'] ?? $row['rnc_proveedor'];
             $nombreProveedor = $data['nombre_proveedor'] ?? $row['nombre_proveedor'];
-            $fecha = $data['fecha'] ?? $row['fecha'];
+            $fecha = ($data['fecha'] ?? '') !== '' ? $data['fecha'] : $row['fecha'];
 
             // Tipo de Bienes y Servicios (campo 3 del 606). Editable a proposito:
             // los gastos anteriores a la migracion quedaron en NULL y hay que
@@ -420,10 +486,10 @@ class gastoModel
             if (array_key_exists('tipo_bienes_servicios', $data)) {
                 $tipoBienes = tipoBienesServiciosModel::normalizar($data['tipo_bienes_servicios']);
                 if ($tipoBienes === null) {
-                    return ['error', 'tipo_bienes_servicios invalido (codigo DGII 01..11)'];
+                    return ['error', 'Elige el tipo de costo o gasto.'];
                 }
                 if (!(new tipoBienesServiciosModel())->isValid($tipoBienes)) {
-                    return ['error', "tipo_bienes_servicios {$tipoBienes} no existe en el catalogo DGII"];
+                    return ['error', 'El tipo de costo o gasto que elegiste ya no es válido. Elige otro de la lista.'];
                 }
             }
 
@@ -470,7 +536,10 @@ class gastoModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo actualizar el gasto: ' . $e->getMessage()];
+            error_log('[gastos] updateGasto ' . $id . ': ' . $e->getMessage());
+            return ['error',
+                'No se pudieron guardar los cambios del gasto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.',
+                'No se pudo actualizar el gasto: ' . $e->getMessage()];
         }
     }
 
@@ -484,13 +553,16 @@ class gastoModel
             $cur = $this->conexion->prepare('SELECT id FROM gastos WHERE id = :id');
             $cur->execute([':id' => $id]);
             if (!$cur->fetch()) {
-                return ['error', 'Gasto no encontrado'];
+                return ['error', 'Este gasto ya no existe.'];
             }
             $stmt = $this->conexion->prepare('DELETE FROM gastos WHERE id = :id');
             $stmt->execute([':id' => $id]);
             return ['success', 'Gasto eliminado'];
         } catch (PDOException $e) {
-            return ['error', 'No se pudo eliminar el gasto: ' . $e->getMessage()];
+            error_log('[gastos] deleteGasto ' . $id . ': ' . $e->getMessage());
+            return ['error',
+                'No se pudo eliminar el gasto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.',
+                'No se pudo eliminar el gasto: ' . $e->getMessage()];
         }
     }
 
@@ -596,6 +668,7 @@ class gastoModel
                 'secuencias' => $secuencias,
             ];
         } catch (PDOException $e) {
+            error_log('[gastos] getGastosStats: ' . $e->getMessage());
             return [
                 'resumen' => null,
                 'por_tipo' => [],
@@ -738,6 +811,7 @@ class gastoModel
             $row = $stmt->fetch();
             return $row ?: null;
         } catch (PDOException $e) {
+            error_log('[gastos] getEcfData ' . $id . ': ' . $e->getMessage());
             return null;
         }
     }
@@ -760,6 +834,7 @@ class gastoModel
             ]);
             return $stmt->rowCount() > 0;
         } catch (PDOException $e) {
+            error_log('[gastos] updateEcfEstado ' . $gastoId . ': ' . $e->getMessage());
             return false;
         }
     }
@@ -776,6 +851,9 @@ class gastoModel
             }
             return $row;
         } catch (PDOException $e) {
+            // Null = "no hay XML" para el controlador: sin el log, una caida de
+            // la DB se leeria como un gasto que nunca se envio.
+            error_log('[gastos] getXmlFirmado ' . $gastoId . ': ' . $e->getMessage());
             return null;
         }
     }

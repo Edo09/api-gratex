@@ -90,7 +90,12 @@ class inventoryModel
                     if ($ownTransaction) {
                         $this->conexion->rollBack();
                     }
-                    return ['error', "El producto {$productId} no existe."];
+                    // El id sirve para rastrearlo, no a quien ajusta: va al log y el
+                    // texto (que tambien sirve para ventas y compras) queda llano.
+                    error_log('[inventario] ' . ($ctx['referencia_tipo'] ?? 'movimiento') . ' '
+                        . ($ctx['referencia_id'] ?? '-') . ': el producto ' . $productId . ' no existe');
+                    return ['error', 'Uno de los productos ya no existe en el catálogo; puede que otra persona lo haya eliminado. '
+                        . 'Quítalo y vuelve a intentarlo.'];
                 }
 
                 $cantidad = (int) $l['cantidad'];
@@ -143,7 +148,11 @@ class inventoryModel
             if ($ownTransaction && $this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo aplicar el movimiento: ' . $e->getMessage()];
+            // El detalle tecnico al log; quien ajusta solo necesita saber que no
+            // se guardo y que hacer.
+            error_log('[inventario] aplicarMovimientos ' . ($ctx['referencia_tipo'] ?? 'movimiento') . ' '
+                . ($ctx['referencia_id'] ?? '-') . ': ' . $e->getMessage());
+            return ['error', 'No se pudieron actualizar las existencias. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -384,17 +393,17 @@ class inventoryModel
             ? ['ANULACION']
             : array_values(array_diff(self::MOTIVOS, ['ANULACION']));
         if (!in_array($motivo, $permitidos, true)) {
-            return ['error', 'motivo invalido. Use: ' . implode(', ', $permitidos)];
+            return ['error', 'Elige el motivo del ajuste.'];
         }
 
         $lineas = is_array($data['lineas'] ?? null) ? $data['lineas'] : [];
         if ($lineas === []) {
-            return ['error', 'El ajuste necesita al menos una linea.'];
+            return ['error', 'Agrega al menos un producto con cantidad al ajuste.'];
         }
         // Cada linea bloquea una fila de products dentro de una sola transaccion:
         // sin tope, una peticion deja en espera a toda la facturacion.
         if (count($lineas) > self::MAX_LINEAS) {
-            return ['error', 'Un ajuste admite hasta ' . self::MAX_LINEAS . ' lineas. Divide el conteo en varios.'];
+            return ['error', 'Un ajuste puede tener hasta ' . self::MAX_LINEAS . ' productos. Divide el conteo en varios ajustes.'];
         }
 
         // El signo lo decide el tipo de la linea; la cantidad siempre llega positiva.
@@ -402,11 +411,11 @@ class inventoryModel
         foreach ($lineas as $i => $l) {
             $cantidad = (int) ($l['cantidad'] ?? 0);
             if ($cantidad <= 0) {
-                return ['error', 'La linea ' . ($i + 1) . ' necesita una cantidad mayor que 0.'];
+                return ['error', 'La línea ' . ($i + 1) . ' necesita una cantidad mayor que 0.'];
             }
             $tipo = strtoupper(trim((string) ($l['tipo'] ?? 'INCREMENTO')));
             if (!in_array($tipo, ['INCREMENTO', 'DISMINUCION'], true)) {
-                return ['error', 'La linea ' . ($i + 1) . ' tiene un tipo invalido (INCREMENTO o DISMINUCION).'];
+                return ['error', 'En la línea ' . ($i + 1) . ', elige si es Incremento o Disminución.'];
             }
             $movimientos[] = [
                 'product_id' => (int) ($l['product_id'] ?? 0),
@@ -420,7 +429,7 @@ class inventoryModel
             $warehouseId = (int) $this->conexion->query('SELECT id FROM warehouses ORDER BY id LIMIT 1')->fetchColumn();
         }
         if ($warehouseId <= 0) {
-            return ['error', 'No hay almacenes registrados.'];
+            return ['error', 'No tienes almacenes creados. Crea uno en Almacenes antes de ajustar el inventario.'];
         }
 
         try {
@@ -472,11 +481,21 @@ class inventoryModel
                 $this->conexion->rollBack();
             }
             // Chocar con uk_codigo es la carrera de dos ajustes simultaneos, no un
-            // error del usuario: merece un mensaje que se entienda.
+            // error del usuario: merece un mensaje que se entienda. El mismo
+            // SQLSTATE lo da la FK del almacen (1452) si lo borraron entretanto;
+            // decirle "otro ajuste" ahi lo haria reintentar sin arreglo.
             if ($e instanceof PDOException && (string) $e->getCode() === '23000') {
-                return ['error', 'Otro ajuste se guardo al mismo tiempo. Vuelve a intentarlo.'];
+                if ((int) ($e->errorInfo[1] ?? 0) === 1452) {
+                    return ['error', 'El almacén elegido para el ajuste ya no existe. Elige otro e inténtalo de nuevo.'];
+                }
+                return ['error', 'Otro ajuste se guardó al mismo tiempo. Vuelve a intentarlo.'];
             }
-            return ['error', 'No se pudo crear el ajuste: ' . $e->getMessage()];
+            // Detalle tecnico al log. crearAjuste tambien corre dentro de
+            // anularAjuste: ahi el usuario pulso "Anular", no "Guardar".
+            error_log('[inventario] crearAjuste' . (!empty($data['anula_a_id']) ? ' (anula ' . $data['anula_a_id'] . ')' : '')
+                . ': ' . $e->getMessage());
+            return ['error', (!empty($data['anula_a_id']) ? 'No se pudo anular el ajuste.' : 'No se pudo guardar el ajuste.')
+                . ' Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -505,12 +524,19 @@ class inventoryModel
                 return ['error', 'Ajuste no encontrado'];
             }
             if (!empty($ajuste['anulado_por_id'])) {
+                // El usuario conoce los ajustes por su codigo (AJ-000123), no por
+                // el id interno: se busca el del ajuste inverso para nombrarlo.
+                $inverso = $this->conexion->prepare('SELECT codigo FROM inventory_adjustments WHERE id = :id');
+                $inverso->execute([':id' => (int) $ajuste['anulado_por_id']]);
+                $codigoInverso = (string) ($inverso->fetchColumn() ?: '');
                 $this->conexion->rollBack();
-                return ['error', 'Ese ajuste ya fue anulado (por el ' . $ajuste['anulado_por_id'] . ').'];
+                return ['error', $codigoInverso !== ''
+                    ? 'Este ajuste ya fue anulado con el ajuste ' . $codigoInverso . '.'
+                    : 'Este ajuste ya fue anulado.'];
             }
             if ($ajuste['motivo'] === 'ANULACION') {
                 $this->conexion->rollBack();
-                return ['error', 'Un ajuste de anulacion no se puede anular.'];
+                return ['error', 'Un ajuste de anulación no se puede anular.'];
             }
 
             // Lineas invertidas: lo que sumo, resta; lo que resto, suma.
@@ -548,7 +574,8 @@ class inventoryModel
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }
-            return ['error', 'No se pudo anular el ajuste: ' . $e->getMessage()];
+            error_log('[inventario] anularAjuste ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo anular el ajuste. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 

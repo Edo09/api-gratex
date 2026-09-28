@@ -1,3 +1,6 @@
+# POST/DELETE exigen sesion de usuario con el modulo landing (admin). GET es publico.
+@token = <token de sesion de un admin>
+
 ### ===== LANDING PAGE ENDPOINTS =====
 
 ### Get all carousel items
@@ -14,6 +17,7 @@ Content-Type: application/json
 
 ### Add a carousel item (with image upload)
 POST http://gratex.net/api/landing/carousel
+X-API-KEY: {{token}}
 Content-Type: multipart/form-data; boundary=----Boundary
 
 ------Boundary
@@ -35,6 +39,7 @@ Content-Type: image/jpeg
 
 ### Add a service (with image upload)
 POST http://gratex.net/api/landing/services
+X-API-KEY: {{token}}
 Content-Type: multipart/form-data; boundary=----Boundary
 
 ------Boundary
@@ -56,6 +61,7 @@ Content-Type: image/jpeg
 
 ### Delete a carousel item (by ID in body)
 DELETE http://gratex.net/api/landing/carousel
+X-API-KEY: {{token}}
 Content-Type: application/json
 
 {
@@ -66,12 +72,14 @@ Content-Type: application/json
 
 ### Delete a carousel item (by ID in query string)
 DELETE http://gratex.net/api/landing/carousel?id=1
+X-API-KEY: {{token}}
 Content-Type: application/json
 
 ###
 
 ### Delete a service (by ID in body)
 DELETE http://gratex.net/api/landing/services
+X-API-KEY: {{token}}
 Content-Type: application/json
 
 {
@@ -82,4 +90,5 @@ Content-Type: application/json
 
 ### Delete a service (by ID in query string)
 DELETE http://gratex.net/api/landing/services?id=1
+X-API-KEY: {{token}}
 Content-Type: application/json

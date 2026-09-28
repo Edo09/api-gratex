@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/EcfUsuarioException.php';
+
 /**
  * Builds the RFCE (Resumen de Factura de Consumo Electronica) XML according to
  * the DGII XSD "RFCE 32 v.1.0.xsd". A RFCE is the summary that must be sent
@@ -168,7 +170,11 @@ class RFCEXmlBuilder
         }
         $ts = strtotime($date);
         if ($ts === false) {
-            throw new RuntimeException('Fecha invalida: ' . $date);
+            // Mismo texto tecnico (integradores y audit); la app muestra el segundo.
+            throw new EcfUsuarioException(
+                'Fecha invalida: ' . $date,
+                'La fecha del comprobante no es válida. Revísala e inténtalo de nuevo.'
+            );
         }
         return date('d-m-Y', $ts);
     }

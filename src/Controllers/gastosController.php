@@ -144,9 +144,11 @@ function handleGastoEstado(int $gastoId, gastoModel $gastoModel): void
         return;
     }
     if (empty($ecf['track_id']) || empty($ecf['ncf'])) {
-        gastoRespond(false, 'Gasto sin track_id o NCF (no fue emitido a DGII)', 422);
+        gastoRespond(false, 'Este gasto todavía no se ha enviado a la DGII, así que no tiene estado que consultar.', 422);
         return;
     }
+    // Antes del try: si la clase no esta cargada, el catch de abajo no la reconoce.
+    require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
     try {
         require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
         $service = new ECFEmissionService();
@@ -192,8 +194,17 @@ function handleGastoEstado(int $gastoId, gastoModel $gastoModel): void
             'secuencia_utilizada' => normalizeSecuenciaUtilizadaGasto($consulta['data']['secuenciaUtilizada'] ?? null),
             'consulta' => $consulta['data'],
         ]);
+    } catch (EcfUsuarioException $e) {
+        // Un caso que el usuario entiende (p. ej. el emisor sin configurar): su
+        // texto llano. El tecnico sigue en getMessage(), para el log.
+        error_log('[ECF GASTO] consulta estado gasto_id=' . $gastoId . ': ' . $e->getMessage());
+        gastoRespond(false, $e->getMensajeUsuario(), 502);
     } catch (Throwable $e) {
-        gastoRespond(false, 'Fallo consultando DGII: ' . $e->getMessage(), 502);
+        // Fallo de transporte o interno: el detalle (codigos HTTP de la DGII,
+        // rutas, excepciones de PHP) no le sirve a quien consulta y no debe
+        // salir del servidor.
+        error_log('[ECF GASTO] consulta estado gasto_id=' . $gastoId . ': ' . $e->getMessage());
+        gastoRespond(false, 'No se pudo consultar el estado en la DGII. Inténtalo de nuevo en unos minutos.', 502);
     }
 }
 
@@ -238,7 +249,7 @@ function handleGastoXml(int $gastoId, gastoModel $gastoModel): void
 {
     $xml = $gastoModel->getXmlFirmado($gastoId);
     if (!$xml) {
-        gastoRespond(false, 'Gasto sin XML firmado (no fue emitido a DGII)', 404);
+        gastoRespond(false, 'Este gasto todavía no se ha enviado a la DGII, así que no hay comprobante firmado para descargar.', 404);
         return;
     }
     header('Content-Type: application/xml; charset=utf-8');
@@ -320,32 +331,34 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         $body = gastoBody();
+        // Los textos de estas validaciones llegan tal cual al formulario de
+        // gasto/compra: hablan de lo que se elige en pantalla, no de los campos.
         if (empty($body['categoria'])) {
-            gastoRespond(false, 'categoria requerida (gastos_menores | facturas_proveedores)', 422);
+            gastoRespond(false, 'Elige si es un gasto menor o una compra a proveedor.', 422);
             break;
         }
         if (empty($body['tipo_gasto'])) {
-            gastoRespond(false, 'tipo_gasto requerido', 422);
+            gastoRespond(false, 'Elige el tipo de comprobante.', 422);
             break;
         }
         // Tipo de Bienes y Servicios Comprados (campo 3 del 606). El codigo
         // exacto lo valida el modelo contra el catalogo; aqui solo se corta
         // temprano con un 422 en vez de un 400 generico.
         if (empty($body['tipo_bienes_servicios'])) {
-            gastoRespond(false, 'tipo_bienes_servicios requerido (codigo DGII 01..11)', 422);
+            gastoRespond(false, 'Elige el tipo de costo o gasto.', 422);
             break;
         }
         // rnc_proveedor: requerido salvo Gastos Menores (E43).
         if (empty($body['rnc_proveedor']) && strtoupper(trim((string) $body['tipo_gasto'])) !== 'E43') {
-            gastoRespond(false, 'rnc_proveedor requerido (excepto Gastos Menores E43)', 422);
+            gastoRespond(false, 'Elige un proveedor que tenga RNC. Solo los gastos menores se pueden registrar sin proveedor.', 422);
             break;
         }
         if (empty($body['nombre_proveedor']) && strtoupper(trim((string) $body['tipo_gasto'])) !== 'E43') {
-            gastoRespond(false, 'nombre_proveedor requerido', 422);
+            gastoRespond(false, 'Falta el nombre del proveedor. Complétalo en Proveedores y vuelve a intentarlo.', 422);
             break;
         }
         if (!isset($body['items']) || !is_array($body['items']) || count($body['items']) === 0) {
-            gastoRespond(false, 'items debe ser un arreglo con al menos un elemento', 422);
+            gastoRespond(false, 'Agrega al menos una línea con descripción e importe.', 422);
             break;
         }
         $body['user_id'] = $authUserId ?? ($body['user_id'] ?? null);
@@ -355,12 +368,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
         if ($result[0] !== 'success') {
             // Sin esto un gasto que la DGII rechaza (o que no pasa la validacion)
             // desaparece sin rastro: el usuario ve el error y la bitacora nada.
+            // A la bitacora va el detalle tecnico cuando el modelo lo trae
+            // ($result[2]: excepcion de la DB, estado del duplicado); al usuario,
+            // solo el texto llano de $result[1].
+            $detalle = $result[2] ?? $result[1];
             AuditLogger::log([
                 'module' => 'gastos', 'action' => $auto ? 'EMIT' : 'CREATE',
                 'entity_type' => 'gasto',
                 'new_values' => $body,
                 'success' => false,
-                'error_message' => is_string($result[1]) ? $result[1] : json_encode($result[1]),
+                'error_message' => is_string($detalle) ? $detalle : json_encode($detalle),
                 'description' => ($auto ? 'Fallo emitiendo gasto como e-CF ' : 'Fallo registrando gasto ')
                     . (string) ($body['tipo_gasto'] ?? '') . '.',
             ]);
@@ -382,5 +399,5 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     default:
-        gastoRespond(false, 'Metodo no soportado', 405);
+        gastoRespond(false, 'Esta acción no está disponible.', 405);
 }

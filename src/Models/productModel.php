@@ -37,6 +37,9 @@ class productModel
             }
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            // Vacio = "no existe" para quien llama: sin el log, una caida de la
+            // DB se confundiria con un producto borrado.
+            error_log('[productos] getProducts: ' . $e->getMessage());
             return [];
         }
     }
@@ -83,6 +86,7 @@ class productModel
             $stmt->execute();
             return $stmt->fetchAll();
         } catch (PDOException $e) {
+            error_log('[productos] getProductsPaginated: ' . $e->getMessage());
             return [];
         }
     }
@@ -100,6 +104,7 @@ class productModel
             $row = $stmt->fetch();
             return $row ? (int) $row['total'] : 0;
         } catch (PDOException $e) {
+            error_log('[productos] getProductsCount: ' . $e->getMessage());
             return 0;
         }
     }
@@ -109,7 +114,9 @@ class productModel
         try {
             $warehouseId = $this->resolveWarehouseId($data, null);
             if ($warehouseId === null) {
-                return ['error', 'No hay un almacen disponible (falta "Almacén Principal").'];
+                // Sin almacen elegido se usa "Almacén Principal"; si no aparece es
+                // que no hay almacenes o que lo renombraron. El texto cubre ambos.
+                return ['error', 'Elige el almacén del producto. Si no tienes ninguno, créalo primero en Almacenes.'];
             }
             $sql = "INSERT INTO products
                 (sku, nombre, descripcion, category_id, warehouse_id, indicador_bien_servicio, indicador_facturacion,
@@ -121,10 +128,12 @@ class productModel
             $stmt->execute($this->bindParams($data, $warehouseId));
             return ['success', 'Product saved', (int) $this->conexion->lastInsertId()];
         } catch (PDOException $e) {
-            if ((int) $e->getCode() === 23000) {
-                return ['error', 'SKU duplicado o categoria/almacen inexistente.'];
+            $conflicto = $this->mensajeConflicto($e);
+            if ($conflicto !== null) {
+                return ['error', $conflicto];
             }
-            return ['error', 'Failed to save product'];
+            error_log('[productos] saveProduct: ' . $e->getMessage());
+            return ['error', 'No se pudo guardar el producto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -133,7 +142,7 @@ class productModel
         try {
             $current = $this->getProducts($id);
             if (count($current) === 0) {
-                return ['error', "There is no product with ID {$id}"];
+                return ['error', 'Este producto ya no existe; puede que otra persona lo haya eliminado. Cierra la ventana y actualiza la lista.'];
             }
             // En update, si no se envia warehouse_id se conserva el actual.
             $warehouseId = $this->resolveWarehouseId($data, (int) $current[0]['warehouse_id']);
@@ -151,10 +160,12 @@ class productModel
             $stmt->execute($params);
             return ['success', 'Product updated'];
         } catch (PDOException $e) {
-            if ((int) $e->getCode() === 23000) {
-                return ['error', 'SKU duplicado o categoria/almacen inexistente.'];
+            $conflicto = $this->mensajeConflicto($e);
+            if ($conflicto !== null) {
+                return ['error', $conflicto];
             }
-            return ['error', 'Failed to update product'];
+            error_log('[productos] updateProduct ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo actualizar el producto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
     }
 
@@ -162,14 +173,63 @@ class productModel
     {
         try {
             if (count($this->getProducts($id)) === 0) {
-                return ['error', "Product not found {$id}"];
+                return ['error', 'Este producto ya no existe; puede que otra persona lo haya eliminado.'];
             }
             $stmt = $this->conexion->prepare("DELETE FROM products WHERE id = :id");
             $stmt->execute([':id' => (int) $id]);
             return ['success', 'Product deleted'];
         } catch (PDOException $e) {
-            return ['error', 'Failed to delete product'];
+            // En un DELETE el 23000 solo puede ser una FK que lo impide. Hoy la
+            // unica sin ON DELETE es inv_mov_product_fk: un producto que ya se
+            // vendio, se compro o se ajusto no se borra, porque el kardex
+            // perderia su historia. Antes caia en el "no se pudo" generico y el
+            // usuario reintentaba sin saber que nunca iba a poder.
+            if ((string) $e->getCode() === '23000') {
+                $detalle = (string) ($e->errorInfo[2] ?? $e->getMessage());
+                if (stripos($detalle, 'inv_mov_product_fk') !== false || stripos($detalle, 'inventory_movements') !== false) {
+                    return ['error', 'No puedes eliminar este producto porque ya tiene movimientos de inventario (ventas, compras o ajustes). '
+                        . 'Si ya no lo usas, desactívalo y guarda los cambios.'];
+                }
+                // Otra tabla que lo referencia (una FK futura): mismo consejo.
+                error_log('[productos] deleteProduct ' . $id . ' bloqueado por FK: ' . $detalle);
+                return ['error', 'No puedes eliminar este producto porque se usa en otros registros. Si ya no lo usas, desactívalo y guarda los cambios.'];
+            }
+            error_log('[productos] deleteProduct ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo eliminar el producto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }
+    }
+
+    /**
+     * Texto para el usuario de un 23000 al guardar un producto, o null si no es
+     * un conflicto conocido (el llamador lo registra y responde el generico).
+     *
+     * El SQLSTATE 23000 lo comparten dos casos que se arreglan distinto: el SKU
+     * repetido (uk_sku, error 1062) y la categoria o el almacen que ya no
+     * existen (FK, error 1452: otra persona los borro con el formulario
+     * abierto). Con un solo mensaje para ambos, quien tenia la categoria borrada
+     * buscaba un SKU repetido que no existia.
+     */
+    private function mensajeConflicto(PDOException $e): ?string
+    {
+        if ((string) $e->getCode() !== '23000') {
+            return null;
+        }
+        $codigo = (int) ($e->errorInfo[1] ?? 0);
+        if ($codigo === 1062) {
+            return 'Ya hay otro producto con ese SKU. Usa uno diferente.';
+        }
+        if ($codigo === 1452) {
+            // El nombre de la FK viene en el detalle de MySQL y dice cual de los dos falta.
+            $detalle = (string) ($e->errorInfo[2] ?? $e->getMessage());
+            if (stripos($detalle, 'fk_products_category') !== false) {
+                return 'La categoría elegida ya no existe. Elige otra.';
+            }
+            if (stripos($detalle, 'fk_products_warehouse') !== false) {
+                return 'El almacén elegido ya no existe. Elige otro.';
+            }
+            return 'La categoría o el almacén elegido ya no existe. Elige otro.';
+        }
+        return null;
     }
 
     /** id del almacen por defecto ("Almacén Principal"), o null si no existe. */

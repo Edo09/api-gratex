@@ -28,7 +28,7 @@ function validateWarehouse($w): ?string
         return 'El nombre es obligatorio y no debe superar 100 caracteres.';
     }
     if (isset($w->descripcion) && strlen((string) $w->descripcion) > 255) {
-        return 'La descripcion no debe superar 255 caracteres.';
+        return 'La descripción no debe superar 255 caracteres.';
     }
     return null;
 }
@@ -39,7 +39,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             $rows = $warehouseModel->getAll($_GET['id']);
             if (empty($rows)) {
                 http_response_code(404);
-                $respuesta = ['status' => false, 'error' => 'Almacen no encontrado'];
+                $respuesta = ['status' => false, 'error' => 'Este almacén no existe.'];
             } else {
                 $respuesta = ['status' => true, 'data' => $rows[0]];
             }
@@ -94,7 +94,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $_PUT = InputSanitizer::jsonInput(false);
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
             http_response_code(422);
-            $respuesta = ['status' => false, 'error' => 'Falta el id del almacen'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar el almacén. Cierra la ventana y ábrelo de nuevo.'];
         } else if (($error = validateWarehouse($_PUT)) !== null) {
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
@@ -121,7 +121,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $_DELETE = InputSanitizer::jsonInput(false);
         if (!isset($_DELETE->id) || is_null($_DELETE->id) || empty(trim((string) $_DELETE->id))) {
             http_response_code(422);
-            $respuesta = ['status' => false, 'error' => 'Falta el id del almacen'];
+            $respuesta = ['status' => false, 'error' => 'No se pudo identificar el almacén. Cierra la ventana y ábrelo de nuevo.'];
         } else {
             $oldWarehouse = $warehouseModel->getAll($_DELETE->id)[0] ?? null;
             $result = $warehouseModel->delete($_DELETE->id);
@@ -142,5 +142,5 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     default:
         http_response_code(405);
-        echo json_encode(['status' => false, 'error' => 'Metodo no soportado']);
+        echo json_encode(['status' => false, 'error' => 'Esta acción no está disponible.']);
 }

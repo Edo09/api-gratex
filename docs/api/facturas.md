@@ -47,6 +47,7 @@ distinto al `{status,...}` del resto):
 | `GET` | `/api/facturas` | Listar facturas (paginado) |
 | `GET` | `/api/facturas?id={id}` | Obtener factura por ID |
 | `GET` | `/api/facturas/stats` | Estadísticas de e-CFs emitidos |
+| `GET` | `/api/facturas/modificables?client_id=` | Facturas del cliente que una nota E33/E34 puede modificar |
 | `GET` | `/api/facturas/{id}/estado` | Consultar estado DGII actualizado |
 | `GET` | `/api/facturas/{id}/pdf` | Descargar PDF de factura |
 | `GET` | `/api/facturas/{id}/xml` | Descargar XML firmado (ECF) |
@@ -226,6 +227,41 @@ X-API-KEY: <key>
 | `ventas_por_dia[]` | Igual que `ventas_por_mes`, por día (`dia` = `YYYY-MM-DD`), últimos 31 días. Los días sin ventas no vienen |
 | `secuencias[].secuencia_actual` | Último número de secuencia asignado |
 | `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo |
+
+---
+
+### Facturas que una nota puede modificar — `GET /api/facturas/modificables`
+
+Para el selector "Comprobante que modifica" de las notas E33/E34. Devuelve las
+facturas **de venta** (E31/E32/E44/E45/E46) del cliente, **aceptadas** por la
+DGII (`ACEPTADO`, `ACEPTADO_CONDICIONAL`, `RFCE_ACEPTADO`) y del ambiente activo,
+de la más reciente a la más vieja.
+
+| Parámetro | Descripción |
+|-----------|-------------|
+| `client_id` | Obligatorio. Cliente de la nota |
+| `query` | Opcional. Parte del e-NCF (`E3100000003`) |
+| `limit` | Opcional, 1 a 50 (default 20) |
+
+```json
+{
+  "status": true,
+  "data": [
+    {
+      "id": 318, "client_id": 12, "tipo_ecf": "31", "e_ncf": "E310000000318",
+      "fecha_emision": "02-08-2026", "estado_dgii": "ACEPTADO",
+      "total": 5900.00, "notas_credito": 1500.00, "notas_debito": 0.00, "saldo": 4400.00
+    }
+  ]
+}
+```
+
+- `fecha_emision`: la `FechaEmision` del XML firmado (dd-mm-aaaa), la que va en
+  `informacion_referencia.fecha_ncf_modificado`.
+- `saldo` = `total` + notas de débito − notas de crédito que ya la referencian
+  (solo las aceptadas o en proceso en la DGII: una rechazada, en ERROR o
+  NO_ENCONTRADO no cuenta y se puede reintentar). Es el tope de
+  una nota de crédito nueva.
 
 ---
 
@@ -413,7 +449,7 @@ Todo lo demás (`fecha_emision`, `tipo_pago`, `tipo_ingresos`, `totales`, `compr
 | `tipo_pago` | no | int | `1` | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros. **`2` solo si el cliente tiene `permitir_credito=1`**, si no responde 422 |
 | `descuento` | no | number | el del cliente | % de descuento de la factura (0-100). Si se omite se usa `clients.descuento`; mandar `0` lo anula. Se reparte por línea como `DescuentoMonto` y baja la base del ITBIS. Una línea con su propio `descuento_monto` no se toca |
 | `tipo_ingresos` | no | string | `"01"` | `"01"` Operaciones (no aplica a E43/E47) |
-| `indicador_monto_gravado` | no | string | `"0"` | `"0"`=precio incluye ITBIS, `"1"`=lo excluye (E31/32/33/34/41/45) |
+| `indicador_monto_gravado` | no | string | `"0"` | Se ignora: esta ruta siempre manda `"0"` al XML (XSD: `"0"` = los montos de las líneas **no** incluyen ITBIS, `"1"` = sí), porque `precio_unitario` se toma **sin ITBIS** y el ITBIS se suma encima. Si tus precios traen ITBIS, desglósalos antes (precio ÷ 1.18, hasta 4 decimales). Solo `strict_input` respeta el valor enviado (E31/32/33/34/41/45) |
 | `comprador` | no | object | del cliente | Sobrescribe datos del comprador (ver abajo) |
 | `totales` | no | object | calculado | Sobrescribe tasas/totales (ver abajo) |
 | `e_ncf` | no | string | autodispensado | Forzar un e-NCF específico (normalmente NO enviar) |
@@ -601,9 +637,17 @@ Modifica (aumenta) una factura E31 previa. Requiere `informacion_referencia`.
 ```
 
 **Notas:**
-- `ncf_modificado`: e-NCF del E31 original (debe estar ACEPTADO en DGII)
+- `ncf_modificado`: e-NCF del E31 original (debe estar ACEPTADO en DGII). XSD: 11 a 19 caracteres.
 - `rnc_otro_contribuyente`: **siempre null** en ambiente certecf — si se envía el RNC, DGII retorna error 614
-- `codigo_modificacion`: `"1"`=Anulación, `"2"`=Corrección monto, `"3"`=Descuento, `"4"`=Otros
+- `fecha_ncf_modificado`: `FechaEmision` del e-CF original, `dd-mm-aaaa` (también se acepta `aaaa-mm-dd`). No puede ser posterior a la nota.
+- `codigo_modificacion` (catálogo DGII `CodigoModificacionType`): `"1"`=Anula el NCF modificado, `"2"`=Corrige texto del comprobante modificado, `"3"`=Corrige montos del NCF modificado, `"4"`=Reemplazo de un NCF emitido en contingencia, `"5"`=Referencia factura de consumo electrónica
+- `razon_modificacion`: opcional en el XSD, máx. 90 caracteres. Vacía → el backend pone un texto por defecto (salvo `strict_input`).
+
+**Validación antes de reservar el e-NCF** (`InformacionReferencia::normalizar`, ruta app): si
+`informacion_referencia` falta o no cumple lo anterior, la emisión responde `422` sin
+dispensar número. Si la factura original está en la base, además debe estar aceptada,
+ser del mismo `client_id` y su fecha coincidir con `fecha_ncf_modificado`. En la ruta de
+integración el builder valida los campos obligatorios igual que antes (mismo mensaje).
 
 ---
 
@@ -648,9 +692,10 @@ Modifica (reduce) una factura E31 previa.
 ```
 
 **Notas:**
-- `indicador_nota_credito`: `"0"`=Monto parcial, `"1"`=Anulación total
+- `indicador_nota_credito` (XSD `IndicadorNotaCreditoType`): `"0"` = la nota se emite dentro de los **30 días calendario** de la factura modificada, `"1"` = después. Si no se envía, la ruta app lo calcula con `fecha_emision` y `fecha_ncf_modificado` (en `strict_input` no se deriva).
 - `rnc_otro_contribuyente`: **siempre null** (igual que E33)
-- El monto del item debe ser menor al saldo disponible del E31 referenciado
+- `informacion_referencia`: mismas reglas y validación que en E33.
+- El monto total de la nota no puede pasar del **saldo** de la factura referenciada (su total + notas de débito − notas de crédito previas aceptadas o en proceso en la DGII; ver `GET /api/facturas/modificables`). Si pasa, `422`. Así el reporte de ventas y el dashboard, que **restan** el E34, nunca restan más de lo vendido.
 
 ---
 
@@ -907,13 +952,21 @@ Para **E32 RFCE (<250k)** el campo relevante es `rfce_track_id` y `estado_dgii` 
 
 ### Respuesta de error
 
-HTTP `4xx`/`5xx` con `status: false` y un mensaje en `error`:
+HTTP `4xx`/`5xx` con `status: false` y un mensaje en `error`. El texto está
+pensado para mostrarse tal cual al usuario (español llano, sin nombres de campos):
 
 ```json
-{ "status": false, "error": "El cliente no tiene RNC y es requerido para e-CF tipo 31 (Credito Fiscal)" }
+{ "status": false, "error": "Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo." }
 ```
 
-Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, RNC faltante) · `404` cliente no encontrado · `502` fallo en emisión DGII.
+Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, RNC faltante, datos de la nota E33/E34, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII · `500` la DGII recibió el e-CF pero no se pudo guardar (el mensaje trae el e-NCF y pide no volver a emitirla).
+
+En un `502` el texto depende del caso: los que el usuario puede resolver o
+reportar (rango e-NCF agotado, emisor o certificado sin configurar) traen su
+propio mensaje (`EcfUsuarioException`); el
+resto es un texto genérico. El detalle técnico no va en la respuesta: queda en
+el `error_log` y en el audit log (`error_message`). Los integradores
+(`/api/integracion/*`) siguen recibiendo el texto técnico.
 
 ---
 

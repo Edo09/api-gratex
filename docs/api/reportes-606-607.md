@@ -138,11 +138,12 @@ Los 23 campos oficiales del 606, en orden:
 Array de strings legibles. Si no está vacío, **muéstralas antes de permitir la descarga**
 (banner/lista). Ejemplos:
 
-- `"e-CF E310000099 (RNC 101096225): firma 'INVALIDA' — verificar antes de declarar."`
-- `"NCF XYZ (RNC 130000000): formato no valido o no autorizado — revisar."`
-- `"e-CF E310000099: tiene retencion (ITBIS/ISR) pero falta Fecha de Pago (campo 7 obligatorio)."`
-- `"RNC 130000000: comprobante sin NCF/e-NCF."`
-- `"NCF E310000099 (RNC 130000000): esta en recepcion e-CF y en gastos/compras. Se declara una sola vez, con el de recepcion e-CF — revisa si la compra tambien esta duplicada en tus costos."`
+- `"e-NCF E310000099 (RNC 101096225): la firma digital del comprobante no es válida. Confirma con el proveedor que es auténtico antes de declararlo."`
+  (con firma `NO_VERIFICADA` o vacía: `"… no se pudo verificar la firma digital del comprobante. …"`)
+- `"NCF XYZ (RNC 130000000): el número no tiene el formato de un NCF o e-NCF válido. Revísalo."`
+- `"e-NCF E310000099: tiene retención de ITBIS o ISR, pero el comprobante no trae la fecha de pago, que en ese caso es obligatoria en el 606."`
+- `"Hay un comprobante sin NCF ni e-NCF (RNC 130000000)."` (sin RNC: `(proveedor sin RNC)`)
+- `"NCF E310000099 (RNC 130000000): aparece en e-CF recibidos y en gastos y compras. Se declara una sola vez, con los datos de e-CF recibidos; revisa si la compra también está duplicada en tus costos."`
 
 No bloquean la generación; son para revisión humana.
 
@@ -226,11 +227,11 @@ El cuerpo es el `.txt`. El header `X-Advertencias-Count` indica cuántas adverte
 
 | Situación | HTTP | Body |
 |-----------|------|------|
-| Período mal formado (no `AAAAMM`) | `400` | `{"status":false,"error":"Parametro periodo invalido. Formato: AAAAMM (ej: 202606)."}` |
-| Mes fuera de rango (no `01`–`12`) | `400` | `{"status":false,"error":"Mes invalido en periodo. Use 01-12."}` |
+| Período mal formado (no `AAAAMM`) | `400` | `{"status":false,"error":"El período no es válido. Elige el año y el mes en los selectores."}` |
+| Mes fuera de rango (no `01`–`12`) | `400` | `{"status":false,"error":"El mes no es válido. Elige un mes de la lista."}` |
 | Falta / inválido `X-API-KEY` | `401` | `{"status":false,"error":"Credenciales requeridas. ..."}` |
 | Reporte no soportado (ej. `/reportes/607`) | `404` | `{"status":false,"error":"Reporte no encontrado. Use 606."}` |
-| Emisor sin RNC configurado | `500` | `{"status":false,"error":"No hay RNC del emisor configurado (emisor_config)."}` |
+| Emisor sin RNC configurado (`emisor_config`) | `500` | `{"status":false,"error":"Tu empresa no tiene el RNC configurado, por eso no se puede generar el reporte. Comunícate con soporte para completarlo."}` |
 
 Período sin transacciones → `200` con `cantidad: 0`, `registros: []` (y el TXT solo trae el
 encabezado con `0`). No es error.
@@ -421,10 +422,11 @@ sola columna (por `TipoPago`, o `efectivo` por defecto en facturas simples). La 
 
 Array de strings; mostrar antes de permitir la descarga si no está vacío. Ejemplos:
 
-- `"NCF E310000000003: venta sin RNC/Cedula de cliente."`
-- `"NCF E340000000010 (nota 34): falta NCF modificado (campo 4)."`
-- `"NCF B0100000873: formato no valido o no autorizado — revisar."`
-- `"NCF ...: tiene retencion (ITBIS/ISR) pero falta Fecha de Retencion (campo 7)."`
+- `"NCF E310000000003: la venta no tiene el RNC o la cédula del cliente."`
+- `"NCF E340000000010: es una nota de crédito y le falta el NCF de la factura que modifica."` (E33: `nota de débito`)
+- `"NCF B0100000873: el número no tiene el formato de un NCF o e-NCF válido. Revísalo."`
+- `"NCF ...: tiene retención de ITBIS o ISR, pero le falta la fecha de retención."`
+- `"Factura FAC_20260612_004: no tiene NCF ni e-NCF."` (se nombra por `no_factura`, no por el id interno)
 
 No bloquean la generación.
 
@@ -479,11 +481,11 @@ El cuerpo es el `.TXT`. Nombre de archivo oficial: `DGII_F_607_<RNC>_<PERIODO>.T
 
 | Situación | HTTP | Body |
 |-----------|------|------|
-| Período mal formado (no `AAAAMM`) | `400` | `{"status":false,"error":"Parametro periodo invalido. Formato: AAAAMM (ej: 202606)."}` |
-| Mes fuera de rango | `400` | `{"status":false,"error":"Mes invalido en periodo. Use 01-12."}` |
+| Período mal formado (no `AAAAMM`) | `400` | `{"status":false,"error":"El período no es válido. Elige el año y el mes en los selectores."}` |
+| Mes fuera de rango | `400` | `{"status":false,"error":"El mes no es válido. Elige un mes de la lista."}` |
 | Falta / inválido `X-API-KEY` | `401` | `{"status":false,"error":"Credenciales requeridas. ..."}` |
 | Reporte no soportado | `404` | `{"status":false,"error":"Reporte no encontrado. Use 606 o 607."}` |
-| Emisor sin RNC configurado | `500` | `{"status":false,"error":"No hay RNC del emisor configurado (emisor_config)."}` |
+| Emisor sin RNC configurado (`emisor_config`) | `500` | `{"status":false,"error":"Tu empresa no tiene el RNC configurado, por eso no se puede generar el reporte. Comunícate con soporte para completarlo."}` |
 
 Período sin ventas → `200` con `cantidad: 0`, `registros: []` (TXT solo con encabezado).
 
