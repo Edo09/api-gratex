@@ -90,8 +90,9 @@ La lista también filtra por **ambiente activo** (`DGII_ECF_ENVIRONMENT`), igual
 |---|---|---|
 | `description` | sí | (también acepta `descripcion`) |
 | `amount` | sí | precio unitario (también `precio_unitario`) |
-| `quantity` | no | default 1 (también `cantidad`) |
-| `subtotal` | no | default `amount * quantity` |
+| `quantity` | no | default 1 (también `cantidad`). Mayor que 0; **hasta 2 decimales** en lo que se emite a la DGII (E41/E43/E47: `CantidadItem` admite 2) y hasta 3 en lo recibido (E31/E33/E34). Entera si la `unidad_medida` de la línea no admite fracciones (`permite_decimales = 0`). Si no, **422** antes de reservar el e-NCF (p. ej. `"Línea 2: la cantidad admite hasta 2 decimales."`) |
+| `unidad_medida` | no | código DGII (id de `GET /api/unidades-medida`), default `43` |
+| `subtotal` | no | default `amount * quantity` (con `amount` a 4 decimales y `quantity` a 3, lo que guarda la base) |
 | `itbis_amount` | no | default 0 |
 | `indicador_bien_servicio` | no | `1` = Bien, `2` = Servicio (default `2`). En el 606 separa bienes (campo 9) de servicios (campo 8) |
 | `product_id` | no | producto del catálogo. En compras mueve inventario — ver [Inventario](#inventario) |
@@ -181,8 +182,8 @@ guardar, con `inventoryModel::registrarCompra`:
 - Nunca tumba el registro: si el inventario falla, la compra queda guardada y el error va al log.
 - Una `E34` que solo es un descuento (sin devolver mercancía) se registra con líneas **sin**
   producto.
-- Las cantidades del inventario son enteras: una cantidad fraccionada se redondea (y se anota
-  en el log).
+- La cantidad entra con sus decimales (hasta 3; `products.stock` es DECIMAL(12,3) desde la
+  migración 025).
 
 ## Emisión a DGII (auto-emision)
 
@@ -217,6 +218,9 @@ GET /api/gastos/{id}/xml      -> XML firmado (Content-Type: application/xml)
 E43 (Gastos Menores) se emite **sin comprador** y `rnc_proveedor` es opcional.
 El ITBIS por línea se calcula del `indicador_facturacion` (1=18%, 2=16%, 3/4=0) si
 no se envía `itbis_amount`.
+`CantidadItem` y `PrecioUnitarioItem` salen de la misma normalización que las facturas
+(`EcfItemMapper::normalizarCantidadPrecio`: cantidad a 2 decimales, precio a 4), así que el
+XML firma exactamente lo que se guardó en `gasto_items`.
 
 ## Estadísticas — `GET /api/gastos/stats`
 
@@ -292,7 +296,7 @@ más `track_id` y `codigo_seguridad`.
     "ambiente": "ecf",
     "user_id": 3,
     "items": [
-      { "id": 1, "description": "Peaje Las Americas", "amount": "60.00", "quantity": 2, "subtotal": "120.00", "itbis_amount": "0.00", "indicador_facturacion": 4, "indicador_bien_servicio": 2 }
+      { "id": 1, "description": "Peaje Las Americas", "amount": "60.0000", "quantity": "2.000", "subtotal": "120.00", "itbis_amount": "0.00", "indicador_facturacion": 4, "indicador_bien_servicio": 2 }
     ],
     "aviso": "El gasto se guardó, pero no se envió a la DGII porque el envío de comprobantes electrónicos está desactivado. No se usó ningún número de comprobante."
   }
@@ -305,7 +309,7 @@ más `track_id` y `codigo_seguridad`.
 | `401` | token ausente o inválido |
 | `404` | `GET /api/gastos/{id}` no existe |
 | `405` | método no soportado |
-| `422` | falta `categoria`, `tipo_gasto`, `rnc_proveedor`, `nombre_proveedor` o `items` |
+| `422` | falta `categoria`, `tipo_gasto`, `rnc_proveedor`, `nombre_proveedor` o `items`, o la cantidad de una línea no es válida |
 | `400` | `tipo_gasto` no permitido para la categoría, falta `ncf` en recibido, NCF ya registrado para ese proveedor, o fallo al guardar (la bitácora guarda el detalle técnico; el `error` es texto para el usuario) |
 
 Formato de error: `{ "status": false, "error": "<mensaje>" }`.
@@ -347,7 +351,8 @@ UNIQUE `(rnc_proveedor, ncf)`. Índices: `categoria`, `tipo_gasto`, `rnc_proveed
 **`gasto_items`**: `id`, `gasto_id` (FK → `gastos.id` ON DELETE CASCADE),
 `description`, `amount`, `quantity`, `subtotal`, `itbis_amount` + (008)
 `indicador_facturacion`, `indicador_bien_servicio` + (024) `product_id`
-(FK → `products.id` ON DELETE SET NULL).
+(FK → `products.id` ON DELETE SET NULL). Desde (025) `quantity` es DECIMAL(12,3) y
+`amount` DECIMAL(18,4): llegan como texto (`"2.000"`, `"60.0000"`).
 
 ### Flujo de emisión
 La emisión real reusa `ECFEmissionService::emitir()` — que internamente **dispensa
@@ -365,7 +370,8 @@ $ecf = $this->emitirGastoDgii(...);   // build + firmar + enviar
 
 ### Métodos del modelo
 Lectura/CRUD: `getGasto`, `getGastoItems`, `getGastosPaginated`, `getGastosCount`,
-`createGasto`, `updateGasto`, `deleteGasto`.
+`createGasto`, `updateGasto`, `deleteGasto`. Validación: `problemaCantidades` (la llama
+el controlador antes de `createGasto`, y `updateGasto` si reemplaza las líneas).
 Emisión/e-CF: `getEcfData`, `updateEcfEstado`, `getXmlFirmado`, `getGastosStats`,
 `getActiveAmbiente` (+ privados `emissionEnabled`, `emitirGastoDgii`,
 `mapItemsForEcf`, `computeTotalesEcf`).

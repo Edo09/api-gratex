@@ -18,6 +18,7 @@ if (file_exists($composerPath)) {
 
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/Pdf/FacturaTemplateFactory.php';
+require_once __DIR__ . '/Pdf/EcfDocumento.php';
 
 /**
  * PDF Generator for Cotizaciones
@@ -468,18 +469,25 @@ class CotizacionPdfGenerator extends FPDF
         $subtotal = 0;
         if (isset($this->cotizacion['items']) && is_array($this->cotizacion['items'])) {
             foreach ($this->cotizacion['items'] as $item) {
-                $cantidad = $item['quantity'] ?? 1;
+                // Desde la migracion 025 la BD devuelve cantidad y precio como
+                // texto DECIMAL ("2.000", "84.7500"): se leen como numero para la
+                // cuenta y se imprimen con los mismos formatos que la factura
+                // (sin "2.000" en el papel y con los 4 decimales del precio).
+                $cantidad = (float) ($item['quantity'] ?? 1);
                 $descripcion = $item['description'] ?? '';
-                $unitario = $item['amount'] ?? 0;
+                $unitario = (float) ($item['amount'] ?? 0);
                 $itbis = $unitario * 0.18;
-                $subtotal += $cantidad * $unitario;
+                // Redondeo por linea, como el MontoItem del e-CF en que se
+                // convierte la cotizacion: con cantidades decimales la suma sin
+                // redondear puede irse un centavo del total de esa factura.
+                $subtotal += round($cantidad * $unitario, 2);
                 $this->Row([
                     $fecha,
 
-                    $cantidad,
+                    EcfDocumento::textoCantidad($cantidad),
                     $this->convertEncoding(html_entity_decode($descripcion)),
                     '$' . number_format($itbis, 2),
-                    '$' . number_format($unitario, 2)
+                    '$' . EcfDocumento::textoPrecio($unitario)
                 ]);
             }
         }

@@ -489,8 +489,13 @@ class FacturaPdfGenerator extends FPDF
         // La factura simple no declara impuestos: no lleva columna de ITBIS, y
         // sus 21 mm se reparten entre Descripción y Valor para que la tabla siga
         // ocupando el mismo ancho.
+        //
+        // Precio mide 25 mm (antes 21, tomados de Descripción): el precio
+        // unitario puede traer 4 decimales y en Arial 10 "12,345.6789" mide
+        // 19.6 mm, que no cabe en los 19 utiles de 21 mm y MultiCell lo partia
+        // en dos renglones. Con 25 caben hasta "123,456.7891" (21.6 mm).
         if ($this->noElectronica) {
-            $columnWidths = [18, 105, 24, 21, 32];
+            $columnWidths = [18, 101, 24, 25, 32];
             $columnLabels = [
                 'Cantidad',
                 $this->convertEncoding('Descripción'),
@@ -500,7 +505,7 @@ class FacturaPdfGenerator extends FPDF
             ];
             $aligns = ['C', 'L', 'C', 'C', 'C'];
         } else {
-            $columnWidths = [18, 92, 24, 21, 21, 24];
+            $columnWidths = [18, 88, 24, 25, 21, 24];
             $columnLabels = [
                 'Cantidad',
                 $this->convertEncoding('Descripción'),
@@ -523,12 +528,15 @@ class FacturaPdfGenerator extends FPDF
         // Las lineas ya vienen resueltas por EcfDocumento: nombre + descripcion
         // (fila de la BD completada con el XML firmado), ITBIS por linea, sigla
         // de unidad y el Motivo de las notas E33/E34 anexado donde corresponde.
+        // Cantidad y precio llegan ya formateados y de modo que Cantidad x
+        // Precio - Descuento de el Valor: con number_format(precio, 2) aqui,
+        // "3 x 84.75 = 254.24" no sumaria (el precio real es 84.7458).
         foreach ($doc->lineas() as $linea) {
             $fila = [
                 $linea['cantidad'],
                 $this->convertEncoding(html_entity_decode($linea['descripcion'])) . "\n ",
                 $linea['unidad'],
-                number_format($linea['precio'], 2),
+                $linea['precio_texto'],
             ];
             if (!$this->noElectronica) {
                 $fila[] = number_format($linea['itbis'], 2);

@@ -172,6 +172,20 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
+    $strictInput = !empty($input['strict_input']);
+
+    // Cantidad y precio con los decimales del XML, UNA vez y antes de todo: el
+    // descuento del cliente, los totales, las lineas del XML y lo que se guarda
+    // salen de los mismos valores (ver EcfItemMapper::normalizarCantidadPrecio).
+    // La cantidad se valida antes de redondear y antes de reservar el e-NCF. El
+    // set de pruebas DGII (strict_input) trae sus montos exactos: no se toca.
+    if (!$strictInput) {
+        if (!assertCantidadesEcf($items)) {
+            return;
+        }
+        $items = EcfItemMapper::normalizarCantidadPrecio($items);
+    }
+
     $client = null;
     if ($clientId) {
         $clients = $clientModel->getClients($clientId);
@@ -186,8 +200,6 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         respond(false, 'Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo.', 422);
         return;
     }
-
-    $strictInput = !empty($input['strict_input']);
 
     // Credito: solo si el cliente lo tiene habilitado. TipoPago DGII: 1=Contado,
     // 2=Credito. Se valida aqui y no en el front porque es una regla comercial
@@ -811,6 +823,12 @@ function handlePreview(clientModel $clientModel): void
     if (!assertUnidadesMedida($items)) {
         return;
     }
+    // Mismas cantidades y precios que la emision: la vista previa no puede
+    // mostrar una linea que al emitir se rechazaria o saldria redondeada.
+    if (!assertCantidadesEcf($items)) {
+        return;
+    }
+    $items = EcfItemMapper::normalizarCantidadPrecio($items);
 
     $client = null;
     if ($clientId) {
@@ -1030,6 +1048,38 @@ function assertUnidadesMedida(array $items): bool
         if (!$model->isValid($u)) {
             respond(false, 'La unidad de medida de la línea ' . ($i + 1)
                 . ' no es válida. Elige otra unidad en esa línea.', 422);
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * Valida la cantidad de cada linea de un e-CF: mayor que 0, con a lo sumo 2
+ * decimales (CantidadItem es Decimal18D1or2) y entera si la unidad de la linea
+ * no admite fracciones (unidades_medida.permite_decimales; sin unidad, o sin
+ * la marca en la master, no se juzga). Se mira lo que mando el usuario, antes
+ * de redondear: 1.125 no pasa en silencio a 1.13, se le pide corregirlo.
+ *
+ * Mismo contrato que assertUnidadesMedida: si falla responde 422 y devuelve
+ * false, y el que llama TIENE que cortar. Va antes de reservar el e-NCF.
+ */
+function assertCantidadesEcf(array $items): bool
+{
+    require_once __DIR__ . '/../Models/unidadMedidaModel.php';
+    static $model = null;
+    if ($model === null) {
+        $model = new unidadMedidaModel();
+    }
+    foreach (array_values($items) as $i => $it) {
+        $it = (array) $it;
+        // Misma lectura que EcfItemMapper::map (sin cantidad = 1).
+        $cantidad = (float) ($it['cantidad'] ?? $it['quantity'] ?? 1);
+        $problema = $model->problemaCantidad($cantidad, $it['unidad_medida'] ?? null, EcfItemMapper::DECIMALES_CANTIDAD);
+        if ($problema !== null) {
+            // "Línea 2: la cantidad…", igual que arma el front sus avisos por línea.
+            respond(false, 'Línea ' . ($i + 1) . ': '
+                . mb_strtolower(mb_substr($problema, 0, 1)) . mb_substr($problema, 1), 422);
             return false;
         }
     }

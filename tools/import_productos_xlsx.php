@@ -12,7 +12,7 @@
  *   PRECIO               -> precio         (lista 1)
  *   PRECIO 2 / 3 / 4     -> precio_2/3/4   (0 o vacio = NULL, "no aplica")
  *   COSTO                -> costo
- *   STOCK, STOCK MINIMO  -> stock, stock_minimo
+ *   STOCK, STOCK MINIMO  -> stock, stock_minimo (hasta 3 decimales; avisa si traen)
  *   ESTATUS              -> activo         (1/0)
  *   SERVICIO/PRODUCTO    -> indicador_bien_servicio (0=bien -> 1, 1=servicio -> 2)
  *   CVE. CATEGORIA       -> category_id    (crea la categoria si no existe)
@@ -106,6 +106,21 @@ function importarProductosXlsx(array $o): int
             }
         }
 
+        $unidad = $modoUnidad === 'xlsx'
+            ? (trim((string) impCol($f, ['UNIDAD'])) ?: '43')
+            : $modoUnidad;
+        $stock = round(impNum(impCol($f, ['STOCK'])), 3);
+        $stockMinimo = round(impNum(impCol($f, ['STOCK MINIMO', 'STOCK MÍNIMO'])), 3);
+        // Un stock con decimales solo tiene sentido en una unidad que se fracciona
+        // (metro, kg). Aqui no se consulta el catalogo de la master (la conexion
+        // puede ser directa a la DB del tenant), asi que se importa y se avisa: si
+        // la unidad es de conteo (43 = Unidad), hay que corregir la unidad o la
+        // existencia del producto despues.
+        if (fmod($stock, 1.0) != 0.0 || fmod($stockMinimo, 1.0) != 0.0) {
+            $avisos[] = "{$sku}: stock con decimales ({$stock} / minimo {$stockMinimo}) en la unidad {$unidad}; "
+                . "revisa que esa unidad admita fracciones";
+        }
+
         $mapeadas[] = [
             'sku' => mb_substr($sku, 0, 50),
             'nombre' => mb_substr($nombre, 0, 150),
@@ -117,11 +132,11 @@ function importarProductosXlsx(array $o): int
             'precio_3' => impPrecioOpcional(impCol($f, ['PRECIO 3'])),
             'precio_4' => impPrecioOpcional(impCol($f, ['PRECIO 4'])),
             'costo' => $costo,
-            'unidad' => $modoUnidad === 'xlsx'
-                ? (trim((string) impCol($f, ['UNIDAD'])) ?: '43')
-                : $modoUnidad,
-            'stock' => (int) impNum(impCol($f, ['STOCK'])),
-            'stock_minimo' => (int) impNum(impCol($f, ['STOCK MINIMO', 'STOCK MÍNIMO'])),
+            'unidad' => $unidad,
+            // Hasta 3 decimales (DECIMAL(12,3), migracion 025): con (int) 12,5 m
+            // de cable entraban como 12.
+            'stock' => $stock,
+            'stock_minimo' => $stockMinimo,
             'activo' => ((int) impNum(impCol($f, ['ESTATUS']))) === 0 ? 0 : 1,
         ];
     }

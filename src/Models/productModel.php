@@ -35,7 +35,7 @@ class productModel
                 $stmt = $this->conexion->prepare(self::SELECT_JOINED . ' WHERE p.id = :id');
                 $stmt->execute([':id' => (int) $id]);
             }
-            return $stmt->fetchAll();
+            return self::existenciasComoNumero($stmt->fetchAll());
         } catch (PDOException $e) {
             // Vacio = "no existe" para quien llama: sin el log, una caida de la
             // DB se confundiria con un producto borrado.
@@ -84,7 +84,7 @@ class productModel
             $stmt->bindValue(':limit', (int) $limit, PDO::PARAM_INT);
             $stmt->bindValue(':offset', (int) $offset, PDO::PARAM_INT);
             $stmt->execute();
-            return $stmt->fetchAll();
+            return self::existenciasComoNumero($stmt->fetchAll());
         } catch (PDOException $e) {
             error_log('[productos] getProductsPaginated: ' . $e->getMessage());
             return [];
@@ -251,6 +251,37 @@ class productModel
         return $fallback ?? $this->getDefaultWarehouseId();
     }
 
+    /**
+     * Unidad de medida (codigo DGII) con la que se guarda el producto: la
+     * enviada o 43 (Unidad). El controlador juzga los decimales de la
+     * existencia con esta misma unidad; si cada uno la resolviera a su manera,
+     * se validaria contra una unidad y se guardaria otra.
+     */
+    public static function unidadDelPayload($d): string
+    {
+        $u = isset($d->unidad_medida) ? trim((string) $d->unidad_medida) : '';
+        return $u === '' ? '43' : $u;
+    }
+
+    /**
+     * stock y stock_minimo como numero (o null en servicios). Eran INT y el
+     * front los recibia como numero; como DECIMAL(15,3) MySQL los devuelve como
+     * texto ("12.500") y el front comparaba textos ("10.000" <= "9.000" daba
+     * true) o los pintaba tal cual. Mismas claves, solo cambia el tipo.
+     */
+    private static function existenciasComoNumero(array $filas): array
+    {
+        foreach ($filas as &$f) {
+            foreach (['stock', 'stock_minimo'] as $col) {
+                if (array_key_exists($col, $f) && $f[$col] !== null) {
+                    $f[$col] = (float) $f[$col];
+                }
+            }
+        }
+        unset($f);
+        return $filas;
+    }
+
     /** Normaliza el payload (stdClass del JSON) a los parametros del INSERT/UPDATE. */
     private function bindParams($d, int $warehouseId): array
     {
@@ -258,8 +289,12 @@ class productModel
             $v = isset($v) ? trim((string) $v) : '';
             return $v === '' ? null : $v;
         };
-        $intOrNull = function ($v) {
-            return ($v === null || $v === '') ? null : (int) $v;
+        // Existencia y minimo con hasta 3 decimales (DECIMAL(15,3), migracion
+        // 025). Con (int) cada vez que se guardaba el producto 12,5 m quedaban
+        // en 12 sin movimiento en el libro. Que la unidad admita decimales lo
+        // valida el controlador antes de llegar aqui.
+        $cantidadOrNull = function ($v) {
+            return ($v === null || $v === '') ? null : round((float) $v, 3);
         };
         $precioOpcional = function ($v) {
             return ($v === null || $v === '' || !is_numeric($v)) ? null : (float) $v;
@@ -280,9 +315,9 @@ class productModel
             ':precio_3'      => $precioOpcional($d->precio_3 ?? null),
             ':precio_4'      => $precioOpcional($d->precio_4 ?? null),
             ':costo'         => (float) ($d->costo ?? 0),
-            ':unidad_medida' => $str($d->unidad_medida ?? null) ?? '43',
-            ':stock'         => $intOrNull($d->stock ?? null),
-            ':stock_minimo'  => $intOrNull($d->stock_minimo ?? null),
+            ':unidad_medida' => self::unidadDelPayload($d),
+            ':stock'         => $cantidadOrNull($d->stock ?? null),
+            ':stock_minimo'  => $cantidadOrNull($d->stock_minimo ?? null),
             ':activo'        => isset($d->activo) ? (int) (bool) $d->activo : 1,
         ];
     }

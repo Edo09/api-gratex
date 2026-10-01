@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..024  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..025  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS cotizaciones (
   date         DATETIME       DEFAULT CURRENT_TIMESTAMP,
   client_id    INT(11)        DEFAULT NULL,
   client_name  VARCHAR(100)   NOT NULL,
-  total        DECIMAL(10,2)  NOT NULL DEFAULT 0.00,
+  total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -62,9 +62,9 @@ CREATE TABLE IF NOT EXISTS cotizacion_items (
   id             INT(11)        NOT NULL AUTO_INCREMENT,
   cotizacion_id  INT(11)        NOT NULL,
   description    TEXT           NOT NULL,
-  amount         DECIMAL(10,2)  NOT NULL,
-  quantity       INT(11)        NOT NULL DEFAULT 1,
-  subtotal       DECIMAL(10,2)  NOT NULL,
+  amount         DECIMAL(18,4)  NOT NULL,
+  quantity       DECIMAL(12,3)  NOT NULL DEFAULT 1.000,
+  subtotal       DECIMAL(18,2)  NOT NULL,
   PRIMARY KEY (id),
   KEY cotizacion_id (cotizacion_id),
   CONSTRAINT cotizacion_items_ibfk_1 FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE
@@ -136,8 +136,8 @@ CREATE TABLE IF NOT EXISTS products (
   costo DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
     COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
-  stock INT(11) NULL COMMENT 'NULL para servicios (sin inventario)',
-  stock_minimo INT(11) NULL,
+  stock DECIMAL(15,3) NULL COMMENT 'NULL para servicios (sin inventario)',
+  stock_minimo DECIMAL(15,3) NULL,
   activo TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS facturas (
   date         DATETIME       DEFAULT CURRENT_TIMESTAMP,
   client_id    INT(11)        DEFAULT NULL,
   client_name  VARCHAR(100)   NOT NULL,
-  total        DECIMAL(10,2)  NOT NULL DEFAULT 0.00,
+  total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
   tipo_pago TINYINT NOT NULL DEFAULT 1
     COMMENT '1=Contado 2=Credito 3=Gratuito 4=Permuta 5=Otros (codigos DGII)',
   NCF          VARCHAR(50)    NULL,
@@ -207,9 +207,11 @@ CREATE TABLE IF NOT EXISTS factura_items (
   product_id  INT(11)        NULL DEFAULT NULL
                  COMMENT 'FK al catalogo; NULL = linea libre (no mueve inventario)',
   description TEXT           NOT NULL,
-  amount      DECIMAL(10,2)  NOT NULL,
-  quantity    INT(11)        NOT NULL DEFAULT 1,
-  subtotal    DECIMAL(10,2)  NOT NULL,
+  amount      DECIMAL(18,4)  NOT NULL
+                 COMMENT 'Precio unitario; hasta 4 decimales (PrecioUnitarioItem del e-CF)',
+  quantity    DECIMAL(12,3)  NOT NULL DEFAULT 1.000
+                 COMMENT 'Hasta 3 decimales si la unidad lo admite (el e-CF lleva 2)',
+  subtotal    DECIMAL(18,2)  NOT NULL,
   descuento_monto DECIMAL(18,2) NOT NULL DEFAULT 0.00
     COMMENT 'Descuento de la linea en monto; subtotal ya va neto de el',
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
@@ -536,8 +538,8 @@ CREATE TABLE IF NOT EXISTS gasto_items (
   product_id INT(11) NULL DEFAULT NULL
     COMMENT 'FK al catalogo; NULL = linea libre (no mueve inventario)',
   description TEXT NOT NULL,
-  amount DECIMAL(18,2) NOT NULL,
-  quantity INT(11) NOT NULL DEFAULT 1,
+  amount DECIMAL(18,4) NOT NULL,
+  quantity DECIMAL(12,3) NOT NULL DEFAULT 1.000,
   subtotal DECIMAL(18,2) NOT NULL,
   itbis_amount DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
@@ -601,10 +603,10 @@ CREATE TABLE IF NOT EXISTS inventory_movements (
   referencia_tipo VARCHAR(20) NULL
                   COMMENT 'ajuste | factura | gasto',
   referencia_id INT(11)      NULL,
-  cantidad      INT(11)      NOT NULL
+  cantidad      DECIMAL(15,3) NOT NULL
                   COMMENT 'Con signo: positivo suma al stock, negativo resta',
-  cantidad_anterior INT(11)  NOT NULL,
-  cantidad_nueva    INT(11)  NOT NULL,
+  cantidad_anterior DECIMAL(15,3) NOT NULL,
+  cantidad_nueva    DECIMAL(15,3) NOT NULL,
   costo_unitario DECIMAL(18,2) NOT NULL DEFAULT 0.00
                   COMMENT 'Costo con que se valoriza el movimiento (NO cambia products.costo)',
   valor_movimiento DECIMAL(18,2) NOT NULL DEFAULT 0.00

@@ -17,11 +17,19 @@
  */
 final class EcfDocumento
 {
+    /**
+     * Como se resuelven las lineas viejas que no cuadran (ver resolverLinea):
+     * e-CF (precio recortado primero, cantidad a 2 decimales) o factura simple
+     * (cantidad redondeada primero, a 3). Mismos nombres que ModoLinea del front.
+     */
+    public const MODO_ECF = 'ecf';
+    public const MODO_SIMPLE = 'simple';
+
     private array $factura;
     private array $clientData;
     private bool $noElectronica;
 
-    /** @var array<int,array{nombre_item:string,descripcion:string}>|null */
+    /** @var array<int,array{nombre_item:string,descripcion:string,cantidad:string,precio:string,monto:string,descuento:string}>|null */
     private ?array $itemsXml = null;
     private ?array $detalleCache = null;
     private ?array $clienteCache = null;
@@ -320,7 +328,12 @@ final class EcfDocumento
      * a su manera). Incluye el ITBIS por linea ya resuelto y el descuento
      * anotado dentro de la descripcion.
      *
-     * @return array<int,array{cantidad:string,descripcion:string,unidad:string,precio:float,itbis:float,valor:float}>
+     * 'cantidad' y 'precio_texto' ya salen formateados (textoCantidad /
+     * textoPrecio) y resueltos contra el XML firmado o derivados para que
+     * Cantidad x Precio - Descuento de el Valor (ver cantidadesYPrecios).
+     * 'precio' es el mismo precio como numero.
+     *
+     * @return array<int,array{cantidad:string,descripcion:string,unidad:string,precio:float,precio_texto:string,itbis:float,valor:float}>
      */
     public function lineas(): array
     {
@@ -362,6 +375,17 @@ final class EcfDocumento
             }
         }
 
+        // Cantidad y precio se resuelven UNA vez aqui, y de aqui salen la carta,
+        // la tirilla, el recibo web y las vistas previas: si cada formato
+        // resolviera por su cuenta, el mismo comprobante podria decir 84.75 en
+        // uno y 84.7458 en otro. El modo decide el orden y los decimales de una
+        // cantidad derivada (ver resolverLinea).
+        $montos = self::resolverLineas(
+            $items,
+            $this->itemsDesdeXml(),
+            $this->noElectronica ? self::MODO_SIMPLE : self::MODO_ECF
+        );
+
         $lineas = [];
         foreach ($items as $i => $item) {
             $item = (array) $item;
@@ -376,27 +400,272 @@ final class EcfDocumento
             // abrir una columna: las columnas de la RI son las que exige la
             // norma DGII y agregar una rompe ese formato. Asi el cliente ve
             // por que el Valor es menor que Cantidad x Precio.
-            $descuento = (float) ($item['descuento_monto'] ?? 0);
+            $descuento = $montos[$i]['descuento'];
             if ($descuento > 0) {
                 $descripcion .= "\nDescuento: -" . number_format($descuento, 2);
             }
 
-            $cantidad = $item['quantity'] ?? $item['cantidad'] ?? 1;
-            $precio   = (float) ($item['amount'] ?? $item['precio_unitario'] ?? 0);
-            $valor    = (float) ($item['subtotal'] ?? $item['monto_item'] ?? ($cantidad * $precio));
+            $precio = $montos[$i]['precio'];
+            $valor  = $montos[$i]['valor'];
 
             $lineas[] = [
-                'cantidad'    => (string) $cantidad,
-                'descripcion' => $descripcion,
-                'unidad'      => $this->unidadSigla($item['unidad_medida'] ?? ''),
-                'precio'      => $precio,
-                'itbis'       => $this->itbisLinea($item, $valor),
-                'valor'       => $valor,
+                'cantidad'     => self::textoCantidad($montos[$i]['cantidad']),
+                'descripcion'  => $descripcion,
+                'unidad'       => $this->unidadSigla($item['unidad_medida'] ?? ''),
+                'precio'       => $precio,
+                'precio_texto' => self::textoPrecio($precio),
+                'itbis'        => $this->itbisLinea($item, $valor),
+                'valor'        => $valor,
             ];
         }
 
         $this->detalleCache = ['lineas' => $lineas, 'motivo_fila' => $motivoPendiente];
         return $this->detalleCache;
+    }
+
+    // ------------------------------------------------------------------
+    // Cantidad y precio de cada linea (resolucion + formato)
+    // ------------------------------------------------------------------
+
+    /**
+     * Cantidad, precio y valor que se imprimen en cada linea, en el orden de
+     * $items. Publico y sin estado para que cualquier salida de las lineas
+     * (el JSON del detalle, un reporte) diga lo mismo que el papel sin tener
+     * que instanciar el documento.
+     *
+     * Hasta la migracion 025 factura_items guardaba quantity en INT(11) y
+     * amount en DECIMAL(10,2): 1.5 se guardo como 2 y 84.7458 como 84.75,
+     * mientras subtotal si se guardo bien. Imprimir esas filas tal cual da
+     * lineas que no suman (2 x 100 = 150). Ver resolverLinea para el orden.
+     *
+     * @param array  $items      Filas de factura_items (quantity, amount,
+     *                           subtotal, descuento_monto) o items de
+     *                           EcfItemMapper (cantidad, precio_unitario, monto_item).
+     * @param string $xmlFirmado facturas.xml_firmado ('' si no hay; una factura
+     *                           simple nunca lo tiene).
+     * @param string $modo       self::MODO_ECF o self::MODO_SIMPLE (ver resolverLinea).
+     * @return array<int,array{cantidad:float,precio:float,valor:float,descuento:float,origen:string}>
+     */
+    public static function cantidadesYPrecios(array $items, string $xmlFirmado = '', string $modo = self::MODO_SIMPLE): array
+    {
+        return self::resolverLineas(array_values($items), self::itemsXml($xmlFirmado), $modo);
+    }
+
+    /**
+     * @param array<int,array{cantidad:string,precio:string,monto:string}> $itemsXml
+     * @return array<int,array{cantidad:float,precio:float,valor:float,descuento:float,origen:string}>
+     */
+    private static function resolverLineas(array $items, array $itemsXml, string $modo): array
+    {
+        // factura_items se inserta uno a uno en el orden de los Item firmados y
+        // se lee ORDER BY id, asi que el indice empareja fila e Item. Pero una
+        // fila de mas o de menos correria todos los indices: con conteos
+        // distintos el XML no se usa para montos y cada fila se resuelve sola.
+        $usarXml = $itemsXml !== [] && count($itemsXml) === count($items);
+
+        $resueltas = [];
+        foreach ($items as $i => $item) {
+            $item = (array) $item;
+            $cantidad  = self::aNumero($item['quantity'] ?? $item['cantidad'] ?? 1);
+            $precio    = self::aNumero($item['amount'] ?? $item['precio_unitario'] ?? 0);
+            $descuento = self::aNumero($item['descuento_monto'] ?? 0);
+            $valorGuardado = $item['subtotal'] ?? $item['monto_item'] ?? null;
+            // Sin valor guardado se calcula como EcfItemMapper: redondeo por linea.
+            // Vacio cuenta como sin valor, igual que en el front (lineaQueCuadra).
+            $valor = $valorGuardado !== null && $valorGuardado !== ''
+                ? self::aNumero($valorGuardado)
+                : round(round($cantidad * $precio, 2) - $descuento, 2);
+
+            $resueltas[] = [
+                'valor'     => $valor,
+                'descuento' => $descuento,
+            ] + self::resolverLinea(
+                $cantidad,
+                $precio,
+                $valor,
+                $descuento,
+                $usarXml ? ($itemsXml[$i] ?? null) : null,
+                $modo
+            );
+        }
+        return $resueltas;
+    }
+
+    /**
+     * Cantidad y precio de UNA linea, de modo que el papel sume:
+     * round(Cantidad x Precio, 2) - Descuento = Valor.
+     *
+     * Hasta la 025 la BD perdia precision de dos formas: la cantidad en INT(11)
+     * (1.5 -> 2, 0.4 -> 0) y el precio en DECIMAL(10,2) (84.7458 -> 84.75),
+     * mientras el Valor se guardaba con lo escrito. Sin XML no se puede saber
+     * cual se perdio, y con cantidades grandes las dos explicaciones cuadran a
+     * la vez (100 / 84.75 / 8474.58 es 100 x 84.7458 o 99.995 x 84.75). El modo
+     * dice cual fue la perdida realista en cada documento:
+     *
+     *  - MODO_ECF: el e-CF manda el precio SIN ITBIS con 4 decimales (el precio
+     *    con ITBIS / 1.18): se perdia el precio. La cantidad derivada lleva 2
+     *    decimales, los de CantidadItem.
+     *  - MODO_SIMPLE: precios de catalogo de 2 decimales y sin ITBIS que
+     *    desglosar, pero cantidades con decimales en el formulario: se perdia
+     *    la cantidad. La cantidad derivada lleva 3 decimales.
+     *
+     * Orden:
+     *  1. e-CF con su Item firmado: CantidadItem y PrecioUnitarioItem del XML,
+     *     si su MontoItem es el Valor de la fila. Es lo que tiene la DGII.
+     *  2. La fila ya cuadra: tal cual (todo lo guardado desde la 025 y lo viejo
+     *     de cantidad entera y precio de 2 decimales).
+     *  3. y 4., en el orden del modo (e-CF: precio y luego cantidad; simple:
+     *     cantidad y luego precio):
+     *     - Precio recortado: P' = round((Valor + Descuento) / Cantidad, 4), solo
+     *       si cuadra y round(P', 2) es justo el precio guardado.
+     *     - Cantidad redondeada: Q' = round((Valor + Descuento) / Precio, 2|3),
+     *       solo si la guardada es entera, round(Q', 0) es ella y Q' cuadra con
+     *       el precio guardado.
+     *  5. Se perdieron las dos: el mismo Q' con el precio ajustado a el,
+     *     round((Valor + Descuento) / Q', 4).
+     *  6. El precio que hace cuadrar la linea con la cantidad guardada, aunque
+     *     no redondee al guardado.
+     *  7. Nada la hace cuadrar (p.ej. cantidad 0 sin Q' posible): lo guardado.
+     *
+     * Un valor derivado cuadra la linea pero no es necesariamente el que se
+     * escribio (254.24 / 3 = 84.7467, no 84.7458): sin XML no hay forma de
+     * saberlo, y una linea que suma vale mas que un numero que no se puede
+     * comprobar.
+     *
+     * COPIA EXACTA en el front: lineaQueCuadra (fiscalo
+     * src/features/invoices/montosLinea.ts), con la que se carga el formulario
+     * de la factura simple y se muestra el detalle del e-CF. Un cambio aqui va
+     * alli en el mismo cambio, o formulario, pantalla y papel dejan de decir lo
+     * mismo (y reguardar reescribe cantidades).
+     *
+     * @param array|null $xml  Item firmado: ['cantidad'=>, 'precio'=>, 'monto'=>] como texto.
+     * @param string     $modo self::MODO_ECF o self::MODO_SIMPLE (cualquier otro = simple).
+     * @return array{cantidad:float,precio:float,origen:string}
+     */
+    public static function resolverLinea(
+        float $cantidad,
+        float $precio,
+        float $valor,
+        float $descuento = 0.0,
+        ?array $xml = null,
+        string $modo = self::MODO_SIMPLE
+    ): array {
+        if ($xml !== null && is_numeric($xml['precio'] ?? null)) {
+            $montoXml = $xml['monto'] ?? null;
+            // MontoItem es el mismo numero que se guardo como subtotal. Si no
+            // coincide, ese Item no es esta fila y mezclarlos imprimiria una
+            // linea que no suma: mejor resolverla con lo guardado.
+            if (!is_numeric($montoXml) || abs((float) $montoXml - $valor) < 0.005) {
+                return [
+                    'cantidad' => is_numeric($xml['cantidad'] ?? null) ? (float) $xml['cantidad'] : $cantidad,
+                    'precio'   => (float) $xml['precio'],
+                    'origen'   => 'xml',
+                ];
+            }
+        }
+
+        if (self::cuadra($cantidad, $precio, $valor, $descuento)) {
+            return ['cantidad' => $cantidad, 'precio' => $precio, 'origen' => 'bd'];
+        }
+
+        $bruto = $valor + $descuento;
+
+        // Precio recortado: el que cuadra con la cantidad guardada y que el
+        // DECIMAL(10,2) habria dejado justo en el precio que hay.
+        $precioDerivado = $cantidad > 0 ? round($bruto / $cantidad, 4) : null;
+        $cuadraConPrecio = $precioDerivado !== null
+            && self::cuadra($cantidad, $precioDerivado, $valor, $descuento);
+        $porPrecio = $cuadraConPrecio && abs(round($precioDerivado, 2) - $precio) < 1e-6
+            ? ['cantidad' => $cantidad, 'precio' => $precioDerivado, 'origen' => 'precio_derivado']
+            : null;
+
+        // Cantidad redondeada: solo si "la explica el INT", es decir, si la
+        // columna (redondeando la mitad hacia arriba, como MySQL) habria guardado
+        // justo la cantidad que hay.
+        $cantidadDerivada = null;
+        if (abs($cantidad - round($cantidad)) < 1e-9 && $precio > 0) {
+            $q = round($bruto / $precio, self::decimalesCantidad($modo));
+            if ($q > 0 && abs($q - $cantidad) > 1e-9 && abs(round($q) - $cantidad) < 1e-9) {
+                $cantidadDerivada = $q;
+            }
+        }
+        $porCantidad = $cantidadDerivada !== null
+            && self::cuadra($cantidadDerivada, $precio, $valor, $descuento)
+            ? ['cantidad' => $cantidadDerivada, 'precio' => $precio, 'origen' => 'cantidad_derivada']
+            : null;
+
+        $primero = $modo === self::MODO_ECF ? ($porPrecio ?? $porCantidad) : ($porCantidad ?? $porPrecio);
+        if ($primero !== null) {
+            return $primero;
+        }
+
+        if ($cantidadDerivada !== null) {
+            $precioAjustado = round($bruto / $cantidadDerivada, 4);
+            if (self::cuadra($cantidadDerivada, $precioAjustado, $valor, $descuento)) {
+                return ['cantidad' => $cantidadDerivada, 'precio' => $precioAjustado, 'origen' => 'cantidad_y_precio_derivados'];
+            }
+        }
+
+        if ($cuadraConPrecio) {
+            return ['cantidad' => $cantidad, 'precio' => $precioDerivado, 'origen' => 'precio_derivado'];
+        }
+
+        // Nada la hace cuadrar: lo guardado.
+        return ['cantidad' => $cantidad, 'precio' => $precio, 'origen' => 'bd'];
+    }
+
+    /**
+     * Decimales de una cantidad derivada: 2 en el e-CF (CantidadItem, igual que
+     * EcfItemMapper::DECIMALES_CANTIDAD), 3 en la factura simple
+     * (facturaModel::DECIMALES_CANTIDAD_SIMPLE).
+     */
+    private static function decimalesCantidad(string $modo): int
+    {
+        return $modo === self::MODO_ECF ? 2 : 3;
+    }
+
+    /** round(Cantidad x Precio, 2) - Descuento = Valor, con el redondeo de EcfItemMapper. */
+    private static function cuadra(float $cantidad, float $precio, float $valor, float $descuento): bool
+    {
+        return abs(round(round($cantidad * $precio, 2) - $descuento, 2) - $valor) < 0.005;
+    }
+
+    /**
+     * Cantidad para imprimir: sin ceros de relleno y hasta 3 decimales, con
+     * separador de miles (3 -> "3", "1.500" -> "1.5", 1234.125 -> "1,234.125").
+     * Desde la 025 MySQL devuelve la columna como texto DECIMAL ("3.000"):
+     * sin esto el papel diria "3.000". Mismo formato que fmtCantidad del front.
+     */
+    public static function textoCantidad($valor): string
+    {
+        $texto = number_format(self::aNumero($valor), 3, '.', ',');
+        // Siempre lleva punto decimal, asi que el rtrim de ceros nunca se come
+        // los del entero ("1,000.000" -> "1,000.").
+        $texto = rtrim(rtrim($texto, '0'), '.');
+        return $texto === '-0' ? '0' : $texto;
+    }
+
+    /**
+     * Precio unitario para imprimir: 2 decimales, o hasta 4 cuando los tiene
+     * (100 -> "100.00", 84.7 -> "84.70", 84.7458 -> "84.7458"). Con 2 fijos,
+     * 3 x 84.7458 se leeria "3 x 84.75 = 254.24" y el cliente veria una linea
+     * que no suma. Mismo formato que fmtPrecio del front.
+     */
+    public static function textoPrecio($valor): string
+    {
+        $texto = number_format(self::aNumero($valor), 4, '.', ',');
+        // Los decimales 3 y 4 solo se quedan si traen algo: "84.7000" -> "84.70".
+        $texto = (string) preg_replace('/(\.\d{2}\d*?)0+$/', '$1', $texto);
+        return $texto === '-0.00' ? '0.00' : $texto;
+    }
+
+    /** Numero de lo que llegue de la BD (int, float o texto DECIMAL); lo no numerico es 0. */
+    private static function aNumero($valor): float
+    {
+        if (is_int($valor) || is_float($valor)) {
+            return (float) $valor;
+        }
+        return is_scalar($valor) && is_numeric(trim((string) $valor)) ? (float) trim((string) $valor) : 0.0;
     }
 
     /**
@@ -714,16 +983,27 @@ final class EcfDocumento
         return [$nombre, $descripcion];
     }
 
-    /** @return array<int,array{nombre_item:string,descripcion:string}> */
+    /** @return array<int,array{nombre_item:string,descripcion:string,cantidad:string,precio:string,monto:string,descuento:string}> */
     private function itemsDesdeXml(): array
     {
-        if ($this->itemsXml !== null) {
-            return $this->itemsXml;
+        if ($this->itemsXml === null) {
+            $this->itemsXml = self::itemsXml((string) ($this->factura['xml_firmado'] ?? ''));
         }
-        $this->itemsXml = [];
-        $xml = (string) ($this->factura['xml_firmado'] ?? '');
+        return $this->itemsXml;
+    }
+
+    /**
+     * Items del e-CF firmado en el orden del documento (NumeroLinea), con los
+     * textos tal como se firmaron. Publico para que quien exponga las lineas
+     * (el JSON del detalle) lea los mismos valores sin armar el documento.
+     * [] si no hay XML o no se puede leer.
+     *
+     * @return array<int,array{nombre_item:string,descripcion:string,cantidad:string,precio:string,monto:string,descuento:string}>
+     */
+    public static function itemsXml(string $xml): array
+    {
         if ($xml === '' || !class_exists('DOMDocument')) {
-            return $this->itemsXml;
+            return [];
         }
         $previo = libxml_use_internal_errors(true);
         $doc = new DOMDocument();
@@ -732,18 +1012,25 @@ final class EcfDocumento
         libxml_clear_errors();
         libxml_use_internal_errors($previo);
         if (!$ok) {
-            return $this->itemsXml;
+            return [];
         }
+        $items = [];
         foreach ($doc->getElementsByTagName('Item') as $el) {
-            $this->itemsXml[] = [
-                'nombre_item' => $this->textoHijo($el, 'NombreItem'),
-                'descripcion' => $this->textoHijo($el, 'DescripcionItem'),
+            $items[] = [
+                'nombre_item' => self::textoHijo($el, 'NombreItem'),
+                'descripcion' => self::textoHijo($el, 'DescripcionItem'),
+                // Los montos firmados: con ellos se reimprime exacto lo que la
+                // BD vieja recorto (ver resolverLinea).
+                'cantidad'    => self::textoHijo($el, 'CantidadItem'),
+                'precio'      => self::textoHijo($el, 'PrecioUnitarioItem'),
+                'monto'       => self::textoHijo($el, 'MontoItem'),
+                'descuento'   => self::textoHijo($el, 'DescuentoMonto'),
             ];
         }
-        return $this->itemsXml;
+        return $items;
     }
 
-    private function textoHijo($padre, string $tag): string
+    private static function textoHijo($padre, string $tag): string
     {
         $nodos = $padre->getElementsByTagName($tag);
         return $nodos->length === 0 ? '' : trim((string) $nodos->item(0)->textContent);

@@ -255,6 +255,8 @@ CREATE TABLE IF NOT EXISTS unidades_medida (
   id          INT(11)      NOT NULL,
   codigo      VARCHAR(20)  NOT NULL COMMENT 'Sigla DGII (UND, KG, CM...) - solo display',
   descripcion VARCHAR(100) NOT NULL,
+  permite_decimales TINYINT(1) NOT NULL DEFAULT 0
+    COMMENT '1 = la cantidad puede llevar decimales (metro, kg, litro, hora...); 0 = solo enteros (unidad, pieza, caja...). Ver master_migrations/010',
   activo      TINYINT(1)   NOT NULL DEFAULT 1,
   PRIMARY KEY (id),
   UNIQUE KEY uq_codigo (codigo)

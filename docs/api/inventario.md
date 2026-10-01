@@ -112,6 +112,8 @@ Reglas de borrado (mostrar el error al usuario):
 |-------|-----|------|------|
 | `category_id` | no | int \| null | categoría a la que pertenece (opcional) |
 | `warehouse_id` | no* | int | almacén. *Si se **omite al crear**, se asigna `Almacén Principal`. En `PUT`, si se omite se conserva el actual |
+| `stock` | no | number \| null | existencia. Hasta **3 decimales**, y solo si la unidad del producto los admite (ver *Cantidades con decimales*). Puede ser 0 o negativa |
+| `stock_minimo` | no | number \| null | mismo criterio que `stock` |
 
 En **listado y detalle** de productos (`GET /api/products`) cada producto incluye, además de
 `category_id`/`warehouse_id`, los **nombres** resueltos para mostrar en tablas:
@@ -138,6 +140,45 @@ descripción. Un `category_id` no numérico o `<= 0` se ignora (no filtra, no da
 
 > Para poblar los selects del formulario de producto: cargar `GET /api/categories` y
 > `GET /api/warehouses` (usar `?query=` para autocompletar si la lista es grande).
+
+---
+
+## Cantidades con decimales
+
+Desde la migración de tenant `025` (y la master `010`), la existencia y el libro de
+movimientos guardan hasta **3 decimales** (`DECIMAL(15,3)`, hasta 999,999,999,999.999):
+1,5 metros de cable mueven 1,5, no 2, y 0,4 kg ya no se pierden. Antes todo era entero y
+una venta fraccionada se redondeaba.
+
+Excepción para corregir el libro: en una unidad sin decimales se acepta un ajuste con
+fracción **solo si deja entera la existencia** (existencia 8,5 → DISMINUCIÓN 0,5). Así se
+puede arreglar un producto contado por «Unidad» que quedó con fracción, y el formulario
+de producto no bloquea guardar si la existencia fraccionaria no se toca.
+
+**Qué unidad admite decimales** lo dice `permite_decimales` de `GET /api/unidades-medida`
+(1 = metro, kg, litro, hora…; 0 = unidad, pieza, caja…). Si la master aún no tiene la
+columna, llega `null` y no se bloquea nada.
+
+| Dónde | Regla |
+|-------|-------|
+| `POST /api/inventario/ajustes` | cada `lineas[].cantidad` > 0; con decimales solo si la **unidad del producto** los admite, y hasta 3. Si no → **`422`** con el texto para el usuario, p. ej. `"En la línea 2 («Bombillo»), la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad."` (el nombre va entre «» para que el front no lo confunda con texto técnico). Tope: la cantidad debe ser menor que 1,000,000,000,000. |
+| `POST /api/inventario/ajustes/{id}/anular` | la anulación invierte lo guardado tal cual, con sus decimales, aunque después le hayan cambiado la unidad al producto |
+| `POST`/`PUT /api/products` | `stock` y `stock_minimo`: mismo criterio con la unidad que se envía (o `43`, Unidad, si no se envía). En `PUT`, una existencia que **no cambió** con la misma unidad no se juzga: la mueve el libro (vender 1,5 metros de un producto en «Unidad» la deja en 8,5) y el formulario la reenvía en cada guardado. Error → **`422`** `{ "status": false, "error": "En la existencia, …" }` |
+| Ventas, devoluciones y compras | descuentan o suman la cantidad de la línea tal cual (2 decimales en e-CF, 3 en factura simple) |
+
+**Tipos en las respuestas** (mismas claves que antes):
+
+- `GET /api/products`: `stock` y `stock_minimo` llegan como **número** (`12.5`) o `null`,
+  no como texto `"12.500"`.
+- Kardex (`GET /api/inventario/movimientos`) y líneas de un ajuste
+  (`GET /api/inventario/ajustes/{id}` → `lineas`): `cantidad`, `cantidad_anterior` y
+  `cantidad_nueva` llegan como **número** (`-1.5`). `costo_unitario` y `valor_movimiento`
+  siguen como antes (texto con 2 decimales).
+- Valor de inventario (`GET /api/inventario/valor`): `entradas`, `salidas`, `existencia` y
+  `totales.existencia` son números con hasta 3 decimales.
+
+Al mostrarlas: sin ceros de relleno (`1.5`, no `1.500`) — en fiscalo, `fmtCantidad`
+de `src/lib/format.ts`.
 
 ---
 

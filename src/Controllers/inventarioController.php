@@ -68,6 +68,19 @@ function invRespond(bool $ok, $payload, int $code = 200): void
     echo json_encode($ok ? ['status' => true, 'data' => $payload] : ['status' => false, 'error' => $payload]);
 }
 
+/**
+ * HTTP de la respuesta de crearAjuste/anularAjuste: 201 si se creo; el que
+ * traiga el modelo (422 = un dato mal escrito, p. ej. 1,5 en un producto por
+ * unidades); si no, 400 como hasta ahora.
+ */
+function invCodigo(array $res): int
+{
+    if ($res[0] === 'success') {
+        return 201;
+    }
+    return isset($res[2]) && is_int($res[2]) ? $res[2] : 400;
+}
+
 /** page/pageSize comunes, con los mismos topes que el resto del API. */
 function invPaginacion(): array
 {
@@ -187,7 +200,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
                     'description' => 'Ajuste de inventario anulado.',
                 ]);
             }
-            invRespond($res[0] === 'success', $res[1], $res[0] === 'success' ? 201 : 400);
+            invRespond($res[0] === 'success', $res[1], invCodigo($res));
             break;
         }
 
@@ -216,7 +229,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 'description' => 'Ajuste de inventario creado.',
             ]);
         }
-        invRespond($res[0] === 'success', $res[1], $res[0] === 'success' ? 201 : 400);
+        invRespond($res[0] === 'success', $res[1], invCodigo($res));
         break;
 
     default:

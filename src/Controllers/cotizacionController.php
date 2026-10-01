@@ -17,6 +17,8 @@ $auth = new AuthMiddleware();
  */
 function cotValidarItems(array $items): ?string
 {
+    require_once __DIR__ . '/../Models/unidadMedidaModel.php';
+    $unidades = new unidadMedidaModel();
     foreach (array_values($items) as $index => $item) {
         $linea = $index + 1;
         if (!isset($item->description) || empty(trim($item->description))) {
@@ -25,8 +27,16 @@ function cotValidarItems(array $items): ?string
         if (!isset($item->amount) || !is_numeric($item->amount)) {
             return 'El precio de la línea ' . $linea . ' no es válido. Revísalo.';
         }
-        if (!isset($item->quantity) || !is_numeric($item->quantity) || $item->quantity < 1) {
-            return 'La cantidad de la línea ' . $linea . ' debe ser 1 o más.';
+        // Mayor que 0 y hasta 2 decimales. Antes se exigia un entero de 1 o mas
+        // (cotizacion_items.quantity era INT): 0.5 m no se podia cotizar y 1.5
+        // se guardaba como 2. Dos decimales y no tres porque la cotizacion se
+        // convierte en e-CF, cuyo CantidadItem admite 2. Las lineas de una
+        // cotizacion no llevan unidad de medida: no hay regla de fracciones.
+        // Sin cantidad, o una que no es numero, cuenta como 0 (mayor que 0).
+        $cantidad = isset($item->quantity) && is_numeric($item->quantity) ? (float) $item->quantity : 0.0;
+        $problema = $unidades->problemaCantidad($cantidad, null, 2);
+        if ($problema !== null) {
+            return 'Línea ' . $linea . ': ' . mb_strtolower(mb_substr($problema, 0, 1)) . mb_substr($problema, 1);
         }
     }
     return null;
@@ -186,6 +196,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } else {
             $itemError = cotValidarItems($_POST->items);
             if ($itemError !== null) {
+                // 422 como las demas validaciones de lineas (facturas, gastos).
+                http_response_code(422);
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_POST->date) ? $_POST->date : '';
@@ -221,6 +233,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } else {
             $itemError = cotValidarItems($_PUT->items);
             if ($itemError !== null) {
+                http_response_code(422);
                 $respuesta = ['status' => false, 'error' => $itemError];
             } else {
                 $date = isset($_PUT->date) ? $_PUT->date : '';

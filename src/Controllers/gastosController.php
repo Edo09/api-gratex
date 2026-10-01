@@ -361,6 +361,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             gastoRespond(false, 'Agrega al menos una línea con descripción e importe.', 422);
             break;
         }
+        // Cantidades: mayor que 0, entera si la unidad no admite fracciones y
+        // hasta 2 decimales en lo que se emite a la DGII (3 en lo recibido).
+        // Aqui y no dentro de createGasto: la auto-emision reserva el e-NCF alla,
+        // y este corte tiene que ser un 422 antes de tocar la secuencia.
+        $problemaCantidad = $gastoModel->problemaCantidades($body['items'], (string) $body['tipo_gasto']);
+        if ($problemaCantidad !== null) {
+            gastoRespond(false, $problemaCantidad, 422);
+            break;
+        }
         $body['user_id'] = $authUserId ?? ($body['user_id'] ?? null);
 
         $result = $gastoModel->createGasto($body);

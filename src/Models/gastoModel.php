@@ -494,6 +494,13 @@ class gastoModel
             }
 
             $replaceItems = isset($data['items']) && is_array($data['items']);
+            if ($replaceItems) {
+                // Misma regla que el alta, con el tipo ya guardado (no se cambia).
+                $problema = $this->problemaCantidades($data['items'], (string) $row['tipo_gasto']);
+                if ($problema !== null) {
+                    return ['error', $problema];
+                }
+            }
             $items = $replaceItems ? $this->normalizeItems($data['items']) : [];
 
             if ($replaceItems) {
@@ -729,6 +736,7 @@ class gastoModel
      */
     private function mapItemsForEcf(array $items): array
     {
+        require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfItemMapper.php';
         $mapped = [];
         foreach ($items as $i => $it) {
             $nombre = (string) $it['description'];
@@ -745,7 +753,10 @@ class gastoModel
                 'itbis_amount' => (float) $it['itbis_amount'],
             ];
         }
-        return $mapped;
+        // Misma normalizacion que la emision de facturas (cantidad a 2, precio a
+        // 4): CantidadItem y PrecioUnitarioItem salen con los valores ya
+        // redondeados en vez de que ECFXmlBuilder los recorte al escribir.
+        return EcfItemMapper::normalizarCantidadPrecio($mapped);
     }
 
     /**
@@ -891,6 +902,39 @@ class gastoModel
     }
 
     /**
+     * Que esta mal en las cantidades de las lineas, en palabras del usuario
+     * ("Línea 2: la unidad «Unidad» no admite fracciones…"), o null si todas
+     * estan bien. Se mira lo que mando el usuario, ANTES de que normalizeItems
+     * redondee.
+     *
+     * Hasta 2 decimales en lo que la empresa emite a la DGII (E41/E43/E47: su
+     * CantidadItem admite 2) y 3 en lo recibido del proveedor, que es un
+     * registro interno como la factura simple. La unidad es la de la linea (el
+     * formulario siempre la manda); sin unidad no hay regla de fracciones.
+     * gastosController la llama antes de createGasto: la auto-emision reserva
+     * el e-NCF dentro, y una cantidad invalida tiene que cortar antes.
+     */
+    public function problemaCantidades(array $items, string $tipoGasto): ?string
+    {
+        require_once __DIR__ . '/unidadMedidaModel.php';
+        $esAutoEmision = in_array(strtoupper(trim($tipoGasto)), self::AUTO_EMISION_TYPES, true);
+        $maxDecimales = $esAutoEmision ? 2 : 3;
+        $unidades = new unidadMedidaModel();
+        foreach (array_values($items) as $i => $raw) {
+            $raw = (array) $raw;
+            // Misma lectura que normalizeItems (sin cantidad = 1).
+            $cantidad = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
+            $problema = $unidades->problemaCantidad($cantidad, $raw['unidad_medida'] ?? null, $maxDecimales);
+            if ($problema !== null) {
+                // "Línea 2: la cantidad…", igual que arma el front sus avisos por línea.
+                return 'Línea ' . ($i + 1) . ': '
+                    . mb_strtolower(mb_substr($problema, 0, 1)) . mb_substr($problema, 1);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Normaliza las lineas recibidas al formato de gasto_items.
      * El ITBIS, si no viene explicito, se calcula del indicador_facturacion
      * (1=18%, 2=16%, resto=0), igual que computeTotales del modulo de facturas.
@@ -900,8 +944,13 @@ class gastoModel
         $normalized = [];
         foreach ($items as $raw) {
             $raw = (array) $raw;
-            $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
-            $amount = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+            // Cantidad a 3 decimales y costo a 4: lo que guardan
+            // gasto_items.quantity DECIMAL(12,3) y amount DECIMAL(18,4), asi el
+            // subtotal por defecto sale de lo mismo que queda en la base. La
+            // cantidad ya llego validada (problemaCantidades: 2 decimales en lo
+            // que se emite a la DGII): esto solo limpia el ruido binario.
+            $quantity = round((float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1), 3);
+            $amount = round((float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0), 4);
             $subtotal = isset($raw['subtotal']) && $raw['subtotal'] !== ''
                 ? (float) $raw['subtotal']
                 : round($quantity * $amount, 2);

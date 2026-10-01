@@ -123,7 +123,7 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 
 ### `cotizaciones` / `cotizacion_items`
 `cotizaciones`: `id`, `code`, `date`, `client_id` (nullable), `client_name`, `total`.
-`cotizacion_items`: `id`, `cotizacion_id` (FK CASCADE), `description`, `amount`, `quantity`, `subtotal`.
+`cotizacion_items`: `id`, `cotizacion_id` (FK CASCADE), `description`, `amount` decimal(18,4), `quantity` decimal(12,3), `subtotal` decimal(18,2) (025).
 
 ### `products` (migración 012)
 Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
@@ -156,7 +156,7 @@ Columnas base + tracking e-CF (migraciones 001/003/005/006).
 | `date` | datetime | default CURRENT_TIMESTAMP |
 | `client_id` | int | nullable |
 | `client_name` | varchar(100) | |
-| `total` | decimal(10,2) | |
+| `total` | decimal(18,2) | (025; antes 10,2) |
 | `NCF` | varchar(50) | nullable tras 001 (facturas simples) |
 | `user_id` | int | nullable (referencia a `master.users.id`, sin FK cross-DB) |
 | **e-CF (001)** | | |
@@ -185,9 +185,9 @@ Columnas base + tracking e-CF (migraciones 001/003/005/006).
 | `id` | int PK AI | |
 | `factura_id` | int | FK → facturas(id) CASCADE |
 | `description` | text | |
-| `amount` | decimal(10,2) | precio unitario |
-| `quantity` | int | default 1 |
-| `subtotal` | decimal(10,2) | |
+| `amount` | decimal(18,4) | precio unitario, hasta 4 decimales (025) |
+| `quantity` | decimal(12,3) | default 1.000; decimales solo si la unidad lo admite (025) |
+| `subtotal` | decimal(18,2) | (025) |
 | `indicador_facturacion` | tinyint | (001) 0=No fact 1=ITBIS18 2=ITBIS16 3=ITBIS0 4=Exento |
 | `indicador_bien_servicio` | tinyint | (001) 1=Bien 2=Servicio |
 | `unidad_medida` | varchar(10) | (014) código DGII (43 = Unidad); columna "Und. Medida" de la RI |

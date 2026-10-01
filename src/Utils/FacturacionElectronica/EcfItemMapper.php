@@ -17,6 +17,44 @@
  */
 class EcfItemMapper
 {
+    /** Decimales de CantidadItem en el XSD (Decimal18D1or2). */
+    public const DECIMALES_CANTIDAD = 2;
+
+    /** Decimales de PrecioUnitarioItem en el XSD (Decimal20D1or4). */
+    public const DECIMALES_PRECIO = 4;
+
+    /**
+     * Deja cantidad y precio de cada linea con los decimales que admite el XML:
+     * cantidad a 2 y precio a 4, con el round() del servidor (el front imita el
+     * de PHP 8.3 en montosLinea.ts).
+     *
+     * Se aplica UNA vez y antes de todo lo demas (descuento del cliente,
+     * totales(), map() y lo que se guarda en factura_items): MontoItem =
+     * round(cantidad x precio, 2) - descuento tiene que salir de los MISMOS
+     * valores que imprime el XML. Antes los totales usaban el valor crudo y
+     * ECFXmlBuilder::qty() recortaba a 2 decimales solo al escribir: 1.125 x
+     * 84.7458 firmaba CantidadItem 1.13 con MontoItem 95.34 (1.13 x 84.7458 =
+     * 95.76), y un precio de 5 decimales salia con 2.
+     *
+     * La cantidad se valida ANTES (unidadMedidaModel::problemaCantidad con 2
+     * decimales): aqui solo se limpia el ruido binario, nunca se convierte en
+     * silencio 1.125 en 1.13. No toca cantidad_raw / precio_unitario_raw: el
+     * set de certificacion DGII (strict_input) va tal cual y quien llama no
+     * normaliza en ese modo. monto_item del body, si viene, se respeta como
+     * siempre (map()).
+     */
+    public static function normalizarCantidadPrecio(array $items): array
+    {
+        foreach ($items as &$item) {
+            $item = (array) $item;
+            // Misma lectura que map(): sin cantidad = 1, sin precio = 0.
+            $item['cantidad'] = round((float) ($item['cantidad'] ?? $item['quantity'] ?? 1), self::DECIMALES_CANTIDAD);
+            $item['precio_unitario'] = round((float) ($item['precio_unitario'] ?? $item['amount'] ?? 0), self::DECIMALES_PRECIO);
+        }
+        unset($item);
+        return $items;
+    }
+
     public static function map(array $items, bool $strict = false): array
     {
         $mapped = [];

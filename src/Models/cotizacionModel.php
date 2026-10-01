@@ -10,6 +10,31 @@ class cotizacionModel
         $this->conexion = Database::getInstance()->getConnection();
     }
 
+    /**
+     * Parametros de una linea para el INSERT, venga como objeto (json_decode sin
+     * assoc) o como arreglo. `$item->x ?? $item['x']` no servia: si el campo
+     * faltaba en un objeto, PHP 8 cortaba con "Cannot use object of type
+     * stdClass as array" (500) en vez de caer al respaldo.
+     *
+     * Precio hasta 4 decimales (amount DECIMAL(18,4)) y cantidad hasta 2
+     * (quantity DECIMAL(12,3); la cotizacion se convierte en e-CF, que admite 2).
+     * cotValidarItems ya rechazo lo que tuviera mas: el round solo limpia el
+     * ruido binario. El subtotal, si no viene, es precio x cantidad.
+     */
+    private static function filaItem($item): array
+    {
+        $campo = static fn(string $k) => is_array($item) ? ($item[$k] ?? null) : ($item->$k ?? null);
+        $amount = round((float) $campo('amount'), 4);
+        $quantity = round((float) $campo('quantity'), 2);
+        $subtotal = $campo('subtotal');
+        return [
+            ':description' => (string) ($campo('description') ?? ''),
+            ':amount' => $amount,
+            ':quantity' => $quantity,
+            ':subtotal' => $subtotal !== null && $subtotal !== '' ? round((float) $subtotal, 2) : round($amount * $quantity, 2),
+        ];
+    }
+
     public function getCotizaciones($id = null)
     {
         try {
@@ -146,13 +171,7 @@ class cotizacionModel
             $itemStmt = $this->conexion->prepare($itemSql);
 
             foreach ($items as $item) {
-                $itemStmt->execute([
-                    ':cotizacion_id' => $cotizacion_id,
-                    ':description' => $item->description ?? $item['description'],
-                    ':amount' => $item->amount ?? $item['amount'],
-                    ':quantity' => $item->quantity ?? $item['quantity'],
-                    ':subtotal' => $item->subtotal ?? $item['subtotal']
-                ]);
+                $itemStmt->execute([':cotizacion_id' => $cotizacion_id] + self::filaItem($item));
             }
 
             // Commit transaction
@@ -242,13 +261,7 @@ class cotizacionModel
             $itemStmt = $this->conexion->prepare($itemSql);
             
             foreach ($items as $item) {
-                $itemStmt->execute([
-                    ':cotizacion_id' => $id,
-                    ':description' => $item->description ?? $item['description'],
-                    ':amount' => $item->amount ?? $item['amount'],
-                    ':quantity' => $item->quantity ?? $item['quantity'],
-                    ':subtotal' => $item->subtotal ?? $item['subtotal']
-                ]);
+                $itemStmt->execute([':cotizacion_id' => $id] + self::filaItem($item));
             }
             
             // Commit transaction

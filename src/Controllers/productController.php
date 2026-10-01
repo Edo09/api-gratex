@@ -7,6 +7,7 @@ header("Allow: GET, POST, OPTIONS, PUT, DELETE");
 header('content-type: application/json; charset=utf-8');
 
 require_once(__DIR__ . '/../Models/productModel.php');
+require_once(__DIR__ . '/../Models/unidadMedidaModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
 
 $productModel = new productModel();
@@ -21,11 +22,76 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
 }
 
 /**
+ * Existencia y stock mínimo: pueden llevar decimales (hasta 3, DECIMAL(15,3))
+ * solo si la unidad del producto los admite. A diferencia de una cantidad de
+ * factura pueden ser 0, y la existencia negativa (se vende sin bloquear), así
+ * que de problemaCantidad solo cuenta la parte de decimales y unidad.
+ *
+ * En PUT, un valor que no cambió, con la misma unidad, no se juzga: el libro
+ * mueve la existencia (vender 1,5 metros de un producto en "Unidad" la deja en
+ * 8,5) y el formulario la reenvía tal cual en cada guardado; rechazarla
+ * impediría hasta corregir el precio. El formulario (fiscalo
+ * ProductFormModal.tsx) aplica la misma excepción.
+ *
+ * @param array|null $actual fila guardada del producto (PUT) o null (POST)
+ */
+function problemaExistencias($p, ?array $actual): ?string
+{
+    static $unidades = null;
+    $unidad = productModel::unidadDelPayload($p);
+    $mismaUnidad = $actual !== null && trim((string) ($actual['unidad_medida'] ?? '')) === $unidad;
+    foreach (['stock' => 'la existencia', 'stock_minimo' => 'el stock mínimo'] as $campo => $nombre) {
+        $valor = $p->$campo ?? null;
+        if ($valor === null || $valor === '') {
+            continue;
+        }
+        if (!is_numeric($valor)) {
+            return ucfirst($nombre) . ' tiene que ser un número.';
+        }
+        $n = (float) $valor;
+        // DECIMAL(15,3) llega a 999,999,999,999.999; pasado eso MySQL lo rechaza
+        // y el formulario diría "no se pudo guardar" sin decir por qué. Se mira
+        // el valor ya redondeado a 3, que es lo que se guarda.
+        if (abs(round($n, 3)) >= 1000000000000) {
+            return ucfirst($nombre) . ' es demasiado grande.';
+        }
+        if (unidadMedidaModel::decimalesDe($n) === 0) {
+            continue;
+        }
+        if ($mismaUnidad && isset($actual[$campo]) && abs((float) $actual[$campo] - $n) < 0.0005) {
+            continue;
+        }
+        if ($unidades === null) {
+            // Fail-open, como permiteDecimales: sin la master no se bloquea el
+            // producto por esto (el valor se guarda redondeado a 3).
+            try {
+                $unidades = new unidadMedidaModel();
+            } catch (Throwable $e) {
+                error_log('[productos] sin catalogo de unidades (fail-open): ' . $e->getMessage());
+                $unidades = false;
+            }
+        }
+        if ($unidades === false) {
+            return null;
+        }
+        // abs(): a la existencia negativa se le juzgan los decimales igual.
+        $problema = $unidades->problemaCantidad(abs($n), $unidad, 3);
+        if ($problema !== null) {
+            return 'En ' . $nombre . ', ' . lcfirst($problema);
+        }
+    }
+    return null;
+}
+
+/**
  * Valida los campos comunes de un producto en POST/PUT. Devuelve string de error o null.
  * Los textos llegan tal cual al formulario de producto: se escriben para quien
  * lo llena (sin nombres de campos del JSON).
+ *
+ * @param array|null $actual fila guardada (PUT), para no juzgar una existencia
+ *                           que no se tocó (ver problemaExistencias)
  */
-function validateProduct($p): ?string
+function validateProduct($p, ?array $actual = null): ?string
 {
     if (!isset($p->nombre) || is_null($p->nombre) || empty(trim($p->nombre)) || strlen($p->nombre) > 150) {
         return 'El nombre del producto es obligatorio y puede tener hasta 150 caracteres.';
@@ -63,7 +129,7 @@ function validateProduct($p): ?string
         && (!is_numeric($p->warehouse_id) || (int) $p->warehouse_id <= 0)) {
         return 'El almacén elegido no es válido. Elige otro de la lista.';
     }
-    return null;
+    return problemaExistencias($p, $actual);
 }
 
 switch ($_SERVER['REQUEST_METHOD']) {
@@ -109,6 +175,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $_POST = InputSanitizer::jsonInput(false);
         $error = validateProduct($_POST);
         if ($error !== null) {
+            // 422: es un dato del formulario, no un fallo del servidor.
+            http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
         } else {
             $result = $productModel->saveProduct($_POST);
@@ -128,12 +196,18 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'PUT':
         $_PUT = InputSanitizer::jsonInput(false);
+        // La fila guardada se lee ANTES de validar: una existencia que no cambio
+        // no se juzga (ver problemaExistencias). La misma sirve para la auditoria.
+        $oldProduct = isset($_PUT->id) && trim((string) $_PUT->id) !== ''
+            ? ($productModel->getProducts($_PUT->id)[0] ?? null)
+            : null;
         if (!isset($_PUT->id) || is_null($_PUT->id) || empty(trim((string) $_PUT->id))) {
             $respuesta = ['status' => false, 'error' => 'No se pudo identificar el producto. Cierra la ventana y ábrelo de nuevo.'];
-        } else if (($error = validateProduct($_PUT)) !== null) {
+        } else if (($error = validateProduct($_PUT, $oldProduct)) !== null) {
+            // 422: es un dato del formulario, no un fallo del servidor.
+            http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
         } else {
-            $oldProduct = $productModel->getProducts($_PUT->id)[0] ?? null;
             $result = $productModel->updateProduct($_PUT->id, $_PUT);
             $respuesta = $result[0] === 'success'
                 ? ['status' => true, 'data' => $result[1]]

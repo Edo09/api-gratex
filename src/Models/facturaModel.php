@@ -17,6 +17,13 @@ class facturaModel
     /** La factura simple desaparecio entre que se abrio y se guardo/elimino. */
     public const MSG_SIMPLE_YA_NO_EXISTE = 'Esta factura ya no existe. Puede que la hayan eliminado; vuelve al listado.';
 
+    /**
+     * Decimales de cantidad de una factura simple: los de
+     * factura_items.quantity DECIMAL(12,3). No va a la DGII, asi que no la ata
+     * el limite de 2 del e-CF (EcfItemMapper::DECIMALES_CANTIDAD).
+     */
+    public const DECIMALES_CANTIDAD_SIMPLE = 3;
+
     public function __construct()
     {
         $this->conexion = Database::getInstance()->getConnection();
@@ -259,10 +266,21 @@ class facturaModel
     public function normalizeSimpleItems(array $items): array
     {
         $normalized = [];
+        // La unidad de una linea del catalogo es la del producto: el formulario
+        // de la factura simple no la manda, y sin esto todo se guardaba (e
+        // imprimia) como "Unidad" (43), aunque fueran metros o kilos.
+        $unidadesProducto = $this->unidadesDeProductos(
+            array_map(static fn($it) => ((array) $it)['product_id'] ?? null, $items)
+        );
         foreach ($items as $raw) {
             $raw = (array) $raw;
-            $quantity = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
-            $amount = (float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0);
+            // Cantidad a 3 decimales y precio a 4: lo que guardan
+            // factura_items.quantity DECIMAL(12,3) y amount DECIMAL(18,4). Asi el
+            // subtotal se calcula con lo mismo que queda en la base (y que ve la
+            // vista previa). La cantidad ya llego validada
+            // (problemaCantidadesSimples): esto solo limpia el ruido binario.
+            $quantity = round((float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1), self::DECIMALES_CANTIDAD_SIMPLE);
+            $amount = round((float) ($raw['amount'] ?? $raw['precio_unitario'] ?? 0), 4);
             // Descuento en MONTO, acotado a [0, bruto]. El subtotal va neto de el.
             $bruto = round($quantity * $amount, 2);
             $descuento = isset($raw['descuento_monto']) && is_numeric($raw['descuento_monto'])
@@ -284,11 +302,134 @@ class facturaModel
                 // dejar NULL en el esquema comun.
                 'indicador_facturacion' => 1,
                 'indicador_bien_servicio' => (int) ($raw['indicador_bien_servicio'] ?? 1),
-                'unidad_medida' => (string) ($raw['unidad_medida'] ?? '43'),
+                'unidad_medida' => (string) (($raw['unidad_medida'] ?? '') !== ''
+                    ? $raw['unidad_medida']
+                    : ($unidadesProducto[(int) ($raw['product_id'] ?? 0)] ?? '43')),
                 'itbis_amount' => 0.0,
             ];
         }
         return $normalized;
+    }
+
+    /**
+     * Que esta mal en las cantidades de una factura simple, en palabras del
+     * usuario ("Línea 2: la unidad «Unidad» no admite fracciones…"), o null si
+     * todas estan bien. Se mira lo que mando el usuario, ANTES de que
+     * normalizeSimpleItems redondee: 1.2345 no pasa en silencio a 1.235.
+     *
+     * Unidad con la que se juzga cada linea: la suya si viene; si no, la del
+     * producto del catalogo (el formulario de la factura simple no manda la
+     * unidad); una linea libre sin ninguna de las dos no tiene regla de unidad,
+     * solo mayor que 0 y hasta 3 decimales. Fail-open como el catalogo: si no se
+     * pueden leer los productos, se juzga sin unidad.
+     *
+     * $previas: las lineas guardadas de la factura que se edita. Una linea que
+     * repite la cantidad de una de ellas (ver cantidadesHeredadas) tampoco se
+     * juzga con la regla de la unidad: una factura vieja pudo guardar 1.5 m en
+     * un producto que hoy se cuenta entero, y sin esto no se podia cambiar ni
+     * la fecha. Mayor que 0 y hasta 3 decimales se exigen igual; una linea
+     * nueva o con otra cantidad lleva la regla completa. El formulario hace lo
+     * mismo (fiscalo SimpleInvoiceFormView, cantidadHeredada).
+     */
+    public function problemaCantidadesSimples(array $items, array $previas = []): ?string
+    {
+        require_once __DIR__ . '/unidadMedidaModel.php';
+        $items = array_values(array_map(static fn($it) => (array) $it, $items));
+        $unidadesProducto = $this->unidadesDeProductos(array_column($items, 'product_id'));
+        $heredadas = self::cantidadesHeredadas($previas);
+        $unidades = new unidadMedidaModel();
+        foreach ($items as $i => $raw) {
+            $unidad = $raw['unidad_medida'] ?? null;
+            if (($unidad === null || $unidad === '') && !empty($raw['product_id'])) {
+                $unidad = $unidadesProducto[(int) $raw['product_id']] ?? null;
+            }
+            // Misma lectura que normalizeSimpleItems (sin cantidad = 1).
+            $cantidad = (float) ($raw['quantity'] ?? $raw['cantidad'] ?? 1);
+            if (self::esCantidadHeredada($raw['product_id'] ?? null, $cantidad, $heredadas)) {
+                // Sin unidad no hay regla de fracciones; lo demas se juzga igual.
+                $unidad = null;
+            }
+            $problema = $unidades->problemaCantidad($cantidad, $unidad, self::DECIMALES_CANTIDAD_SIMPLE);
+            if ($problema !== null) {
+                // "Línea 2: la cantidad…", igual que arma el front sus avisos por línea.
+                return 'Línea ' . ($i + 1) . ': '
+                    . mb_strtolower(mb_substr($problema, 0, 1)) . mb_substr($problema, 1);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * [product_id => cantidades] de las lineas guardadas de una factura simple
+     * (0 = linea libre). Por cada fila, dos: la guardada y la que resuelve
+     * EcfDocumento::resolverLinea en MODO_SIMPLE, que es la que imprime el papel
+     * y la que carga el formulario al editar (lineaQueCuadra en modo 'simple'):
+     * 2 / 100 / 150 de antes de la 025 vuelve del formulario como 1.5.
+     * Estatica y sin BD para poder probarla sola.
+     *
+     * @param array $previas Filas de factura_items (quantity, amount, subtotal, descuento_monto, product_id).
+     * @return array<int,float[]>
+     */
+    public static function cantidadesHeredadas(array $previas): array
+    {
+        if ($previas === []) {
+            return [];
+        }
+        require_once __DIR__ . '/../Utils/Pdf/EcfDocumento.php';
+        $previas = array_values(array_map(static fn($it) => (array) $it, $previas));
+        $resueltas = EcfDocumento::cantidadesYPrecios($previas, '', EcfDocumento::MODO_SIMPLE);
+        $mapa = [];
+        foreach ($previas as $i => $fila) {
+            $producto = (int) ($fila['product_id'] ?? 0);
+            $guardada = $fila['quantity'] ?? $fila['cantidad'] ?? null;
+            if (is_numeric($guardada)) {
+                $mapa[$producto][] = (float) $guardada;
+            }
+            $mapa[$producto][] = (float) $resueltas[$i]['cantidad'];
+        }
+        return $mapa;
+    }
+
+    /**
+     * ¿La cantidad es la de una linea guardada del mismo producto? (ver
+     * cantidadesHeredadas). Tolerancia de 1e-9: ambas llegan ya a 3 decimales.
+     *
+     * @param array<int,float[]> $heredadas
+     */
+    public static function esCantidadHeredada($productId, float $cantidad, array $heredadas): bool
+    {
+        foreach ($heredadas[(int) ($productId ?? 0)] ?? [] as $q) {
+            if (abs($q - $cantidad) < 1e-9) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * [product_id => unidad_medida] de los productos del catalogo que usan las
+     * lineas. Vacio si no hay productos o si la consulta falla (fail-open: una
+     * lectura fallida no puede impedir vender).
+     */
+    private function unidadesDeProductos(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($id) => $id > 0)));
+        if (!$ids) {
+            return [];
+        }
+        try {
+            $marcas = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->conexion->prepare("SELECT id, unidad_medida FROM products WHERE id IN ({$marcas})");
+            $stmt->execute($ids);
+            $mapa = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                $mapa[(int) $p['id']] = (string) $p['unidad_medida'];
+            }
+            return $mapa;
+        } catch (PDOException $e) {
+            error_log('[facturas] unidades de productos (fail-open): ' . $e->getMessage());
+            return [];
+        }
     }
 
     private function insertSimpleItems(int $facturaId, array $items): void
@@ -931,9 +1072,13 @@ class facturaModel
                  :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
             $itemStmt = $this->conexion->prepare($itemSql);
             foreach ($factura['items'] as $item) {
-                $amount = (float) ($item['amount'] ?? 0);
-                $quantity = (float) ($item['quantity'] ?? 1);
-                $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : $amount * $quantity;
+                // Precio a 4 y cantidad a 3, lo que guardan amount DECIMAL(18,4) y
+                // quantity DECIMAL(12,3). La emision ya los manda normalizados
+                // (EcfItemMapper::normalizarCantidadPrecio: 4 y 2, lo del XML);
+                // esto solo deja explicito lo que queda en la base.
+                $amount = round((float) ($item['amount'] ?? 0), 4);
+                $quantity = round((float) ($item['quantity'] ?? 1), 3);
+                $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : round($amount * $quantity, 2);
                 $itemStmt->execute([
                     ':factura_id' => $facturaId,
                     ':product_id' => $item['product_id'] ?? null,

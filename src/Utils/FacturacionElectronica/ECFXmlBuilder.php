@@ -723,7 +723,14 @@ class ECFXmlBuilder
         if (preg_match('/^\d+\.\d{1,4}$/', $text)) {
             return $text;
         }
-        return $this->money($value);
+        // Fuera del patron (entero, mas de 4 decimales, un float que el ini
+        // `precision` del servidor pasa a texto con ruido): a 4 decimales, lo que
+        // admite PrecioUnitarioItem, sin ceros de relleno despues del segundo
+        // (10 -> 10.00, 10.1230 -> 10.123). Antes caia a money() y un precio de
+        // 10.12345 firmaba 10.12 mientras MontoItem se calculaba con el completo.
+        // EcfItemMapper::normalizarCantidadPrecio ya lo deja en 4: esto es la red.
+        $fijo = number_format((float) ($value ?? 0), 4, '.', '');
+        return preg_replace('/(\.\d{2}\d*?)0+$/', '$1', $fijo);
     }
 
     private function qty($value): string

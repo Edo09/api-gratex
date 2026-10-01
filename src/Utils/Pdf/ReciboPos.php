@@ -512,10 +512,14 @@ final class ReciboPos
         return $pares;
     }
 
-    /** "2 UND x 950.00" */
+    /**
+     * "2 UND x 950.00", "1.5 MTR x 84.7458". Cantidad y precio llegan ya
+     * formateados y resueltos por EcfDocumento para que la cuenta de el valor
+     * de la derecha; recortar aqui el precio a 2 decimales la rompia.
+     */
     private function textoCantidadPrecio(array $linea): string
     {
-        return $linea['cantidad'] . ' ' . $linea['unidad'] . ' x ' . number_format($linea['precio'], 2);
+        return $linea['cantidad'] . ' ' . $linea['unidad'] . ' x ' . $linea['precio_texto'];
     }
 
     /** "ITBIS 171.00", o '' si la linea no lleva. */

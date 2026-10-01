@@ -77,7 +77,7 @@ documento completo en una sola llamada:
       "id": 1154, "e_ncf": "E310000000335", "tipo_ecf": "31", "total": "2950.00",
       "estado_dgii": "ACEPTADO", "codigo_seguridad": "mG2wqe",
       "items": [
-        { "description": "Servicio profesional", "quantity": "5", "amount": "1500.00",
+        { "description": "Servicio profesional", "quantity": "5.000", "amount": "1500.0000",
           "subtotal": "7500.00", "itbis_amount": "1350.00", "indicador_facturacion": 1 }
       ],
       "cliente": { "id": 3511, "client_name": "...", "razon_social": "...", "rnc": "...", "direccion": "..." },
@@ -87,7 +87,12 @@ documento completo en una sola llamada:
 }
 ```
 
-- `items` — líneas de `factura_items`.
+- `items` — líneas de `factura_items`. Desde la migración 025 `quantity` llega
+  como texto con 3 decimales (`"5.000"`, `"1.500"`) y `amount` con 4
+  (`"84.7458"`): convertirlos a número antes de operar (`Number()`, nunca `+`
+  entre textos) y darles formato al mostrarlos. Las facturas anteriores guardaron
+  el precio con 2 decimales y la cantidad entera; el valor exacto está en
+  `xml_firmado` (`CantidadItem` / `PrecioUnitarioItem`, mismo orden que `items`).
 - `cliente` — registro completo de `clients` (solo si la factura tiene `client_id`).
 - `emisor` — fila de `emisor_config` del tenant.
 
@@ -348,14 +353,18 @@ para mostrar; **no** se envían al XML.
 
 ```json
 { "status": true, "data": [
-  { "id": 21, "codigo": "KG", "descripcion": "Kilogramo" },
-  { "id": 43, "codigo": "UND", "descripcion": "Unidad" }
+  { "id": 21, "codigo": "KG", "descripcion": "Kilogramo", "permite_decimales": true },
+  { "id": 43, "codigo": "UND", "descripcion": "Unidad", "permite_decimales": false }
 ]}
 ```
 
 - En `POST /api/facturas` y `POST /api/gastos`, cada `items[].unidad_medida` debe
   ser un `id` válido del catálogo (si se omite/queda vacío, default `43`). Un
   código fuera del catálogo devuelve **422**.
+- `permite_decimales` dice si una cantidad en esa unidad puede llevar decimales
+  (1.5 metros sí, 1.5 unidades no). Una línea con decimales en una unidad que no
+  los admite devuelve **422** (ver "Cantidad y precio de las líneas"). Es `null`
+  mientras la master no tenga la migración 010: entonces no se bloquea nada.
 - Aplica también a la auto-emisión de gastos (E41/E43/E47) y se persiste en
   `factura_items.unidad_medida` / `gasto_items.unidad_medida`.
 
@@ -459,6 +468,26 @@ Todo lo demás (`fecha_emision`, `tipo_pago`, `tipo_ingresos`, `totales`, `compr
 #### Campos de pago opcionales (crédito)
 
 `fecha_limite_pago`, `termino_pago`, `tipo_cuenta_pago`, `numero_cuenta_pago`, `banco_pago`, `fecha_desde`, `fecha_hasta`, `total_paginas`.
+
+### Cantidad y precio de las líneas
+
+- `cantidad` (o `quantity`): mayor que 0 y **hasta 2 decimales** (`CantidadItem`
+  es `Decimal18D1or2` en el XSD). Si la unidad de la línea no admite fracciones
+  (`permite_decimales = false`: Unidad, Caja, Par…) tiene que ser entera; una
+  línea sin `unidad_medida` no se juzga por unidad. Si no se cumple responde
+  **422** con el texto para el usuario (p. ej. `"Línea 2: la cantidad admite
+  hasta 2 decimales."`) **antes** de reservar el e-NCF. No se redondea en
+  silencio: 1.125 se rechaza, no se firma como 1.13.
+- `precio_unitario` (o `amount`): se redondea a **4 decimales**
+  (`PrecioUnitarioItem` es `Decimal20D1or4`).
+- Las dos se normalizan **una sola vez**, antes del descuento del cliente, los
+  totales, el XML y el guardado (`EcfItemMapper::normalizarCantidadPrecio`):
+  `MontoItem = round(cantidad × precio, 2) − descuento` sale de los mismos
+  valores que imprime el XML y que quedan en `factura_items`
+  (`quantity` DECIMAL(12,3), `amount` DECIMAL(18,4)).
+- Aplica igual a `POST /api/facturas/preview`.
+- `strict_input` (set de pruebas DGII) no pasa por esta validación ni por el
+  redondeo: `cantidad_raw` / `precio_unitario_raw` y los montos del set van tal cual.
 
 ---
 
@@ -959,7 +988,7 @@ pensado para mostrarse tal cual al usuario (español llano, sin nombres de campo
 { "status": false, "error": "Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo." }
 ```
 
-Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, RNC faltante, datos de la nota E33/E34, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII · `500` la DGII recibió el e-CF pero no se pudo guardar (el mensaje trae el e-NCF y pide no volver a emitirla).
+Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, unidad de medida, cantidad de una línea, RNC faltante, datos de la nota E33/E34, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII · `500` la DGII recibió el e-CF pero no se pudo guardar (el mensaje trae el e-NCF y pide no volver a emitirla).
 
 En un `502` el texto depende del caso: los que el usuario puede resolver o
 reportar (rango e-NCF agotado, emisor o certificado sin configurar) traen su

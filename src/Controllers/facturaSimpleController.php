@@ -7,7 +7,8 @@
 //   GET    /api/facturas-simples?id={id}       -> idem
 //   GET    /api/facturas-simples/{id}/pdf      -> PDF de la factura guardada (?format=download|base64|datos, ?formato=pos|pos76|pos72)
 //   POST   /api/facturas-simples              -> crear
-//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64|datos, ?formato=pos|pos76|pos72)
+//   POST   /api/facturas-simples/preview      -> PDF previo sin guardar (?format=download|base64|datos, ?formato=pos|pos76|pos72;
+//                                               factura_id opcional en el body: la que se edita, para juzgar las cantidades como el PUT)
 //   PUT    /api/facturas-simples/{id}          -> actualizar (id tambien valido en el body)
 //   DELETE /api/facturas-simples/{id}          -> eliminar (id tambien valido en el body)
 //
@@ -174,6 +175,19 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
     }
     if (!isset($body['items']) || !is_array($body['items']) || count($body['items']) === 0) {
         fsRespond(false, FS_SIN_LINEAS, 422);
+        return;
+    }
+    // Misma regla de cantidades que al guardar: la vista previa no puede
+    // mostrar una linea que despues no se deja guardar, ni negarse a mostrar
+    // una que si. Al editar, el front manda factura_id y las lineas se juzgan
+    // contra las guardadas, igual que en el PUT.
+    $previas = [];
+    if (isset($body['factura_id']) && is_numeric($body['factura_id']) && (int) $body['factura_id'] > 0) {
+        $previas = $facturaModel->getFacturaSimple((int) $body['factura_id'])['items'] ?? [];
+    }
+    $errorCantidad = $facturaModel->problemaCantidadesSimples($body['items'], $previas);
+    if ($errorCantidad !== null) {
+        fsRespond(false, $errorCantidad, 422);
         return;
     }
 
@@ -381,6 +395,13 @@ switch ($_SERVER['REQUEST_METHOD']) {
             fsRespond(false, FS_SIN_LINEAS, 422);
             break;
         }
+        // Cantidad > 0, hasta 3 decimales y entera si la unidad no admite
+        // fracciones (ver facturaModel::problemaCantidadesSimples).
+        $errorCantidad = $facturaModel->problemaCantidadesSimples($body['items']);
+        if ($errorCantidad !== null) {
+            fsRespond(false, $errorCantidad, 422);
+            break;
+        }
         $userId = $authUserId ?? ($body['user_id'] ?? null);
         if (!$userId) {
             // 401: el front cierra la sesion al recibirlo, asi que el texto
@@ -429,13 +450,25 @@ switch ($_SERVER['REQUEST_METHOD']) {
             fsRespond(false, FS_SIN_LINEAS, 422);
             break;
         }
-        // Estado previo: hace falta para dos cosas distintas. El cliente guardado
-        // es contra quien se valida el credito cuando el PUT no reenvia
-        // client_id (el front lo omite si no se cambio de cliente), y las lineas
-        // guardadas son las que hay que devolver al almacen si se reemplazan.
+        // Estado previo: hace falta para tres cosas distintas. El cliente
+        // guardado es contra quien se valida el credito cuando el PUT no reenvia
+        // client_id (el front lo omite si no se cambio de cliente), las lineas
+        // guardadas son las que hay que devolver al almacen si se reemplazan, y
+        // son tambien contra las que se juzgan las cantidades.
         $previa = $facturaModel->getFacturaSimple($id);
         if ($previa === null) {
             fsRespond(false, facturaModel::MSG_SIMPLE_YA_NO_EXISTE, 404);
+            break;
+        }
+        // Misma regla de cantidades que al crear (solo si se reemplazan las
+        // lineas), salvo la de la unidad en una linea que conserva su cantidad
+        // guardada: una factura vieja con 1.5 en un producto que hoy se cuenta
+        // entero se tiene que poder reguardar (ver problemaCantidadesSimples).
+        $errorCantidad = isset($body['items'])
+            ? $facturaModel->problemaCantidadesSimples($body['items'], $previa['items'] ?? [])
+            : null;
+        if ($errorCantidad !== null) {
+            fsRespond(false, $errorCantidad, 422);
             break;
         }
 
