@@ -167,6 +167,23 @@ Request
 `db_pass`/`cert_pass`/`webhook_secret` se guardan cifrados (`iv(12)‖tag(16)‖ciphertext`) con
 `MASTER_ENCRYPTION_KEY` (32 bytes hex, generada una sola vez).
 
+### Correos salientes (`TenantMail`)
+Cotización por correo, factura (`saveFacturaWithItems`, envío hoy desactivado) y bienvenida
+de cliente toman su identidad de `src/Utils/TenantMail.php`:
+- **Gratex** — sin tenant resuelto, o tenant con RNC `131256432` (por RNC, no por id): igual
+  que siempre, `From: Gratex <info@gratex.net>`, `-finfo@gratex.net` y copia a su personal.
+- **Otro tenant** — `From:` y `-f` = `emisor_config.correo`, con `nombre_comercial` (o
+  `razon_social`) como nombre, codificado RFC 2047. **Sin copias a Gratex.** Sin un correo
+  válido no se envía: la cotización se guarda igual y `data.message` lo explica.
+  Si el correo es de un dominio público (hotmail, gmail…) el server no está en su SPF y el
+  destinatario puede mandarlo a spam o rechazarlo (ver [alta-tenant-runbook](integrations/alta-tenant-runbook.md#fase-4--completar-los-datos-del-emisor)).
+- **Bienvenida** — solo Gratex (la plantilla `contents.html` es suya); otro tenant recibe
+  `mail_sent: false` con el motivo.
+- Los PDF que se adjuntan se guardan en `cotizaciones/<tenant_id>/` y `facturas/<tenant_id>/`
+  (sin tenant, en la carpeta raíz de siempre): los códigos se repiten entre tenants.
+
+Prueba sin DB ni `mail()`: `php tools/test_tenant_mail.php`.
+
 ### Gating
 Todo lo multi-tenant está **gated** por `MULTI_TENANT_ENABLED`. Con el flag en `false` el
 comportamiento es idéntico al single-tenant (todo en una DB, cert del `.env`). En producción

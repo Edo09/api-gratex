@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
+require_once(__DIR__ . '/../Utils/TenantMail.php');
 
 class cotizacionModel
 {
@@ -183,11 +184,9 @@ class cotizacionModel
                 return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => 'Cotization saved']];
             }
 
-            // 1. Generate PDF and save to cotizaciones/ folder
-            $pdfPath = __DIR__ . '/../../cotizaciones/';
-            if (!is_dir($pdfPath)) {
-                mkdir($pdfPath, 0755, true);
-            }
+            // 1. Generate PDF and save to cotizaciones/<tenant_id>/ (los codigos
+            // se repiten entre tenants)
+            $pdfPath = TenantMail::carpetaPdf(TenantMail::tenantActual(), 'cotizaciones');
             $pdfFile = $pdfPath . 'Cotizacion_' . $code . '.pdf';
             // Use PDF generator utility (generateCotizacionPdf helper)
             require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
@@ -210,9 +209,9 @@ class cotizacionModel
                 $clientEmail = $clientRow['email'];
             }
 
-            $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
+            $avisoCorreo = $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
 
-            return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => 'Cotization saved and emailed']];
+            return ['success', ['id' => $cotizacion_id, 'code' => $code, 'message' => $avisoCorreo ?? 'Cotization saved and emailed']];
         } catch (PDOException $e) {
             // inTransaction: el fallo puede venir de la busqueda del codigo, antes
             // del beginTransaction, y un rollBack sin transaccion lanza otra excepcion.
@@ -279,11 +278,8 @@ class cotizacionModel
             $codeRow = $codeStmt->fetch();
             $code = $codeRow ? $codeRow['code'] : $id;
 
-            // 1. Generate PDF and save to cotizaciones/ folder
-            $pdfPath = __DIR__ . '/../../cotizaciones/';
-            if (!is_dir($pdfPath)) {
-                mkdir($pdfPath, 0755, true);
-            }
+            // 1. Generate PDF and save to cotizaciones/<tenant_id>/
+            $pdfPath = TenantMail::carpetaPdf(TenantMail::tenantActual(), 'cotizaciones');
             $pdfFile = $pdfPath . 'Cotizacion_' . $code . '.pdf';
             require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
             $cotizacionData = $this->getCotizaciones($id);
@@ -303,9 +299,9 @@ class cotizacionModel
                 $clientEmail = $clientRow['email'];
             }
 
-            $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
+            $avisoCorreo = $this->sendCotizacionPdfEmail($clientEmail, $code, $pdfFile);
 
-            return ['success', 'Cotization updated and emailed'];
+            return ['success', $avisoCorreo ?? 'Cotization updated and emailed'];
         } catch (PDOException $e) {
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
@@ -356,15 +352,30 @@ class cotizacionModel
         }
     }
 
-    private function sendCotizacionPdfEmail(string $clientEmail, string $code, string $pdfFile): void
+    /**
+     * Envia la cotizacion al cliente con la identidad del tenant (TenantMail):
+     * Gratex como siempre; otro tenant desde su emisor_config.correo y sin
+     * copias a Gratex.
+     *
+     * @return string|null null si se envio; si no, el aviso para el usuario (la
+     *                     cotizacion ya quedo guardada).
+     */
+    private function sendCotizacionPdfEmail(string $clientEmail, string $code, string $pdfFile): ?string
     {
-        $to = $clientEmail . ', edwin@gratex.net, omareogm09@gmail.com, info@gratex.net';
-        $from = 'info@gratex.net';
+        $tenant = TenantMail::tenantActual();
+        $remitente = TenantMail::remitenteDelTenant();
+        if ($remitente === null) {
+            return 'La cotización se guardó, pero no se envió por correo: tu empresa no tiene un correo registrado. Pide a soporte que lo agregue y vuelve a guardarla con "Enviar por correo" activado.';
+        }
+        $to = TenantMail::destinatarios($tenant, $clientEmail, TenantMail::COPIAS_GRATEX_DOCUMENTOS);
+        if ($to === '') {
+            return 'La cotización se guardó, pero no se envió por correo: el cliente no tiene un correo válido registrado.';
+        }
         $subject = 'Cotizacion anexa';
         $htmlContent = '<p>Estimado cliente:<br/> Su Cotizaci&oacute;n <b>' . $code . '</b> se encuentra anexa a este mensaje.</p>';
 
         $mime_boundary = '==Multipart_Boundary_x' . md5(time()) . 'x';
-        $headers = "From: Gratex <{$from}>\r\n";
+        $headers = TenantMail::cabeceraFrom($remitente);
         $headers .= "MIME-Version: 1.0\r\n";
         $headers .= "Content-Type: multipart/mixed;\r\n boundary=\"{$mime_boundary}\"";
 
@@ -386,6 +397,10 @@ class cotizacionModel
         }
         $message .= "--{$mime_boundary}--\r\n";
 
-        mail($to, $subject, $message, $headers, '-f' . $from);
+        if (!mail($to, $subject, $message, $headers, TenantMail::parametroEnvelope($remitente))) {
+            error_log('[cotizaciones] mail() no acepto la cotizacion ' . $code . ' (tenant ' . ($tenant['id'] ?? 'sin tenant') . ', from ' . $remitente['correo'] . ')');
+            return 'La cotización se guardó, pero no se pudo enviar el correo. Inténtalo de nuevo más tarde y, si sigue pasando, avisa a soporte.';
+        }
+        return null;
     }
 }

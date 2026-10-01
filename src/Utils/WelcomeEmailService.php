@@ -1,7 +1,15 @@
 <?php
+require_once __DIR__ . '/TenantMail.php';
 
 function sendClientWelcomeEmail(array $clientData)
 {
+    // La plantilla (contents.html, logo2020.png) y el texto son de Gratex y van
+    // con copia a su personal: para otro tenant no se envia hasta que tenga una
+    // plantilla propia.
+    if (!TenantMail::esGratex(TenantMail::tenantActual())) {
+        return ['success' => false, 'message' => 'Cliente guardado. El correo de bienvenida todavía no está disponible para tu empresa.'];
+    }
+
     $templatePath = __DIR__ . '/../../contents.html';
     if (!is_file($templatePath)) {
         return ['success' => false, 'message' => 'Welcome email template not found'];

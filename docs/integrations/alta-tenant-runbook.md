@@ -120,6 +120,13 @@ UPDATE emisor_config SET direccion = '<dirección real>', telefono = '<tel>', co
 Esto no es cosmético: `ECFXmlBuilder` toma `DireccionEmisor` de aquí, así que sale en
 el XML que va a DGII.
 
+**Correo:** `emisor_config.correo` es también el remitente (`From:` y `-f`) de las
+cotizaciones que el tenant manda por correo. Sin él no se envían (la cotización se
+guarda y la API devuelve el aviso en `data.message`). Si es de un dominio público (`@hotmail.com`,
+`@gmail.com`…), el server no está autorizado en su SPF/DMARC y el proveedor del cliente
+puede mandarlo a spam o rechazarlo; lo fiable es un dominio propio del tenant con el
+server incluido en su registro SPF. Detalle en [architecture.md](../architecture.md#correos-salientes-tenantmail).
+
 **Logo:** súbelo por `public/upload_logo.php` (su token es const dentro del archivo,
 hay que editarlo en el server). Sin logo propio, el PDF usa el de Gratex.
 

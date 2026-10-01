@@ -141,11 +141,10 @@ class facturaModel
                 $facturaForPdf['NCF'] = $NCF;
                 $facturaForPdf['no_factura'] = $no_factura;
 
-                // Generate PDF and save
-                $pdfPath = __DIR__ . '/../../facturas/';
-                if (!is_dir($pdfPath)) {
-                    mkdir($pdfPath, 0755, true);
-                }
+                // Generate PDF and save to facturas/<tenant_id>/ (los numeros se
+                // repiten entre tenants)
+                require_once(__DIR__ . '/../Utils/TenantMail.php');
+                $pdfPath = TenantMail::carpetaPdf(TenantMail::tenantActual(), 'facturas');
                 $pdfFile = $pdfPath . 'Factura_' . $no_factura . '.pdf';
                 $pdfContent = generateFacturaPdf($facturaForPdf, null, 'S');
                 file_put_contents($pdfFile, $pdfContent);
@@ -160,16 +159,14 @@ class facturaModel
                     $clientEmail = $clientRow['email'];
                 }
 
-                $to = $clientEmail;
-                $to .= ', edwin@gratex.net';
-                $to .= ', omareogm09@gmail.com';
-                $to .= ', info@gratex.net';
-                $from = 'info@gratex.net';
-                $fromName = 'Gratex';
+                // Identidad del tenant (TenantMail): Gratex como siempre; otro
+                // tenant desde su emisor_config.correo y sin copias a Gratex.
+                $remitente = TenantMail::remitenteDelTenant();
+                $to = TenantMail::destinatarios(TenantMail::tenantActual(), $clientEmail, TenantMail::COPIAS_GRATEX_DOCUMENTOS);
                 $subject = 'Factura anexa';
                 $htmlContent = '<p>Estimado cliente:<br/> Su Factura <b>' . $no_factura . '</b> se encuentra anexa a este mensaje.</p>';
 
-                $headers = "From: $fromName <$from>\r\n";
+                $headers = $remitente !== null ? TenantMail::cabeceraFrom($remitente) : '';
                 $headers .= "MIME-Version: 1.0\r\n";
                 $semi_rand = md5(time());
                 $mime_boundary = "==Multipart_Boundary_x{$semi_rand}x";
@@ -193,8 +190,11 @@ class facturaModel
                     $message .= $data . "\r\n\r\n";
                 }
                 $message .= "--{$mime_boundary}--\r\n";
-                $returnpath = '-f' . $from;
-                // @mail($to, $subject, $message, $headers, $returnpath);
+                // Envio desactivado. Si se reactiva: sin remitente (tenant sin
+                // correo) o sin destinatarios no se manda.
+                // if ($remitente !== null && $to !== '') {
+                //     @mail($to, $subject, $message, $headers, TenantMail::parametroEnvelope($remitente));
+                // }
             }
 
             return ['success', [
