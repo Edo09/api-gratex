@@ -33,12 +33,10 @@ class CotizacionPdfGenerator extends FPDF
     public function Row($data)
     {
         $nb = 0;
-        $mockValues = ['N/A', 'Sample', '---', 'No Data', 'Test'];
         for ($i = 0; $i < count($data); $i++) {
-            // If null, use mock value (cycle through mockValues for variety)
-            if ($data[$i] === null || $data[$i] === '') {
-                $data[$i] = $mockValues[$i % count($mockValues)];
-            }
+            // Celda vacia se imprime vacia. Aqui se ponian valores de prueba
+            // ('N/A', 'Sample', '---'...) que salian en el papel del cliente.
+            $data[$i] = (string) ($data[$i] ?? '');
             $width = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
             $nb = max($nb, $this->NbLines($width, $data[$i]));
         }
@@ -160,6 +158,24 @@ class CotizacionPdfGenerator extends FPDF
     public function setCotizacion($cotizacion)
     {
         $this->cotizacion = $cotizacion;
+    }
+
+    /**
+     * Fecha (d/m/Y) de la columna Fecha del detalle. El preview no trae fecha
+     * (el controller pasa '') y strtotime('') es false, que date() tomaba como
+     * 0: cada linea salia con 31/12/1969 (01/01/1970 en UTC). Vacia, invalida
+     * o en ceros se usa hoy en hora de RD, porque la app no fija zona horaria
+     * y la del servidor no es la de RD. Una fecha valida se lee y se imprime
+     * en la zona del servidor, como antes: conserva el dia guardado.
+     */
+    private function fechaLineas(): string
+    {
+        $raw = trim((string) ($this->cotizacion['date'] ?? ''));
+        $ts = ($raw === '' || strpos($raw, '0000-00-00') === 0) ? false : strtotime($raw);
+        if ($ts !== false) {
+            return date('d/m/Y', $ts);
+        }
+        return (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('d/m/Y');
     }
 
     /**
@@ -463,7 +479,7 @@ class CotizacionPdfGenerator extends FPDF
         // partian en cuanto el encabezado real (logo + emisor) crecia.
         $this->SetLineHeight(4.8);
 
-        $fecha = isset($this->cotizacion['date']) ? date('d/m/Y', strtotime($this->cotizacion['date'])) : date('d/m/Y');
+        $fecha = $this->fechaLineas();
         $codcliente = $this->cotizacion['client_id'] ?? '';
 
         $subtotal = 0;
