@@ -4,7 +4,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
   `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
-  migraciones ya incluidas, hasta la 025). Las migraciones sueltas activas (012–025)
+  migraciones ya incluidas, hasta la 026). Las migraciones sueltas activas (012–026)
   son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
@@ -12,7 +12,12 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
   2. `db/tenant_schema.sql` — reflejar el mismo cambio para tenants futuros, con
      los mismos nombres de índices y FKs. El snapshot no desactiva
      `FOREIGN_KEY_CHECKS`: la tabla referenciada por una FK debe crearse antes
-     (p. ej. `products` va antes de `factura_items` y `gasto_items`).
+     (p. ej. `products` va antes de `cotizacion_items`, `factura_items` y
+     `gasto_items`). `php tools/check_tenant_schema_orden.php` lo revisa sin
+     MySQL.
+- Si la DDL de producción puede no ser la del repo, la migración se escribe
+  idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
+  `PREPARE/EXECUTE` (ver 018 y 026; en el master, 008, 010 y 011).
 - Cambios al **master** (`gratex_master`): `db/master_migrations/` (+ reflejar
   en `db/master_schema.sql` para instalaciones nuevas).
 

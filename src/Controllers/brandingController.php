@@ -3,6 +3,7 @@
 // Ruta: /api/branding (requiere token; el tenant sale SIEMPRE del token,
 // nunca del body).
 //   GET    /api/branding          -> branding actual + plantillas disponibles
+//                                    + cotizacion_formato (solo lectura)
 //   PUT    /api/branding          -> {template?, accent_color?} (422 si invalido)
 //   POST   /api/branding/logo     -> multipart campo "logo" (png/jpg, max 2 MB)
 //   DELETE /api/branding/logo     -> elimina el logo (vuelve al global)
@@ -81,6 +82,13 @@ function brCurrent(int $tenantId): array
         // front ya pide autenticado.
         'logo_data_uri'       => brLogoDataUri($tenant['logo_path'] ?? null),
         'available_templates' => BrandingResolver::availableTemplates($tenantId),
+        // Formato de cotizacion del tenant (master.tenants.cotizacion_formato,
+        // migracion master 011): con esto el front elige la pantalla de
+        // cotizacion. Sale de la misma fila que TenantResolver::current(), de
+        // donde el backend elige el formato al guardar, asi que los dos lados
+        // ven el mismo valor. Solo lectura: se cambia por SQL y el PUT no lo
+        // acepta. Sin la columna (011 sin correr) todo tenant es 'gratex'.
+        'cotizacion_formato'  => (string) ($tenant['cotizacion_formato'] ?? 'gratex'),
     ];
 }
 

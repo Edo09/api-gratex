@@ -1,0 +1,351 @@
+{
+  "emisor": { "rnc": "132615123", "razon_social": "FERREHERRAMIENTAS VENTURA, SRL", "nombre_comercial": "Ferreherramientas Ventura", "direccion": "CALLE NICOLAS CASIMIRO NO.78, ENS. ESPAILLAT, SANTO DOMINGO NORTE", "telefono": "829-898-7798", "correo": "yaironventura0201@hotmail.com" },
+  "casos": [
+    {
+      "id": "pintura",
+      "hoja": "cotizacion pintura",
+      "code": "COT-000001",
+      "date": "2026-05-14 09:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 7, "description": "GALONES DE PINTURA BLNACA SEMIGLOSS", "amount": 2000, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "LLAVES DE LAVAMANOS PICO LARGO", "amount": 970, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "MANGUERAS DE LAVAMANOS", "amount": 275, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "BROCHAS No.4", "amount": 160, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "FUNDAS CEMENTO GRIS", "amount": 935, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "FUNDA CEMENTO BLANCO", "amount": 2380, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "CUBETA DE PINTURA SEMIGLOSS 966", "amount": 10400, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 41860,
+        "itbis": 7534.8,
+        "total": 49394.8,
+        "retencion_isr": 0,
+        "adeudado": 49394.8,
+        "abono": 0,
+        "restante": 49394.8,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false
+      }
+    },
+    {
+      "id": "pintura_retencion_abono",
+      "hoja": "cotizacion pintura",
+      "code": "COT-000001",
+      "date": "2026-05-14 09:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 7, "description": "GALONES DE PINTURA BLNACA SEMIGLOSS", "amount": 2000, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "LLAVES DE LAVAMANOS PICO LARGO", "amount": 970, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "MANGUERAS DE LAVAMANOS", "amount": 275, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "BROCHAS No.4", "amount": 160, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "FUNDAS CEMENTO GRIS", "amount": 935, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "FUNDA CEMENTO BLANCO", "amount": 2380, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "CUBETA DE PINTURA SEMIGLOSS 966", "amount": 10400, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 10000, "retencion_isr": true },
+      "esperado": {
+        "subtotal": 41860,
+        "itbis": 7534.8,
+        "total": 49394.8,
+        "retencion_isr": 2093,
+        "adeudado": 47301.8,
+        "abono": 10000,
+        "restante": 37301.8,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": true
+      }
+    },
+    {
+      "id": "pintura_mano_obra",
+      "hoja": "cotizacion pintura",
+      "code": "COT-000001",
+      "date": "2026-05-14 09:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 7, "description": "GALONES DE PINTURA BLNACA SEMIGLOSS", "amount": 2000, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "LLAVES DE LAVAMANOS PICO LARGO", "amount": 970, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "MANGUERAS DE LAVAMANOS", "amount": 275, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "BROCHAS No.4", "amount": 160, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "FUNDAS CEMENTO GRIS", "amount": 935, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "FUNDA CEMENTO BLANCO", "amount": 2380, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "CUBETA DE PINTURA SEMIGLOSS 966", "amount": 10400, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 100, "manejo_bancario": 50, "mano_obra": 1500, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 41860,
+        "itbis": 7534.8,
+        "total": 51044.8,
+        "retencion_isr": 0,
+        "adeudado": 51044.8,
+        "abono": 0,
+        "restante": 51044.8,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false,
+        "cargos_bancarios": 100,
+        "manejo_bancario": 50,
+        "mano_obra": 1500
+      }
+    },
+    {
+      "id": "b150000049",
+      "hoja": "b150000049",
+      "code": "COT-000002",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "T  3\"", "amount": 350, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "CODO 3X2", "amount": 325, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "T  3 A 2", "amount": 310, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "REDUCCION DE 3 A 2", "amount": 305, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "SIFON DE 2\"", "amount": 240, "indicador_facturacion": 1 },
+        { "quantity": 3, "description": "CODO DE 2", "amount": 135, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "REDUCCION DE 2 A 1/2", "amount": 175, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "PVC AZUL LANCON 8OZ.", "amount": 675, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "TUBO PVC DE 2 SEMIPRESION", "amount": 725, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "INODORO", "amount": 11500, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "LAVA MANOS CON PEDESTAL", "amount": 7000, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARANDELA DE INODORO 4 A3", "amount": 210, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "JUNTA DE CERA", "amount": 225, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "JUEGO DE TORNILLOS DE VASINETA", "amount": 138, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "LLAVES ANGULAR DE 1/2X3/8", "amount": 325, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "NIPLES HG 1/2X3/8", "amount": 160, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "MANGUERA DE INODORO", "amount": 210, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "MANGUERA LAVA MANOS", "amount": 210, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "T PVC 1/2", "amount": 30, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "ADAPTADORES MACHO 1/2", "amount": 35, "indicador_facturacion": 1 },
+        { "quantity": 4, "description": "CODO DE 2/1 HG", "amount": 90, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "TUBO PVC DE 3 SEMIPRESION", "amount": 1080, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ROLLO TEFLON AMARILLO", "amount": 90, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "LLAVE LAVA MANOS", "amount": 750, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "SIFON SENCILLO DE LAVA MANOS", "amount": 225, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "BOQUILLA LAVA MANOS", "amount": 375, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 27278,
+        "itbis": 4910.04,
+        "total": 32188.04,
+        "retencion_isr": 0,
+        "adeudado": 32188.04,
+        "abono": 0,
+        "restante": 32188.04,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false
+      }
+    },
+    {
+      "id": "ceramicas",
+      "hoja": "CERAMICAS",
+      "code": "COT-000003",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 3, "description": "METROS DE CERAMICAS 60X60", "amount": 1650, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "FUNDAS DE PAGATOX", "amount": 625, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "FUNDA CEMENTOS GRIS", "amount": 960, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "FUNDA ARENA", "amount": 300, "indicador_facturacion": 1 },
+        { "quantity": 5, "description": "LIBRAS CEMENTO BLANCO", "amount": 100, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 8260,
+        "itbis": 1486.8,
+        "total": 9746.8,
+        "retencion_isr": 0,
+        "adeudado": 9746.8,
+        "abono": 0,
+        "restante": 9746.8,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false
+      }
+    },
+    {
+      "id": "redondeo_8475",
+      "hoja": null,
+      "code": "COT-000004",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "PRUEBA REDONDEO", "amount": 84.75, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 84.75,
+        "itbis": 15.26,
+        "total": 100.01,
+        "retencion_isr": 0,
+        "adeudado": 100.01,
+        "abono": 0,
+        "restante": 100.01,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 84.75, "itbis": 15.26 }
+        ]
+      }
+    },
+    {
+      "id": "flotante",
+      "hoja": null,
+      "code": "COT-000005",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "PRUEBA FLOTANTE", "amount": 13.7, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 15.48, "retencion_isr": true },
+      "esperado": {
+        "subtotal": 13.7,
+        "itbis": 2.47,
+        "total": 16.17,
+        "retencion_isr": 0.69,
+        "adeudado": 15.48,
+        "abono": 15.48,
+        "restante": 0,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": true,
+        "lineas": [
+          { "base": 13.7, "itbis": 2.47 }
+        ],
+        "error_abono": null
+      }
+    },
+    {
+      "id": "mixto",
+      "hoja": null,
+      "code": "COT-000006",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "A", "amount": 100, "indicador_facturacion": 1 },
+        { "quantity": 2, "description": "B EXENTO", "amount": 50, "indicador_facturacion": 4 },
+        { "quantity": 1, "description": "C 16%", "amount": 200, "indicador_facturacion": 2 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 400,
+        "itbis": 50,
+        "total": 450,
+        "retencion_isr": 0,
+        "adeudado": 450,
+        "abono": 0,
+        "restante": 450,
+        "etiqueta_itbis": "ITBIS",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 100, "itbis": 18 },
+          { "base": 100, "itbis": 0 },
+          { "base": 200, "itbis": 32 }
+        ]
+      }
+    },
+    {
+      "id": "exento",
+      "hoja": null,
+      "code": "COT-000007",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 3, "description": "TODO EXENTO", "amount": 10, "indicador_facturacion": 4 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 30,
+        "itbis": 0,
+        "total": 30,
+        "retencion_isr": 0,
+        "adeudado": 30,
+        "abono": 0,
+        "restante": 30,
+        "etiqueta_itbis": "ITBIS",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 30, "itbis": 0 }
+        ]
+      }
+    },
+    {
+      "id": "largo_60",
+      "hoja": null,
+      "code": "COT-000060",
+      "date": "2026-09-02 10:15:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 1 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 101, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 2 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 102, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 3 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 103, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 4 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 104, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 5 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 105, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 6 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 106, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 7 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 107, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 8 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 108, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 9 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 109, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 10 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 110, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 11 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 111, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 12 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 112, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 13 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 113, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 14 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 114, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 15 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 115, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 16 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 116, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 17 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 117, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 18 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 118, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 19 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 119, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 20 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 120, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 21 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 121, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 22 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 122, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 23 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 123, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 24 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 124, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 25 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 125, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 26 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 126, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 27 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 127, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 28 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 128, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 29 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 129, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 30 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 130, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 31 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 131, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 32 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 132, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 33 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 133, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 34 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 134, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 35 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 135, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 36 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 136, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 37 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 137, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 38 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 138, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 39 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 139, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 40 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 140, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 41 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 141, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 42 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 142, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 43 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 143, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 44 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 144, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 45 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 145, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 46 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 146, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 47 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 147, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 48 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 148, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 49 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 149, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 50 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 150, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 51 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 151, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 52 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 152, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 53 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 153, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 54 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 154, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 55 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 155, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 56 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 156, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 57 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 157, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 58 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 158, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 59 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 159, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DE PRUEBA NUMERO 60 CON UNA DESCRIPCION LARGA PARA FORZAR VARIAS LINEAS EN LA CELDA", "amount": 160, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false },
+      "esperado": {
+        "subtotal": 7830,
+        "itbis": 1409.4,
+        "total": 9239.4,
+        "retencion_isr": 0,
+        "adeudado": 9239.4,
+        "abono": 0,
+        "restante": 9239.4,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false
+      }
+    }
+  ]
+}

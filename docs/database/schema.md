@@ -54,6 +54,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `ambiente` | varchar(20) | `certecf` mientras certifica → `ecf` en producción (per-tenant) |
 | `pdf_template` | varchar | `clasico`/`moderno`/`compacto`/`custom:tenant<id>` (master_migration 002) |
 | `pdf_accent_color` | varchar(7) | `#RRGGBB` opcional |
+| `cotizacion_formato` | varchar(40) | `gratex` (default) \| `ferreteria`: formato de cotización (master_migration 011). Solo por SQL; lo devuelve `GET /api/branding` |
 | `logo_path` | varchar | `logos/<tenant_id>.<ext>` |
 | `webhook_url`/`webhook_secret_encrypted` | varchar/varbinary | Push de documentos entrantes (integración) |
 | `activo` | tinyint(1) | |
@@ -65,12 +66,12 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
 ## DB del tenant — Tablas de negocio
 
-Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–016).
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–026).
 
 | Tabla | Dominio |
 |---|---|
 | `clients` | Clientes (+ datos fiscales para e-CF) |
-| `cotizaciones` / `cotizacion_items` | Cotizaciones |
+| `cotizaciones` / `cotizacion_items` / `cotizacion_ajustes` | Cotizaciones; el formato del tenant decide qué columnas usa (migración 026) |
 | `facturas` / `factura_items` | Facturas (+ tracking e-CF completo) |
 | `ncf_sequences` | Secuencias NCF / e-NCF como **rangos autorizados** por DGII |
 | `emisor_config` | Config fiscal del emisor (fila única) |
@@ -121,9 +122,28 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 | `razon_social` | varchar(150) | |
 | `direccion` / `municipio` / `provincia` | varchar | datos fiscales |
 
-### `cotizaciones` / `cotizacion_items`
-`cotizaciones`: `id`, `code`, `date`, `client_id` (nullable), `client_name`, `total`.
-`cotizacion_items`: `id`, `cotizacion_id` (FK CASCADE), `description`, `amount` decimal(18,4), `quantity` decimal(12,3), `subtotal` decimal(18,2) (025).
+### `cotizaciones` / `cotizacion_items` / `cotizacion_ajustes` (025 + 026)
+Cada tenant tiene un **formato de cotización** (`master.tenants.cotizacion_formato`,
+master_migration 011; código en `src/Utils/Cotizacion/`). Las filas del formato original
+(Gratex) dejan en `NULL` todas las columnas que agregó la 026.
+
+`cotizaciones`: `id`, `code`, `formato` (varchar(40), `NULL` = gratex), `numero` (int unsigned,
+UNIQUE `uk_cotizaciones_numero`: consecutivo `COT-000001`, `NULL` en Gratex), `date`,
+`client_id` (nullable), `client_name` (nullable desde la 026), `subtotal` / `itbis`
+(decimal(18,2): antes de ITBIS y suma del ITBIS de las líneas), `total` decimal(18,2) (025),
+`user_id` (referencia a `master.users.id`, sin FK cross-DB), `updated_at`.
+
+`cotizacion_items`: `id`, `cotizacion_id` (FK CASCADE), `product_id` (FK `products` `ON DELETE SET
+NULL`, índice `idx_cotizacion_items_product`; `NULL` = línea libre), `description`, `amount`
+decimal(18,4), `quantity` decimal(12,3), `subtotal` decimal(18,2) (025), `unidad_medida` (código
+DGII, ej. `43`), `indicador_facturacion` (1=ITBIS18 2=ITBIS16 3=ITBIS0 4=Exento),
+`indicador_bien_servicio` (1=Bien 2=Servicio), `itbis_amount` decimal(18,2).
+
+`cotizacion_ajustes` (026): `id`, `cotizacion_id` (FK `cotizaciones` CASCADE), `concepto`
+varchar(30) (clave del formato; Ferretería: `cargos_bancarios`, `manejo_bancario`, `mano_obra`,
+`abono`, `retencion_isr`), `monto` decimal(18,2). UNIQUE `uk_cotizacion_ajuste (cotizacion_id,
+concepto)`; solo se guardan los montos distintos de cero. Detalle:
+[../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
 
 ### `products` (migración 012)
 Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
@@ -274,10 +294,12 @@ Detalle del módulo: [../modules/gastos.md](../modules/gastos.md).
 ```
 clients      1───* cotizaciones / facturas        (client_id, nullable)
 cotizaciones 1───* cotizacion_items               (FK CASCADE)
+cotizaciones 1───* cotizacion_ajustes             (FK CASCADE, 026)
 facturas     1───* factura_items                  (FK CASCADE)
 facturas     1───* aprobaciones_comerciales        (factura_id, soft link por e_ncf)
 gastos       1───* gasto_items                     (FK CASCADE)
-ncf_sequences / emisor_config / ecf_recibidos / proveedores / products — standalone
+products     1───* cotizacion_items / factura_items / gasto_items  (product_id, SET NULL)
+ncf_sequences / emisor_config / ecf_recibidos / proveedores — standalone
 ```
 
 En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado por `tenant_id`
@@ -289,9 +311,9 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 
 | Artefacto | Para qué |
 |---|---|
-| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–016). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–026). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–016 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–026 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 

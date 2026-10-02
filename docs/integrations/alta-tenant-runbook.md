@@ -130,6 +130,21 @@ server incluido en su registro SPF. Detalle en [architecture.md](../architecture
 **Logo:** súbelo por `public/upload_logo.php` (su token es const dentro del archivo,
 hay que editarlo en el server). Sin logo propio, el PDF usa el de Gratex.
 
+**Formato de cotización:** todo tenant nuevo cotiza con el formato `gratex`: el
+formulario y el PDF de Gratex, con su cuenta bancaria impresa. Si el cliente tiene un
+formato propio ya programado (`src/Utils/Cotizacion/`; hoy `ferreteria`), actívalo en
+el master después de desplegar el código y de correr la migración 026 en su DB:
+
+```bash
+UPDATE tenants SET cotizacion_formato = 'ferreteria' WHERE id = <tenant_id>;
+```
+
+El PDF de Ferretería imprime en el pie la `razon_social`, el `correo` y el `telefono`
+de `emisor_config`, y la `direccion` en dos líneas como máximo: el `UPDATE` de
+`emisor_config` de esta fase tiene que estar hecho. Si el cliente no tiene formato
+propio y no debe cotizar con el de Gratex, quita el módulo `cotizaciones` de sus roles.
+Cómo se agrega un formato: [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
+
 ---
 
 ## Fase 5 — Verificar
@@ -144,6 +159,10 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
    devolver solo los 2 clientes de prueba DGII de SU DB.
 3. **Emisión:** crear una factura de prueba y confirmar que el PDF trae los datos del
    cliente (no los de Gratex) y que DGII la acepta.
+4. **Cotización:** `GET /api/branding` devuelve el `cotizacion_formato` esperado.
+   Crear una cotización de prueba, abrir su PDF (logo, datos y pie del tenant; con un
+   formato propio, sin la cuenta bancaria de Gratex) y borrarla. Pasos listos en
+   `tests/test_cotizaciones_ferreteria.http`.
 
 ---
 
@@ -184,6 +203,8 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | `Unable to read certificate ... mac verify failure` | Contraseña incorrecta o `cert_pass_encrypted` NULL | Re-cifrarla con `public/encrypt_credential.php` y actualizar `tenants` |
 | El PDF muestra datos de Gratex | `emisor_config` incompleto y/o tenant sin logo (Fase 4 saltada) | El `UPDATE` de la Fase 4 + subir el logo |
 | Clientes de prueba DGII duplicados | El schema se aplicó dos veces sobre la misma DB | `DELETE FROM clients WHERE rnc IN ('131880681','533445861');` y dejar una corrida limpia |
+| La cotización sale con la cuenta bancaria y los textos de Gratex | El tenant sigue en `cotizacion_formato = 'gratex'` (el default) | Activar su formato (Fase 4) o quitar el módulo `cotizaciones` de sus roles |
+| Al guardar una cotización: "La pantalla de cotizaciones está desactualizada…" (`409`) | Se cambió `cotizacion_formato` con la pantalla abierta, o el navegador tiene el front de antes | Recargar la página |
 
 ---
 
@@ -196,4 +217,5 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | Datos del emisor | `emisor_config` (DB del tenant) |
 | Certificado | `<CERT_DIR>/<rnc>/cert.p12` + `tenants.cert_path` |
 | Logo | `logos/<tenant_id>.<ext>` + `tenants.logo_path` |
+| Formato de cotización | `tenants.cotizacion_formato` (master; `gratex` por defecto) |
 | Secuencias e-NCF | `ncf_sequences` (DB del tenant), por ambiente |
