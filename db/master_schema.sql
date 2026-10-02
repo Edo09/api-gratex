@@ -51,6 +51,8 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'Plantilla Representacion Impresa: clasico | moderno | compacto | custom:<nombre>',
   pdf_accent_color    CHAR(7)        NULL
                         COMMENT 'Color de acento hex #RRGGBB (NULL = colores por defecto de la plantilla)',
+  cotizacion_formato  VARCHAR(40)    NOT NULL DEFAULT 'gratex'
+                        COMMENT 'Formato de cotizacion: gratex | ferreteria (src/Utils/Cotizacion/). Se cambia solo por SQL. Ver master_migrations/011',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,

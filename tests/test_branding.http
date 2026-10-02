@@ -5,7 +5,7 @@
 ### token). Ver docs/modules/branding-plantillas.md.
 ### ============================================================================
 
-### Branding actual + plantillas disponibles
+### Branding actual + plantillas disponibles + cotizacion_formato (gratex | ferreteria)
 GET http://localhost:8000/api/branding
 X-API-KEY: 7a775f6fb0d5ccab15cf149d2c60f15c
 

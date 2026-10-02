@@ -54,6 +54,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `ambiente` | varchar(20) | `certecf` mientras certifica → `ecf` en producción (per-tenant) |
 | `pdf_template` | varchar | `clasico`/`moderno`/`compacto`/`custom:tenant<id>` (master_migration 002) |
 | `pdf_accent_color` | varchar(7) | `#RRGGBB` opcional |
+| `cotizacion_formato` | varchar(40) | `gratex` (default) \| `ferreteria`: formato de cotización (master_migration 011). Solo por SQL; lo devuelve `GET /api/branding` |
 | `logo_path` | varchar | `logos/<tenant_id>.<ext>` |
 | `webhook_url`/`webhook_secret_encrypted` | varchar/varbinary | Push de documentos entrantes (integración) |
 | `activo` | tinyint(1) | |
