@@ -699,6 +699,117 @@ if ($escribirPdf) {
 }
 
 // ---------------------------------------------------------------------------
+// Registro de formatos y contrato CotizacionFormato (Task 6)
+// ---------------------------------------------------------------------------
+
+require_once __DIR__ . '/../src/Utils/Cotizacion/CotizacionFormatos.php';
+
+echo "\n== Registro de formatos (CotizacionFormatos) ==\n";
+
+// Un cotizacionModel sin pasar por el constructor, que es el que abre la
+// conexión: aquí nada llega a la DB (para() solo construye el formato).
+$modeloSinDb = (new ReflectionClass('cotizacionModel'))->newInstanceWithoutConstructor();
+
+// para() y delTenant() avisan en el error_log de un formato desconocido. Mientras
+// corre la sección el log va a un archivo temporal: se comprueba el aviso y la
+// salida queda limpia.
+$logFormatos = (string) tempnam(sys_get_temp_dir(), 'cotfmt');
+$logAnteriorFormatos = ini_set('error_log', $logFormatos);
+$leerLogFormatos = function () use ($logFormatos): string {
+    clearstatcache();
+    $txt = (string) file_get_contents($logFormatos);
+    file_put_contents($logFormatos, '');
+    return $txt;
+};
+
+// La firma de cada método, para fijar el contrato que implementa cada formato.
+$firmaFormato = static function (string $clase, string $metodo): string {
+    $m = new ReflectionMethod($clase, $metodo);
+    $params = array_map(static fn(ReflectionParameter $p) => $p->getType() . ' $' . $p->getName(), $m->getParameters());
+    return $metodo . '(' . implode(', ', $params) . '): ' . $m->getReturnType();
+};
+$contratoFormato = [
+    'nombre(): string',
+    'crear(object $body): array',
+    'actualizar(array $row, object $body): array',
+    'preview(object $body, ?array $row): array',
+    'pdf(array $cotizacion): array',
+    'permiteCorreo(): bool',
+];
+$firmasDe = static fn(string $clase): array => array_map(
+    static fn(string $f) => $firmaFormato($clase, strstr($f, '(', true)),
+    $contratoFormato
+);
+$chk('CotizacionFormato: abstracta, con los 6 métodos del contrato',
+    (new ReflectionClass('CotizacionFormato'))->isAbstract() && $firmasDe('CotizacionFormato') === $contratoFormato);
+$formatoMinimo = new class extends CotizacionFormato {
+    public function nombre(): string { return 'minimo'; }
+    public function crear(object $body): array { return ['error', 'no', 422]; }
+    public function actualizar(array $row, object $body): array { return ['error', 'no', 422]; }
+    public function preview(object $body, ?array $row): array { return ['error', 'no', 422]; }
+    public function pdf(array $cotizacion): array { return ['error', 'no', 422]; }
+};
+$chk('un formato nuevo no ofrece correo salvo que lo diga (permiteCorreo() = false)', $formatoMinimo->permiteCorreo() === false);
+
+$chk("DEFAULT = 'gratex'", CotizacionFormatos::DEFAULT === 'gratex');
+$chk("existe('gratex')", CotizacionFormatos::existe('gratex'));
+$chk('existe(null), existe(\'\') y existe(\'x\') = false',
+    !CotizacionFormatos::existe(null) && !CotizacionFormatos::existe('') && !CotizacionFormatos::existe('x'));
+$chk("existe('GRATEX') = false: la clave es exacta", !CotizacionFormatos::existe('GRATEX'));
+
+$formatoGratex = CotizacionFormatos::para('gratex', $modeloSinDb);
+$chk("para('gratex') = GratexFormato", get_class($formatoGratex) === 'GratexFormato' && $formatoGratex instanceof CotizacionFormato);
+$chk("GratexFormato: nombre() = 'gratex', permiteCorreo() = true", $formatoGratex->nombre() === 'gratex' && $formatoGratex->permiteCorreo() === true);
+$chk('GratexFormato cumple el contrato (mismas firmas)', $firmasDe('GratexFormato') === $contratoFormato);
+$chk('el modelo que recibe para() es el que usa el formato',
+    (fn() => $this->modelo)->call($formatoGratex) === $modeloSinDb);
+$chk("para('gratex') no avisa nada", $leerLogFormatos() === '');
+$chk('para(null) = GratexFormato, sin aviso (NULL = cotización de antes de los formatos)',
+    get_class(CotizacionFormatos::para(null, $modeloSinDb)) === 'GratexFormato' && $leerLogFormatos() === '');
+$chk("para('x') = GratexFormato y lo avisa en el error_log",
+    get_class(CotizacionFormatos::para('x', $modeloSinDb)) === 'GratexFormato'
+    && str_contains($leerLogFormatos(), 'formato desconocido "x"'));
+
+// delTenant() lee TenantResolver::current(): se le pone el tenant a mano (es
+// privado; Reflection basta para un CLI) y se deja como estaba, sin tenant.
+$tenantResuelto = new ReflectionProperty('TenantResolver', 'current');
+$conTenant = function (?array $tenant) use ($tenantResuelto): string {
+    $tenantResuelto->setValue(null, $tenant);
+    return CotizacionFormatos::delTenant();
+};
+$chk('delTenant() sin tenant resuelto = gratex', $conTenant(null) === 'gratex' && $leerLogFormatos() === '');
+$chk('delTenant(): tenant sin la columna (master sin la 011) = gratex, sin aviso',
+    $conTenant(['id' => 1, 'rnc' => '101000000', 'tipo' => 'app']) === 'gratex' && $leerLogFormatos() === '');
+$chk("delTenant(): cotizacion_formato 'gratex' = gratex",
+    $conTenant(['id' => 1, 'cotizacion_formato' => 'gratex']) === 'gratex' && $leerLogFormatos() === '');
+$chk("delTenant(): 'Ferreteria' (mal escrito en el UPDATE) = gratex, y lo avisa",
+    $conTenant(['id' => 5, 'cotizacion_formato' => 'Ferreteria']) === 'gratex'
+    && str_contains($leerLogFormatos(), '"Ferreteria" no es un formato conocido'));
+$tenantResuelto->setValue(null, null);
+
+$chk('delCuerpo(cuerpo vacío) = gratex', CotizacionFormatos::delCuerpo(new stdClass()) === 'gratex');
+$chk('delCuerpo(): el cuerpo de CotizacionFormView (sin "formato") = gratex', CotizacionFormatos::delCuerpo((object) [
+    'client_id' => 5, 'date' => '2026-09-02 10:15:00', 'total' => 236, 'user_id' => 3, 'sent_email' => false,
+    'items' => [(object) ['description' => 'TUBO', 'amount' => 200, 'quantity' => 1, 'subtotal' => 200]],
+]) === 'gratex');
+$chk("delCuerpo(): formato 'ferreteria' y 'gratex' se devuelven tal cual",
+    CotizacionFormatos::delCuerpo((object) ['formato' => 'ferreteria']) === 'ferreteria'
+    && CotizacionFormatos::delCuerpo((object) ['formato' => 'gratex']) === 'gratex');
+$chk('delCuerpo(): formato null o que no es texto (5, true, []) = gratex',
+    CotizacionFormatos::delCuerpo((object) ['formato' => null]) === 'gratex'
+    && CotizacionFormatos::delCuerpo((object) ['formato' => 5]) === 'gratex'
+    && CotizacionFormatos::delCuerpo((object) ['formato' => true]) === 'gratex'
+    && CotizacionFormatos::delCuerpo((object) ['formato' => []]) === 'gratex');
+$chk("delCuerpo(): formato '' es texto y se devuelve tal cual (409 en cualquier tenant)",
+    CotizacionFormatos::delCuerpo((object) ['formato' => '']) === '');
+
+$chk('MSG_DESACTUALIZADA (el 409) = el mensaje de la spec', CotizacionFormatos::MSG_DESACTUALIZADA
+    === 'La pantalla de cotizaciones está desactualizada (cambió el formato de tu empresa). Recarga la página.');
+
+ini_set('error_log', $logAnteriorFormatos === false ? '' : $logAnteriorFormatos);
+@unlink($logFormatos);
+
+// ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
 

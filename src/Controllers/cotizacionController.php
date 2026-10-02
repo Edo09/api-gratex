@@ -6,6 +6,7 @@ header("Allow: GET, POST, OPTIONS, PUT, DELETE");
 header('content-type: application/json; charset=utf-8');
 require_once(__DIR__ . '/../Models/cotizacionModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
+require_once(__DIR__ . '/../Utils/Cotizacion/CotizacionFormatos.php');
 
 $cotizacionModel = new cotizacionModel();
 $auth = new AuthMiddleware();
@@ -46,6 +47,52 @@ const COT_SIN_CLIENTE = 'Elige un cliente para la cotización.';
 const COT_SIN_LINEAS = 'Agrega al menos una línea a la cotización.';
 const COT_TOTAL_INVALIDO = 'El total de la cotización no es válido. Revisa los precios y las cantidades.';
 
+/**
+ * La cotizacion $id como la lee getCotizaciones(), con el mismo valor que
+ * recibira el modelo (la misma fila que va a tocar), o null si no existe. Con
+ * un $id == null (0, '', false) getCotizaciones() devuelve TODAS las filas, y
+ * la primera seria otra cotizacion, con otro formato: ahi no hay fila.
+ */
+function cotFila(cotizacionModel $modelo, $id): ?array
+{
+    if (!is_scalar($id) || $id == null) {
+        return null;
+    }
+    return $modelo->getCotizaciones($id)[0] ?? null;
+}
+
+/**
+ * El formato que dice el cuerpo tiene que ser el que eligio el servidor. Si no,
+ * la pantalla es de antes del cambio de formato (pestaña abierta, bundle viejo)
+ * y guardarla con las reglas del otro formato cambiaria los montos: Gratex
+ * manda precios con ITBIS y Ferreteria se lo suma encima. 409 y no se guarda
+ * nada. Devuelve false si ya respondio.
+ */
+function cotFormatoCoincide(object $body, CotizacionFormato $formato): bool
+{
+    $delCuerpo = CotizacionFormatos::delCuerpo($body);
+    if ($delCuerpo === $formato->nombre()) {
+        return true;
+    }
+    error_log('[cotizaciones] el cuerpo dice formato "' . $delCuerpo . '" y toca "' . $formato->nombre() . '": 409');
+    http_response_code(409);
+    echo json_encode(['status' => false, 'error' => CotizacionFormatos::MSG_DESACTUALIZADA]);
+    return false;
+}
+
+/**
+ * Respuesta de un ['error', $mensaje, $http] de un formato. El codigo solo se
+ * fija si no es 200: los errores de cabecera de Gratex responden 200 con
+ * status:false, como siempre.
+ */
+function cotError(array $resultado): array
+{
+    if ($resultado[2] !== 200) {
+        http_response_code($resultado[2]);
+    }
+    return ['status' => false, 'error' => $resultado[1]];
+}
+
 // Validate token for all requests except OPTIONS
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
     $validation = $auth->validateRequest();
@@ -59,6 +106,14 @@ $endpoint = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $isPdfRequest = preg_match('/\/api\/cotizaciones\/(\d+)\/pdf/', $endpoint, $pdfMatches);
 // Preview PDF endpoint
 $isPreviewRequest = preg_match('/\/api\/cotizaciones\/preview$/', $endpoint);
+
+// El cuerpo se decodifica una sola vez. Vacio o que no es un objeto JSON queda
+// como objeto vacio: los formatos reciben siempre un objeto, y cada isset()
+// responde lo mismo que antes con null.
+$body = InputSanitizer::jsonInput(false);
+if (!is_object($body)) {
+    $body = new stdClass();
+}
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
@@ -76,12 +131,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
             $cotizacionData = $cotizaciones[0];
             $cotizacionData['items'] = $cotizacionModel->getCotizacionItems($cotizacionId);
-            // Include PDF generator
-            require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
-            // Generate and output PDF
-            $pdf = new CotizacionPdfGenerator('P', 'mm', 'Letter');
-            $pdf->setCotizacion($cotizacionData);
-            $pdfContent = $pdf->generatePdf();
+            // El PDF lo dibuja el formato de la fila (sin formato = Gratex), no
+            // el que tenga hoy la empresa.
+            $resultado = CotizacionFormatos::para($cotizacionData['formato'] ?? null, $cotizacionModel)->pdf($cotizacionData);
+            if ($resultado[0] !== 'success') {
+                $respuesta = cotError($resultado);
+                header('content-type: application/json; charset=utf-8');
+                echo json_encode($respuesta);
+                break;
+            }
+            $pdfContent = $resultado[1];
             // Check if user wants base64 or download
             $format = isset($_GET['format']) ? $_GET['format'] : 'download';
             if ($format === 'base64') {
@@ -134,141 +193,94 @@ switch ($_SERVER['REQUEST_METHOD']) {
     case 'POST':
         // PDF preview endpoint
         if ($isPreviewRequest) {
-            $_POST = InputSanitizer::jsonInput(false);
-            // Validate required fields
-            if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
-                $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
-            } else if (!isset($_POST->items) || !is_array($_POST->items)) {
-                $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
-            } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
-                $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
-            } else {
-                // Convert items to associative arrays
-                $items = array_map(function ($item) {
-                    return (array)$item;
-                }, $_POST->items);
-                // Look up client_name from clients table
-                require_once(__DIR__ . '/../Models/clientModel.php');
-                $clientModelInstance = new clientModel();
-                $clientData = $clientModelInstance->getClients($_POST->client_id);
-                $client_name = (!empty($clientData) && isset($clientData[0]['client_name'])) ? $clientData[0]['client_name'] : '';
-                // Prepare a fake cotizacion array (as in getCotizaciones)
-                $cotizacion = [[
-                    'id' => null,
-                    'code' => 'PREVIEW',
-                    'date' => isset($_POST->date) ? $_POST->date : '',
-                    'client_id' => $_POST->client_id,
-                    'client_name' => $client_name,
-                    'total' => $_POST->total,
-                    'items' => $items,
-                    'description' => '',
-                ]];
-                // Generate PDF
-                require_once(__DIR__ . '/../Utils/CotizacionPdfGenerator.php');
-                $pdf = new CotizacionPdfGenerator('P', 'mm', 'Letter');
-                $pdf->setCotizacion($cotizacion[0]);
-                $pdfContent = $pdf->generatePdf();
-
+            // Con id (vista previa de una cotizacion guardada), el formato de
+            // esa fila; sin id, o si ya no existe, el de la empresa.
+            $row = isset($body->id) ? cotFila($cotizacionModel, $body->id) : null;
+            $nombre = $row !== null ? ($row['formato'] ?? null) : CotizacionFormatos::delTenant();
+            $formato = CotizacionFormatos::para($nombre, $cotizacionModel);
+            if (!cotFormatoCoincide($body, $formato)) {
+                return;
+            }
+            $resultado = $formato->preview($body, $row);
+            if ($resultado[0] === 'success') {
                 // Return as base64 JSON (same as open cotizacion)
                 header('content-type: application/json; charset=utf-8');
                 echo json_encode([
                     'status' => true,
                     'data' => [
                         'filename' => 'Cotizacion_Preview.pdf',
-                        'content' => base64_encode($pdfContent),
+                        'content' => base64_encode($resultado[1]),
                         'mime_type' => 'application/pdf'
                     ]
                 ]);
                 return;
             }
+            $respuesta = cotError($resultado);
             echo json_encode($respuesta);
             return;
         }
 
-        // Standard Create Cotizacion
-        $_POST = InputSanitizer::jsonInput(false);
-        if (!isset($_POST->client_id) || is_null($_POST->client_id)) {
-            $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
-        } else if (!isset($_POST->items) || !is_array($_POST->items) || count($_POST->items) == 0) {
-            $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
-        } else if (!isset($_POST->total) || !is_numeric($_POST->total)) {
-            $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
+        // Standard Create Cotizacion: el formato de la empresa.
+        $formato = CotizacionFormatos::para(CotizacionFormatos::delTenant(), $cotizacionModel);
+        if (!cotFormatoCoincide($body, $formato)) {
+            break;
+        }
+        $result = $formato->crear($body);
+        if ($result[0] === 'success') {
+            $respuesta = ['status' => true, 'data' => $result[1]];
+            AuditLogger::log([
+                'module' => 'cotizaciones', 'action' => 'CREATE',
+                'entity_type' => 'cotizacion',
+                'entity_id' => is_array($result[1]) ? ($result[1]['id'] ?? null) : null,
+                'new_values' => $body, 'description' => 'Cotizacion creada.',
+            ]);
         } else {
-            $itemError = cotValidarItems($_POST->items);
-            if ($itemError !== null) {
-                // 422 como las demas validaciones de lineas (facturas, gastos).
-                http_response_code(422);
-                $respuesta = ['status' => false, 'error' => $itemError];
-            } else {
-                $date = isset($_POST->date) ? $_POST->date : '';
-                $user_id = isset($_POST->user_id) ? $_POST->user_id : null;
-                $send_email = isset($_POST->sent_email) && $_POST->sent_email === true;
-                $result = $cotizacionModel->saveCotizacion($_POST->client_id, $date, $_POST->items, $_POST->total, $user_id, $send_email);
-                if ($result[0] === 'success') {
-                    $respuesta = ['status' => true, 'data' => $result[1]];
-                    AuditLogger::log([
-                        'module' => 'cotizaciones', 'action' => 'CREATE',
-                        'entity_type' => 'cotizacion',
-                        'entity_id' => is_array($result[1]) ? ($result[1]['id'] ?? null) : null,
-                        'new_values' => $_POST, 'description' => 'Cotizacion creada.',
-                    ]);
-                } else {
-                    $respuesta = ['status' => false, 'error' => $result[1]];
-                }
-            }
+            $respuesta = cotError($result);
         }
         echo json_encode($respuesta);
         break;
 
     case 'PUT':
-        $_PUT = InputSanitizer::jsonInput(false);
-        if (!isset($_PUT->id) || is_null($_PUT->id)) {
+        if (!isset($body->id) || is_null($body->id)) {
             $respuesta = ['status' => false, 'error' => 'No se pudo identificar la cotización que quieres modificar. Ábrela de nuevo desde el listado.'];
-        } else if (!isset($_PUT->client_id) || is_null($_PUT->client_id)) {
-            $respuesta = ['status' => false, 'error' => COT_SIN_CLIENTE];
-        } else if (!isset($_PUT->items) || !is_array($_PUT->items) || count($_PUT->items) == 0) {
-            $respuesta = ['status' => false, 'error' => COT_SIN_LINEAS];
-        } else if (!isset($_PUT->total) || !is_numeric($_PUT->total)) {
-            $respuesta = ['status' => false, 'error' => COT_TOTAL_INVALIDO];
+            echo json_encode($respuesta);
+            break;
+        }
+        // La fila primero: la valida y la guarda el formato con el que se
+        // creo, no el que tenga hoy la empresa. Si ya no existe, Gratex, que
+        // responde su "ya no existe" de siempre. Es tambien el old_values de
+        // la auditoria.
+        $oldCotizacion = cotFila($cotizacionModel, $body->id);
+        $formato = CotizacionFormatos::para($oldCotizacion['formato'] ?? null, $cotizacionModel);
+        if (!cotFormatoCoincide($body, $formato)) {
+            break;
+        }
+        $result = $formato->actualizar($oldCotizacion ?? [], $body);
+        if ($result[0] === 'success') {
+            $respuesta = ['status' => true, 'data' => $result[1]];
+            AuditLogger::log([
+                'module' => 'cotizaciones', 'action' => 'UPDATE',
+                'entity_type' => 'cotizacion', 'entity_id' => $body->id,
+                'old_values' => $oldCotizacion, 'new_values' => $body,
+                'description' => 'Cotizacion actualizada.',
+            ]);
         } else {
-            $itemError = cotValidarItems($_PUT->items);
-            if ($itemError !== null) {
-                http_response_code(422);
-                $respuesta = ['status' => false, 'error' => $itemError];
-            } else {
-                $date = isset($_PUT->date) ? $_PUT->date : '';
-                $user_id = isset($_PUT->user_id) ? $_PUT->user_id : null;
-                $send_email = isset($_PUT->sent_email) && $_PUT->sent_email === true;
-                $oldCotizacion = $cotizacionModel->getCotizaciones($_PUT->id)[0] ?? null;
-                $result = $cotizacionModel->updateCotizacion($_PUT->id, $_PUT->client_id, $date, $_PUT->items, $_PUT->total, $user_id, $send_email);
-                if ($result[0] === 'success') {
-                    $respuesta = ['status' => true, 'data' => $result[1]];
-                    AuditLogger::log([
-                        'module' => 'cotizaciones', 'action' => 'UPDATE',
-                        'entity_type' => 'cotizacion', 'entity_id' => $_PUT->id,
-                        'old_values' => $oldCotizacion, 'new_values' => $_PUT,
-                        'description' => 'Cotizacion actualizada.',
-                    ]);
-                } else {
-                    $respuesta = ['status' => false, 'error' => $result[1]];
-                }
-            }
+            $respuesta = cotError($result);
         }
         echo json_encode($respuesta);
         break;
 
     case 'DELETE':
-        $_DELETE = InputSanitizer::jsonInput(false);
-        if (!isset($_DELETE->id) || is_null($_DELETE->id)) {
+        if (!isset($body->id) || is_null($body->id)) {
             $respuesta = ['status' => false, 'error' => 'No se pudo identificar la cotización que quieres eliminar. Actualiza el listado e inténtalo de nuevo.'];
         } else {
-            $oldCotizacion = $cotizacionModel->getCotizaciones($_DELETE->id)[0] ?? null;
-            $result = $cotizacionModel->deleteCotizacion($_DELETE->id);
+            $oldCotizacion = $cotizacionModel->getCotizaciones($body->id)[0] ?? null;
+            $result = $cotizacionModel->deleteCotizacion($body->id);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => $result[1]];
                 AuditLogger::log([
                     'module' => 'cotizaciones', 'action' => 'DELETE',
-                    'entity_type' => 'cotizacion', 'entity_id' => $_DELETE->id,
+                    'entity_type' => 'cotizacion', 'entity_id' => $body->id,
                     'old_values' => $oldCotizacion, 'description' => 'Cotizacion eliminada.',
                 ]);
             } else {
