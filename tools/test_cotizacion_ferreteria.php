@@ -452,6 +452,252 @@ foreach ([1, 'true', null, 0] as $malo) {
         'La casilla «Retención Renta por Tercero 5%» no es válida: tiene que ser sí o no.');
 }
 
+// ===========================================================================
+// T5 — PDF de Ferreteria (FerreteriaCotizacionPdf)
+// ===========================================================================
+// Las aserciones corren siempre (sin BD, ~0.5 s). Con --pdf ademas escribe los
+// PDF en tools/out/ para compararlos a ojo con la hoja de Excel; --grid (que
+// implica --pdf) les superpone la rejilla de calibracion de 10 mm.
+//
+// FPDF comprime el contenido de cada pagina (FlateDecode). No se apaga la
+// compresion ni se agrega un modo "de prueba" al renderizador: el script infla
+// los streams con gzuncompress y busca el texto ahi, asi se prueba el mismo
+// PDF que recibe el usuario.
+
+require_once __DIR__ . '/../src/Utils/Cotizacion/FerreteriaCotizacionPdf.php';
+
+echo "\n== T5: PDF de Ferreteria (FerreteriaCotizacionPdf) ==\n";
+
+$argsPdf = array_slice($argv ?? [], 1);
+$conGrillaPdf = in_array('--grid', $argsPdf, true);
+$escribirPdf = $conGrillaPdf || in_array('--pdf', $argsPdf, true);
+
+$fxPdf = json_decode((string) file_get_contents(__DIR__ . '/fixtures/cotizacion_ferreteria.json'), true);
+$casosPdf = [];
+foreach ($fxPdf['casos'] as $casoFx) {
+    $casosPdf[$casoFx['id']] = $casoFx;
+}
+$logoPdf = is_file(__DIR__ . '/fixtures/ferreteria_logo.jpeg') ? __DIR__ . '/fixtures/ferreteria_logo.jpeg' : null;
+$chk('fixture: tools/fixtures/ferreteria_logo.jpeg existe', $logoPdf !== null);
+
+// Lo mismo que le pasara FerreteriaFormato::pdf()/preview(): items + totales ya
+// calculados por totales(). Los casos sin fecha, cliente o ajustes propios
+// (largo_60, mixto) usan los de pintura.
+$armarPdf = static function (array $caso, ?string $code, ?string $logo, bool $grilla = false) use ($fxPdf, $casosPdf): FerreteriaCotizacionPdf {
+    $sinAjustes = ['cargos_bancarios' => 0, 'manejo_bancario' => 0, 'mano_obra' => 0, 'abono' => 0, 'retencion_isr' => false];
+    $lineas = array_map(static fn(array $l): array => [
+        'quantity' => (float) $l['quantity'],
+        'amount' => (float) $l['amount'],
+        'indicador_facturacion' => (int) $l['indicador_facturacion'],
+    ], $caso['lineas']);
+    $cotizacion = [
+        'code' => $code,
+        'date' => $caso['date'] ?? $casosPdf['pintura']['date'],
+        'items' => array_map(static fn(array $l): array => [
+            'description' => (string) $l['description'],
+            'quantity' => (float) $l['quantity'],
+            'amount' => (float) $l['amount'],
+        ], $caso['lineas']),
+        'totales' => FerreteriaFormato::totales($lineas, $caso['ajustes'] ?? $sinAjustes),
+    ];
+    $pdf = new FerreteriaCotizacionPdf($cotizacion, $fxPdf['emisor'], $caso['cliente'] ?? $casosPdf['pintura']['cliente'], $logo);
+    $pdf->setDebugGrid($grilla);
+    return $pdf;
+};
+
+// Paginas = objetos "/Type /Page" (el \b deja fuera el "/Type /Pages" del arbol).
+$contarPaginas = static fn(string $bytes): int => (int) preg_match_all('#/Type /Page\b#', $bytes);
+// FPDF escribe primero el contenido de las paginas, en orden, y despues los
+// recursos (el logo): los N primeros streams son las N paginas.
+$paginasPdf = static function (string $bytes) use ($contarPaginas): array {
+    preg_match_all('/stream\n(.*?)\nendstream/s', $bytes, $m);
+    $paginas = [];
+    foreach (array_slice($m[1], 0, $contarPaginas($bytes)) as $s) {
+        $plano = @gzuncompress($s);
+        $paginas[] = $plano === false ? $s : $plano;
+    }
+    return $paginas;
+};
+// El texto va en ISO-8859-1 dentro de "(...) Tj": se busca igual.
+$iso = static fn(string $s): string => mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
+
+// --- el renderizador es puro (spec 7): ni BD ni tenant ni branding ---
+$codigoPdf = '';
+foreach (token_get_all((string) file_get_contents(__DIR__ . '/../src/Utils/Cotizacion/FerreteriaCotizacionPdf.php')) as $tok) {
+    if (is_array($tok) && in_array($tok[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+        continue;
+    }
+    $codigoPdf .= is_array($tok) ? $tok[1] : $tok;
+}
+$chk('puro: no usa Database, TenantResolver, BrandingResolver ni EmisorConfigModel',
+    !preg_match('/\b(Database|TenantResolver|BrandingResolver|EmisorConfigModel)\b/', $codigoPdf));
+
+// --- pintura: 1 pagina, numero, totales de su hoja ---
+$bytesPintura = $armarPdf($casosPdf['pintura'], $casosPdf['pintura']['code'], $logoPdf)->render();
+$txtPintura = implode("\n", $paginasPdf($bytesPintura));
+$chk('pintura: render() devuelve un PDF (%PDF)', str_starts_with($bytesPintura, '%PDF'));
+$chk('pintura: exactamente 1 pagina', $contarPaginas($bytesPintura) === 1);
+$chk('pintura: una sola pagina no lleva "Pagina X de Y"', !str_contains($txtPintura, $iso('Página 1 de')));
+$chk('pintura: imprime su numero COT-000001', str_contains($txtPintura, '(COT-000001)'));
+$chk('pintura: titulo, fecha larga y rotulo del cliente',
+    str_contains($txtPintura, $iso('(COTIZACIÓN MERCANCÍAS)'))
+    && str_contains($txtPintura, '(MAYO 14/2026.-)')
+    && str_contains($txtPintura, $iso('(NOMBRE O RAZÓN SOCIAL)')));
+$chk('pintura: RNC del emisor y del cliente formateados',
+    str_contains($txtPintura, '(RNC 132-61512-3)') && str_contains($txtPintura, '(401-51513-1)'));
+$chk('pintura: cabecera de las 4 columnas',
+    str_contains($txtPintura, '(Cantidad)') && str_contains($txtPintura, $iso('(Descripción mercancías)'))
+    && str_contains($txtPintura, '(Valor Unitario)') && str_contains($txtPintura, '(Valor Total RD$)'));
+$chk('pintura: linea 7.00 x 2,000.00 = 14,000.00',
+    str_contains($txtPintura, '(7.00)') && str_contains($txtPintura, '(2,000.00)') && str_contains($txtPintura, '(14,000.00)'));
+$chk('pintura: marca "No hay mas productos"', str_contains($txtPintura, $iso('No hay más productos debajo de la línea')));
+$chk('pintura: Sub-total 41,860.00 / ITBIS 18% 7,534.80 / TOTAL 49,394.80',
+    str_contains($txtPintura, '(41,860.00)') && str_contains($txtPintura, '(ITBIS 18%)')
+    && str_contains($txtPintura, '(7,534.80)') && str_contains($txtPintura, '(49,394.80)'));
+$chk('pintura: sin cargos, retencion, abono ni restante (no tienen valor)',
+    !str_contains($txtPintura, 'Cargos bancarios') && !str_contains($txtPintura, 'Costo mano de obra')
+    && !str_contains($txtPintura, 'Tercero 5%') && !str_contains($txtPintura, 'Abono') && !str_contains($txtPintura, 'Restante'));
+$chk('pintura: Recibido por + pie (razon social, correo, telefono)',
+    str_contains($txtPintura, '(Recibido por:)') && str_contains($txtPintura, '(FERREHERRAMIENTAS VENTURA, SRL)')
+    && str_contains($txtPintura, '(yaironventura0201@hotmail.com)') && str_contains($txtPintura, $iso('(Teléfono 829-898-7798)')));
+$chk('pintura: el correo del pie es un enlace mailto', str_contains($bytesPintura, '/URI (mailto:yaironventura0201@hotmail.com)'));
+$chk('pintura: no imprime cuenta bancaria ni sello de Gratex', !str_contains($txtPintura, '790371603') && !str_contains($txtPintura, 'Cuenta'));
+
+// --- vista previa: sin numero ---
+$txtPrevia = implode("\n", $paginasPdf($armarPdf($casosPdf['pintura'], null, $logoPdf)->render()));
+$chk('vista previa (code null): imprime VISTA PREVIA', str_contains($txtPrevia, '(VISTA PREVIA)'));
+$chk('vista previa: no inventa un numero COT-', !str_contains($txtPrevia, 'COT-'));
+
+// --- filas de ajustes: solo las que tienen valor ---
+$txtRet = implode("\n", $paginasPdf($armarPdf($casosPdf['pintura_retencion_abono'], 'COT-000001', $logoPdf)->render()));
+$chk('retencion+abono: Retencion 2,093.00, Abono 10,000.00, Restante (Adeudado) 37,301.80',
+    str_contains($txtRet, $iso('(Retención Renta por Tercero 5%)')) && str_contains($txtRet, '(2,093.00)')
+    && str_contains($txtRet, '(Abono realizado)') && str_contains($txtRet, '(10,000.00)')
+    // FPDF escapa los parentesis del texto: "(Restante \(Adeudado\))".
+    && str_contains($txtRet, '(Restante \(Adeudado\))') && str_contains($txtRet, '(37,301.80)'));
+$txtMano = implode("\n", $paginasPdf($armarPdf($casosPdf['pintura_mano_obra'], 'COT-000001', $logoPdf)->render()));
+$chk('mano de obra: Cargos 100.00, Manejos 50.00, Mano de obra 1,500.00, TOTAL 51,044.80',
+    str_contains($txtMano, '(Cargos bancarios)') && str_contains($txtMano, '(100.00)')
+    && str_contains($txtMano, '(Manejos de operaciones bancarias)') && str_contains($txtMano, '(50.00)')
+    && str_contains($txtMano, '(Costo mano de obra)') && str_contains($txtMano, '(1,500.00)')
+    && str_contains($txtMano, '(51,044.80)'));
+$chk('mano de obra: sin Restante (no hay retencion ni abono)', !str_contains($txtMano, 'Restante'));
+
+// --- etiqueta ITBIS y precio con 4 decimales ---
+$txtMixto = implode("\n", $paginasPdf($armarPdf($casosPdf['mixto'], 'COT-000009', $logoPdf)->render()));
+$chk('mixto: rotulo "ITBIS" a secas (no todo es 18%)', str_contains($txtMixto, '(ITBIS)') && !str_contains($txtMixto, 'ITBIS 18%'));
+$caso4Dec = ['lineas' => [['quantity' => 3, 'amount' => 84.7458, 'indicador_facturacion' => 1, 'description' => 'PRUEBA PRECIO 4 DECIMALES']]]
+    + $casosPdf['pintura'];
+$txt4Dec = implode("\n", $paginasPdf($armarPdf($caso4Dec, 'COT-000010', $logoPdf)->render()));
+$chk('precio 84.7458: Valor Unitario 84.7458 y Valor Total 254.24 (textoPrecio)',
+    str_contains($txt4Dec, '(3.00)') && str_contains($txt4Dec, '(84.7458)') && str_contains($txt4Dec, '(254.24)'));
+
+// --- logo: presente, ausente, inexistente, ilegible ---
+if ($logoPdf !== null) {
+    $chk('con logo: incrusta la imagen', str_contains($bytesPintura, '/Subtype /Image'));
+    $chk('con logo: la razon social sale solo en el pie', substr_count($txtPintura, '(FERREHERRAMIENTAS VENTURA, SRL)') === 1);
+}
+$bytesSinLogo = $armarPdf($casosPdf['pintura'], 'COT-000001', null)->render();
+$chk('sin logo: no incrusta imagen', !str_contains($bytesSinLogo, '/Subtype /Image'));
+$chk('sin logo: razon social arriba (en su lugar) y en el pie',
+    substr_count(implode("\n", $paginasPdf($bytesSinLogo)), '(FERREHERRAMIENTAS VENTURA, SRL)') === 2);
+$bytesNoExiste = $armarPdf($casosPdf['pintura'], 'COT-000001', __DIR__ . '/fixtures/no_existe.png')->render();
+$chk('logo inexistente: el PDF sale igual, sin imagen', str_starts_with($bytesNoExiste, '%PDF') && !str_contains($bytesNoExiste, '/Subtype /Image'));
+$bytesNoImagen = $armarPdf($casosPdf['pintura'], 'COT-000001', __DIR__ . '/fixtures/cotizacion_ferreteria.json')->render();
+$chk('logo que no es imagen: el PDF sale igual, sin imagen', str_starts_with($bytesNoImagen, '%PDF') && !str_contains($bytesNoImagen, '/Subtype /Image'));
+if (function_exists('imagecreatetruecolor')) {
+    // PNG entrelazado: getimagesize lo acepta pero FPDF lanza al leerlo.
+    $pngEntrelazado = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'cotizacion_ferreteria_' . getmypid() . '.png';
+    $imgPdf = imagecreatetruecolor(40, 20);
+    imageinterlace($imgPdf, true);
+    imagepng($imgPdf, $pngEntrelazado);
+    echo "     (se espera un aviso \"logo ilegible\" en stderr)\n";
+    $bytesEntrelazado = $armarPdf($casosPdf['pintura'], 'COT-000001', $pngEntrelazado)->render();
+    @unlink($pngEntrelazado);
+    $chk('logo que FPDF no soporta (PNG entrelazado): sale con la razon social',
+        str_starts_with($bytesEntrelazado, '%PDF') && !str_contains($bytesEntrelazado, '/Subtype /Image')
+        && substr_count(implode("\n", $paginasPdf($bytesEntrelazado)), '(FERREHERRAMIENTAS VENTURA, SRL)') === 2);
+}
+
+// --- largo_60: saltos de pagina ---
+$largoPdf = $casosPdf['largo_60'];
+$bytesLargo = $armarPdf($largoPdf, 'COT-000060', $logoPdf)->render();
+$nLargo = $contarPaginas($bytesLargo);
+$pagsLargo = $paginasPdf($bytesLargo);
+$chk("largo_60: mas de una pagina ({$nLargo})", $nLargo > 1);
+$chk('largo_60: un stream de contenido por pagina', count($pagsLargo) === $nLargo);
+$numeradas = true;
+foreach ($pagsLargo as $kPag => $pPag) {
+    $numeradas = $numeradas && str_contains($pPag, $iso('(Página ' . ($kPag + 1) . ' de ' . $nLargo . ')'));
+}
+$chk("largo_60: cada pagina dice \"Pagina X de {$nLargo}\"", $numeradas);
+$chk('largo_60: las 60 filas impresas', str_contains(implode("\n", $pagsLargo), 'NUMERO 60 CON') && str_contains($pagsLargo[0], 'NUMERO 1 CON'));
+
+// Las reglas de corte de la spec 7 para cada largo de 1 a 60 lineas: asi el
+// corte cae en todos los puntos posibles de la pagina, no solo en uno.
+$marcaSuelta = [];
+$cierrePartido = [];
+$cabeceraMal = [];
+$cierreSolo = 0;
+for ($nFilas = 1; $nFilas <= count($largoPdf['lineas']); $nFilas++) {
+    $subPdf = ['lineas' => array_slice($largoPdf['lineas'], 0, $nFilas)] + $largoPdf;
+    $pags = $paginasPdf($armarPdf($subPdf, 'COT-000060', $logoPdf)->render());
+    $ultimaPag = count($pags) - 1;
+    $donde = static function (string $aguja) use ($pags): array {
+        return array_keys(array_filter($pags, static fn(string $p): bool => str_contains($p, $aguja)));
+    };
+    // 1) la marca en la misma pagina que la ultima fila
+    $pagFila = $donde('NUMERO ' . $nFilas . ' CON');
+    if ($pagFila === [] || $pagFila !== $donde('No hay m')) {
+        $marcaSuelta[] = $nFilas;
+    }
+    // 2) totales + Recibido por + pie, todos en la ultima pagina
+    foreach (['(Sub-total RD$)', '(TOTAL RD$)', '(Recibido por:)', $iso('(Teléfono 829-898-7798)')] as $aguja) {
+        if ($donde($aguja) !== [$ultimaPag]) {
+            $cierrePartido[] = $nFilas;
+            break;
+        }
+    }
+    // 3) cabecera de tabla en cada pagina con filas, y en ninguna otra
+    foreach ($pags as $kPag => $pPag) {
+        if (str_contains($pPag, 'ARTICULO DE PRUEBA') !== str_contains($pPag, '(Valor Unitario)')) {
+            $cabeceraMal[] = $nFilas . '/p' . ($kPag + 1);
+        }
+    }
+    if (!str_contains($pags[$ultimaPag], 'ARTICULO DE PRUEBA')) {
+        $cierreSolo++;
+    }
+}
+$chk('cortes 1..60: la marca siempre en la pagina de la ultima fila'
+    . ($marcaSuelta ? ' (fallan n=' . implode(',', $marcaSuelta) . ')' : ''), $marcaSuelta === []);
+$chk('cortes 1..60: el bloque de cierre nunca se parte y va en la ultima pagina'
+    . ($cierrePartido ? ' (fallan n=' . implode(',', $cierrePartido) . ')' : ''), $cierrePartido === []);
+$chk('cortes 1..60: cabecera de tabla solo en paginas con filas'
+    . ($cabeceraMal ? ' (fallan ' . implode(',', $cabeceraMal) . ')' : ''), $cabeceraMal === []);
+$chk("cortes 1..60: algun largo empuja el cierre solo a una pagina nueva ({$cierreSolo} casos)", $cierreSolo > 0);
+
+// --- --pdf [--grid]: archivos para la comparacion visual con el Excel ---
+if ($escribirPdf) {
+    $dirOut = __DIR__ . '/out';
+    if (!is_dir($dirOut)) {
+        mkdir($dirOut, 0775, true);
+    }
+    $salidasPdf = [
+        'pintura' => [$casosPdf['pintura'], $casosPdf['pintura']['code'] ?? 'COT-000001'],
+        'b150000049' => [$casosPdf['b150000049'], $casosPdf['b150000049']['code'] ?? 'COT-000002'],
+        'ceramicas' => [$casosPdf['ceramicas'], $casosPdf['ceramicas']['code'] ?? 'COT-000003'],
+        'largo_60' => [$largoPdf, $largoPdf['code'] ?? 'COT-000060'],
+        // Extras: las filas opcionales de totales y la vista previa sin numero.
+        'pintura_retencion_abono' => [$casosPdf['pintura_retencion_abono'], $casosPdf['pintura_retencion_abono']['code'] ?? 'COT-000001'],
+        'vista_previa' => [$casosPdf['pintura'], null],
+    ];
+    foreach ($salidasPdf as $idPdf => [$casoPdf, $codePdf]) {
+        $rutaPdf = $dirOut . '/cotizacion_ferreteria_' . $idPdf . '.pdf';
+        $okPdf = file_put_contents($rutaPdf, $armarPdf($casoPdf, $codePdf, $logoPdf, $conGrillaPdf)->render()) !== false;
+        $chk('--pdf: tools/out/' . basename($rutaPdf) . ($conGrillaPdf ? ' (con rejilla)' : ''), $okPdf);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
