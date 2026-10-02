@@ -225,6 +225,27 @@ final class FerreteriaFormato extends CotizacionFormato
     }
 
     /**
+     * Descripcion de una linea lista para guardar e imprimir: cada corrida de
+     * caracteres de control (saltos de linea, tabuladores...) o de separadores
+     * Unicode de linea/parrafo pasa a UN espacio, y se recortan los extremos.
+     * El formulario ya junta los saltos, pero la API acepta lo que le manden, y
+     * en el PDF un "\n" es un renglon nuevo dentro de la celda: una descripcion
+     * llena de saltos estiraba la fila hasta salirse de la pagina. Los espacios
+     * normales se respetan: en sus hojas hay descripciones como 'T  3"'.
+     */
+    public static function limpiarDescripcion(string $s): string
+    {
+        $limpia = preg_replace('/[\p{Cc}\x{2028}\x{2029}]+/u', ' ', $s);
+        // preg_replace devuelve null con UTF-8 invalido: en ese caso se quitan los
+        // controles ASCII byte a byte (la conversion a ISO-8859-1 del PDF ya
+        // cambia lo demas por '?').
+        if ($limpia === null) {
+            $limpia = preg_replace('/[\x00-\x1F\x7F]+/', ' ', $s) ?? $s;
+        }
+        return trim($limpia);
+    }
+
+    /**
      * La fecha como la escribe la hoja: 'SEPTIEMBRE 2/2026.-'. Vacía, en ceros
      * o ilegible se usa hoy en hora de RD (la app no fija zona horaria), nunca
      * el 31/12/1969 de un strtotime fallido.
@@ -513,7 +534,7 @@ final class FerreteriaFormato extends CotizacionFormato
             return 'La línea ' . $n . ' no es válida. Quítala y vuelve a agregarla.';
         }
 
-        $descripcion = is_string($item->description ?? null) ? trim($item->description) : '';
+        $descripcion = is_string($item->description ?? null) ? self::limpiarDescripcion($item->description) : '';
         if ($descripcion === '') {
             return 'La línea ' . $n . ' no tiene descripción. Escríbela o quita esa línea.';
         }

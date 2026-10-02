@@ -620,7 +620,9 @@ final class FerreteriaCotizacionPdf
 
     private function texto($valor): string
     {
-        return is_scalar($valor) ? trim((string) $valor) : '';
+        // Mismo criterio que validarForma: un salto de linea en una fila vieja o
+        // en un dato del emisor no debe estirar la celda (ver limpiarDescripcion).
+        return is_scalar($valor) ? FerreteriaFormato::limpiarDescripcion((string) $valor) : '';
     }
 
     /** UTF-8 -> ISO-8859-1 (fuentes core de FPDF). */

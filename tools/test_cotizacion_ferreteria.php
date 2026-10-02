@@ -1227,6 +1227,59 @@ $tenantResuelto->setValue(null, null);
 $chk('registro: para(null) sigue siendo Gratex', get_class(CotizacionFormatos::para(null, $modeloSinDb)) === 'GratexFormato');
 
 // ---------------------------------------------------------------------------
+// T7b: descripciones limpias (saltos de linea y controles -> un espacio)
+// ---------------------------------------------------------------------------
+echo "\n== T7b: descripciones limpias ==\n";
+$chk('limpiarDescripcion: \r\n y \t -> un espacio',
+    FerreteriaFormato::limpiarDescripcion("LINEA UNO\r\nLINEA DOS\tTRES") === 'LINEA UNO LINEA DOS TRES');
+$chk('limpiarDescripcion: corrida de controles -> UN espacio',
+    FerreteriaFormato::limpiarDescripcion("A\n\n\r\n\x0B\x0CB") === 'A B');
+$chk('limpiarDescripcion: separadores Unicode U+2028/U+2029',
+    FerreteriaFormato::limpiarDescripcion("A\u{2028}B\u{2029}C") === 'A B C');
+$chk('limpiarDescripcion: respeta espacios dobles escritos (T  3")',
+    FerreteriaFormato::limpiarDescripcion('T  3"') === 'T  3"');
+$chk('limpiarDescripcion: recorta extremos (tambien controles en los extremos)',
+    FerreteriaFormato::limpiarDescripcion("\n  CODO DE 2 \t\r\n") === 'CODO DE 2');
+$chk('limpiarDescripcion: solo controles -> vacia',
+    FerreteriaFormato::limpiarDescripcion("\r\n\t") === '');
+
+// validarForma usa la descripcion limpia (y una de puros saltos cuenta como vacia).
+$t7bCuerpo = static function (string $descripcion): object {
+    return json_decode(json_encode([
+        'formato' => 'ferreteria', 'client_id' => 1, 'date' => '2026-09-02 10:15:00',
+        'items' => [['product_id' => null, 'description' => $descripcion, 'quantity' => 1, 'amount' => 100]],
+        'ajustes' => ['cargos_bancarios' => 0, 'manejo_bancario' => 0, 'mano_obra' => 0, 'abono' => 0, 'retencion_isr' => false],
+    ]));
+};
+$t7bProblema = static fn(float $c, string $u, int $d): ?string => null;
+$t7bUnidad = static fn(string $u): bool => true;
+$t7bR = FerreteriaFormato::validarForma($t7bCuerpo("FUNDA\r\nCEMENTO\tGRIS"), $t7bProblema, $t7bUnidad);
+$chk('validarForma guarda la descripcion limpia',
+    ($t7bR['ok'] ?? null) === true && ($t7bR['cot']['items'][0]['description'] ?? null) === 'FUNDA CEMENTO GRIS');
+$t7bR = FerreteriaFormato::validarForma($t7bCuerpo("\r\n\t"), $t7bProblema, $t7bUnidad);
+$chk('validarForma: descripcion de puros saltos = sin descripcion',
+    ($t7bR['ok'] ?? null) === false
+    && ($t7bR['error'] ?? null) === 'La línea 1 no tiene descripción. Escríbela o quita esa línea.');
+
+// El PDF tambien limpia (filas viejas o datos que no pasaron por validarForma):
+// 40 lineas con 30 saltos cada una caben en las mismas paginas que sin saltos.
+$t7bTot = FerreteriaFormato::totales(
+    array_fill(0, 40, ['quantity' => 1.0, 'amount' => 10.0, 'indicador_facturacion' => 1]),
+    ['cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'retencion_isr' => false]
+);
+$t7bPdf = static function (string $desc) use ($fixture, $t7bTot): string {
+    $items = array_fill(0, 40, ['description' => $desc, 'quantity' => 1.0, 'amount' => 10.0]);
+    $cot = ['code' => 'COT-000099', 'date' => '2026-09-02 10:15:00', 'items' => $items, 'totales' => $t7bTot];
+    $cliente = $fixture['casos'][0]['cliente'];
+    return (new FerreteriaCotizacionPdf($cot, $fixture['emisor'], $cliente, null))->render();
+};
+$t7bPaginas = static fn(string $pdf): int => preg_match_all('#/Type /Page[^s]#', $pdf);
+$t7bLimpio = $t7bPaginas($t7bPdf('ARTICULO DE PRUEBA'));
+$t7bSucio = $t7bPaginas($t7bPdf('ARTICULO' . str_repeat("\r\n", 30) . 'DE PRUEBA'));
+$chk('PDF: descripciones con saltos no agregan paginas (' . $t7bSucio . ' vs ' . $t7bLimpio . ')',
+    $t7bLimpio > 0 && $t7bSucio === $t7bLimpio);
+
+// ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
 
