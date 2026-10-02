@@ -803,6 +803,29 @@ $chk('delCuerpo(): formato null o que no es texto (5, true, []) = gratex',
 $chk("delCuerpo(): formato '' es texto y se devuelve tal cual (409 en cualquier tenant)",
     CotizacionFormatos::delCuerpo((object) ['formato' => '']) === '');
 
+// deLaFila(): el formato de un PUT. Con fila, el de la fila (aunque el cuerpo
+// diga otro: la guardia responde 409). Sin fila (otra persona la borró), el del
+// cuerpo si se conoce: Ferretería responde su 404 "ya no existe" y no el 409
+// "cambió el formato de tu empresa", que bloquearía la pantalla.
+$cuerpoFerreteriaT6 = (object) ['formato' => 'ferreteria'];
+$cuerpoGratexT6 = (object) ['client_id' => 5, 'items' => []];
+$chk('deLaFila(): con fila, el formato de la fila (aunque el cuerpo diga otro)',
+    CotizacionFormatos::deLaFila(['id' => 7, 'formato' => 'ferreteria'], $cuerpoGratexT6) === 'ferreteria'
+    && CotizacionFormatos::deLaFila(['id' => 7, 'formato' => 'gratex'], $cuerpoFerreteriaT6) === 'gratex');
+$chk('deLaFila(): fila de Gratex (formato NULL, o sin la columna antes de la 026) = null, que para() lee como gratex',
+    CotizacionFormatos::deLaFila(['id' => 7, 'formato' => null], $cuerpoFerreteriaT6) === null
+    && CotizacionFormatos::deLaFila(['id' => 7], $cuerpoFerreteriaT6) === null);
+$chk("deLaFila(): fila con formato desconocido = ese nombre (para() lo avisa y usa gratex)",
+    CotizacionFormatos::deLaFila(['id' => 7, 'formato' => 'x'], $cuerpoGratexT6) === 'x');
+$chk('deLaFila(): sin fila y cuerpo de Ferretería = ferreteria (su 404, no el 409), sin aviso',
+    CotizacionFormatos::deLaFila(null, $cuerpoFerreteriaT6) === 'ferreteria' && $leerLogFormatos() === '');
+$chk('deLaFila(): sin fila y cuerpo de Gratex (sin "formato") = gratex, como antes',
+    CotizacionFormatos::deLaFila(null, $cuerpoGratexT6) === 'gratex'
+    && CotizacionFormatos::deLaFila(null, new stdClass()) === 'gratex');
+$chk("deLaFila(): sin fila y formato desconocido ('x', '') = gratex (la guardia responde 409)",
+    CotizacionFormatos::deLaFila(null, (object) ['formato' => 'x']) === 'gratex'
+    && CotizacionFormatos::deLaFila(null, (object) ['formato' => '']) === 'gratex');
+
 $chk('MSG_DESACTUALIZADA (el 409) = el mensaje de la spec', CotizacionFormatos::MSG_DESACTUALIZADA
     === 'La pantalla de cotizaciones está desactualizada (cambió el formato de tu empresa). Recarga la página.');
 
@@ -817,7 +840,9 @@ ini_set('error_log', $logAnteriorFormatos === false ? '' : $logAnteriorFormatos)
 // tipo, asi que basta con los mismos metodos que PDO. Nada de esta seccion
 // abre una base de datos ni instancia Database/MasterDatabase: crear(),
 // actualizar(), preview() y pdf() de FerreteriaFormato si lo harian, y se
-// prueban en el servidor (tests/test_cotizaciones_ferreteria.http).
+// prueban en el servidor (tests/test_cotizaciones_ferreteria.http). La
+// excepcion es actualizar([]) (la fila ya no existe), que responde 404 antes
+// de tocar la DB.
 
 require_once __DIR__ . '/../src/Models/cotizacionModel.php';
 require_once __DIR__ . '/../src/Utils/Cotizacion/CotizacionFormatos.php';
@@ -1225,6 +1250,27 @@ $chk('el modelo que recibe para() es el que usa el formato', (fn() => $this->mod
 $chk("delTenant(): cotizacion_formato 'ferreteria' = ferreteria", $conTenant(['id' => 5, 'cotizacion_formato' => 'ferreteria']) === 'ferreteria');
 $tenantResuelto->setValue(null, null);
 $chk('registro: para(null) sigue siendo Gratex', get_class(CotizacionFormatos::para(null, $modeloSinDb)) === 'GratexFormato');
+
+// PUT sobre una cotizacion que ya no existe: el controller resuelve el formato
+// del cuerpo (deLaFila) y Ferreteria responde su 404 antes de validar o leer
+// la DB. Por si algun dia deja de ser asi, la master queda con una instancia
+// sin conexion: prepararDatos() lanzaria y responderia 500 (el chequeo falla)
+// en vez de abrir la base del .env.
+$masterInstanciaT7 = new ReflectionProperty('MasterDatabase', 'instance');
+$masterAnteriorT7 = $masterInstanciaT7->getValue();
+$masterInstanciaT7->setValue(null, (new ReflectionClass('MasterDatabase'))->newInstanceWithoutConstructor());
+try {
+    $rT7 = $fT7->actualizar([], json_decode(json_encode([
+        'id' => 404, 'formato' => 'ferreteria', 'client_id' => 1,
+        'items' => [['product_id' => null, 'description' => 'TUBO', 'quantity' => 1, 'amount' => 100]],
+    ])));
+} catch (Throwable $e) {
+    $rT7 = ['lanzo', $e->getMessage()];
+}
+$masterInstanciaT7->setValue(null, $masterAnteriorT7);
+$chk('actualizar([]) (la borraron antes del PUT) = 404 "ya no existe", sin validar ni leer la DB', $rT7 === [
+    'error', 'Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.', 404,
+]);
 
 // ---------------------------------------------------------------------------
 // T7b: descripciones limpias (saltos de linea y controles -> un espacio)

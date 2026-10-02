@@ -80,4 +80,24 @@ final class CotizacionFormatos
     {
         return isset($body->formato) && is_string($body->formato) ? $body->formato : self::DEFAULT;
     }
+
+    /**
+     * El formato de un PUT: el de la fila que se edita (NULL = gratex), no el
+     * que tenga hoy la empresa. $fila es null cuando la cotización ya no existe
+     * (otra persona la borró): entonces el que dice el cuerpo, si este código lo
+     * conoce, para que ese formato responda su "ya no existe" (Ferretería 404,
+     * Gratex su 200 de siempre). Resolver Gratex ahí haría que la guardia
+     * respondiera 409 "cambió el formato de tu empresa" a un cuerpo de
+     * Ferretería, y el front bloquearía la pantalla por un cambio que no hubo.
+     * Un cuerpo de Gratex (sin "formato") sigue resolviendo gratex, como antes.
+     * Un formato que este código no conoce cae en gratex y recibe el 409.
+     */
+    public static function deLaFila(?array $fila, object $body): ?string
+    {
+        if ($fila !== null) {
+            return $fila['formato'] ?? null;
+        }
+        $delCuerpo = self::delCuerpo($body);
+        return self::existe($delCuerpo) ? $delCuerpo : self::DEFAULT;
+    }
 }

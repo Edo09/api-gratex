@@ -465,8 +465,9 @@ Content-Type: application/json
 GET {{base}}/api/cotizaciones/{{cotFerreteria}}/pdf?format=base64
 X-API-KEY: {{tokenFerreteria}}
 
-### D3 Editar la borrada con el cuerpo de Ferreteria -> 409 (sin fila no hay formato guardado: el servidor
-### resuelve gratex y la guardia responde; nada se guarda)
+### D3 Editar la borrada con el cuerpo de Ferreteria -> 404 "Esta cotización ya no existe. Puede que la hayan
+### eliminado; vuelve al listado." (sin fila no hay formato guardado: el servidor usa el del cuerpo, no el 409;
+### nada se guarda)
 PUT {{base}}/api/cotizaciones
 X-API-KEY: {{tokenFerreteria}}
 Content-Type: application/json

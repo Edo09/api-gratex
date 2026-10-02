@@ -74,7 +74,10 @@ function cotFormatoCoincide(object $body, CotizacionFormato $formato): bool
     if ($delCuerpo === $formato->nombre()) {
         return true;
     }
-    error_log('[cotizaciones] el cuerpo dice formato "' . $delCuerpo . '" y toca "' . $formato->nombre() . '": 409');
+    // El formato del cuerpo lo escribe el usuario y cleanString deja pasar \n y
+    // \t: json_encode los escapa (y las comillas), para que no pueda inventar
+    // lineas en el log. Recortado: un texto de 1 MB no llena el log.
+    error_log('[cotizaciones] el cuerpo dice formato ' . json_encode(mb_substr($delCuerpo, 0, 40)) . ' y toca "' . $formato->nombre() . '": 409');
     http_response_code(409);
     echo json_encode(['status' => false, 'error' => CotizacionFormatos::MSG_DESACTUALIZADA]);
     return false;
@@ -247,11 +250,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
             break;
         }
         // La fila primero: la valida y la guarda el formato con el que se
-        // creo, no el que tenga hoy la empresa. Si ya no existe, Gratex, que
-        // responde su "ya no existe" de siempre. Es tambien el old_values de
-        // la auditoria.
+        // creo, no el que tenga hoy la empresa. Si ya no existe, el formato del
+        // cuerpo (si se conoce), que responde su "ya no existe": Ferreteria 404,
+        // Gratex el de siempre (deLaFila). Es tambien el old_values de la
+        // auditoria.
         $oldCotizacion = cotFila($cotizacionModel, $body->id);
-        $formato = CotizacionFormatos::para($oldCotizacion['formato'] ?? null, $cotizacionModel);
+        $formato = CotizacionFormatos::para(CotizacionFormatos::deLaFila($oldCotizacion, $body), $cotizacionModel);
         if (!cotFormatoCoincide($body, $formato)) {
             break;
         }

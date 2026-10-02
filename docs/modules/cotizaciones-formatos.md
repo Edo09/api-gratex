@@ -29,7 +29,7 @@ Referencia de la API (cuerpos, respuestas, errores): [../api/cotizaciones.md](..
 |---------|----------|
 | `src/Controllers/cotizacionController.php` | Decodifica el cuerpo una vez, elige el formato, aplica la guardia `409`, llama al formato, escribe la auditoría y envuelve la respuesta. No tiene reglas de ningún formato |
 | `src/Utils/Cotizacion/CotizacionFormato.php` | Clase abstracta: el contrato de un formato |
-| `src/Utils/Cotizacion/CotizacionFormatos.php` | Registro `FORMATOS` (clave → clase), `para()`, `delTenant()`, `delCuerpo()` |
+| `src/Utils/Cotizacion/CotizacionFormatos.php` | Registro `FORMATOS` (clave → clase), `para()`, `delTenant()`, `delCuerpo()`, `deLaFila()` |
 | `src/Utils/Cotizacion/GratexFormato.php` | Las ramas de siempre del controller, movidas tal cual |
 | `src/Utils/Cotizacion/FerreteriaFormato.php` | Reglas puras (totales, validación, número, RNC, fecha) + crear/editar/vista previa/PDF |
 | `src/Utils/Cotizacion/FerreteriaCotizacionPdf.php` | Renderizador FPDF puro de la hoja de Ferretería |
@@ -79,7 +79,7 @@ Esquema completo: [../database/schema.md](../database/schema.md).
 | Petición | Formato | Por qué |
 |----------|---------|---------|
 | `POST /api/cotizaciones` | El de la empresa (`CotizacionFormatos::delTenant()`) | Una cotización nueva nace con el formato actual |
-| `PUT /api/cotizaciones` | El de la fila (`cotizaciones.formato`, `NULL` = gratex). La fila se lee primero; si ya no existe, `gratex` (que responde su "ya no existe"; un cuerpo de otro formato recibe el `409`) | Cambiar el ajuste de la empresa no reinterpreta las guardadas |
+| `PUT /api/cotizaciones` | El de la fila (`cotizaciones.formato`, `NULL` = gratex). La fila se lee primero; si ya no existe, el del cuerpo cuando este código lo conoce (`CotizacionFormatos::deLaFila()`), que responde su "ya no existe": Ferretería `404`, Gratex su `200` `status: false` de siempre. Un formato desconocido cae en `gratex` y recibe el `409` | Cambiar el ajuste de la empresa no reinterpreta las guardadas; borrar una cotización no es un cambio de formato |
 | `POST /api/cotizaciones/preview` | El de la fila si el cuerpo trae `id` de una que existe; si no, el de la empresa | La vista previa de una guardada imprime su código |
 | `GET /api/cotizaciones/{id}/pdf` | El de la fila | Una de Gratex sale siempre con el PDF de Gratex |
 | `GET` (lista y `?id=`), `DELETE` | Ninguno: código común del modelo | — |
@@ -117,7 +117,7 @@ El mensaje lo lee el usuario; el detalle técnico va al `error_log`. `$body` es 
 
 `$http` es el código de la respuesta: Gratex usa `200` en sus errores de cabecera y
 de guardado (su pantalla lo espera así) y `422` en los de línea; Ferretería usa `422`
-para validación, `404` cuando la cotización desaparece mientras se guarda y `500` para
+para validación, `404` cuando la cotización ya no existe (o desaparece mientras se guarda) y `500` para
 fallos de la base o del PDF. El controller aplica `$http` con `http_response_code()`
 salvo cuando es `200`.
 

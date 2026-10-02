@@ -36,8 +36,9 @@ abstract class CotizacionFormato
      * PUT /api/cotizaciones sobre una cotización existente. El número y el
      * código nunca cambian.
      * @param array $row La fila actual (getCotizaciones($id)[0]). [] solo cuando
-     *                   ya no existe: ese caso siempre resuelve a Gratex, que
-     *                   responde su "ya no existe" de siempre.
+     *                   ya no existe: ese caso resuelve al formato del cuerpo
+     *                   (CotizacionFormatos::deLaFila), que tiene que responder
+     *                   su "ya no existe" sin guardar nada.
      * @return array ['success', mixed $data] | ['error', string $msg, int $http]
      */
     abstract public function actualizar(array $row, object $body): array;

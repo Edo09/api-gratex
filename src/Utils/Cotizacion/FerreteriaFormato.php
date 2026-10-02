@@ -284,6 +284,10 @@ final class FerreteriaFormato extends CotizacionFormato
 
     public function actualizar(array $row, object $body): array
     {
+        // Sin fila: la borraron antes del PUT. El controller resuelve entonces
+        // el formato del cuerpo (CotizacionFormatos::deLaFila), asi que este
+        // "ya no existe" es el que recibe la pantalla de Ferreteria. Antes de
+        // validar ni leer la DB: no hay nada que guardar.
         if (empty($row['id'])) {
             return ['error', 'Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.', 404];
         }

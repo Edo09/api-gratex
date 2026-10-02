@@ -332,11 +332,10 @@ ajustes** (sin `ajustes` = ninguno). `numero` y `code` no cambian. Sin `date` (o
 `""`) conserva la fecha y hora guardadas. Responde lo mismo que el POST, con el
 `code` y el `numero` de siempre.
 
-- **`409`** si la fila es de otro formato (una de Gratex editada con el formulario de Ferretería), y también si la
-  cotización ya no existe: sin fila no hay formato guardado, el servidor resuelve `gratex` y la guardia responde. Al
-  recargar, la cotización ya no está en el listado.
-- **`404`** `"Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado."` solo si la borran en el
-  instante entre la lectura de la fila y el guardado.
+- **`409`** si la fila es de otro formato (una de Gratex editada con el formulario de Ferretería).
+- **`404`** `"Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado."` si la cotización ya no
+  existe: sin fila no hay formato guardado y el servidor usa el del cuerpo (`ferreteria`), que responde este 404 sin
+  guardar nada. También si la borran en el instante entre la lectura de la fila y el guardado.
 
 ### POST `/api/cotizaciones/preview` — PDF sin guardar
 
@@ -391,7 +390,7 @@ Todos con `status: false`. `N` es el número de la línea como la ve el usuario 
 | 422 | `«Costo mano de obra» no es un monto válido. Revísalo.` / `… no puede ser negativo.` / `… admite hasta 2 decimales.` (lo mismo para «Cargos bancarios», «Manejos de operaciones bancarias» y «Abono realizado») |
 | 422 | `La casilla «Retención Renta por Tercero 5%» no es válida: tiene que ser sí o no.` |
 | 422 | `El abono (RD$ 50,000.00) no puede ser mayor que lo adeudado (RD$ 49,394.80).` |
-| 404 | `Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.` (PUT, si la borran mientras se guarda) |
+| 404 | `Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.` (PUT de una que ya no existe, o que la borran mientras se guarda) |
 | 409 | `La pantalla de cotizaciones está desactualizada (cambió el formato de tu empresa). Recarga la página.` |
 | 500 | `No se pudo revisar la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.` (no se pudo leer el cliente o los productos) |
 | 500 | `No se pudo guardar la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.` / `No se pudieron guardar los cambios de la cotización. …` |
@@ -421,8 +420,8 @@ el hueco.
 | `200` `status: true` | Éxito |
 | `200` `status: false` | Gratex: errores de cabecera (cliente, líneas, total), "ya no existe" y fallos del modelo; PUT/DELETE sin `id`; DELETE de una que no existe |
 | `401` | Sin token o token inválido |
-| `404` | PDF de un id que no existe; PUT de Ferretería si la cotización se borra mientras se guarda |
-| `409` | Guardia de formato: la pantalla está desactualizada (también un PUT con cuerpo de Ferretería sobre una cotización que ya no existe) |
+| `404` | PDF de un id que no existe; PUT de Ferretería sobre una cotización que ya no existe (o que se borra mientras se guarda) |
+| `409` | Guardia de formato: la pantalla está desactualizada |
 | `422` | Validación: líneas de Gratex; todo el cuerpo de Ferretería |
 | `500` | Ferretería: fallo al leer el cliente o los productos, al guardar o al generar el PDF |
 
