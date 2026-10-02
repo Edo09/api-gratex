@@ -65,7 +65,7 @@ con `true` el sistema enruta por el master DB (ver [architecture.md](architectur
 
 ## Base de datos
 
-Crear la DB y aplicar el esquema del tenant (incluye base + migraciones 001–016):
+Crear la DB y aplicar el esquema del tenant (incluye base + migraciones 001–026):
 
 ```powershell
 mysql -u root gratex_local < db/tenant_schema.sql

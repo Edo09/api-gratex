@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..025  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..026  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -16,7 +16,8 @@
 --
 -- ORDEN: aqui no se desactiva FOREIGN_KEY_CHECKS, asi que toda tabla referenciada
 -- por una FK se crea ANTES que quien la referencia. Por eso el catalogo
--- (categories, warehouses, products) va antes de facturas, gastos e inventario.
+-- (categories, warehouses, products) va antes de cotizaciones, facturas, gastos
+-- e inventario. tools/check_tenant_schema_orden.php lo revisa sin MySQL.
 --
 -- SIN users / api_tokens / landing_* (viven en gratex_master). NO incluye
 -- CREATE DATABASE / USE: el onboarding crea el DB y selecciona su conexion.
@@ -46,33 +47,8 @@ CREATE TABLE IF NOT EXISTS clients (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
--- 2) Cotizaciones
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS cotizaciones (
-  id           INT(11)        NOT NULL AUTO_INCREMENT,
-  code         VARCHAR(50)    NOT NULL,
-  date         DATETIME       DEFAULT CURRENT_TIMESTAMP,
-  client_id    INT(11)        DEFAULT NULL,
-  client_name  VARCHAR(100)   NOT NULL,
-  total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
-  PRIMARY KEY (id)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS cotizacion_items (
-  id             INT(11)        NOT NULL AUTO_INCREMENT,
-  cotizacion_id  INT(11)        NOT NULL,
-  description    TEXT           NOT NULL,
-  amount         DECIMAL(18,4)  NOT NULL,
-  quantity       DECIMAL(12,3)  NOT NULL DEFAULT 1.000,
-  subtotal       DECIMAL(18,2)  NOT NULL,
-  PRIMARY KEY (id),
-  KEY cotizacion_id (cotizacion_id),
-  CONSTRAINT cotizacion_items_ibfk_1 FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ----------------------------------------------------------------------------
 -- 2b) Inventario: Categorias + Almacenes (DB del tenant = empresa; sin company_id).
---     Van antes de products (sus FKs), y products antes de facturas/gastos.
+--     Van antes de products (sus FKs), y products antes de cotizaciones/facturas/gastos.
 --     Ver db/migrations/017_add_inventory.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS categories (
@@ -109,8 +85,8 @@ WHERE NOT EXISTS (SELECT 1 FROM warehouses WHERE nombre = 'Almacén Principal');
 -- 2c) Catalogo de productos/servicios (para la facturacion). `indicador_facturacion`
 --     define el gravamen ITBIS igual que en factura_items (1=18% gravado, 4=Exento).
 --     category_id (FK categories, opcional) + warehouse_id (FK warehouses, obligatorio).
---     Lo referencian por FK factura_items, gasto_items e inventory_movements: por
---     eso se crea antes que ellas.
+--     Lo referencian por FK cotizacion_items, factura_items, gasto_items e
+--     inventory_movements: por eso se crea antes que ellas.
 --     Ver db/migrations/012_add_products.sql, 017_add_inventory.sql y
 --     019_add_product_precios.sql.
 -- ----------------------------------------------------------------------------
@@ -148,6 +124,75 @@ CREATE TABLE IF NOT EXISTS products (
   KEY idx_activo (activo),
   CONSTRAINT fk_products_category FOREIGN KEY (category_id) REFERENCES categories (id) ON DELETE SET NULL,
   CONSTRAINT fk_products_warehouse FOREIGN KEY (warehouse_id) REFERENCES warehouses (id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 2d) Cotizaciones. Van despues del catalogo: cotizacion_items.product_id es FK
+--     a products. formato NULL = Gratex (lineas de texto libre y codigo
+--     aleatorio); los demas formatos (src/Utils/Cotizacion/) numeran con
+--     `numero`, guardan subtotal/itbis, los datos fiscales de cada linea y sus
+--     cargos y abonos en cotizacion_ajustes.
+--     Ver db/migrations/025_decimales_cantidades_precios.sql y
+--     026_cotizaciones_formatos.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cotizaciones (
+  id           INT(11)        NOT NULL AUTO_INCREMENT,
+  code         VARCHAR(50)    NOT NULL,
+  formato      VARCHAR(40)    NULL DEFAULT NULL
+                 COMMENT 'Formato de cotizacion (src/Utils/Cotizacion/), NULL = gratex',
+  numero       INT UNSIGNED   NULL DEFAULT NULL
+                 COMMENT 'Consecutivo del tenant (COT-000001), NULL = codigo aleatorio de Gratex',
+  date         DATETIME       DEFAULT CURRENT_TIMESTAMP,
+  client_id    INT(11)        DEFAULT NULL,
+  client_name  VARCHAR(100)   NULL DEFAULT NULL,
+  subtotal     DECIMAL(18,2)  NULL DEFAULT NULL
+                 COMMENT 'Antes de ITBIS, NULL en cotizaciones de Gratex',
+  itbis        DECIMAL(18,2)  NULL DEFAULT NULL
+                 COMMENT 'Suma del ITBIS de las lineas, NULL en cotizaciones de Gratex',
+  total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
+  user_id      INT(11)        NULL DEFAULT NULL
+                 COMMENT 'Referencia a gratex_master.users.id (sin FK cross-DB)',
+  updated_at   DATETIME       NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cotizaciones_numero (numero)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cotizacion_items (
+  id             INT(11)        NOT NULL AUTO_INCREMENT,
+  cotizacion_id  INT(11)        NOT NULL,
+  product_id     INT(11)        NULL DEFAULT NULL
+                   COMMENT 'FK al catalogo, NULL = linea libre o de Gratex',
+  description    TEXT           NOT NULL,
+  amount         DECIMAL(18,4)  NOT NULL,
+  quantity       DECIMAL(12,3)  NOT NULL DEFAULT 1.000,
+  subtotal       DECIMAL(18,2)  NOT NULL,
+  unidad_medida  VARCHAR(10)    NULL DEFAULT NULL
+                   COMMENT 'Codigo de unidad DGII (ej. 43 = Unidad), NULL = linea de Gratex',
+  indicador_facturacion TINYINT NULL DEFAULT NULL
+                   COMMENT '1=ITBIS 18% | 2=ITBIS 16% | 3=ITBIS 0% | 4=Exento, NULL = linea de Gratex',
+  indicador_bien_servicio TINYINT NULL DEFAULT NULL
+                   COMMENT '1=Bien | 2=Servicio, NULL = linea de Gratex',
+  itbis_amount   DECIMAL(18,2)  NULL DEFAULT NULL
+                   COMMENT 'ITBIS de la linea, NULL = linea de Gratex',
+  PRIMARY KEY (id),
+  KEY cotizacion_id (cotizacion_id),
+  KEY idx_cotizacion_items_product (product_id),
+  CONSTRAINT cotizacion_items_ibfk_1 FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE,
+  CONSTRAINT cotizacion_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Montos fuera de las lineas (cargos bancarios, mano de obra, abono,
+-- retencion...): una fila por concepto, solo los distintos de cero. Cada
+-- formato declara que conceptos acepta.
+CREATE TABLE IF NOT EXISTS cotizacion_ajustes (
+  id             INT(11)        NOT NULL AUTO_INCREMENT,
+  cotizacion_id  INT(11)        NOT NULL,
+  concepto       VARCHAR(30)    NOT NULL
+                   COMMENT 'Clave definida por el formato (ej. mano_obra, abono)',
+  monto          DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cotizacion_ajuste (cotizacion_id, concepto),
+  CONSTRAINT cotizacion_ajustes_cot_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
