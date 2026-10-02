@@ -1,0 +1,602 @@
+### ============================================================================
+### Cotizaciones por formato -> /api/cotizaciones
+### Formato "ferreteria" (Ferreteria) y regresion del formato "gratex" (Gratex).
+### Ver docs/api/cotizaciones.md y docs/modules/cotizaciones-formatos.md.
+###
+### Correr contra un servidor con la master 011 y la tenant 026 aplicadas (local o
+### staging; en produccion solo los pasos del smoke test del despliegue). Antes:
+###   - el tenant de Ferreteria con cotizacion_formato = 'ferreteria' en el master;
+###   - llenar las variables de abajo (tokens del login de cada tenant, ids reales).
+### Los ids de las cotizaciones salen de las respuestas de "Crear".
+### ============================================================================
+
+@base = http://localhost:8000
+@tokenFerreteria = <token de sesion de un usuario de Ferreteria con el modulo cotizaciones>
+@tokenGratex = <token de sesion de un usuario de Gratex con el modulo cotizaciones>
+@clienteFerreteria = <id de un cliente de la DB de Ferreteria>
+@productoFerreteria = <id de un producto de la DB de Ferreteria>
+@clienteGratex = <id de un cliente de la DB de Gratex>
+@cotFerreteria = <id que devolvio "F1 Crear">
+@cotGratex = <id que devolvio "G1 Crear">
+
+### Step 1: Login (una vez por tenant; el token va en X-API-KEY)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "<usuario>",
+  "password": "<password>"
+}
+
+###
+
+### F0 Branding de Ferreteria -> data.cotizacion_formato = "ferreteria"
+GET {{base}}/api/branding
+X-API-KEY: {{tokenFerreteria}}
+
+### F0b PUT de branding con solo cotizacion_formato (usuario que pueda editar el branding) -> 422
+### "No hay cambios para guardar.": el PUT no acepta el campo, se cambia solo por SQL. F0 sigue diciendo "ferreteria".
+PUT {{base}}/api/branding
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_formato": "gratex"
+}
+
+### ============================================================================
+### Comprobaciones de servidor que no son peticiones (Tasks 2, 3, 5 y 6; anotar el resultado de cada una)
+### M1 Migracion 026, DOS veces, en una DB armada con el snapshot de ANTES de la 026
+###    (git show <commit de la 026>~1:db/tenant_schema.sql). 1a corrida: el paso 0 da InnoDB en las 3 tablas e id
+###    int(11); E1 da 16 filas (client_name con IS_NULLABLE YES), E2 3 indices y E3 2 FKs (SET NULL y CASCADE).
+###    2a corrida: cada paso ejecuta DO 0 y SHOW CREATE TABLE cotizacion_items queda igual (sin indice duplicado).
+### M2 Snapshot nuevo: db/tenant_schema.sql sobre una DB vacia (o php tools/create_tenant.php contra un master de
+###    prueba) termina sin errno 150/1824, y SHOW TABLES incluye cotizacion_ajustes.
+### M3 Master 011 DOS veces: la 2a ejecuta DO 0; SELECT id, nombre, cotizacion_formato FROM tenants -> todos 'gratex'
+###    hasta el UPDATE de Ferreteria.
+### M4 Antes de la 011 (master sin la columna): G0 responde 200 con "cotizacion_formato": "gratex".
+### M5 Copia de la DB de Gratex con la 026 y todavia el codigo viejo: G1 sigue devolviendo {id, code, message}.
+### M6 PDF largo: una cotizacion de Ferreteria de 30+ lineas (o las 60 de largo_60 del fixture) -> la cabecera de la
+###    tabla se repite solo en paginas que siguen con filas, la marca "No hay mas productos" queda en la pagina de la
+###    ultima fila, totales + "Recibido por" + pie no se parten, y cada pagina dice "Pagina X de Y". Con 1 pagina no
+###    sale "Pagina".
+### M7 Tenant de Ferreteria sin logo (tenants.logo_path NULL): el PDF imprime la razon social en negrita arriba y
+###    nunca el logo de Gratex.
+### M8 Auditoria: despues de G1, G2 y G13, audit_logs tiene las filas CREATE, UPDATE y DELETE del modulo cotizaciones
+###    con los mismos campos que antes del despliegue (entity_id, old_values, new_values, description).
+### ============================================================================
+
+### ============================================================================
+### FERRETERIA: el camino feliz
+### ============================================================================
+
+### F1 Crear (ejemplo de la spec) -> 200 {id, code "COT-000001" (o el siguiente), numero, total 3883.6}
+### Una linea de producto (bien/servicio sale del producto) y una libre sin unidad
+### ni indicadores (se guarda 43, ITBIS 18%, bien). Mano de obra sin ITBIS.
+### 935 x 2 = 1,870.00 + 150.00 = Sub-total 2,020.00; ITBIS 363.60; TOTAL 3,883.60.
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-09-02 10:15:00",
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 2, "amount": 935,
+      "unidad_medida": "43", "indicador_facturacion": 1, "indicador_bien_servicio": 1 },
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 }
+  ],
+  "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 1500, "abono": 0, "retencion_isr": false }
+}
+
+### F2 Crear la hoja "cotizacion pintura" con retencion y abono -> 200, total 49394.8
+### Sub-total 41,860.00 / ITBIS 7,534.80 / TOTAL 49,394.80; retencion 2,093.00;
+### abono 10,000.00 -> Restante (Adeudado) 37,301.80 en el PDF. total, sent_email y
+### user_id del cuerpo se ignoran (el total lo calcula el servidor).
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-05-14",
+  "total": 1,
+  "sent_email": true,
+  "user_id": 999,
+  "items": [
+    { "product_id": null, "description": "GALONES DE PINTURA BLNACA SEMIGLOSS", "quantity": 7, "amount": 2000 },
+    { "product_id": null, "description": "LLAVES DE LAVAMANOS PICO LARGO", "quantity": 2, "amount": 970 },
+    { "product_id": null, "description": "MANGUERAS DE LAVAMANOS", "quantity": 2, "amount": 275 },
+    { "product_id": null, "description": "BROCHAS No.4", "quantity": 2, "amount": 160 },
+    { "product_id": null, "description": "FUNDAS CEMENTO GRIS", "quantity": 2, "amount": 935 },
+    { "product_id": null, "description": "FUNDA CEMENTO BLANCO", "quantity": 1, "amount": 2380 },
+    { "product_id": null, "description": "CUBETA DE PINTURA SEMIGLOSS 966", "quantity": 2, "amount": 10400 }
+  ],
+  "ajustes": { "abono": 10000, "retencion_isr": true }
+}
+
+### F3 Obtener una -> formato "ferreteria", numero (entero), subtotal "2020.00",
+### itbis "363.60", total "3883.60", ajustes {"mano_obra":"1500.00"} (objeto),
+### items con product_id / unidad_medida "43" / indicadores / itbis_amount "336.60" y "27.00".
+GET {{base}}/api/cotizaciones?id={{cotFerreteria}}
+X-API-KEY: {{tokenFerreteria}}
+
+### F4 Listado -> orden date DESC, id DESC; cada fila con "ajustes" como objeto
+GET {{base}}/api/cotizaciones?page=1&pageSize=10
+X-API-KEY: {{tokenFerreteria}}
+
+### F5 Buscar por codigo: "COT-000001" y "000001" encuentran la misma
+GET {{base}}/api/cotizaciones?page=1&pageSize=10&query=000001
+X-API-KEY: {{tokenFerreteria}}
+
+### F6 Editar SIN date -> 200 con el mismo code y numero; la fecha guardada no cambia
+### (repetir F3: date sigue "2026-09-02 10:15:00"). Sin "ajustes" = ninguno: la mano
+### de obra desaparece (F3: ajustes {}), total 2383.6.
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotFerreteria}},
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 2, "amount": 935,
+      "unidad_medida": "43", "indicador_facturacion": 1, "indicador_bien_servicio": 1 },
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 }
+  ]
+}
+
+### F7 Editar con fecha de solo dia -> la fecha pasa a 2026-09-03 con la hora actual de RD
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotFerreteria}},
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-09-03",
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 3, "amount": 150, "indicador_facturacion": 4 }
+  ],
+  "ajustes": { "cargos_bancarios": 100, "manejo_bancario": 50 }
+}
+
+### F8 Vista previa SIN id -> 200 base64 (Cotizacion_Preview.pdf); en el numero dice VISTA PREVIA
+POST {{base}}/api/cotizaciones/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "PRUEBA PRECIO 4 DECIMALES", "quantity": 3, "amount": 84.7458 }
+  ],
+  "ajustes": { "mano_obra": 500, "retencion_isr": true }
+}
+
+### F9 Vista previa CON id -> imprime el code de esa cotizacion y su fecha guardada
+POST {{base}}/api/cotizaciones/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotFerreteria}},
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 }
+  ]
+}
+
+### F10 PDF guardado en base64 -> filename "Cotizacion_COT-00000X.pdf"; abrirlo y
+### compararlo con la hoja de Excel (bloques, 4 columnas, filas de totales, pie)
+GET {{base}}/api/cotizaciones/{{cotFerreteria}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### F11 PDF guardado como descarga directa
+GET {{base}}/api/cotizaciones/{{cotFerreteria}}/pdf
+X-API-KEY: {{tokenFerreteria}}
+
+### ============================================================================
+### FERRETERIA: 422 (status:false con el texto para el usuario)
+### ============================================================================
+
+### E1 Sin client_id -> 422 "Elige un cliente para la cotización."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### E2 Cliente que no existe -> 422 "Elige un cliente para la cotización."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": 999999999,
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### E3 Sin lineas -> 422 "Agrega al menos una línea a la cotización."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": []
+}
+
+### E4 Fecha que no existe -> 422 "La fecha no es válida."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-02-30",
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### E5 Producto que no existe -> 422 "Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": 999999999, "description": "NO EXISTE", "quantity": 1, "amount": 150 } ]
+}
+
+### E6 Unidad que no esta en el catalogo -> 422 "La unidad de medida de la línea 1 no es válida. Elige otra unidad en esa línea."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150, "unidad_medida": "999" } ]
+}
+
+### E7 Fraccion en "Unidad" (43) -> 422 "Línea 1: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad."
+### (con la master 010 aplicada; sin ella la regla no bloquea)
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "FUNDAS CEMENTO GRIS", "quantity": 1.5, "amount": 935, "unidad_medida": "43" } ]
+}
+
+### E8 Precio con 5 decimales -> 422 "Línea 1: el precio admite hasta 4 decimales."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 84.74581 } ]
+}
+
+### E9 Indicador de ITBIS fuera de 1-4 -> 422 "Línea 1: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150, "indicador_facturacion": 5 } ]
+}
+
+### E10 Concepto de ajuste desconocido -> 422 "Los cargos y abonos traen un concepto que este formato no conoce («descuento»)."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "descuento": 10 }
+}
+
+### E11 Retencion que no es booleano -> 422 "La casilla «Retención Renta por Tercero 5%» no es válida: tiene que ser sí o no."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "retencion_isr": 1 }
+}
+
+### E12 Mano de obra negativa -> 422 "«Costo mano de obra» no puede ser negativo."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "mano_obra": -1 }
+}
+
+### E13 Abono mayor que lo adeudado -> 422 "El abono (RD$ 200.00) no puede ser mayor que lo adeudado (RD$ 177.00)."
+### (150.00 + ITBIS 27.00 = 177.00). La vista previa responde el mismo 422.
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "abono": 200 }
+}
+
+### E14 Abono exacto al centavo (13.70 + 2.47 = 16.17; retencion 0.69; abono 15.48) -> 200, Restante 0.00
+POST {{base}}/api/cotizaciones/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "PRUEBA FLOTANTE", "quantity": 1, "amount": 13.70 } ],
+  "ajustes": { "abono": 15.48, "retencion_isr": true }
+}
+
+### ============================================================================
+### 409: guardia de formato (no guarda nada)
+### "La pantalla de cotizaciones está desactualizada (cambió el formato de tu empresa). Recarga la página."
+### ============================================================================
+
+### X1 Ferreteria con un cuerpo de Gratex (sin "formato") -> 409
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "amount": 177, "quantity": 1, "subtotal": 177 } ],
+  "total": 177,
+  "date": "2026-10-01 10:15:00",
+  "sent_email": false
+}
+
+### X2 Vista previa de Ferreteria con un cuerpo de Gratex -> 409
+POST {{base}}/api/cotizaciones/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "amount": 177, "quantity": 1, "subtotal": 177 } ],
+  "total": 177
+}
+
+### X3 Gratex con un cuerpo de Ferreteria -> 409
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### X4 Editar una cotizacion de Gratex con un cuerpo de Ferreteria -> 409 (la fila manda)
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "id": {{cotGratex}},
+  "formato": "ferreteria",
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### ============================================================================
+### FERRETERIA: borrar (al final, sobre las cotizaciones de prueba)
+### ============================================================================
+
+### D1 Eliminar -> 200 "Cotization deleted"; sus lineas y ajustes se van con ella
+DELETE {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotFerreteria}}
+}
+
+### D2 PDF de la borrada -> 404 "No encontramos esta cotización. Puede que la hayan eliminado; actualiza el listado."
+GET {{base}}/api/cotizaciones/{{cotFerreteria}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### D3 Editar la borrada con el cuerpo de Ferreteria -> 409 (sin fila no hay formato guardado: el servidor
+### resuelve gratex y la guardia responde; nada se guarda)
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotFerreteria}},
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ]
+}
+
+### ============================================================================
+### GRATEX: regresion (mismo status, sobre y data que antes del cambio)
+### Los cuerpos son EXACTAMENTE los que manda fiscalo CotizacionFormView.tsx:
+### crear = {client_id, items[{description, amount, quantity, subtotal}], total,
+### date, user_id, sent_email}; editar = {id, ...lo mismo}; vista previa =
+### {client_id, items, total} (sin date). Correr cada uno antes y despues del
+### despliegue y comparar; solo pueden cambiar las claves nuevas del GET.
+### ============================================================================
+
+### G0 Branding de Gratex -> data.cotizacion_formato = "gratex"
+GET {{base}}/api/branding
+X-API-KEY: {{tokenGratex}}
+
+### G1 Crear -> 200 {id, code (3 letras + 3 digitos), message "Cotization saved"}
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [
+    { "description": "Banner 3x2 full color", "amount": 2360, "quantity": 1, "subtotal": 2360 },
+    { "description": "Instalacion", "amount": 590.5, "quantity": 1.5, "subtotal": 885.75 }
+  ],
+  "total": 3245.75,
+  "date": "2026-10-01 10:15:00",
+  "user_id": 4,
+  "sent_email": false
+}
+
+### G2 Editar -> 200 "Cotization updated"
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "id": {{cotGratex}},
+  "client_id": {{clienteGratex}},
+  "items": [
+    { "description": "Banner 3x2 full color", "amount": 2360, "quantity": 2, "subtotal": 4720 },
+    { "description": "Instalacion", "amount": 590.5, "quantity": 1.5, "subtotal": 885.75 }
+  ],
+  "total": 5605.75,
+  "date": "2026-10-01 11:00:00",
+  "user_id": 4,
+  "sent_email": false
+}
+
+### G3 Vista previa -> 200 base64 Cotizacion_Preview.pdf con el codigo PREVIEW (PDF de Gratex)
+POST {{base}}/api/cotizaciones/preview
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [
+    { "description": "Banner 3x2 full color", "amount": 2360, "quantity": 1, "subtotal": 2360 }
+  ],
+  "total": 2360
+}
+
+### G4 Obtener una -> mismas claves de siempre + formato/numero/subtotal/itbis en null,
+### "ajustes": {} y, en cada linea, las columnas nuevas en null
+GET {{base}}/api/cotizaciones?id={{cotGratex}}
+X-API-KEY: {{tokenGratex}}
+
+### G5 Listado -> igual que antes salvo las claves nuevas y el desempate por id
+GET {{base}}/api/cotizaciones?page=1&pageSize=10
+X-API-KEY: {{tokenGratex}}
+
+### G6 PDF guardado -> el de Gratex de siempre (comparar sin /CreationDate)
+GET {{base}}/api/cotizaciones/{{cotGratex}}/pdf?format=base64
+X-API-KEY: {{tokenGratex}}
+
+### G7 Sin cliente -> 200 status:false "Elige un cliente para la cotización."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "items": [ { "description": "Banner", "amount": 100, "quantity": 1, "subtotal": 100 } ],
+  "total": 100
+}
+
+### G8 Sin lineas -> 200 status:false "Agrega al menos una línea a la cotización."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [],
+  "total": 0
+}
+
+### G9 Total no numerico -> 200 status:false "El total de la cotización no es válido. Revisa los precios y las cantidades."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": "Banner", "amount": 100, "quantity": 1, "subtotal": 100 } ],
+  "total": "abc"
+}
+
+### G10 Linea sin descripcion -> 422 "La línea 1 no tiene descripción. Escríbela o quita esa línea."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": " ", "amount": 100, "quantity": 1, "subtotal": 100 } ],
+  "total": 100
+}
+
+### G11 Editar sin id -> 200 status:false "No se pudo identificar la cotización que quieres modificar. Ábrela de nuevo desde el listado."
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": "Banner", "amount": 100, "quantity": 1, "subtotal": 100 } ],
+  "total": 100
+}
+
+### G12 Editar una que no existe -> 200 status:false "Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado."
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "id": 999999999,
+  "client_id": {{clienteGratex}},
+  "items": [ { "description": "Banner", "amount": 100, "quantity": 1, "subtotal": 100 } ],
+  "total": 100,
+  "date": "2026-10-01 11:00:00",
+  "user_id": 4,
+  "sent_email": false
+}
+
+### G13 Eliminar la de prueba -> 200 "Cotization deleted"
+DELETE {{base}}/api/cotizaciones
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "id": {{cotGratex}}
+}
