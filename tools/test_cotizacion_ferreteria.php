@@ -809,6 +809,340 @@ $chk('MSG_DESACTUALIZADA (el 409) = el mensaje de la spec', CotizacionFormatos::
 ini_set('error_log', $logAnteriorFormatos === false ? '' : $logAnteriorFormatos);
 @unlink($logFormatos);
 
+// ===========================================================================
+// T7 — cotizacionModel y FerreteriaFormato sin MySQL (Task 7)
+// ===========================================================================
+// El modelo se crea sin constructor (no conecta) y con una conexion falsa que
+// registra cada SQL y contesta lo minimo que el modelo lee: $conexion no tiene
+// tipo, asi que basta con los mismos metodos que PDO. Nada de esta seccion
+// abre una base de datos ni instancia Database/MasterDatabase: crear(),
+// actualizar(), preview() y pdf() de FerreteriaFormato si lo harian, y se
+// prueban en el servidor (tests/test_cotizaciones_ferreteria.http).
+
+require_once __DIR__ . '/../src/Models/cotizacionModel.php';
+require_once __DIR__ . '/../src/Utils/Cotizacion/CotizacionFormatos.php';
+
+/** Conexion falsa: registra SQL y parametros y contesta lo minimo que lee el modelo. */
+final class ConexionFalsaT7
+{
+    /** @var array<int,array{0:string,1:array}> cada execute(), en orden */
+    public array $ejecutados = [];
+    /** @var string[] cada SQL preparado o consultado, en orden */
+    public array $consultas = [];
+    /** Filas de "SELECT c.* ..." (getCotizaciones / getCotizacionesPaginated). */
+    public array $cabeceras = [];
+    /** Filas de "SELECT * FROM cotizacion_items". */
+    public array $lineas = [];
+    /** [concepto => monto] de cotizacion_ajustes (lo que da FETCH_KEY_PAIR). */
+    public array $ajustes = [];
+    /** Fila de "SELECT * FROM clients" (false = no existe). */
+    public array|false $cliente = false;
+    public int $maxNumero = 6;
+    /** Cuantos INSERT de cabecera chocan con uk_cotizaciones_numero antes de pasar. */
+    public int $choquesNumero = 0;
+    /** Lo que devuelve el SELECT ... FOR UPDATE de actualizarConFormato (false = la borraron). */
+    public array|false $filaActual = ['code' => 'COT-000004', 'numero' => 4];
+    public bool $lockLibre = true;
+    /** true = todo prepare() lanza (DB caida o tabla inexistente). */
+    public bool $fallarTodo = false;
+    public int $commits = 0;
+    public int $rollbacks = 0;
+    public int $locksTomados = 0;
+    public int $locksSoltados = 0;
+    private bool $enTransaccion = false;
+
+    public static function error(int $codigo, string $detalle): PDOException
+    {
+        $e = new PDOException("SQLSTATE[23000]: {$codigo} {$detalle}");
+        $e->errorInfo = ['23000', $codigo, $detalle];
+        return $e;
+    }
+
+    public function query(string $sql): SentenciaFalsaT7
+    {
+        $this->consultas[] = $sql;
+        if (str_contains($sql, 'GET_LOCK')) {
+            $this->locksTomados++;
+            return new SentenciaFalsaT7($this, $sql, $this->lockLibre ? 1 : 0);
+        }
+        if (str_contains($sql, 'RELEASE_LOCK')) {
+            $this->locksSoltados++;
+            return new SentenciaFalsaT7($this, $sql, 1);
+        }
+        if (str_contains($sql, 'MAX(numero)')) {
+            return new SentenciaFalsaT7($this, $sql, $this->maxNumero + 1);
+        }
+        return new SentenciaFalsaT7($this, $sql);
+    }
+
+    public function prepare(string $sql): SentenciaFalsaT7
+    {
+        $this->consultas[] = $sql;
+        if ($this->fallarTodo) {
+            throw self::error(1146, "Table 'tenant.cotizacion_ajustes' doesn't exist");
+        }
+        return new SentenciaFalsaT7($this, $sql);
+    }
+
+    public function beginTransaction(): bool { $this->enTransaccion = true; return true; }
+    public function commit(): bool { $this->enTransaccion = false; $this->commits++; return true; }
+    public function rollBack(): bool { $this->enTransaccion = false; $this->rollbacks++; return true; }
+    public function inTransaction(): bool { return $this->enTransaccion; }
+    public function lastInsertId(): string { return '77'; }
+
+    /** Parametros de cada execute() cuyo SQL empieza con $inicio. */
+    public function paramsDe(string $inicio): array
+    {
+        $out = [];
+        foreach ($this->ejecutados as [$sql, $params]) {
+            if (str_starts_with(ltrim($sql), $inicio)) {
+                $out[] = $params;
+            }
+        }
+        return $out;
+    }
+
+    /** ¿Algun SQL registrado contiene $texto? */
+    public function huboSql(string $texto): bool
+    {
+        foreach ($this->consultas as $sql) {
+            if (str_contains($sql, $texto)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+final class SentenciaFalsaT7
+{
+    public function __construct(private ConexionFalsaT7 $c, private string $sql, private mixed $columna = null) {}
+
+    public function bindValue($clave, $valor, $tipo = null): bool { return true; }
+
+    public function execute(?array $params = null): bool
+    {
+        $this->c->ejecutados[] = [$this->sql, $params ?? []];
+        if (str_starts_with(ltrim($this->sql), 'INSERT INTO cotizaciones') && $this->c->choquesNumero > 0) {
+            $this->c->choquesNumero--;
+            $this->c->maxNumero++; // otra caja grabo ese numero mientras tanto
+            throw ConexionFalsaT7::error(1062, "Duplicate entry '" . $this->c->maxNumero . "' for key 'cotizaciones.uk_cotizaciones_numero'");
+        }
+        return true;
+    }
+
+    public function fetchColumn() { return $this->columna; }
+
+    public function fetch()
+    {
+        if (str_contains($this->sql, 'FOR UPDATE')) {
+            return $this->c->filaActual;
+        }
+        if (str_contains($this->sql, 'FROM clients')) {
+            return $this->c->cliente;
+        }
+        return false;
+    }
+
+    public function fetchAll($modo = null): array
+    {
+        if (str_starts_with($this->sql, 'SELECT c.*')) {
+            return $this->c->cabeceras;
+        }
+        if (str_starts_with($this->sql, 'SELECT * FROM cotizacion_items')) {
+            return $this->c->lineas;
+        }
+        if (str_contains($this->sql, 'FROM cotizacion_ajustes')) {
+            return $modo === PDO::FETCH_KEY_PAIR ? $this->c->ajustes : [];
+        }
+        return [];
+    }
+}
+
+/** Modelo sin constructor (no conecta) con la conexion falsa puesta. */
+$modeloT7 = static function (ConexionFalsaT7 $c): cotizacionModel {
+    $m = (new ReflectionClass('cotizacionModel'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('cotizacionModel', 'conexion'))->setValue($m, $c);
+    return $m;
+};
+/** Llama un metodo privado del modelo (PHP >= 8.1 no pide setAccessible). */
+$privadoT7 = static fn(?cotizacionModel $m, string $metodo, ...$args) => (new ReflectionMethod('cotizacionModel', $metodo))->invoke($m, ...$args);
+
+// Filas como las devuelve PDO: los DECIMAL como texto con los ceros de la columna.
+$comoFilasT7 = static fn(array $lineas): array => array_map(static fn(array $l): array => [
+    'id' => 1, 'cotizacion_id' => 1, 'product_id' => null,
+    'description' => $l['description'],
+    'amount' => number_format((float) $l['amount'], 4, '.', ''),
+    'quantity' => number_format((float) $l['quantity'], 3, '.', ''),
+    'subtotal' => '0.00', 'unidad_medida' => '43',
+    'indicador_facturacion' => (int) $l['indicador_facturacion'],
+    'indicador_bien_servicio' => 1, 'itbis_amount' => '0.00',
+], $lineas);
+
+// Los error_log del modelo (esperados en estos casos) van a un archivo y no
+// ensucian la salida; se restaura al final de este bloque.
+$logPrevioT7 = ini_set('error_log', sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'test_cotizacion_ferreteria_t7.log');
+
+echo "\n== T7: lecturas de cotizacionModel ==\n";
+$c = new ConexionFalsaT7();
+$modeloT7($c)->getCotizacionItems(5);
+$sqlItemsT7 = (string) end($c->consultas);
+$chk('lineas: SELECT * ... ORDER BY id ASC', $sqlItemsT7 === 'SELECT * FROM cotizacion_items WHERE cotizacion_id = :cotizacion_id ORDER BY id ASC');
+$chk('lineas: no nombra columnas de la 026 (sin 026 no vaciaria las lineas)',
+    stripos($sqlItemsT7, 'product_id') === false && stripos($sqlItemsT7, 'itbis_amount') === false);
+
+$c = new ConexionFalsaT7();
+$c->cabeceras = [
+    ['id' => 3, 'code' => 'ABC123', 'formato' => null, 'client_id' => 1, 'total' => '100.00'],
+    ['id' => 9, 'code' => 'COT-000004', 'formato' => 'ferreteria', 'numero' => 4, 'client_id' => 15, 'total' => '49394.80'],
+];
+$c->lineas = $comoFilasT7($casos['pintura']['lineas']);
+$c->ajustes = ['abono' => '10000.00', 'retencion_isr' => '2093.00'];
+$filasT7 = $modeloT7($c)->getCotizaciones(9);
+$jsonT7 = json_decode((string) json_encode($filasT7), true);
+$chk('getCotizaciones: fila Gratex con "ajustes": {} (objeto, no [])', str_contains((string) json_encode($filasT7[0]), '"ajustes":{}'));
+$chk('getCotizaciones: fila Ferreteria con sus ajustes como objeto',
+    ($jsonT7[1]['ajustes'] ?? null) === ['abono' => '10000.00', 'retencion_isr' => '2093.00']
+    && str_contains((string) json_encode($filasT7[1]), '"ajustes":{"abono"'));
+$idsAjustesT7 = array_column($c->paramsDe('SELECT concepto, monto FROM cotizacion_ajustes'), ':id');
+$chk('getCotizaciones: cotizacion_ajustes solo se consulta para la fila Ferreteria', $idsAjustesT7 === [9]);
+$chk('getCotizaciones: items de SELECT * (traen las columnas de la 026)', count($filasT7[1]['items']) === 7
+    && array_key_exists('indicador_facturacion', $filasT7[1]['items'][0]));
+
+$c = new ConexionFalsaT7();
+$c->cabeceras = [['id' => 3, 'code' => 'ABC123', 'client_id' => 1, 'total' => '100.00']];   // base sin la 026: no hay columna formato
+$filasT7 = $modeloT7($c)->getCotizacionesPaginated(0, 10);
+$chk('listado: empate de fecha ordenado por id', str_contains($c->consultas[0] ?? '', 'ORDER BY c.date DESC, c.id DESC LIMIT'));
+$chk('listado: fila sin columna formato (antes de la 026) = {} sin consultar cotizacion_ajustes',
+    json_encode($filasT7[0]['ajustes'] ?? null) === '{}' && !$c->huboSql('cotizacion_ajustes'));
+$c = new ConexionFalsaT7();
+$aj = $privadoT7($modeloT7($c), 'ajustesDeFila', ['id' => 9, 'formato' => 'gratex']);
+$chk("ajustesDeFila: formato 'gratex' = {} sin consultar", json_encode($aj) === '{}' && $c->consultas === []);
+$c = new ConexionFalsaT7();
+$c->fallarTodo = true;
+$chk('getAjustes: tabla inexistente => [] sin lanzar', $modeloT7($c)->getAjustes(9) === []);
+
+$c = new ConexionFalsaT7();
+$chk('getProductosInfo: sin ids validos => [] sin consultar', $modeloT7($c)->getProductosInfo([null, 0, '', '0']) === [] && $c->consultas === []);
+$chk('getCliente: id inexistente => null', $modeloT7($c)->getCliente(123456) === null);
+$c->cliente = ['id' => 15, 'email' => 'a@b.do', 'client_name' => 'Juan', 'company_name' => 'HOSPITAL', 'rnc' => '401515131',
+    'razon_social' => 'HOSPITAL DOCENTE', 'direccion' => 'X', 'descuento' => '0.00', 'phone_number' => '809'];
+$chk('getCliente: las 5 claves del contrato', $modeloT7($c)->getCliente(15) === [
+    'client_name' => 'Juan', 'company_name' => 'HOSPITAL', 'razon_social' => 'HOSPITAL DOCENTE', 'rnc' => '401515131', 'email' => 'a@b.do',
+]);
+
+ini_set('error_log', (string) $logPrevioT7);
+
+// --- T7, ronda B: escrituras con formato (crearConFormato / actualizarConFormato) ---
+// Los error_log del modelo (esperados en estos casos) van a un archivo y no
+// ensucian la salida; se restaura al final de este bloque.
+$logPrevioT7 = ini_set('error_log', sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'test_cotizacion_ferreteria_t7.log');
+
+/** 'cot' como lo dejan validarForma + aplicarCatalogo, armado desde un caso del fixture. */
+$cotT7 = static fn(array $caso, ?string $fecha): array => [
+    'date' => $fecha,
+    'client_id' => 15,
+    'items' => array_map(static fn(array $l): array => [
+        'product_id' => null,
+        'description' => $l['description'],
+        'quantity' => (float) $l['quantity'],
+        'amount' => (float) $l['amount'],
+        'unidad_medida' => '43',
+        'indicador_facturacion' => (int) $l['indicador_facturacion'],
+        'indicador_bien_servicio' => 1,
+    ], $caso['lineas']),
+    'ajustes' => [
+        'cargos_bancarios' => (float) $caso['ajustes']['cargos_bancarios'],
+        'manejo_bancario' => (float) $caso['ajustes']['manejo_bancario'],
+        'mano_obra' => (float) $caso['ajustes']['mano_obra'],
+        'abono' => (float) $caso['ajustes']['abono'],
+        'retencion_isr' => (bool) $caso['ajustes']['retencion_isr'],
+    ],
+];
+// Totales como los deja aplicarCatalogo (mismas lineas, mismas reglas).
+$totDeT7 = static fn(array $cot): array => FerreteriaFormato::totales(array_map(static fn(array $it): array => [
+    'quantity' => $it['quantity'], 'amount' => $it['amount'], 'indicador_facturacion' => $it['indicador_facturacion'],
+], $cot['items']), $cot['ajustes']);
+
+echo "\n== T7: crearConFormato / actualizarConFormato (conexion falsa) ==\n";
+$cot = $cotT7($casos['pintura_retencion_abono'], '2026-05-14 09:00:00');
+$tot = $totDeT7($cot);
+
+$c = new ConexionFalsaT7();
+$r = $modeloT7($c)->crearConFormato($cot, $tot, 'ferreteria', 5, 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+$chk('crear: success con id, code, numero y total', $r === ['success', ['id' => 77, 'code' => 'COT-000007', 'numero' => 7, 'total' => 49394.8]]);
+$cab = $c->paramsDe('INSERT INTO cotizaciones')[0] ?? [];
+$chk('crear: cabecera con formato, numero, code y client_name', ($cab[':formato'] ?? null) === 'ferreteria' && ($cab[':numero'] ?? null) === 7
+    && ($cab[':code'] ?? null) === 'COT-000007' && ($cab[':client_name'] ?? null) === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+$chk('crear: subtotal, itbis y total de totales()', ($cab[':subtotal'] ?? null) === 41860.0 && ($cab[':itbis'] ?? null) === 7534.8
+    && ($cab[':total'] ?? null) === 49394.8);
+$chk('crear: user_id del parametro y fecha del cuerpo', ($cab[':user_id'] ?? null) === 5 && ($cab[':date'] ?? null) === '2026-05-14 09:00:00');
+$lin = $c->paramsDe('INSERT INTO cotizacion_items');
+$chk('crear: 7 lineas', count($lin) === 7);
+$chk('crear: linea 1 con base e ITBIS de totales()', ($lin[0][':subtotal'] ?? null) === 14000.0 && ($lin[0][':itbis_amount'] ?? null) === 2520.0
+    && array_key_exists(':product_id', $lin[0]) && $lin[0][':product_id'] === null
+    && ($lin[0][':unidad_medida'] ?? null) === '43' && ($lin[0][':indicador_facturacion'] ?? null) === 1);
+$aju = $c->paramsDe('INSERT INTO cotizacion_ajustes');
+$chk('crear: solo ajustes no cero (abono y la retencion como monto)', array_column($aju, ':monto', ':concepto') === ['abono' => 10000.0, 'retencion_isr' => 2093.0]);
+$chk('crear: 1 commit, 0 rollback, candado tomado y soltado', $c->commits === 1 && $c->rollbacks === 0 && $c->locksTomados === 1 && $c->locksSoltados === 1);
+
+$c = new ConexionFalsaT7();
+$cotSinFecha = $cotT7($casos['pintura'], null);
+$modeloT7($c)->crearConFormato($cotSinFecha, $totDeT7($cotSinFecha), 'ferreteria', null, 'X');
+$cab = $c->paramsDe('INSERT INTO cotizaciones')[0] ?? [];
+$chk('crear: sin fecha => ahora (Y-m-d H:i:s)', preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) ($cab[':date'] ?? '')) === 1);
+$chk('crear: sin ajustes => ningun INSERT de ajustes', $c->paramsDe('INSERT INTO cotizacion_ajustes') === []);
+
+$c = new ConexionFalsaT7();
+$c->choquesNumero = 1;
+$r = $modeloT7($c)->crearConFormato($cot, $tot, 'ferreteria', 5, 'X');
+$chk('1062 una vez: reintenta en otra transaccion y toma el siguiente numero', ($r[0] ?? '') === 'success'
+    && ($r[1]['numero'] ?? null) === 8 && ($r[1]['code'] ?? null) === 'COT-000008');
+$chk('1062 una vez: 1 rollback, 1 commit, 2 lecturas del MAX, candado soltado una vez', $c->rollbacks === 1 && $c->commits === 1
+    && count(array_filter($c->consultas, static fn(string $s): bool => str_contains($s, 'MAX(numero)'))) === 2 && $c->locksSoltados === 1);
+
+$c = new ConexionFalsaT7();
+$c->choquesNumero = 2;
+$r = $modeloT7($c)->crearConFormato($cot, $tot, 'ferreteria', 5, 'X');
+$chk('1062 dos veces: no hay tercer intento', count($c->paramsDe('INSERT INTO cotizaciones')) === 2);
+$chk('1062 dos veces: mensaje claro, sin commit, candado soltado', $r === ['error', 'Otra cotización se guardó al mismo tiempo. Vuelve a guardar.']
+    && $c->commits === 0 && $c->rollbacks === 2 && $c->locksSoltados === 1);
+
+$c = new ConexionFalsaT7();
+$c->lockLibre = false;
+$r = $modeloT7($c)->crearConFormato($cot, $tot, 'ferreteria', 5, 'X');
+$chk('candado ocupado: guarda igual y no suelta lo que no tomo', ($r[0] ?? '') === 'success' && $c->locksSoltados === 0);
+
+$fkT7 = ConexionFalsaT7::error(1452, 'Cannot add or update a child row: a foreign key constraint fails (`t`.`cotizacion_items`, CONSTRAINT `cotizacion_items_product_fk` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL)');
+$r = $privadoT7(null, 'errorConFormato', $fkT7, 'GENERICO');
+$chk('1452 del producto (lo borraron) => 422 que se entiende, sin reintento', ($r[0] ?? '') === 'error' && ($r[2] ?? null) === 422
+    && str_contains($r[1] ?? '', 'ya no existe en el catálogo'));
+$chk('otro error => el generico, sin HTTP propio', $privadoT7(null, 'errorConFormato', ConexionFalsaT7::error(1205, 'Lock wait timeout exceeded'), 'GENERICO') === ['error', 'GENERICO']);
+$chk('esNumeroRepetido: solo 1062 en uk_cotizaciones_numero',
+    $privadoT7(null, 'esNumeroRepetido', ConexionFalsaT7::error(1062, "Duplicate entry '7' for key 'uk_cotizaciones_numero'"))
+    && !$privadoT7(null, 'esNumeroRepetido', ConexionFalsaT7::error(1062, "Duplicate entry '1-abono' for key 'uk_cotizacion_ajuste'")));
+
+$c = new ConexionFalsaT7();
+$c->filaActual = false;
+$r = $modeloT7($c)->actualizarConFormato(4, $cot, $tot, 5, 'X');
+$chk('actualizar: fila borrada => 404 y nada escrito', ($r[0] ?? '') === 'error' && ($r[2] ?? null) === 404
+    && $c->paramsDe('UPDATE cotizaciones') === [] && $c->rollbacks === 1);
+
+$c = new ConexionFalsaT7();
+$r = $modeloT7($c)->actualizarConFormato(4, $cotSinFecha, $totDeT7($cotSinFecha), 5, 'NUEVO NOMBRE');
+$chk('actualizar: numero y code de la fila, nunca nuevos', $r === ['success', ['id' => 4, 'code' => 'COT-000004', 'numero' => 4, 'total' => 49394.8]]);
+$upd = $c->paramsDe('UPDATE cotizaciones')[0] ?? [];
+$chk('actualizar: date null => conserva la guardada (COALESCE)', array_key_exists(':date', $upd) && $upd[':date'] === null
+    && $c->huboSql('date = COALESCE(:date, date)'));
+$chk('actualizar: client_name nuevo', ($upd[':client_name'] ?? null) === 'NUEVO NOMBRE');
+$chk('actualizar: reemplaza lineas y ajustes', count($c->paramsDe('DELETE FROM cotizacion_items')) === 1
+    && count($c->paramsDe('DELETE FROM cotizacion_ajustes')) === 1 && count($c->paramsDe('INSERT INTO cotizacion_items')) === 7
+    && $c->paramsDe('INSERT INTO cotizacion_ajustes') === []);
+$chk('actualizar: no toca la secuencia', $c->locksTomados === 0 && !$c->huboSql('MAX(numero)'));
+$chk('actualizar: 1 commit', $c->commits === 1 && $c->rollbacks === 0);
+
+ini_set('error_log', (string) $logPrevioT7);
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
