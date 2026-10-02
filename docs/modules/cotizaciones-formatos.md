@@ -275,7 +275,7 @@ formatos de `src/Utils/Cotizacion/`; Gratex y la facturación siguen con su `rou
 | PDF para comparar con el Excel | `php tools/test_cotizacion_ferreteria.php --pdf` (o `--grid`, con la rejilla de 10 mm) → `tools/out/` |
 | Orden de las FK del snapshot y SQL dinámico de la 026, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
 | Paridad del front | `node scripts/parity-cotizacion-ferreteria.ts` (desde `fiscalo`) |
-| API real (crear, editar, vista previa, PDF, borrar, cada `422`, el `409`, la regresión de Gratex) | `tests/test_cotizaciones_ferreteria.http` contra un servidor con las migraciones |
+| API real (crear, editar, vista previa, PDF, borrar, cada `422`, el `409`, la regresión de Gratex) y las comprobaciones M1-M12 de servidor: la 026 dos veces sobre un volcado de cada DB de tenant, la numeración con cinco creaciones simultáneas (`GET_LOCK`) y el estado que queda en la base | `tests/test_cotizaciones_ferreteria.http` contra un servidor con las migraciones |
 
 El CLI nunca abre una base: el modelo se crea sin constructor y con una conexión
 falsa. `crear()`, `actualizar()`, `preview()` y `pdf()` de un formato sí leen la base

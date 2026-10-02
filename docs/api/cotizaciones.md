@@ -427,4 +427,4 @@ el hueco.
 | `500` | Ferretería: fallo al leer el cliente o los productos, al guardar o al generar el PDF |
 
 Pruebas a mano: [../../tests/test_cotizaciones_ferreteria.http](../../tests/test_cotizaciones_ferreteria.http)
-(Ferretería, los 422, el 409 y la regresión de Gratex).
+(Ferretería, los 422, el 409, la regresión de Gratex y, como comentarios M1-M12, la numeración con creaciones simultáneas y las comprobaciones en la base).

@@ -45,11 +45,13 @@ Content-Type: application/json
 }
 
 ### ============================================================================
-### Comprobaciones de servidor que no son peticiones (Tasks 2, 3, 5 y 6; anotar el resultado de cada una)
-### M1 Migracion 026, DOS veces, en una DB armada con el snapshot de ANTES de la 026
-###    (git show <commit de la 026>~1:db/tenant_schema.sql). 1a corrida: el paso 0 da InnoDB en las 3 tablas e id
-###    int(11); E1 da 16 filas (client_name con IS_NULLABLE YES), E2 3 indices y E3 2 FKs (SET NULL y CASCADE).
-###    2a corrida: cada paso ejecuta DO 0 y SHOW CREATE TABLE cotizacion_items queda igual (sin indice duplicado).
+### Comprobaciones de servidor que no son peticiones (Tasks 2, 3, 5, 6 y 7; anotar el resultado de cada una)
+### M1 Migracion 026, DOS veces, sobre un volcado (dump) de CADA DB de tenant (Gratex y Ferreteria, cada uno
+###    restaurado en una DB de prueba) y tambien en una DB armada con el snapshot de ANTES de la 026
+###    (git show <commit de la 026>~1:db/tenant_schema.sql). En cada una, 1a corrida: el paso 0 da InnoDB en las 3
+###    tablas e id int(11); E1 da 16 filas (client_name con IS_NULLABLE YES), E2 3 indices y E3 2 FKs (SET NULL y
+###    CASCADE). 2a corrida: cada paso ejecuta DO 0 y SHOW CREATE TABLE cotizacion_items queda igual (sin indice
+###    duplicado). Anotar el resultado del paso 0 de cada volcado.
 ### M2 Snapshot nuevo: db/tenant_schema.sql sobre una DB vacia (o php tools/create_tenant.php contra un master de
 ###    prueba) termina sin errno 150/1824, y SHOW TABLES incluye cotizacion_ajustes.
 ### M3 Master 011 DOS veces: la 2a ejecuta DO 0; SELECT id, nombre, cotizacion_formato FROM tenants -> todos 'gratex'
@@ -64,6 +66,33 @@ Content-Type: application/json
 ###    nunca el logo de Gratex.
 ### M8 Auditoria: despues de G1, G2 y G13, audit_logs tiene las filas CREATE, UPDATE y DELETE del modulo cotizaciones
 ###    con los mismos campos que antes del despliegue (entity_id, old_values, new_values, description).
+### M9 Estado en la DB del tenant despues de F1 y F2 (SQL en la base; <id> = el id que devolvio cada creacion):
+###    SELECT formato, numero, code, client_name, subtotal, itbis, total, user_id FROM cotizaciones WHERE id = <id>;
+###      -> 'ferreteria', numero consecutivo, COT-00000N, la razon social del cliente, 2020.00 / 363.60 / 3883.60
+###      (F1) y el id del usuario del token.
+###    SELECT product_id, unidad_medida, indicador_facturacion, indicador_bien_servicio, subtotal, itbis_amount
+###      FROM cotizacion_items WHERE cotizacion_id = <id> ORDER BY id;
+###      -> la linea del producto con el indicador_bien_servicio de products, y la libre con NULL / '43' / 1 / 1;
+###      1870.00 / 336.60 y 150.00 / 27.00.
+###    SELECT concepto, monto FROM cotizacion_ajustes WHERE cotizacion_id = <id>;
+###      -> solo mano_obra 1500.00 (F1). En F2: abono 10000.00 y retencion_isr 2093.00.
+### M10 Numeracion con concurrencia (GET_LOCK): cinco creaciones a la vez desde una terminal bash, con el token
+###    de Ferreteria y el id de un cliente de esa DB:
+###      BASE=http://localhost:8000; TOKEN='<token de Ferreteria>'; CLIENTE=<id de cliente>
+###      for i in 1 2 3 4 5; do
+###        curl -s -X POST "$BASE/api/cotizaciones" -H "X-API-KEY: $TOKEN" -H "Content-Type: application/json" \
+###          -d '{"formato":"ferreteria","client_id":'"$CLIENTE"',"items":[{"description":"PRUEBA CONCURRENCIA '"$i"'","quantity":1,"amount":10}]}' &
+###      done; wait; echo
+###    Esperado: cinco {"status":true,"data":{...}} con cinco numero distintos y consecutivos, sin errores. Dos
+###    numero iguales o un 500 "Otra cotizacion se guardo al mismo tiempo" = el candado no serializa: anotarlo como
+###    bug de la Task 7. Despues borrar las cinco (DELETE /api/cotizaciones con cada id, como D1).
+### M11 Edicion y borrado en la DB del tenant (F6, F7 y D1, sobre la cotizacion de F1):
+###    - F6 y F7 dejan numero y code como estaban (SELECT numero, code FROM cotizaciones WHERE id = <id>).
+###    - Sin date (F6) el datetime guardado no cambia, hora incluida (SELECT date FROM cotizaciones WHERE id = <id>).
+###    - Sin ajustes (F6) ya no queda ninguna fila de esa cotizacion en cotizacion_ajustes.
+###    - D1: despues de borrar, no quedan filas con ese cotizacion_id en cotizacion_items ni en cotizacion_ajustes.
+### M12 Gratex sin la 026: el bloque G1-G13 devuelve lo mismo que antes del despliegue, y G4, G5 y G6 tambien
+###    contra una DB de tenant SIN la 026 (antes de correrla): las lineas no vienen vacias y "ajustes" es {}.
 ### ============================================================================
 
 ### ============================================================================
