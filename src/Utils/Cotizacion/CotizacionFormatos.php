@@ -30,6 +30,7 @@ final class CotizacionFormatos
     /** @var array<string,class-string<CotizacionFormato>> nombre => clase */
     private const FORMATOS = [
         'gratex' => GratexFormato::class,
+        'ferreteria' => FerreteriaFormato::class,
     ];
 
     public static function existe(?string $nombre): bool

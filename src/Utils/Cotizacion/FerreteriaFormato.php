@@ -1,6 +1,14 @@
 <?php
 require_once __DIR__ . '/Redondeo.php';
 require_once __DIR__ . '/../../Models/unidadMedidaModel.php';
+require_once __DIR__ . '/CotizacionFormato.php';
+// FerreteriaCotizacionPdf.php tambien incluye este archivo: require_once corta
+// el ciclo, y ninguno de los dos usa al otro al cargarse, solo en sus metodos.
+require_once __DIR__ . '/FerreteriaCotizacionPdf.php';
+require_once __DIR__ . '/../Pdf/BrandingResolver.php';
+require_once __DIR__ . '/../../Models/cotizacionModel.php';
+require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
+require_once __DIR__ . '/../../RequestContext.php';
 
 /**
  * Formato de cotización de Ferretería (FERREHERRAMIENTAS VENTURA, SRL): su
@@ -18,7 +26,7 @@ require_once __DIR__ . '/../../Models/unidadMedidaModel.php';
  * src/features/cotizaciones/formatos/ferreteria/totales.ts) y tiene que dar
  * igual al centavo. Un cambio de regla va en los dos lados en el mismo cambio.
  */
-final class FerreteriaFormato
+final class FerreteriaFormato extends CotizacionFormato
 {
     public const NOMBRE = 'ferreteria';
     /** Ajustes con monto que acepta este formato (cotizacion_ajustes.concepto). */
@@ -44,6 +52,19 @@ final class FerreteriaFormato
         'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
         'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE',
     ];
+
+    /** El modelo de cotizaciones de la peticion: lo pasa CotizacionFormatos::para(). */
+    private cotizacionModel $modelo;
+
+    public function __construct(cotizacionModel $modelo)
+    {
+        $this->modelo = $modelo;
+    }
+
+    public function nombre(): string
+    {
+        return self::NOMBRE;
+    }
 
     /** Tasa de ITBIS según indicador_facturacion: 1 = 18%, 2 = 16%, 3 y 4 = 0%. Igual que itbisRate del front. */
     public static function tasa(int $indicador): float
@@ -216,6 +237,267 @@ final class FerreteriaFormato
             $dia = new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo'));
         }
         return self::MESES[(int) $dia->format('n') - 1] . ' ' . $dia->format('j') . '/' . $dia->format('Y') . '.-';
+    }
+
+    // ------------------------------------------------------------------------
+    // Contrato de CotizacionFormato: crear, actualizar, vista previa y PDF.
+    // Tocan la DB (cliente, productos, guardar, emisor); las reglas que
+    // dependen de lo que la DB contesta van en las funciones puras de abajo
+    // (aplicarCatalogo, nombreCliente, lineasDesdeFilas, ajustesDesdeFilas,
+    // itemsPdf), que el CLI prueba sin base de datos.
+    // ------------------------------------------------------------------------
+
+    public function crear(object $body): array
+    {
+        $datos = $this->prepararDatos($body);
+        if ($datos[0] !== 'ok') {
+            return $datos;
+        }
+        [, $cot, $tot, $cliente] = $datos;
+        // user_id sale del token, nunca del cuerpo: un cuerpo puede traer
+        // cualquier id. sent_email y total del cuerpo se ignoran (spec 6.5).
+        // Sin fecha, el modelo pone la de ahora.
+        $r = $this->modelo->crearConFormato($cot, $tot, self::NOMBRE, RequestContext::userId(), self::nombreCliente($cliente));
+        return $r[0] === 'success' ? $r : ['error', $r[1], $r[2] ?? 500];
+    }
+
+    public function actualizar(array $row, object $body): array
+    {
+        if (empty($row['id'])) {
+            return ['error', 'Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.', 404];
+        }
+        $datos = $this->prepararDatos($body);
+        if ($datos[0] !== 'ok') {
+            return $datos;
+        }
+        [, $cot, $tot, $cliente] = $datos;
+        // numero y code no cambian nunca; date null conserva la guardada.
+        $r = $this->modelo->actualizarConFormato((int) $row['id'], $cot, $tot, RequestContext::userId(), self::nombreCliente($cliente));
+        return $r[0] === 'success' ? $r : ['error', $r[1], $r[2] ?? 500];
+    }
+
+    public function preview(object $body, ?array $row): array
+    {
+        $datos = $this->prepararDatos($body);
+        if ($datos[0] !== 'ok') {
+            return $datos;
+        }
+        [, $cot, $tot, $cliente] = $datos;
+        return $this->renderizar([
+            // Sin id todavia no hay numero: el PDF imprime VISTA PREVIA.
+            'code' => $row !== null ? (string) $row['code'] : null,
+            // La fecha que se guardaria: la del cuerpo; si no viene, la
+            // guardada (un PUT sin fecha la conserva); si no hay, hoy.
+            'date' => $cot['date'] ?? (string) ($row['date'] ?? self::ahoraRd()),
+            'items' => self::itemsPdf($cot['items']),
+            'totales' => $tot,
+        ], $cliente);
+    }
+
+    public function pdf(array $cotizacion): array
+    {
+        // Los totales se recalculan desde lo guardado con las reglas del
+        // guardado: las lineas y los ajustes son la fuente, y la retencion
+        // sale otra vez del Sub-total, que es el mismo que se guardo.
+        $tot = self::totales(
+            self::lineasDesdeFilas($cotizacion['items'] ?? []),
+            self::ajustesDesdeFilas($cotizacion['ajustes'] ?? [])
+        );
+        $cliente = null;
+        if (!empty($cotizacion['client_id'])) {
+            try {
+                $cliente = $this->modelo->getCliente((int) $cotizacion['client_id']);
+            } catch (Throwable $e) {
+                error_log('[cotizaciones] cliente del PDF de la cotizacion ' . ($cotizacion['id'] ?? '?') . ': ' . $e->getMessage());
+            }
+        }
+        // Cliente borrado (cotizaciones.client_id no tiene FK) o lectura
+        // fallida: lo que trajo el JOIN de getCotizaciones, y el PDF sale igual.
+        $cliente ??= [
+            'razon_social' => null,
+            'company_name' => $cotizacion['company_name'] ?? null,
+            'client_name' => $cotizacion['client_name'] ?? null,
+            'rnc' => $cotizacion['rnc'] ?? null,
+        ];
+        return $this->renderizar([
+            'code' => (string) ($cotizacion['code'] ?? ''),
+            'date' => (string) ($cotizacion['date'] ?? self::ahoraRd()),
+            'items' => self::itemsPdf($cotizacion['items'] ?? []),
+            'totales' => $tot,
+        ], $cliente);
+    }
+
+    /**
+     * Lo comun de crear, actualizar y vista previa: la forma del cuerpo
+     * (validarForma, sin DB), lo que solo sabe la DB (el cliente y los
+     * productos) y las reglas que dependen de eso (aplicarCatalogo).
+     *
+     * Las unidades son el catalogo de master: problemaCantidad e isValid son
+     * fail-open, una lectura fallida del catalogo no bloquea la cotizacion.
+     *
+     * @return array ['ok', array $cot, array $tot, array $cliente] | ['error', string, int]
+     */
+    private function prepararDatos(object $body): array
+    {
+        try {
+            $unidades = new unidadMedidaModel();
+            $forma = self::validarForma($body, [$unidades, 'problemaCantidad'], [$unidades, 'isValid']);
+            if (!$forma['ok']) {
+                return ['error', $forma['error'], 422];
+            }
+            $cot = $forma['cot'];
+            $cliente = $this->modelo->getCliente($cot['client_id']);
+            $productos = $this->modelo->getProductosInfo(array_column($cot['items'], 'product_id'));
+        } catch (Throwable $e) {
+            // getCliente y getProductosInfo no atrapan a proposito: una DB
+            // caida no puede contestarse "el cliente no existe".
+            error_log('[cotizaciones] ferreteria: no se pudo revisar la cotizacion contra la DB: ' . $e->getMessage());
+            return ['error', 'No se pudo revisar la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.', 500];
+        }
+        $r = self::aplicarCatalogo($cot, $cliente, $productos);
+        if ($r[0] !== 'ok') {
+            return $r;
+        }
+        return ['ok', $r[1], $r[2], $cliente];
+    }
+
+    /**
+     * El PDF con los datos del tenant. El renderizador es puro; aqui se junta
+     * lo que vive en la DB del tenant (emisor_config) y en master (el logo).
+     *
+     * @return array ['success', string $pdf] | ['error', string, int]
+     */
+    private function renderizar(array $cotizacion, array $cliente): array
+    {
+        try {
+            $emisor = (new EmisorConfigModel())->get() ?? [];
+            $pdf = new FerreteriaCotizacionPdf($cotizacion, $emisor, $cliente, BrandingResolver::logoPath());
+            return ['success', $pdf->render()];
+        } catch (Throwable $e) {
+            error_log('[cotizaciones] no se pudo generar el PDF de Ferreteria (' . ($cotizacion['code'] ?? 'vista previa') . '): ' . $e->getMessage());
+            return ['error', 'No se pudo generar el PDF de la cotización. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.', 500];
+        }
+    }
+
+    /**
+     * Reglas que dependen de la DB, ya con lo que la DB contesto: el cliente
+     * existe, cada producto existe y de el sale bien/servicio; luego los
+     * totales y el tope del abono. Pura: el CLI la prueba sin base de datos.
+     *
+     * @param array      $cot       'cot' de validarForma
+     * @param array|null $cliente   getCliente() (null = no existe)
+     * @param array      $productos getProductosInfo()
+     * @return array ['ok', array $cot, array $tot] | ['error', string, int]
+     */
+    public static function aplicarCatalogo(array $cot, ?array $cliente, array $productos): array
+    {
+        if ($cliente === null) {
+            return ['error', 'Elige un cliente para la cotización.', 422];
+        }
+        $cot['items'] = array_values($cot['items']);
+        foreach ($cot['items'] as $i => $item) {
+            if (empty($item['product_id'])) {
+                continue;
+            }
+            $info = $productos[(int) $item['product_id']] ?? null;
+            if ($info === null) {
+                return ['error', 'Línea ' . ($i + 1) . ': el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.', 422];
+            }
+            // Bien o servicio lo dice el catalogo, no la pantalla: es lo que
+            // la factura copiara al convertir (y lo que decide si mueve inventario).
+            $cot['items'][$i]['indicador_bien_servicio'] = (int) $info['indicador_bien_servicio'];
+        }
+        $tot = self::totales(self::lineasDesdeFilas($cot['items']), $cot['ajustes']);
+        $error = self::errorAbono($tot);
+        if ($error !== null) {
+            return ['error', $error, 422];
+        }
+        return ['ok', $cot, $tot];
+    }
+
+    /**
+     * Nombre que se guarda en cotizaciones.client_name: el mismo orden que el
+     * PDF (razon_social, si no company_name, si no client_name). Recortado a
+     * 100, el ancho de la columna: razon_social admite 150 y en modo estricto
+     * MySQL rechazaria la fila entera por un nombre largo.
+     */
+    public static function nombreCliente(array $cliente): string
+    {
+        foreach (['razon_social', 'company_name', 'client_name'] as $campo) {
+            $v = trim((string) ($cliente[$campo] ?? ''));
+            if ($v !== '') {
+                return mb_substr($v, 0, 100);
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Lineas para totales() desde las filas guardadas (cotizacion_items, con
+     * los DECIMAL como texto) o desde las ya validadas. Sin indicador (fila
+     * vieja o NULL) cuenta como 18%, el mismo default que al guardar.
+     *
+     * @param array<int,array|object> $items
+     * @return array<int,array{quantity:float,amount:float,indicador_facturacion:int}>
+     */
+    public static function lineasDesdeFilas(array $items): array
+    {
+        $lineas = [];
+        foreach (array_values($items) as $fila) {
+            $fila = (array) $fila;
+            $ind = $fila['indicador_facturacion'] ?? null;
+            $lineas[] = [
+                'quantity' => (float) ($fila['quantity'] ?? 0),
+                'amount' => (float) ($fila['amount'] ?? 0),
+                'indicador_facturacion' => ($ind === null || $ind === '') ? 1 : (int) $ind,
+            ];
+        }
+        return $lineas;
+    }
+
+    /**
+     * Ajustes para totales() desde lo guardado ([concepto => monto], como lo
+     * devuelve getAjustes, o el objeto `ajustes` de la fila del GET). La
+     * retencion se guarda como monto; aqui vuelve a ser la casilla (marcada si
+     * el monto es > 0) y totales() la recalcula desde el Sub-total.
+     */
+    public static function ajustesDesdeFilas(array|object $filas): array
+    {
+        $guardados = (array) $filas;
+        $out = [];
+        foreach (self::AJUSTES_MONTO as $concepto) {
+            $v = $guardados[$concepto] ?? 0;
+            $out[$concepto] = is_numeric($v) ? (float) $v : 0.0;
+        }
+        $ret = $guardados[self::RETENCION] ?? 0;
+        $out[self::RETENCION] = is_numeric($ret) && (float) $ret > 0;
+        return $out;
+    }
+
+    /**
+     * Lineas en la forma de FerreteriaCotizacionPdf. Sirve igual para las del
+     * cuerpo ya validado (vista previa) que para las filas guardadas (PDF).
+     *
+     * @return array<int,array{description:string,quantity:float,amount:float}>
+     */
+    public static function itemsPdf(array $items): array
+    {
+        $out = [];
+        foreach (array_values($items) as $item) {
+            $item = (array) $item;
+            $out[] = [
+                'description' => (string) ($item['description'] ?? ''),
+                'quantity' => (float) ($item['quantity'] ?? 0),
+                'amount' => (float) ($item['amount'] ?? 0),
+            ];
+        }
+        return $out;
+    }
+
+    /** Fecha y hora de ahora en Santo Domingo, como la guarda un DATETIME. */
+    private static function ahoraRd(): string
+    {
+        return (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('Y-m-d H:i:s');
     }
 
     /**

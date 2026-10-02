@@ -1143,6 +1143,89 @@ $chk('actualizar: 1 commit', $c->commits === 1 && $c->rollbacks === 0);
 
 ini_set('error_log', (string) $logPrevioT7);
 
+// --- T7, ronda C: FerreteriaFormato (piezas puras) y su registro ---
+echo "\n== T7: pdf() reconstruye los totales desde lo guardado ==\n";
+$lineasT7 = FerreteriaFormato::lineasDesdeFilas($comoFilasT7($casos['pintura']['lineas']));
+$chk('lineasDesdeFilas: 7 lineas como numeros', count($lineasT7) === 7
+    && $lineasT7[0] === ['quantity' => 7.0, 'amount' => 2000.0, 'indicador_facturacion' => 1]);
+$t = FerreteriaFormato::totales($lineasT7, FerreteriaFormato::ajustesDesdeFilas([]));
+$chk('pintura desde filas: 41,860.00 / 7,534.80 / 49,394.80', $t['subtotal'] === 41860.0 && $t['itbis'] === 7534.8 && $t['total'] === 49394.8);
+$viejasT7 = FerreteriaFormato::lineasDesdeFilas([['quantity' => '2.000', 'amount' => '50.0000'],
+    (object) ['quantity' => '1.000', 'amount' => '10.0000', 'indicador_facturacion' => null]]);
+$chk('fila sin indicador (o NULL) cuenta como 18%', $viejasT7[0]['indicador_facturacion'] === 1 && $viejasT7[1]['indicador_facturacion'] === 1);
+$aj = FerreteriaFormato::ajustesDesdeFilas((object) ['abono' => '10000.00', 'retencion_isr' => '2093.00']);
+$chk('ajustesDesdeFilas: montos a float y la retencion a casilla', $aj === [
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 10000.0, 'retencion_isr' => true,
+]);
+$chk('ajustesDesdeFilas({}) = todo en cero, sin retencion', FerreteriaFormato::ajustesDesdeFilas((object) []) === [
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'retencion_isr' => false,
+]);
+$chk("ajustesDesdeFilas: retencion '0.00' = casilla apagada", FerreteriaFormato::ajustesDesdeFilas(['retencion_isr' => '0.00'])['retencion_isr'] === false);
+
+// Ida y vuelta por cada caso del fixture: lo que crearConFormato escribe
+// (lineas y ajustes), leido de vuelta como texto DECIMAL, da los mismos totales.
+foreach ($casos as $idT7 => $casoT7) {
+    $cotRt = $cotT7($casoT7, null);
+    $totRt = $totDeT7($cotRt);
+    $c = new ConexionFalsaT7();
+    $modeloT7($c)->crearConFormato($cotRt, $totRt, 'ferreteria', null, 'X');
+    $filasRt = array_map(static fn(array $p): array => [
+        'description' => $p[':description'],
+        'amount' => number_format($p[':amount'], 4, '.', ''),
+        'quantity' => number_format($p[':quantity'], 3, '.', ''),
+        'indicador_facturacion' => $p[':indicador_facturacion'],
+    ], $c->paramsDe('INSERT INTO cotizacion_items'));
+    $ajustesRt = array_map(static fn(float $m): string => number_format($m, 2, '.', ''),
+        array_column($c->paramsDe('INSERT INTO cotizacion_ajustes'), ':monto', ':concepto'));
+    $chk("ida y vuelta ({$idT7}): pdf() recalcula los mismos totales que se guardaron",
+        FerreteriaFormato::totales(FerreteriaFormato::lineasDesdeFilas($filasRt), FerreteriaFormato::ajustesDesdeFilas($ajustesRt)) === $totRt);
+}
+$pdfItemsT7 = FerreteriaFormato::itemsPdf($comoFilasT7($casos['pintura']['lineas']));
+$chk('itemsPdf: descripcion, cantidad y precio como numeros',
+    $pdfItemsT7[0] === ['description' => 'GALONES DE PINTURA BLNACA SEMIGLOSS', 'quantity' => 7.0, 'amount' => 2000.0]);
+
+echo "\n== T7: client_name y reglas de catalogo (aplicarCatalogo) ==\n";
+$cliT7 = $casos['pintura']['cliente'];
+$chk('nombreCliente: razon_social primero', FerreteriaFormato::nombreCliente($cliT7) === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+$chk('nombreCliente: sin razon_social => company_name',
+    FerreteriaFormato::nombreCliente(['razon_social' => '  ', 'company_name' => 'ACME SRL', 'client_name' => 'Juan']) === 'ACME SRL');
+$chk('nombreCliente: solo client_name', FerreteriaFormato::nombreCliente(['razon_social' => null, 'company_name' => '', 'client_name' => 'Juan Perez']) === 'Juan Perez');
+$chk('nombreCliente: nada => vacio', FerreteriaFormato::nombreCliente([]) === '');
+$chk('nombreCliente: recorta a 100, el ancho de la columna (multibyte)', mb_strlen(FerreteriaFormato::nombreCliente(['razon_social' => str_repeat('Ñ', 150)])) === 100);
+
+$cot = $cotT7($casos['pintura'], null);
+$chk('aplicarCatalogo: cliente que no existe => 422', FerreteriaFormato::aplicarCatalogo($cot, null, []) === ['error', 'Elige un cliente para la cotización.', 422]);
+$cot['items'][1]['product_id'] = 55;   // existe, es servicio
+$cot['items'][2]['product_id'] = 99;   // no existe
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, [55 => ['indicador_bien_servicio' => 2]]);
+$chk('aplicarCatalogo: producto que no existe => 422 que nombra la linea 3', $r === [
+    'error', 'Línea 3: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.', 422,
+]);
+$cot['items'][2]['product_id'] = null;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, [55 => ['indicador_bien_servicio' => 2]]);
+$chk('aplicarCatalogo: ok', ($r[0] ?? '') === 'ok');
+$chk('aplicarCatalogo: bien/servicio sale del producto', ($r[1]['items'][1]['indicador_bien_servicio'] ?? null) === 2);
+$chk('aplicarCatalogo: la linea libre conserva lo del cuerpo', ($r[1]['items'][0]['indicador_bien_servicio'] ?? null) === 1);
+$chk('aplicarCatalogo: totales de la hoja pintura', ($r[2]['total'] ?? null) === 49394.8 && count($r[2]['lineas'] ?? []) === 7);
+$cot = $cotT7($casos['pintura'], null);
+$cot['ajustes']['abono'] = 50000.0;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: abono mayor que lo adeudado => 422 con el texto de errorAbono', ($r[0] ?? '') === 'error' && ($r[2] ?? null) === 422
+    && $r[1] === 'El abono (RD$ 50,000.00) no puede ser mayor que lo adeudado (RD$ 49,394.80).');
+
+echo "\n== T7: registro de formatos ==\n";
+// $modeloSinDb, $firmasDe, $contratoFormato, $conTenant y $tenantResuelto los
+// deja definidos la seccion de Task 6 (registro y contrato).
+$fT7 = CotizacionFormatos::para('ferreteria', $modeloSinDb);
+$chk("registro: existe('ferreteria')", CotizacionFormatos::existe('ferreteria'));
+$chk("registro: para('ferreteria') = FerreteriaFormato, nombre() 'ferreteria', sin correo",
+    get_class($fT7) === 'FerreteriaFormato' && $fT7->nombre() === 'ferreteria' && $fT7->permiteCorreo() === false);
+$chk('FerreteriaFormato cumple el contrato (mismas firmas)', $firmasDe('FerreteriaFormato') === $contratoFormato);
+$chk('el modelo que recibe para() es el que usa el formato', (fn() => $this->modelo)->call($fT7) === $modeloSinDb);
+$chk("delTenant(): cotizacion_formato 'ferreteria' = ferreteria", $conTenant(['id' => 5, 'cotizacion_formato' => 'ferreteria']) === 'ferreteria');
+$tenantResuelto->setValue(null, null);
+$chk('registro: para(null) sigue siendo Gratex', get_class(CotizacionFormatos::para(null, $modeloSinDb)) === 'GratexFormato');
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
