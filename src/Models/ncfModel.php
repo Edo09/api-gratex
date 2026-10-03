@@ -80,6 +80,28 @@ class ncfModel
     }
 
     /**
+     * Expresion SQL del ultimo numero dispensado del rango ACTIVO de un tipo,
+     * para los resumenes de secuencias (proximo e-NCF = esto + 1). Elige el
+     * rango igual que dispenseNextECF; sin rango vigente cae a
+     * MAX(ns.current_value). Va dentro de un SELECT ... FROM ncf_sequences ns
+     * GROUP BY ns.type.
+     *
+     * Con MAX(current_value) a secas, un rango registrado por adelantado ("En
+     * cola", arranca en numero_desde - 1) hacia mostrar un proximo e-NCF que
+     * no es el que sale.
+     */
+    public static function sqlSecuenciaActual(PDO $conexion, string $ambiente): string
+    {
+        $amb = $conexion->quote($ambiente);
+        return "COALESCE((SELECT a.current_value FROM ncf_sequences a
+                           WHERE a.type = ns.type AND a.ambiente = {$amb}
+                             AND (a.numero_hasta IS NULL OR a.current_value < a.numero_hasta)
+                             AND (a.fecha_vencimiento IS NULL OR a.fecha_vencimiento >= CURDATE())
+                           ORDER BY a.numero_desde ASC LIMIT 1),
+                         MAX(ns.current_value))";
+    }
+
+    /**
      * Reserves the next e-NCF for an electronic type (E31..E47) from the ACTIVE
      * authorized range (DGII model: ranges with numero_desde/hasta + vencimiento).
      *

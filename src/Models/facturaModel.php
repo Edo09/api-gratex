@@ -2,6 +2,7 @@
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../AmbienteResolver.php');
 require_once(__DIR__ . '/ReporteVentasModel.php');
+require_once(__DIR__ . '/ncfModel.php');
 
 class facturaModel
 {
@@ -993,15 +994,20 @@ class facturaModel
             // Reintento de un e-CF RECHAZADO: cuando DGII rechaza sin consumir la
             // secuencia (secuenciaUtilizada=false, p.ej. codigo 135) el contador se
             // revierte y el mismo e-NCF se reutiliza. El registro rechazado anterior
-            // con ese e_ncf choca con la clave unica uk_e_ncf, asi que se ELIMINA
-            // (con sus lineas) antes de re-insertar. NUNCA se borra un e-CF que no
-            // este en estado de rechazo: en ese caso se aborta con un error claro.
+            // con ese e_ncf choca con la clave unica uk_e_ncf_amb, asi que se
+            // ARCHIVA antes de re-insertar. NUNCA se archiva un e-CF que no este en
+            // estado de rechazo: en ese caso se aborta con un error claro.
+            // Solo cuenta el MISMO ambiente (la clave es por ambiente, migracion
+            // 027): el mismo numero en certificacion no es este comprobante. Una
+            // fila sin ambiente cuenta igual que ECFEmissionService::eNcfYaUsado.
             if (!empty($ecf['e_ncf'])) {
-                $prev = $this->conexion->prepare('SELECT id, estado_dgii FROM facturas WHERE e_ncf = :encf');
-                $prev->execute([':encf' => $ecf['e_ncf']]);
-                $prevRow = $prev->fetch(PDO::FETCH_ASSOC);
-                if ($prevRow) {
-                    $estadosRechazo = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
+                $prev = $this->conexion->prepare(
+                    'SELECT id, estado_dgii FROM facturas
+                     WHERE e_ncf = :encf AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL)'
+                );
+                $prev->execute([':encf' => $ecf['e_ncf'], ':amb' => $ecf['ambiente'] ?? null]);
+                $estadosRechazo = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
+                foreach ($prev->fetchAll(PDO::FETCH_ASSOC) as $prevRow) {
                     if (!in_array((string) ($prevRow['estado_dgii'] ?? ''), $estadosRechazo, true)) {
                         $this->conexion->rollBack();
                         $detalle = 'Ya existe una factura con e-NCF ' . $ecf['e_ncf']
@@ -1014,7 +1020,7 @@ class facturaModel
                     }
                     $delId = (int) $prevRow['id'];
                     // Archive the rejected attempt to maintain history for the client,
-                    // setting e_ncf to NULL to bypass the uk_e_ncf unique constraint.
+                    // setting e_ncf to NULL to bypass the uk_e_ncf_amb unique constraint.
                     $this->conexion->prepare(
                         "UPDATE facturas SET e_ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO') WHERE id = :id"
                     )->execute([':id' => $delId]);
@@ -1250,12 +1256,13 @@ class facturaModel
             )->fetchAll(PDO::FETCH_ASSOC);
 
             $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
+            $secuenciaActual = ncfModel::sqlSecuenciaActual($this->conexion, $ambiente ?? 'certecf');
             // Varias filas por tipo = rangos autorizados DGII: se agregan por tipo.
             // restantes = capacidad disponible en rangos vigentes (NULL = sin limite
             // registrado); vencimiento = el del rango vigente mas proximo a dispensar.
             $secuencias = $this->conexion->query(
                 "SELECT ns.type,
-                        MAX(ns.current_value) as secuencia_actual,
+                        {$secuenciaActual} as secuencia_actual,
                         COALESCE(MAX(f.total_emitidos), 0) as total_emitidos,
                         SUM(CASE WHEN ns.numero_hasta IS NOT NULL
                                   AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())

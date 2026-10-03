@@ -32,10 +32,24 @@ class aprobacionComercialModel
         return (int) $this->conexion->lastInsertId();
     }
 
-    public function findFacturaIdByENcf(string $eNcf): ?int
+    /**
+     * Factura nuestra a la que responde el comprador. El mismo e-NCF puede
+     * existir en certificacion y en produccion (la clave es por ambiente,
+     * migracion 027): se busca en el ambiente de la aprobacion, o en filas sin
+     * ambiente (anteriores a la columna). Sin ambiente conocido, como antes.
+     */
+    public function findFacturaIdByENcf(string $eNcf, ?string $ambiente = null): ?int
     {
-        $stmt = $this->conexion->prepare('SELECT id FROM facturas WHERE e_ncf = ? LIMIT 1');
-        $stmt->execute([$eNcf]);
+        if ($ambiente === null) {
+            $stmt = $this->conexion->prepare('SELECT id FROM facturas WHERE e_ncf = ? LIMIT 1');
+            $stmt->execute([$eNcf]);
+        } else {
+            $stmt = $this->conexion->prepare(
+                'SELECT id FROM facturas WHERE e_ncf = ? AND (ambiente_dgii = ? OR ambiente_dgii IS NULL)
+                 ORDER BY (ambiente_dgii IS NULL) LIMIT 1'
+            );
+            $stmt->execute([$eNcf, $ambiente]);
+        }
         $row = $stmt->fetch();
         return $row ? (int) $row['id'] : null;
     }

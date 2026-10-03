@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..026  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..027  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -240,7 +240,8 @@ CREATE TABLE IF NOT EXISTS facturas (
   user_id      INT(11)        DEFAULT NULL
                  COMMENT 'Referencia a gratex_master.users.id (sin FK cross-DB)',
   PRIMARY KEY (id),
-  UNIQUE KEY uk_e_ncf (e_ncf),
+  -- Por ambiente: certificacion y produccion numeran aparte (migracion 027).
+  UNIQUE KEY uk_e_ncf_amb (e_ncf, ambiente_dgii),
   KEY idx_track_id (track_id),
   KEY idx_estado_dgii (estado_dgii),
   KEY idx_rfce_track_id (rfce_track_id)

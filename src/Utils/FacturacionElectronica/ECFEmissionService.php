@@ -79,23 +79,30 @@ class ECFEmissionService
      * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
      */
     /**
-     * true si el e-NCF ya lo ocupa una factura que NO se puede re-emitir.
+     * true si el e-NCF ya lo ocupa, en ESTE ambiente, una factura que NO se
+     * puede re-emitir. Certificacion y produccion numeran aparte (migracion
+     * 027): contar los de prueba hacia saltar el rango que la DGII autoriza en
+     * produccion. Una fila sin ambiente (anterior a la columna) cuenta como
+     * ocupada: no se sabe de cual era.
      * Mismos estados reintentables que facturaModel::saveFacturaConECF, para que
      * los dos chequeos no puedan discrepar. Fail-open: ante un error de consulta
      * devuelve false y deja que el chequeo del modelo siga siendo la red.
      */
-    private function eNcfYaUsado(string $eNcf): bool
+    private function eNcfYaUsado(string $eNcf, string $ambiente): bool
     {
         try {
-            $stmt = Database::getInstance()->getConnection()
-                ->prepare('SELECT estado_dgii FROM facturas WHERE e_ncf = :e LIMIT 1');
-            $stmt->execute([':e' => $eNcf]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if (!$row) {
-                return false;
-            }
+            $stmt = Database::getInstance()->getConnection()->prepare(
+                'SELECT estado_dgii FROM facturas
+                 WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL)'
+            );
+            $stmt->execute([':e' => $eNcf, ':amb' => $ambiente]);
             $reintentables = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
-            return !in_array((string) ($row['estado_dgii'] ?? ''), $reintentables, true);
+            foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $estado) {
+                if (!in_array((string) $estado, $reintentables, true)) {
+                    return true;
+                }
+            }
+            return false;
         } catch (Throwable $e) {
             error_log('[ECF] eNcfYaUsado fallo: ' . $e->getMessage());
             return false;
@@ -224,7 +231,7 @@ class ECFEmissionService
                         . '. Solicita un rango nuevo a la DGII y regístralo en Configuración → Numeraciones e-CF → Gestionar rangos.'
                     );
                 }
-                $ocupado = $this->eNcfYaUsado((string) $disp['e_ncf']);
+                $ocupado = $this->eNcfYaUsado((string) $disp['e_ncf'], (string) $ambienteEarly);
                 if ($ocupado) {
                     error_log('[ECF] e-NCF ' . $disp['e_ncf'] . ' ya usado localmente; se salta al siguiente.');
                 }

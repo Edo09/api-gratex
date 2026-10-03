@@ -1,7 +1,7 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 026) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 027) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
 -- creado: una columna, una tabla, un indice o el tipo nuevo de una columna.
@@ -12,7 +12,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025 y la 026 si se pueden repetir sin dano.
+-- La 025, la 026 y la 027 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -126,5 +126,11 @@ FROM (
          AND EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cotizacion_items'
                    AND COLUMN_NAME = 'product_id')
+  UNION ALL
+  SELECT '027', '027_e_ncf_unico_por_ambiente.sql',
+         'indice unico facturas.uk_e_ncf_amb (e_ncf, ambiente_dgii)',
+         EXISTS (SELECT 1 FROM information_schema.STATISTICS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas'
+                   AND INDEX_NAME = 'uk_e_ncf_amb')
 ) m
 ORDER BY m.migracion;

@@ -647,9 +647,10 @@ class gastoModel
             // Varias filas por tipo = rangos autorizados DGII (agregadas por tipo;
             // restantes NULL = sin rango con limite registrado).
             $ambSeqFilter = $ambiente !== null ? "AND ns.ambiente = '{$ambiente}'" : "AND ns.ambiente = 'certecf'";
+            $secuenciaActual = ncfModel::sqlSecuenciaActual($this->conexion, $ambiente ?? 'certecf');
             $secuencias = $this->conexion->query(
                 "SELECT ns.type,
-                        MAX(ns.current_value) as secuencia_actual,
+                        {$secuenciaActual} as secuencia_actual,
                         COALESCE(MAX(g.total_emitidos), 0) as total_emitidos,
                         SUM(CASE WHEN ns.numero_hasta IS NOT NULL
                                   AND (ns.fecha_vencimiento IS NULL OR ns.fecha_vencimiento >= CURDATE())

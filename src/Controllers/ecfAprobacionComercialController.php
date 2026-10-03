@@ -125,7 +125,7 @@ function handleAprobacionComercial(): void
         (new IntegracionStoreModel())->saveAprobacion($tenantId, $aprData);
     } else {
         $model = new aprobacionComercialModel();
-        $aprData['factura_id'] = $model->findFacturaIdByENcf($eNcf);
+        $aprData['factura_id'] = $model->findFacturaIdByENcf($eNcf, $aprData['ambiente']);
         $model->save($aprData);
     }
 
