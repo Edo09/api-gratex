@@ -28,20 +28,23 @@ class Tenant1Template extends ClasicoTemplate
             return;
         }
 
-        // Entre la firma del cliente (termina en x=125) y el margen derecho, a
-        // la altura de las firmas. La tercera linea cierra en y=271.4, donde el
-        // motor estampa "Pagina X de Y" (centrada, no se cruzan).
+        // Entre la firma del cliente (termina en x=125) y el cuadro de totales
+        // (borde derecho x=205.9): a 8 pt la linea en mayusculas mide 73.6 mm y
+        // es la que manda el ancho. Las cinco lineas van de y=257.5 a 273.5, a
+        // la derecha de "Pagina X de Y" (centrada, no se cruzan).
         $lineas = [
             'Apreciado cliente: La fecha límite del pago de',
             'la presente factura es para el ' . $doc->fechaLimitePago() . '.',
-            'Agradeceremos tener pendiente esta información.',
+            'Facturas en atraso de 40 días, generarán un cargo',
+            'de 3% de interés mensual.',
+            'POR FAVOR EVITE DEMORAS EN EL PAGO. GRACIAS.',
         ];
-        $pdf->SetFont('Arial', '', 9);
-        $y = 260.6;
+        $pdf->SetFont('Arial', '', 8);
+        $y = 257.5;
         foreach ($lineas as $linea) {
-            $pdf->SetXY(134, $y);
-            $pdf->Cell(72, 3.6, $this->enc($linea), 0, 0, 'L');
-            $y += 3.6;
+            $pdf->SetXY(131, $y);
+            $pdf->Cell(76, 3.2, $this->enc($linea), 0, 0, 'L');
+            $y += 3.2;
         }
     }
 }
