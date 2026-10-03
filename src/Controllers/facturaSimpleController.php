@@ -216,6 +216,7 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
         'NCF'          => $body['NCF'] ?? null,  // NCF tradicional (no e-CF), opcional
         'tipo_ecf'     => null,                  // factura simple: nunca e-CF
         'date'         => $body['date'] ?? date('Y-m-d'),
+        'tipo_pago'    => $body['tipo_pago'] ?? 1,   // fecha limite de pago del pie
         'total'        => round($total, 2),
         'client_id'    => $body['client_id'] ?? null,
         'client_name'  => $body['client_name'] ?? ($client['client_name'] ?? ''),

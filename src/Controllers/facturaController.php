@@ -849,6 +849,9 @@ function handlePreview(clientModel $clientModel): void
         'ambiente_dgii'      => null,
         'date'               => $input['date'] ?? date('Y-m-d'),
         'fecha_emision_dgii' => null,
+        // Para la fecha limite de pago del pie (EcfDocumento::fechaLimitePago).
+        'tipo_pago'          => $input['tipo_pago'] ?? 1,
+        'fecha_limite_pago'  => $input['fecha_limite_pago'] ?? null,
         'total'              => $totales['monto_total'],
         'tipo_ecf'           => $input['tipo_ecf'] ?? null,
         'client_id'          => $clientId,

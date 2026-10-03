@@ -391,6 +391,7 @@ class FacturaPdfGenerator extends FPDF
     {
         // Resolver plantilla ANTES de AddPage() (Header/Footer la usan).
         $tpl = $this->template();
+        $tpl->setDocumento($this->doc());
         $style = $tpl->style();
         $layout = $tpl->layout();
         // Limites del motor: la tabla jamas invade la zona de totales/QR

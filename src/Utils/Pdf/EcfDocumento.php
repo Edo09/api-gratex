@@ -202,6 +202,26 @@ final class EcfDocumento
         return '31/12/' . date('Y', $ts ?: time());
     }
 
+    /**
+     * Fecha limite de pago (dd/mm/aaaa). De contado se paga al emitir: es la
+     * fecha de la factura. A credito manda la FechaLimitePago del e-CF firmado;
+     * sin XML (factura simple, vista previa) la que pidio el front o, si no, la
+     * misma regla que ECFXmlBuilder aplica al emitir: fecha + 30 dias.
+     */
+    public function fechaLimitePago(): string
+    {
+        $delXml = $this->campoXml('FechaLimitePago');
+        if ($delXml !== '') {
+            return str_replace('-', '/', $delXml);
+        }
+        $ts = strtotime($this->fecha()) ?: time();
+        if ((int) ($this->factura['tipo_pago'] ?? 1) === 2) {
+            $pedida = strtotime((string) ($this->factura['fecha_limite_pago'] ?? ''));
+            $ts = $pedida ?: strtotime('+30 days', $ts);
+        }
+        return date('d/m/Y', $ts);
+    }
+
     /** Texto de un nodo simple del e-CF firmado ('' si no hay XML o no existe). */
     private function campoXml(string $tag): string
     {

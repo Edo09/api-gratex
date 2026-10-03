@@ -21,12 +21,34 @@ abstract class FacturaTemplate
     /** @var array{0:int,1:int,2:int}|null Acento RGB del tenant (null = colores propios de la plantilla). */
     protected ?array $accent;
 
+    /** @var EcfDocumento|null Comprobante que se esta imprimiendo (lo fija el motor). */
+    private $documento = null;
+
     /**
      * @param array{0:int,1:int,2:int}|null $accent
      */
     public function __construct(?array $accent = null)
     {
         $this->accent = $accent;
+    }
+
+    /**
+     * El motor entrega el comprobante antes de la primera pagina. Header() y
+     * Footer() de FPDF no reciben datos del documento, y un pie a la medida
+     * puede necesitarlos (p.ej. la fecha limite de pago del Tenant1Template).
+     */
+    public function setDocumento(EcfDocumento $documento): void
+    {
+        $this->documento = $documento;
+    }
+
+    /**
+     * Comprobante en curso, o null cuando no hay factura (la cotizacion reusa
+     * el encabezado de la plantilla sin pasar comprobante).
+     */
+    protected function documento(): ?EcfDocumento
+    {
+        return $this->documento;
     }
 
     /**

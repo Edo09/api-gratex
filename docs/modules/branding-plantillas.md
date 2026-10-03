@@ -77,6 +77,9 @@ Cuando un cliente pide su propio formato de factura:
    - `drawCompanyHeader($pdf, $emisor, $logoPath, $variant)` — identidad del
      emisor (corre en cada página; `$variant` es `factura` o `cotizacion`).
    - `drawFooter($pdf)` — firmas/sello (el motor agrega la paginación después).
+     Si el pie necesita datos del comprobante, `$this->documento()` devuelve
+     el `EcfDocumento` en curso (p.ej. `fechaLimitePago()`, `tipoEcf()`); ver
+     `Custom/Tenant1Template.php` (Gratex: aviso de fecha límite de pago).
    - `drawItemsTableHeader($pdf, $widths, $labels)` — banda de la tabla
      (anchos y etiquetas los fija el motor: no se puede quitar una columna).
    - `drawTotals($pdf, $filas)` — cuadro de totales (filas DGII del motor).
