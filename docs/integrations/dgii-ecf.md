@@ -112,6 +112,26 @@ Referencia completa de payloads: [../api/facturas.md](../api/facturas.md). Datos
 - `FechaHoraFirma` del XML debe coincidir con `fecha_emision_dgii` en la BD — capturar el
   timestamp antes de construir el XML.
 
+### Recuperar un e-CF que DGII recibió pero no quedó guardado
+
+`php tools/consultar_ecf_dgii.php --rnc=<emisor> --encf=E340000000001[,E340000000002]`
+(en el server, con el certificado del tenant; sin shell:
+`/api/public/consultar_ecf_dgii.php?token=<CERT_RUN_TOKEN>&rnc=<emisor>&encf=…[&formato=json]`)
+consulta por e-NCF los servicios que la emisión normal no usa:
+
+- `ConsultaTrackIds` → trackId(s), estado, fechaRecepcion.
+- `ConsultaEstado` → estado, montoTotal, totalITBIS, fechaEmision, fechaFirma,
+  rncComprador y **codigoSeguridad** (extraídos del e-CF recibido). Con eso el timbre/QR
+  de la Representación Impresa vuelve a ser válido; el script imprime la URL de
+  `ConsultaTimbre` ya armada para comprobarlo.
+- `ConsultaResultado` por cada trackId → secuenciaUtilizada y mensajes (motivo de un rechazo).
+
+Ningún servicio devuelve items, NCFModificado, razón ni el XML: eso solo existe en el
+cliente que lo emitió (pestaña abierta, HAR) o en logs del hosting. Los dos primeros
+servicios no existen en `certecf` (responden 404): solo `ecf` y `testecf`. Caso que lo
+motivó: E34 aceptado el 2026-10-05 cuyo INSERT falló por la clave `uk_e_ncf` vieja
+(migración 027 sin aplicar).
+
 ---
 
 ## Bugs críticos resueltos en certificación
