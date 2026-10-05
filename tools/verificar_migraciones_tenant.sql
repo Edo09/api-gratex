@@ -1,10 +1,10 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 027) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 028) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
--- creado: una columna, una tabla, un indice o el tipo nuevo de una columna.
+-- creado: una columna, una tabla, un indice o el tipo o ancho nuevo de una columna.
 --
 -- Uso: en phpMyAdmin entra a la base de la empresa (la lista de bases sale de
 -- la ultima consulta de tools/verificar_migraciones_master.sql, columna
@@ -12,7 +12,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025, la 026 y la 027 si se pueden repetir sin dano.
+-- La 025, la 026, la 027 y la 028 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -132,5 +132,14 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.STATISTICS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas'
                    AND INDEX_NAME = 'uk_e_ncf_amb')
+  UNION ALL
+  SELECT '028', '028_estado_dgii_ancho.sql',
+         'facturas.estado_dgii y gastos.estado_dgii de 40 o mas',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas'
+                   AND COLUMN_NAME = 'estado_dgii' AND CHARACTER_MAXIMUM_LENGTH >= 40)
+         AND EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'gastos'
+                   AND COLUMN_NAME = 'estado_dgii' AND CHARACTER_MAXIMUM_LENGTH >= 40)
 ) m
 ORDER BY m.migracion;

@@ -66,7 +66,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
 ## DB del tenant — Tablas de negocio
 
-Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–026).
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–028).
 
 | Tabla | Dominio |
 |---|---|
@@ -183,7 +183,7 @@ Columnas base + tracking e-CF (migraciones 001/003/005/006).
 | `tipo_ecf` | varchar(2) | 31,32,33,34,41,43,44,45,46,47 |
 | `e_ncf` | varchar(13) | UNIQUE (`uk_e_ncf`) |
 | `track_id` | varchar(60) | TrackId DGII — INDEX |
-| `estado_dgii` | varchar(20) | PENDIENTE/ENVIADO/ACEPTADO/ACEPTADO_CONDICIONAL/RECHAZADO/ERROR — INDEX |
+| `estado_dgii` | varchar(40) | PENDIENTE/ENVIADO/EN_PROCESO/ACEPTADO/ACEPTADO_CONDICIONAL/RECHAZADO/NO_ENCONTRADO/ERROR, `RFCE_` + estado (E32 < 250k), estado + `_ARCHIVADO` al reutilizar el número (migración 028) — INDEX |
 | `codigo_seguridad` | varchar(10) | para QR / RI |
 | `fecha_emision_dgii` | datetime | debe coincidir con `FechaHoraFirma` del XML |
 | `ambiente_dgii` | varchar(20) | testecf/certecf/ecf |
@@ -311,9 +311,9 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 
 | Artefacto | Para qué |
 |---|---|
-| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–026). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–028). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–026 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–028 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 

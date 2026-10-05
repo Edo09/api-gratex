@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..027  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..028  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -215,8 +215,9 @@ CREATE TABLE IF NOT EXISTS facturas (
   e_ncf        VARCHAR(13)    NULL,
   track_id     VARCHAR(60)    NULL
                  COMMENT 'TrackId que devuelve DGII al recibir el e-CF',
-  estado_dgii  VARCHAR(20)    NOT NULL DEFAULT 'PENDIENTE'
-                 COMMENT 'PENDIENTE | ENVIADO | ACEPTADO | ACEPTADO_CONDICIONAL | RECHAZADO | ERROR',
+  -- 40 y no 20: RFCE_ACEPTADO_CONDICIONAL y los *_ARCHIVADO pasan de 20 (migracion 028).
+  estado_dgii  VARCHAR(40)    NOT NULL DEFAULT 'PENDIENTE'
+                 COMMENT 'PENDIENTE | ENVIADO | EN_PROCESO | ACEPTADO | ACEPTADO_CONDICIONAL | RECHAZADO | NO_ENCONTRADO | ERROR; RFCE_<estado> en E32 < 250k; <estado>_ARCHIVADO al reutilizar el numero',
   codigo_seguridad VARCHAR(10) NULL
                  COMMENT 'Codigo de seguridad para representacion impresa y QR',
   fecha_emision_dgii DATETIME NULL,
@@ -551,8 +552,8 @@ CREATE TABLE IF NOT EXISTS gastos (
   es_auto_emision TINYINT(1) NOT NULL DEFAULT 0
     COMMENT '1 = la empresa emite y genera la secuencia | 0 = recibido del proveedor',
   ambiente VARCHAR(20) NULL COMMENT 'testecf | certecf | ecf',
-  estado_dgii VARCHAR(20) NOT NULL DEFAULT 'REGISTRADO'
-    COMMENT 'REGISTRADO (recibido) | PENDIENTE_EMISION | ENVIADO | ACEPTADO | ACEPTADO_CONDICIONAL | RECHAZADO | ERROR',
+  estado_dgii VARCHAR(40) NOT NULL DEFAULT 'REGISTRADO'
+    COMMENT 'REGISTRADO (recibido) | PENDIENTE_EMISION | ENVIADO | EN_PROCESO | ACEPTADO | ACEPTADO_CONDICIONAL | RECHAZADO | NO_ENCONTRADO | ERROR; <estado>_ARCHIVADO al reutilizar el numero',
   track_id VARCHAR(60) NULL
     COMMENT 'TrackId que devuelve DGII al recibir el e-CF emitido',
   codigo_seguridad VARCHAR(10) NULL
