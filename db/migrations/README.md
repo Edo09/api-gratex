@@ -18,6 +18,13 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
   `PREPARE/EXECUTE` (ver 018, 026, 027 y 028; en el master, 008, 010 y 011).
+- En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
+  `information_schema` para las sentencias que siguen (la 028 falló así el
+  2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
+  migración que dependa de la base del tenant la fija en la PRIMERA sentencia,
+  `SET @db := DATABASE();`, nombra todo con `@db` (`TABLE_SCHEMA = @db`,
+  `` `', @db, '`.tabla `` en el SQL dinámico) y deja el `SELECT` de resultado
+  para el final. Ver 028.
 - Cambios al **master** (`gratex_master`): `db/master_migrations/` (+ reflejar
   en `db/master_schema.sql` para instalaciones nuevas).
 

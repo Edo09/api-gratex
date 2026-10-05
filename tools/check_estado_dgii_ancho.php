@@ -115,9 +115,29 @@ $chk('snapshot: defaults intactos (PENDIENTE / REGISTRADO)',
 // ---------------------------------------------------------------------------
 $chk('028: el archivo existe', $migracion !== '');
 $sinComentarios = (string) preg_replace('/^[ \t]*--.*$/m', '', $migracion);
+// phpMyAdmin, despues de un SELECT sobre information_schema, cambia la base
+// actual a information_schema para lo que sigue (2026-10-05: "#1109 Unknown
+// table 'FACTURAS' in information_schema"). La 028 fija la base en @db en la
+// PRIMERA sentencia y nombra todo con ella; el unico SELECT de nivel superior
+// es el resultado final.
+$sentencias = array_values(array_filter(
+    array_map('trim', preg_split('/;\s*\n/', $sinComentarios)),
+    fn($s) => $s !== ''
+));
+$chk('028: la primera sentencia fija la base en @db', ($sentencias[0] ?? '') === 'SET @db := DATABASE()',
+    'primera sentencia: ' . substr((string) ($sentencias[0] ?? ''), 0, 60));
+$chk('028: DATABASE() aparece una sola vez', substr_count($sinComentarios, 'DATABASE()') === 1);
+$chk('028: cada consulta a information_schema filtra por TABLE_SCHEMA = @db',
+    preg_match_all('/information_schema\.COLUMNS/', $sinComentarios) > 0
+    && preg_match_all('/information_schema\.COLUMNS/', $sinComentarios) === preg_match_all('/TABLE_SCHEMA = @db/', $sinComentarios));
+$selects = array_keys(array_filter($sentencias, fn($s) => stripos($s, 'SELECT') === 0));
+$chk('028: el unico SELECT de nivel superior es la ultima sentencia',
+    $selects === [count($sentencias) - 1], 'SELECT en las sentencias: ' . implode(',', $selects));
+$chk('028: las filas truncadas se cuentan en las tablas de @db',
+    preg_match_all("/INTO @[fg]_truncadas FROM `', @db, '`\.(facturas|gastos) /", $sinComentarios) === 2);
 foreach (['facturas' => $snapF, 'gastos' => $snapG] as $tabla => $snap) {
-    $chk("028: modifica {$tabla}.estado_dgii",
-        (bool) preg_match("/ALTER TABLE {$tabla} MODIFY estado_dgii /", $sinComentarios));
+    $chk("028: modifica {$tabla}.estado_dgii nombrando la base",
+        (bool) preg_match("/ALTER TABLE `', @db, '`\.{$tabla} MODIFY estado_dgii /", $sinComentarios));
     $chk("028: solo actua si {$tabla} tiene menos de " . ($snap['ancho'] ?? '?'),
         (bool) preg_match("/TABLE_NAME = '{$tabla}'.*?COLUMN_NAME = 'estado_dgii'.*?CHARACTER_MAXIMUM_LENGTH < " . ($snap['ancho'] ?? -1) . '/s', $sinComentarios));
     $chk("028: {$tabla} usa el mismo COMMENT que el snapshot",
@@ -142,7 +162,9 @@ $chk('verificador: tiene la fila 028',
     (bool) preg_match("/SELECT '028', '028_estado_dgii_ancho\.sql'/", $verificador));
 $chk('verificador: la fila 028 mira las dos columnas con CHARACTER_MAXIMUM_LENGTH >= ' . $anchoF,
     substr_count($verificador, "COLUMN_NAME = 'estado_dgii' AND CHARACTER_MAXIMUM_LENGTH >= {$anchoF}") === 2);
+$chk('verificador: muestra en que base se evaluo', str_contains($verificador, 'DATABASE() AS base'));
 $chk('README: el rango de migraciones activas llega a la 028', str_contains($readme, '012–028'));
+$chk('README: advierte el cambio de base de phpMyAdmin', str_contains($readme, 'SET @db := DATABASE();'));
 $chk('snapshot: el encabezado dice 012..028', str_contains($snapshot, '012..028'));
 
 printf("\n%d/%d OK\n", $total - $fallos, $total);

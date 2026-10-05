@@ -18,7 +18,10 @@
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
 
-SELECT m.migracion, m.archivo, m.que_revisa,
+-- La columna base dice en que base se evaluo: si dice information_schema (o
+-- cualquier otra que no sea la del tenant), las filas no valen. Selecciona la
+-- base del tenant y vuelve a correrlo.
+SELECT DATABASE() AS base, m.migracion, m.archivo, m.que_revisa,
        IF(m.ok, 'APLICADA', 'FALTA') AS estado
 FROM (
   SELECT '012' AS migracion, '012_add_products.sql' AS archivo,
