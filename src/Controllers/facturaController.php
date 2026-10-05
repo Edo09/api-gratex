@@ -66,6 +66,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         if (isset($_GET['id'])) {
             $facturas = array_map('enrichFacturaTotales', $facturaModel->getFacturas($_GET['id']));
+            // Notas que modifican este comprobante ("notas") y, si es una nota,
+            // el que modifica ("modifica"): lo mismo que trae cada fila del listado.
+            $facturas = $facturaModel->adjuntarNotasVinculadas($facturas);
             // Detalle por id: enriquecer con lineas, cliente y emisor para que el
             // front pinte el documento completo en una sola llamada. La forma de
             // `data` sigue siendo un array (compatibilidad con clientes previos).

@@ -63,6 +63,51 @@ distinto al `{status,...}` del resto):
 | `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`) o `todos` |
 | `tipo_ecf` | — | Filtra por tipo: `E31`, `E32`, … `E47` (también acepta `31`, `32`, …) |
 
+#### Notas vinculadas: `notas` y `modifica` (listado y detalle)
+
+Cada fila del listado y `data[0]` del detalle traen dos campos más, para saber
+qué comprobantes tienen nota de crédito/débito y a cuál modifica cada nota:
+
+```json
+{
+  "id": 1201, "e_ncf": "E440000000001", "tipo_ecf": "44", "total": "82200.00",
+  "notas": [
+    { "id": 1203, "e_ncf": "E340000000001", "tipo_ecf": "34", "codigo_modificacion": "1",
+      "total": "82200.00", "estado_dgii": "ACEPTADO", "date": "2026-10-05 10:10:38" }
+  ],
+  "modifica": null
+}
+```
+
+```json
+{
+  "id": 1203, "e_ncf": "E340000000001", "tipo_ecf": "34", "ncf_modificado": "E440000000001",
+  "notas": [],
+  "modifica": { "id": 1201, "e_ncf": "E440000000001", "tipo_ecf": "44",
+                "total": "82200.00", "date": "2026-10-01 09:00:00" }
+}
+```
+
+- `notas` — siempre presente (lista, puede venir vacía), ordenada por `id`
+  ascendente: las E33/E34 cuyo `ncf_modificado` es el `e_ncf` de la fila, en el
+  mismo `ambiente_dgii` (NULL con NULL), y solo si la DGII las tiene: `estado_dgii`
+  en `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO` o `ENVIADO` (la misma regla
+  que el saldo de `/api/facturas/modificables`). Una nota rechazada, en `ERROR`,
+  `NO_ENCONTRADO` o archivada no aparece. Fila sin `e_ncf` → `[]`.
+  - `tipo_ecf`: `"34"` nota de crédito, `"33"` nota de débito.
+  - `codigo_modificacion`: `"1"` anula, `"2"` corrige texto, `"3"` corrige montos,
+    `"4"` reemplazo de contingencia, `"5"` referencia a factura de consumo; `null`
+    si la nota no lo guardó.
+- `modifica` — `null`, salvo en una E33/E34 con `ncf_modificado`: el comprobante
+  que modifica, buscado por `e_ncf = ncf_modificado` en el mismo ambiente.
+  `e_ncf` siempre viene; `id`, `tipo_ecf`, `total` y `date` vienen `null` si ese
+  comprobante no está en el sistema (p. ej. un NCF de papel).
+- Como el resto de la fila, `id` llega como número pero `total` llega como texto
+  (`"82200.00"`): convertir con `Number()` antes de sumar. El `total` de la nota
+  viene **positivo**; restarlo cuando `tipo_ecf` es `"34"`.
+- Se resuelven con dos consultas por página (notas y comprobantes modificados),
+  no una por fila.
+
 #### Detalle por ID (`GET /api/facturas?id={id}`)
 
 `data` es un **array** con la factura (compatibilidad histórica; tomar `data[0]`).
@@ -95,6 +140,8 @@ documento completo en una sola llamada:
   `xml_firmado` (`CantidadItem` / `PrecioUnitarioItem`, mismo orden que `items`).
 - `cliente` — registro completo de `clients` (solo si la factura tiene `client_id`).
 - `emisor` — fila de `emisor_config` del tenant.
+- `notas` / `modifica` — igual que en el listado (ver
+  [Notas vinculadas](#notas-vinculadas-notas-y-modifica-listado-y-detalle)).
 
 #### Parámetro `?format=base64`
 
@@ -172,6 +219,7 @@ X-API-KEY: <key>
     "resumen": {
       "total_ecf": 45,
       "monto_total": 1250000.00,
+      "monto_neto": 1085600.00,
       "tipos_distintos": 8,
       "primer_ecf": "2026-05-01 09:00:00",
       "ultimo_ecf": "2026-05-28 14:30:00"
@@ -219,7 +267,8 @@ X-API-KEY: <key>
 | Campo | Descripción |
 |-------|-------------|
 | `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos) |
-| `resumen.monto_total` | Suma de todos los montos emitidos (RD$) |
+| `resumen.monto_total` | Suma de todos los montos emitidos (RD$), tal cual: la nota de crédito (E34) suma y los rechazados también |
+| `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) no cuentan. Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
 | `resumen.tipos_distintos` | Cantidad de tipos e-CF distintos utilizados |
 | `por_tipo[].tipo_ecf` | Código del tipo (31, 32, 33, …) |
 | `por_tipo[].nombre` | Nombre del tipo |

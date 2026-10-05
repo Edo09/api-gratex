@@ -25,6 +25,18 @@ class facturaModel
      */
     public const DECIMALES_CANTIDAD_SIMPLE = 3;
 
+    /** Tipos e-CF que modifican otro comprobante: nota de debito y de credito. */
+    public const TIPOS_NOTA = ['33', '34'];
+
+    /**
+     * Estados en que una nota E33/E34 cuenta contra la factura que modifica:
+     * los que la DGII tiene (aceptada o en proceso). Una en ERROR o
+     * NO_ENCONTRADO (o su intento archivado) no llego a valer. Lo usan
+     * sqlReferencia() (saldo para una nota nueva) y vincularNotas() (listado y
+     * detalle), para que pantalla y emision cuenten las mismas notas.
+     */
+    public const ESTADOS_NOTA_VIGENTE = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO'];
+
     public function __construct()
     {
         $this->conexion = Database::getInstance()->getConnection();
@@ -874,10 +886,176 @@ class facturaModel
             foreach ($facturas as &$factura) {
                 $factura['description'] = $this->getFacturaItemsDescription($factura['id']);
             }
-            return $facturas;
+            unset($factura);
+            return $this->adjuntarNotasVinculadas($facturas);
         } catch (PDOException $e) {
             return [];
         }
+    }
+
+    /**
+     * Pega a cada fila de facturas sus notas ("notas") y, si es una nota, el
+     * comprobante que modifica ("modifica"). Ver vincularNotas() para la forma.
+     *
+     * Dos consultas por pagina (notas y originales), con IN (...): nunca una
+     * por fila. Cada fila necesita id, e_ncf, tipo_ecf, ncf_modificado y
+     * ambiente_dgii. Si la base falla, las filas salen igual, sin notas y con
+     * "modifica" de solo el e-NCF: el listado no se cae por esto.
+     */
+    public function adjuntarNotasVinculadas(array $rows): array
+    {
+        if ($rows === []) {
+            return [];
+        }
+
+        $eNcfs = [];
+        $modificados = [];
+        foreach ($rows as $row) {
+            $eNcf = trim((string) ($row['e_ncf'] ?? ''));
+            if ($eNcf !== '') {
+                $eNcfs[$eNcf] = true;
+            }
+            $ref = trim((string) ($row['ncf_modificado'] ?? ''));
+            if ($ref !== '' && in_array((string) ($row['tipo_ecf'] ?? ''), self::TIPOS_NOTA, true)) {
+                $modificados[$ref] = true;
+            }
+        }
+
+        $notas = [];
+        $originales = [];
+        try {
+            if ($eNcfs !== []) {
+                $tipos = "'" . implode("', '", self::TIPOS_NOTA) . "'";
+                $stmt = $this->conexion->prepare(
+                    'SELECT id, e_ncf, tipo_ecf, codigo_modificacion, total, estado_dgii, date,
+                            ncf_modificado, ambiente_dgii
+                     FROM facturas
+                     WHERE tipo_ecf IN (' . $tipos . ')
+                       AND ncf_modificado IN (' . self::placeholders(count($eNcfs)) . ')
+                       AND estado_dgii IN (' . self::sqlEstadosNotaVigente() . ')
+                     ORDER BY id ASC'
+                );
+                $stmt->execute(array_keys($eNcfs));
+                $notas = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+            if ($modificados !== []) {
+                $stmt = $this->conexion->prepare(
+                    'SELECT id, e_ncf, tipo_ecf, total, date, ambiente_dgii
+                     FROM facturas
+                     WHERE e_ncf IN (' . self::placeholders(count($modificados)) . ')
+                     ORDER BY id ASC'
+                );
+                $stmt->execute(array_keys($modificados));
+                $originales = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            }
+        } catch (PDOException $e) {
+            error_log('[facturas] adjuntarNotasVinculadas: ' . $e->getMessage());
+            $notas = [];
+            $originales = [];
+        }
+
+        return self::vincularNotas($rows, $notas, $originales);
+    }
+
+    /**
+     * Emparejamiento puro de adjuntarNotasVinculadas (se prueba sin DB en
+     * tools/test_notas_vinculadas.php).
+     *
+     * $rows:       filas de facturas (id, e_ncf, tipo_ecf, ncf_modificado, ambiente_dgii).
+     * $notas:      candidatas a nota (id, e_ncf, tipo_ecf, codigo_modificacion,
+     *              total, estado_dgii, date, ncf_modificado, ambiente_dgii).
+     * $originales: comprobantes que las notas de $rows modifican (id, e_ncf,
+     *              tipo_ecf, total, date, ambiente_dgii).
+     *
+     * Devuelve $rows en el mismo orden, cada una con:
+     *   notas    lista (quiza vacia), por id ascendente, de las E33/E34 vigentes
+     *            (ESTADOS_NOTA_VIGENTE) cuyo ncf_modificado es el e_ncf de la fila
+     *            en el mismo ambiente_dgii (NULL con NULL, como <=>):
+     *            {id, e_ncf, tipo_ecf, codigo_modificacion, total, estado_dgii, date}.
+     *            Fila sin e_ncf (p.ej. un intento archivado): [].
+     *   modifica null, salvo en una E33/E34 con ncf_modificado:
+     *            {id, e_ncf (= ncf_modificado), tipo_ecf, total, date}, con
+     *            id/tipo_ecf/total/date null si el comprobante no esta en
+     *            facturas en ese ambiente (p.ej. un NCF de papel).
+     * El e-NCF se compara sin mayusculas/minusculas ni espacios en los bordes,
+     * como la collation de la columna. total queda como texto (DECIMAL).
+     */
+    public static function vincularNotas(array $rows, array $notas, array $originales): array
+    {
+        $clave = static function ($eNcf, $ambiente): ?string {
+            $eNcf = strtoupper(trim((string) ($eNcf ?? '')));
+            if ($eNcf === '') {
+                return null;
+            }
+            $ambiente = $ambiente === null ? "\0" : strtolower(trim((string) $ambiente));
+            return $eNcf . '|' . $ambiente;
+        };
+        $texto = static fn($v): ?string => $v === null ? null : (string) $v;
+
+        usort($notas, static fn($a, $b) => (int) ($a['id'] ?? 0) <=> (int) ($b['id'] ?? 0));
+        $notasPorOriginal = [];
+        foreach ($notas as $n) {
+            if (!in_array((string) ($n['tipo_ecf'] ?? ''), self::TIPOS_NOTA, true)
+                || !in_array((string) ($n['estado_dgii'] ?? ''), self::ESTADOS_NOTA_VIGENTE, true)) {
+                continue;
+            }
+            $k = $clave($n['ncf_modificado'] ?? null, $n['ambiente_dgii'] ?? null);
+            if ($k === null) {
+                continue;
+            }
+            $notasPorOriginal[$k][] = [
+                'id' => (int) $n['id'],
+                'e_ncf' => (string) $n['e_ncf'],
+                'tipo_ecf' => (string) $n['tipo_ecf'],
+                'codigo_modificacion' => $texto($n['codigo_modificacion'] ?? null),
+                'total' => (string) $n['total'],
+                'estado_dgii' => (string) $n['estado_dgii'],
+                'date' => $texto($n['date'] ?? null),
+            ];
+        }
+
+        $originalPorClave = [];
+        foreach ($originales as $o) {
+            $k = $clave($o['e_ncf'] ?? null, $o['ambiente_dgii'] ?? null);
+            // El primero por id si hubiera repetidos (uk_e_ncf_amb no los
+            // impide con ambiente NULL).
+            if ($k !== null && (!isset($originalPorClave[$k]) || (int) $o['id'] < (int) $originalPorClave[$k]['id'])) {
+                $originalPorClave[$k] = $o;
+            }
+        }
+
+        foreach ($rows as &$row) {
+            $ambiente = $row['ambiente_dgii'] ?? null;
+            $k = $clave($row['e_ncf'] ?? null, $ambiente);
+            $row['notas'] = $k !== null ? ($notasPorOriginal[$k] ?? []) : [];
+
+            $row['modifica'] = null;
+            $ref = trim((string) ($row['ncf_modificado'] ?? ''));
+            if ($ref !== '' && in_array((string) ($row['tipo_ecf'] ?? ''), self::TIPOS_NOTA, true)) {
+                $o = $originalPorClave[$clave($ref, $ambiente)] ?? null;
+                $row['modifica'] = [
+                    'id' => $o !== null ? (int) $o['id'] : null,
+                    'e_ncf' => $ref,
+                    'tipo_ecf' => $o !== null ? $texto($o['tipo_ecf'] ?? null) : null,
+                    'total' => $o !== null ? $texto($o['total'] ?? null) : null,
+                    'date' => $o !== null ? $texto($o['date'] ?? null) : null,
+                ];
+            }
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /** "?, ?, ?" para un IN (...) de $n valores. */
+    private static function placeholders(int $n): string
+    {
+        return implode(', ', array_fill(0, $n, '?'));
+    }
+
+    /** ESTADOS_NOTA_VIGENTE como lista SQL: 'ACEPTADO', 'ACEPTADO_CONDICIONAL', ... */
+    private static function sqlEstadosNotaVigente(): string
+    {
+        return "'" . implode("', '", self::ESTADOS_NOTA_VIGENTE) . "'";
     }
 
     public function getFacturasCount($query = null, $estado = null, $tipoEcf = null)
@@ -1178,9 +1356,16 @@ class facturaModel
             $ambiente = $this->resolveActiveAmbiente();
             $ambFilter = $ambiente !== null ? "AND ambiente_dgii = '{$ambiente}'" : '';
 
+            // monto_neto: lo que de verdad se emitio. La nota de credito (E34)
+            // resta y los rechazados no cuentan (cubre RECHAZADO,
+            // RECHAZADO_ARCHIVADO y RFCE_RECHAZADO, como $notRechazado mas
+            // abajo). monto_total sigue siendo la suma cruda.
             $resumen = $this->conexion->query(
                 "SELECT COUNT(*) as total_ecf,
                         COALESCE(SUM(total), 0) as monto_total,
+                        COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%'
+                                          THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END
+                                          ELSE 0 END), 0) as monto_neto,
                         COUNT(DISTINCT tipo_ecf) as tipos_distintos,
                         MIN(fecha_emision_dgii) as primer_ecf,
                         MAX(fecha_emision_dgii) as ultimo_ecf
@@ -1427,6 +1612,7 @@ class facturaModel
     {
         // FechaEmision se lee del XML firmado: es la que tiene la DGII y la que
         // pide FechaNCFModificado. SUBSTRING/LOCATE evita traer el XML entero.
+        $estados = self::sqlEstadosNotaVigente();
         return "SELECT f.id, f.client_id, f.tipo_ecf, f.e_ncf, f.date, f.fecha_emision_dgii,
                        f.total, f.estado_dgii,
                        SUBSTRING(f.xml_firmado, LOCATE('<FechaEmision>', f.xml_firmado) + 14, 10) AS fecha_xml,
@@ -1442,7 +1628,7 @@ class facturaModel
                       -- Solo notas que la DGII tiene: aceptadas o en proceso. Una en ERROR o
                       -- NO_ENCONTRADO (o su intento archivado) no llego a valer, y contarla
                       -- bloquearia el reintento que el propio mensaje le pide al usuario.
-                      AND estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO')
+                      AND estado_dgii IN ({$estados})
                     GROUP BY ncf_modificado, ambiente_dgii
                 ) n ON n.ncf_modificado = f.e_ncf AND n.ambiente_dgii <=> f.ambiente_dgii";
     }
