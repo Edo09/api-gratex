@@ -119,12 +119,19 @@ Referencia completa de payloads: [../api/facturas.md](../api/facturas.md). Datos
 `/api/public/consultar_ecf_dgii.php?token=<CERT_RUN_TOKEN>&rnc=<emisor>&encf=…[&formato=json]`)
 consulta por e-NCF los servicios que la emisión normal no usa:
 
-- `ConsultaTrackIds` → trackId(s), estado, fechaRecepcion.
+- `ConsultaTrackIds` → trackId(s), estado, fechaRecepcion (solo la fecha, `dd/MM/yyyy`).
+- `ConsultaResultado` por cada trackId → estado, secuenciaUtilizada, fechaRecepcion con
+  hora (`M/d/yyyy h:mm:ss tt`) y mensajes (motivo de un rechazo).
 - `ConsultaEstado` → estado, montoTotal, totalITBIS, fechaEmision, fechaFirma,
-  rncComprador y **codigoSeguridad** (extraídos del e-CF recibido). Con eso el timbre/QR
-  de la Representación Impresa vuelve a ser válido; el script imprime la URL de
-  `ConsultaTimbre` ya armada para comprobarlo.
-- `ConsultaResultado` por cada trackId → secuenciaUtilizada y mensajes (motivo de un rechazo).
+  rncComprador y codigoSeguridad (extraídos del e-CF recibido), con los que el
+  timbre/QR volvería a ser válido. **En la práctica la DGII puede exigir el propio
+  código de seguridad para responder**: con el E340000000001 contestó HTTP 400 "Para
+  consultar el estado de esta factura, es necesario completar el campo Cod_Seguridad."
+  (2026-10-05). En ese caso el código, los montos y las fechas no se pueden obtener de
+  la DGII; el script lo informa como "no disponible", no como fallo.
+
+Lo verificado en producción (2026-10-05, Ferreventura, `ecf`): TrackIds y
+ConsultaResultado responden por e-NCF y trackId con el certificado del emisor.
 
 Ningún servicio devuelve items, NCFModificado, razón ni el XML: eso solo existe en el
 cliente que lo emitió (pestaña abierta, HAR) o en logs del hosting. Los dos primeros

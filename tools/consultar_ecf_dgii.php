@@ -97,13 +97,15 @@ function cecfNormalizarTrackIds($data): array
 }
 
 /**
- * Fechas de la DGII a 'Y-m-d H:i:s' (con hora) o 'Y-m-d'. Mezclan tres formatos:
- * el .NET en-US "M/d/yyyy h:mm:ss tt" (fechaRecepcion real: "5/27/2026 3:31:10 PM"),
- * el "dd-MM-yyyy HH:mm:ss" del XML (fechaFirma, fechaEmision) e ISO 8601. Con
- * barras manda el mes primero; con guiones, el dia primero: un dia <= 12 no
- * avisa si se adivina mal, por eso no se usa strtotime. Si se exige hora y el
- * valor no la trae, null: para fecha_emision_dgii un "00:00:00" inventado
- * rompe el QR (ConsultaTimbre compara FechaFirma al segundo).
+ * Fechas de la DGII a 'Y-m-d H:i:s' (con hora) o 'Y-m-d'. Mezclan formatos
+ * (visto en produccion el 2026-10-05): ConsultaResultado da el .NET en-US
+ * "M/d/yyyy h:mm:ss tt" ("10/5/2026 10:10:38 AM"), ConsultaTrackIds da es-DO
+ * "dd/MM/yyyy" sin hora ("05/10/2026"), el XML "dd-MM-yyyy HH:mm:ss"
+ * (fechaFirma, fechaEmision) y hay ISO 8601. Barra con AM/PM: mes primero;
+ * barra sin AM/PM: dia primero; guiones: dia primero. Un dia <= 12 no avisa si
+ * se adivina mal, por eso no se usa strtotime. Si se exige hora y el valor no
+ * la trae, null: para fecha_emision_dgii un "00:00:00" inventado rompe el QR
+ * (ConsultaTimbre compara FechaFirma al segundo).
  */
 function cecfNormalizarFecha(?string $valor, bool $conHora): ?string
 {
@@ -116,7 +118,9 @@ function cecfNormalizarFecha(?string $valor, bool $conHora): ?string
         $v = (string) preg_replace('/^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2})(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$/', '$1', $v);
         $formatos = ['Y-m-d\TH:i:s', 'Y-m-d H:i:s', 'Y-m-d'];
     } elseif (str_contains($v, '/')) {
-        $formatos = ['n/j/Y g:i:s A', 'n/j/Y H:i:s', 'n/j/Y g:i A', 'n/j/Y'];
+        $formatos = preg_match('/\s[AP]M$/i', $v)
+            ? ['n/j/Y g:i:s A', 'n/j/Y g:i A']
+            : ['j/n/Y H:i:s', 'j/n/Y H:i', 'j/n/Y'];
     } else {
         $formatos = ['d-m-Y H:i:s', 'd-m-Y H:i', 'd-m-Y'];
     }
@@ -235,7 +239,9 @@ function cecfResumen(string $encf, array $trackIds, ?array $estado, array $resul
         'rnc_comprador' => $texto($estado['rncComprador'] ?? null),
         'id_extranjero' => $texto($estado['idExtranjero'] ?? null),
         'secuencia_utilizada' => $secuencia,
-        'fecha_recepcion' => cecfNormalizarFecha($trackIds[0]['fechaRecepcion'] ?? ($primerResultado['fechaRecepcion'] ?? null), true),
+        // ConsultaResultado trae la hora; ConsultaTrackIds, solo la fecha.
+        'fecha_recepcion' => cecfNormalizarFecha($primerResultado['fechaRecepcion'] ?? null, true)
+            ?? cecfNormalizarFecha($trackIds[0]['fechaRecepcion'] ?? null, true),
         'mensajes' => $mensajes,
     ];
 }
@@ -281,6 +287,18 @@ function cecfUrlTimbre(array $r, string $rncEmisor, string $ambiente): ?string
         rawurlencode(DateTime::createFromFormat('Y-m-d H:i:s', $firma)->format('d-m-Y H:i:s')),
         rawurlencode($codigo)
     );
+}
+
+/**
+ * ConsultaEstado exige el codigo de seguridad para algunos e-CF ("condicionales
+ * a la vigencia del comprobante" en la Descripcion Tecnica). La respuesta real
+ * (2026-10-05, E340000000001) fue HTTP 400 "Para consultar el estado de esta
+ * factura, es necesario completar el campo Cod_Seguridad." No es una caida: sin
+ * ese codigo, montos, fechas y codigo no se pueden obtener de la DGII.
+ */
+function cecfEstadoExigeCodigo(string $mensaje): bool
+{
+    return stripos($mensaje, 'Cod_Seguridad') !== false;
 }
 
 function cecfAvisoAmbiente(string $ambiente): ?string
@@ -437,9 +455,15 @@ function cecfEjecutar(array $o): int
             $estado = (is_array($r['data']) && (isset($r['data']['ncfElectronico']) || isset($r['data']['codigo']))) ? $r['data'] : null;
             $info('ConsultaEstado', 'HTTP ' . $r['status_code'] . ($estado === null ? ', sin datos del e-CF' : ', ' . (string) ($estado['estado'] ?? '?')));
         } catch (Throwable $e) {
-            $fallos++;
             $crudo[$encf]['estado'] = ['error' => $e->getMessage()];
-            $info('ConsultaEstado', 'FALLO ' . $e->getMessage());
+            if ($codigoArg === '' && cecfEstadoExigeCodigo($e->getMessage())) {
+                // Regla de la DGII, no una caida: no cuenta como fallo.
+                $info('ConsultaEstado', 'no disponible: la DGII exige el codigo de seguridad para este e-CF'
+                    . ' (sin el, no da montos, fechas ni codigo)');
+            } else {
+                $fallos++;
+                $info('ConsultaEstado', 'FALLO ' . $e->getMessage());
+            }
         }
 
         $resultados = [];

@@ -59,13 +59,21 @@ $chk('trackIds: claves faltantes salen como null',
     && array_key_exists('fechaRecepcion', $incompleto[0]) && $incompleto[0]['fechaRecepcion'] === null, $incompleto);
 
 // ---------------------------------------------------------------------------
-// Fechas. DGII mezcla formatos: .NET en-US "M/d/yyyy h:mm:ss tt" (fechaRecepcion
-// real: 5/27/2026 3:31:10 PM), el "dd-MM-yyyy HH:mm:ss" del XML, e ISO 8601.
-// Regla: con barras manda el mes primero; con guiones, el dia primero.
+// Fechas. DGII mezcla formatos (visto en produccion el 2026-10-05, E34 de
+// Ferreventura): ConsultaResultado da .NET en-US "M/d/yyyy h:mm:ss tt"
+// ("10/5/2026 10:10:38 AM"), ConsultaTrackIds da es-DO "dd/MM/yyyy" sin hora
+// ("05/10/2026"), el XML "dd-MM-yyyy HH:mm:ss", y hay ISO 8601.
+// Regla: barra con AM/PM = mes primero; barra sin AM/PM = dia primero;
+// guiones = dia primero.
 // ---------------------------------------------------------------------------
 $casos = [
     ['5/27/2026 3:31:10 PM', true, '2026-05-27 15:31:10', 'US con AM/PM'],
-    ['12/1/2026 1:02:03 AM', true, '2026-12-01 01:02:03', 'US: barra = mes primero'],
+    ['12/1/2026 1:02:03 AM', true, '2026-12-01 01:02:03', 'US: barra con AM/PM = mes primero'],
+    ['10/5/2026 10:10:38 AM', true, '2026-10-05 10:10:38', 'ConsultaResultado real (E340000000001)'],
+    ['05/10/2026', false, '2026-10-05', 'ConsultaTrackIds real: dd/MM/yyyy, dia primero'],
+    ['05/10/2026', true, null, 'ConsultaTrackIds sin hora cuando se exige hora -> null'],
+    ['05/10/2026 14:03:30', true, '2026-10-05 14:03:30', 'barra con hora de 24 h: dia primero'],
+    ['5/27/2026', false, null, 'barra sin AM/PM y 27 como mes -> null, no un dia inventado'],
     ['27-05-2026 15:31:10', true, '2026-05-27 15:31:10', 'XML DGII d-m-Y H:i:s'],
     ['01-12-2026 09:05:00', true, '2026-12-01 09:05:00', 'guion = dia primero'],
     ['2026-05-27T15:31:10', true, '2026-05-27 15:31:10', 'ISO sin zona'],
@@ -73,7 +81,6 @@ $casos = [
     ['2026-05-27T15:31:10-04:00', true, '2026-05-27 15:31:10', 'ISO con zona (hora local tal cual)'],
     ['2026-05-27 15:31:10', true, '2026-05-27 15:31:10', 'Y-m-d H:i:s'],
     ['27-05-2026', false, '2026-05-27', 'solo fecha d-m-Y'],
-    ['5/27/2026', false, '2026-05-27', 'solo fecha M/d/Y'],
     ['2026-05-27', false, '2026-05-27', 'solo fecha ISO'],
     ['5/27/2026 3:31:10 PM', false, '2026-05-27', 'con hora pedida sin hora -> solo fecha'],
     ['27-05-2026', true, null, 'sin hora cuando se exige hora -> null'],
@@ -148,6 +155,26 @@ $chk('resumen: mensajes con texto se conservan', ($res2['mensajes'] ?? null) ===
 // Sin nada (DGII no encontro el e-NCF)
 $res3 = cecfResumen('E340000000009', [], null, []);
 $chk('resumen vacio: estado_dgii null y track_id null', $res3['estado_dgii'] === null && $res3['track_id'] === null, $res3);
+
+// Respuesta real del 2026-10-05 (E340000000001): TrackIds trae solo la fecha
+// (dd/MM/yyyy) y ConsultaResultado la fecha con hora (en-US). Gana la de hora.
+$res4 = cecfResumen('E340000000001',
+    cecfNormalizarTrackIds([['trackId' => '303fabde-0e83-4050-82f6-40091bc6ce1f', 'estado' => 'Aceptado', 'fechaRecepcion' => '05/10/2026']]),
+    null,
+    [['trackId' => '303fabde-0e83-4050-82f6-40091bc6ce1f', 'data' => [
+        'trackId' => '303fabde-0e83-4050-82f6-40091bc6ce1f', 'codigo' => '1', 'estado' => 'Aceptado',
+        'rnc' => '132615123', 'encf' => 'E340000000001', 'secuenciaUtilizada' => true,
+        'fechaRecepcion' => '10/5/2026 10:10:38 AM', 'mensajes' => [['valor' => '', 'codigo' => 0]],
+    ]]]);
+$chk('resumen real: fecha_recepcion con hora, de ConsultaResultado', ($res4['fecha_recepcion'] ?? null) === '2026-10-05 10:10:38', $res4);
+$chk('resumen real: ACEPTADO y secuencia utilizada', $res4['estado_dgii'] === 'ACEPTADO' && $res4['secuencia_utilizada'] === true, $res4);
+
+// ConsultaEstado sin codigo de seguridad: la DGII lo exige para algunos e-CF
+// (respuesta real del 2026-10-05). No es un fallo de la consulta.
+$chk('ConsultaEstado: el HTTP 400 que pide Cod_Seguridad se reconoce',
+    cecfEstadoExigeCodigo('DGII authenticated request failed: HTTP 400 - "Para consultar el estado de esta factura, es necesario completar el campo Cod_Seguridad."'));
+$chk('ConsultaEstado: un fallo de red no se confunde con eso',
+    !cecfEstadoExigeCodigo('HTTP request failed: Operation timed out after 30001 milliseconds'));
 
 // ---------------------------------------------------------------------------
 // URL de ConsultaTimbre: mismo armado que EcfDocumento::timbre()
