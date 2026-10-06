@@ -102,6 +102,9 @@ class EcfItemMapper
                 'precio_unitario' => $precio,
                 'precio_unitario_raw' => $raw['precio_unitario_raw'] ?? null,
                 'descuento_monto' => $descuento > 0 ? $descuento : null,
+                // Texto original: el set de pruebas DGII lo firma tal cual
+                // (ECFXmlBuilder::decimal); la emision normal usa el float.
+                'descuento_monto_raw' => $raw['descuento_monto_raw'] ?? $raw['descuento_monto'] ?? null,
                 'subdescuentos' => is_array($raw['subdescuentos'] ?? null) ? $raw['subdescuentos'] : [],
                 'recargo_monto' => $raw['recargo_monto'] ?? null,
                 'subrecargos' => is_array($raw['subrecargos'] ?? null) ? $raw['subrecargos'] : [],

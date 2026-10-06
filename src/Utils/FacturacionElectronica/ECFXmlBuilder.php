@@ -17,8 +17,15 @@ class ECFXmlBuilder
 {
     private const SCHEMA_VERSION = '1.0';
 
+    /** Patron XSD de Decimal18D1or2 (MontoItem, DescuentoMonto, montos del set). */
+    private const PATRON_DECIMAL_18_2 = '/^[0-9]{1,16}(\.[0-9]{1,2})?$/';
+
+    /** Set de pruebas DGII (strict_input): ver decimal(). Se fija en cada build(). */
+    private bool $strict = false;
+
     public function build(array $data): string
     {
+        $this->strict = !empty($data['strict_input']);
         $data = $this->normalizeE47Data($data);
         $data = $this->normalizeNotaReferenceData($data);
 
@@ -31,6 +38,13 @@ class ECFXmlBuilder
 
         $root->appendChild($this->buildEncabezado($document, $data));
         $root->appendChild($this->buildDetallesItems($document, $data['items'] ?? [], (string) ($data['tipo_ecf'] ?? '')));
+
+        // XSD: DetallesItems, Subtotales, DescuentosORecargos, Paginacion,
+        // InformacionReferencia. Subtotales y Paginacion no se emiten.
+        $descuentosORecargos = $this->buildDescuentosORecargos($document, $data['descuentos_o_recargos'] ?? [], (string) ($data['tipo_ecf'] ?? ''));
+        if ($descuentosORecargos !== null) {
+            $root->appendChild($descuentosORecargos);
+        }
 
         if (!empty($data['informacion_referencia'])) {
             $root->appendChild($this->buildInformacionReferencia($document, $data['informacion_referencia']));
@@ -478,12 +492,20 @@ class ECFXmlBuilder
                 $itemEl->appendChild($doc->createElement('FechaVencimientoItem', $this->formatDate($item['fecha_vencimiento_item'])));
             }
             $itemEl->appendChild($doc->createElement('PrecioUnitarioItem', $this->price($item['precio_unitario_raw'] ?? $item['precio_unitario'] ?? 0)));
-            $this->appendNumberIfSet($doc, $itemEl, 'DescuentoMonto', $item['descuento_monto'] ?? null);
+            // Montos por decimal(), no (string): EcfItemMapper deja el descuento en
+            // float (200.0) y salia "200"; la DGII compara el texto contra su set
+            // ("200.00") y el rechazo reinicia el set (CAGLIARI, E41/E34, 2026-10-06).
+            // El float del mapper decide SI hay descuento; en el set se firma su texto.
+            $descuento = $item['descuento_monto'] ?? null;
+            if ($descuento !== null && $this->strict && is_string($item['descuento_monto_raw'] ?? null)) {
+                $descuento = $item['descuento_monto_raw'];
+            }
+            $this->appendMoneyIfSet($doc, $itemEl, 'DescuentoMonto', $descuento);
             $this->appendSubDescuentos($doc, $itemEl, $item['subdescuentos'] ?? []);
-            $this->appendNumberIfSet($doc, $itemEl, 'RecargoMonto', $item['recargo_monto'] ?? null);
+            $this->appendMoneyIfSet($doc, $itemEl, 'RecargoMonto', $item['recargo_monto'] ?? null, true);
             $this->appendSubRecargos($doc, $itemEl, $item['subrecargos'] ?? []);
             $this->appendItemImpuestosAdicionales($doc, $itemEl, $item['impuestos_adicionales'] ?? []);
-            $itemEl->appendChild($doc->createElement('MontoItem', $this->money($item['monto_item_raw'] ?? $item['monto_item'] ?? 0)));
+            $itemEl->appendChild($doc->createElement('MontoItem', $this->decimal($item['monto_item_raw'] ?? $item['monto_item'] ?? 0)));
             $detalles->appendChild($itemEl);
         }
         return $detalles;
@@ -539,7 +561,7 @@ class ECFXmlBuilder
             $node = $doc->createElement('SubDescuento');
             $this->appendIfNotEmpty($doc, $node, 'TipoSubDescuento', $sub['tipo_sub_descuento'] ?? '');
             $this->appendNumberIfSet($doc, $node, 'SubDescuentoPorcentaje', $sub['sub_descuento_porcentaje'] ?? null);
-            $this->appendNumberIfSet($doc, $node, 'MontoSubDescuento', $sub['monto_sub_descuento'] ?? null);
+            $this->appendMoneyIfSet($doc, $node, 'MontoSubDescuento', $sub['monto_sub_descuento'] ?? null, true);
             if ($node->childNodes->length > 0) $tabla->appendChild($node);
         }
         if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
@@ -554,7 +576,7 @@ class ECFXmlBuilder
             $node = $doc->createElement('SubRecargo');
             $this->appendIfNotEmpty($doc, $node, 'TipoSubRecargo', $sub['tipo_sub_recargo'] ?? '');
             $this->appendNumberIfSet($doc, $node, 'SubRecargoPorcentaje', $sub['sub_recargo_porcentaje'] ?? null);
-            $this->appendNumberIfSet($doc, $node, 'MontoSubRecargo', $sub['monto_sub_recargo'] ?? null);
+            $this->appendMoneyIfSet($doc, $node, 'MontoSubRecargo', $sub['monto_sub_recargo'] ?? null, true);
             if ($node->childNodes->length > 0) $tabla->appendChild($node);
         }
         if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
@@ -588,6 +610,41 @@ class ECFXmlBuilder
             if ($node->childNodes->length > 0) $tabla->appendChild($node);
         }
         if ($tabla->childNodes->length > 0) $totales->appendChild($tabla);
+    }
+
+    /**
+     * DescuentosORecargos: descuentos o recargos GLOBALES del documento (no por
+     * linea). Solo llega en el set de pruebas (ECFEmissionService), cuyos
+     * totales ya los incluyen. E43 y E47 no tienen la seccion en su XSD.
+     */
+    private function buildDescuentosORecargos(DOMDocument $doc, $entradas, string $tipoEcf): ?DOMElement
+    {
+        if (!is_array($entradas) || $entradas === [] || in_array($tipoEcf, ['43', '47'], true)) {
+            return null;
+        }
+        $node = $doc->createElement('DescuentosORecargos');
+        foreach (array_slice($entradas, 0, 20) as $e) {
+            // NumeroLinea y TipoAjuste son obligatorios en el XSD.
+            if (!is_array($e) || trim((string) ($e['numero_linea'] ?? '')) === '' || trim((string) ($e['tipo_ajuste'] ?? '')) === '') {
+                continue;
+            }
+            $dr = $doc->createElement('DescuentoORecargo');
+            $this->appendIfNotEmpty($doc, $dr, 'NumeroLinea', $e['numero_linea']);
+            $this->appendIfNotEmpty($doc, $dr, 'TipoAjuste', $e['tipo_ajuste']);
+            // Solo los XSD de 31, 32, 33, 34 y 45 lo tienen; en 41/44/46 rompe el XSD.
+            if (in_array($tipoEcf, ['31', '32', '33', '34', '45'], true)) {
+                $this->appendIfNotEmpty($doc, $dr, 'IndicadorNorma1007', $e['indicador_norma_1007'] ?? '');
+            }
+            // AlfNum45Type.
+            $this->appendIfNotEmpty($doc, $dr, 'DescripcionDescuentooRecargo', mb_substr(trim((string) ($e['descripcion'] ?? '')), 0, 45));
+            $this->appendIfNotEmpty($doc, $dr, 'TipoValor', $e['tipo_valor'] ?? '');
+            $this->appendNumberIfSet($doc, $dr, 'ValorDescuentooRecargo', $e['valor'] ?? null);
+            $this->appendMoneyIfSet($doc, $dr, 'MontoDescuentooRecargo', $e['monto'] ?? null);
+            $this->appendMoneyIfSet($doc, $dr, 'MontoDescuentooRecargoOtraMoneda', $e['monto_otra_moneda'] ?? null);
+            $this->appendIfNotEmpty($doc, $dr, 'IndicadorFacturacionDescuentooRecargo', $e['indicador_facturacion'] ?? '');
+            $node->appendChild($dr);
+        }
+        return $node->childNodes->length > 0 ? $node : null;
     }
 
     private function buildInformacionReferencia(DOMDocument $doc, array $ref): DOMElement
@@ -640,12 +697,12 @@ class ECFXmlBuilder
         $parent->appendChild($this->el($doc, $name, $value));
     }
 
-    private function appendMoneyIfSet(DOMDocument $doc, DOMElement $parent, string $name, $value): void
+    private function appendMoneyIfSet(DOMDocument $doc, DOMElement $parent, string $name, $value, bool $rechazarTexto = false): void
     {
         if ($value === null || $value === '') {
             return;
         }
-        $parent->appendChild($doc->createElement($name, $this->money($value)));
+        $parent->appendChild($doc->createElement($name, $this->decimal($value, $rechazarTexto)));
     }
 
     private function appendNumberIfSet(DOMDocument $doc, DOMElement $parent, string $name, $value): void
@@ -715,6 +772,36 @@ class ECFXmlBuilder
     private function money($value): string
     {
         return number_format((float) ($value ?? 0), 2, '.', '');
+    }
+
+    /**
+     * Monto Decimal18D1or2. Emision normal: money(), siempre 2 decimales. Set de
+     * pruebas (strict_input): el TEXTO del xlsx tal cual si cumple el patron del
+     * XSD, porque la DGII compara el texto contra su conjunto de datos: "200" no
+     * es "200.00", y "3752.00" no es "3752" (E310000000004 del set de CAGLIARI
+     * trae MontoItem '3752'). Los valores calculados llegan como float y pasan
+     * por money() tambien en el set.
+     */
+    private function decimal($value, bool $rechazarTexto = false): string
+    {
+        if (is_string($value)) {
+            $text = trim($value);
+            if ($this->strict && preg_match(self::PATRON_DECIMAL_18_2, $text)) {
+                return $text;
+            }
+            // money() convertiria "1,000.00" en 1.00 y firmaria un monto fiscal
+            // equivocado sin avisar. Solo donde el texto antes pasaba crudo
+            // (RecargoMonto y las subtablas: el XSD ya lo rechazaba): en los demas
+            // campos money() es lo de siempre y fallar ahora frenaria emisiones
+            // que hoy salen.
+            if ($rechazarTexto && $text !== '' && !is_numeric($text)) {
+                throw new EcfUsuarioException(
+                    'Monto invalido en el e-CF: ' . $value,
+                    'Alguno de los montos del comprobante no es un número válido (usa punto decimal y sin separador de miles). Revísalo e inténtalo de nuevo.'
+                );
+            }
+        }
+        return $this->money($value);
     }
 
     private function price($value): string

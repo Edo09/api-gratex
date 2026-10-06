@@ -90,6 +90,68 @@ function faltanCreds() {
   return !c['X-API-KEY'] || !c['X-API-SECRET'];
 }
 
+// La salida del runner es lo unico que queda de una corrida: cert_run.php borra
+// su reporte al terminar y cada paso redibuja el contenido. Se guarda en
+// localStorage (sobrevive a recargar la pagina). No lleva credenciales: el
+// runner no imprime el api_secret ni el CERT_RUN_TOKEN.
+const SALIDA_KEY = 'gratex_integracion_ultima_corrida';
+let salida = null;
+let corriendo = false;
+try { salida = JSON.parse(localStorage.getItem(SALIDA_KEY) || 'null'); } catch (e) { salida = null; }
+
+function guardarSalida() {
+  try { localStorage.setItem(SALIDA_KEY, JSON.stringify(salida)); } catch (e) { /* sin storage: queda en memoria */ }
+}
+
+/** Relee la corrida guardada: otra pestaña puede estar escribiendola. */
+function releerSalida() {
+  if (corriendo) return;
+  try {
+    const guardada = JSON.parse(localStorage.getItem(SALIDA_KEY) || 'null');
+    if (guardada) salida = guardada;
+  } catch (e) { /* sin storage: queda la de memoria */ }
+}
+window.addEventListener('storage', ev => {
+  if (ev.key === SALIDA_KEY) { releerSalida(); pintarSalida(); }
+});
+
+function pintarSalida() {
+  releerSalida();
+  const out = $('outRunner');
+  if (!out || !salida) return;
+  out.textContent = salida.texto;
+  out.style.display = 'block';
+  out.scrollTop = out.scrollHeight;
+  // terminado=false fuera de una corrida de ESTA pestaña: o sigue en curso (otra
+  // pestaña la esta recibiendo: llegaron datos hace poco) o se corto (red,
+  // recarga). cert_run.php sigue corriendo en el server aunque el navegador se
+  // vaya (ignore_user_abort): la salida esta incompleta y el runner puede seguir
+  // mandando comprobantes y notas.
+  const abierta = salida.terminado === false && !corriendo;
+  const reciente = abierta && Date.now() - (salida.actualizado || 0) < 180000;
+  const sigue = ' El server pudo seguir corriéndola (y mandando las notas): revisa el estado en el paso 3' +
+    ' antes de volver a lanzarla.';
+  let aviso = '';
+  if (abierta && salida.cortada) {
+    aviso = ' — INCOMPLETA: se cortó la conexión antes del final (' + salida.cortada + ').' + sigue;
+  } else if (reciente) {
+    aviso = ' — EN CURSO (en otra pestaña o sigue en el server): espera a que termine antes de volver a correr.';
+  } else if (abierta) {
+    aviso = ' — INCOMPLETA: se cortó la conexión o se recargó la página antes del final.' + sigue;
+  }
+  $('runnerInfo').textContent = 'Última corrida: fase ' + salida.fase + (salida.dry ? ' (dry-run)' : '') +
+    ', ' + new Date(salida.cuando).toLocaleString() + aviso;
+  $('runnerInfo').style.color = abierta ? 'var(--warn)' : '';
+  $('runnerBar').style.display = 'block';
+}
+
+/** e-NCF (E + tipo + 10 digitos) en orden de aparicion, sin repetir. */
+function encfsDe(texto) {
+  const vistos = new Set();
+  (texto.match(/E(?:3[1-4]|4[1-7])\d{10}/g) || []).forEach(e => vistos.add(e));
+  return [...vistos];
+}
+
 async function call(method, path, body) {
   if (faltanCreds()) throw new Error('Pon X-API-KEY y X-API-SECRET arriba.');
   const opts = { method, headers: { ...creds(), 'Accept': 'application/json' } };
@@ -200,6 +262,17 @@ const PASOS = [
       </div>
       <button class="act" id="btnEstado">Consultar</button>
       <div id="outEstado" style="display:none;margin-top:12px"></div>
+    </div>
+    <div class="panel">
+      <h3 style="margin:0;font-size:15px">Consultar varios</h3>
+      <p class="muted">Un e-NCF por línea (o separados por coma). Cada uno se busca en el respaldo del master,
+      así que no hace falta el <code>track_id</code>. Sale el estado en DGII y sus mensajes: ahí está el motivo
+      exacto de cada rechazo. Los RFCE (E32 &lt;250k) no tienen <code>track_id</code>: esos se consultan
+      arriba con su código de seguridad.</p>
+      <textarea id="stLista" placeholder="E310000000034&#10;E340000000002"></textarea>
+      <button class="act" id="btnEstadoLista">Consultar todos</button>
+      <button class="act ghost" id="btnTomarCorrida">Tomar los e-NCF de la última corrida</button>
+      <div id="outEstadoLista" style="display:none;margin-top:12px"></div>
     </div>` },
 
   { n:4, t:'Bandejas de entrada', tag:'GET /recibidos · /aprobaciones', body: () => `
@@ -241,6 +314,17 @@ const PASOS = [
       <p class="muted">Lee el xlsx de DGII y emite cada caso. El e-NCF sale del propio xlsx.</p>
       <label>Archivo xlsx del set</label><input type="file" id="f2xlsx" accept=".xlsx,.xlsm">
       <label>Filtrar tipos (opcional, ej. E31,E32)</label><input type="text" id="f2filter">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--txt)">
+        <input type="checkbox" id="f2esperar" checked style="width:auto">
+        Esperar a que la DGII acepte lo enviado antes de mandar las notas (E33/E34)</label>
+      <div class="row">
+        <div><label>Esperar hasta (segundos)</label><input type="number" id="f2espera" value="300" min="30" step="30"></div>
+        <div></div>
+      </div>
+      <p class="muted"><b>Cualquier</b> rechazo de la DGII reinicia el set, y una nota que sale después cae
+      con <i>"El eNCF modificado no ha sido emitido"</i>. Con esto el runner consulta en la DGII todo lo
+      enviado antes de las notas: si algo salió rechazado, <b>no manda las notas</b> y muestra el motivo de
+      cada rechazo. Si se agota el tiempo con algo aún en proceso, las manda igual con un aviso.</p>
       <button class="act" data-fase="2" data-dry="1">Dry-run</button>
       <button class="act" data-fase="2">Correr fase 2</button>
     </div>
@@ -277,6 +361,10 @@ const PASOS = [
       <button class="act" data-fase="4">Correr fase 4</button>
     </div>
 
+    <div id="runnerBar" class="muted" style="display:none;margin-top:16px">
+      <span id="runnerInfo"></span>
+      <button class="act ghost" id="btnBajarSalida" style="margin:0 0 0 10px;padding:5px 11px">Descargar salida</button>
+    </div>
     <pre id="outRunner" style="display:none"></pre>
     <p class="muted">Ojo: si DGII rechaza <b>cualquier</b> comprobante, reinicia el set completo.
     Y las secuencias que consuma el runner son secuencias reales del cliente.</p>` },
@@ -376,6 +464,75 @@ function wire(n) {
       catch (err) { $('outEstado').style.display = 'block'; $('outEstado').textContent = err.message; }
       finally { e.target.disabled = false; }
     };
+
+    $('btnTomarCorrida').onclick = () => {
+      releerSalida();
+      const lista = salida ? encfsDe(salida.texto) : [];
+      $('stLista').value = lista.length ? lista.join('\n') : '';
+      if (!lista.length) $('stLista').placeholder = 'No hay una corrida guardada en este navegador.';
+    };
+
+    $('btnEstadoLista').onclick = async (e) => {
+      const out = $('outEstadoLista');
+      const lista = encfsDe($('stLista').value.toUpperCase());
+      out.style.display = 'block';
+      if (!lista.length) { out.textContent = 'Pon al menos un e-NCF (ej. E310000000034).'; return; }
+      if (faltanCreds()) { out.textContent = 'Pon X-API-KEY y X-API-SECRET arriba.'; return; }
+      e.target.disabled = true;
+      out.innerHTML = '';
+      const resumen = document.createElement('div');
+      out.appendChild(resumen);
+      const tabla = document.createElement('table');
+      // "Enviado" = el ultimo envio de ese e-NCF (el respaldo que se consulto): si
+      // es de una corrida vieja, el estado tambien lo es.
+      tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Enviado</th><th>Estado DGII</th><th>Mensajes</th></tr></thead>';
+      const cuerpo = document.createElement('tbody');
+      tabla.appendChild(cuerpo);
+      out.appendChild(tabla);
+      const cuenta = { ok: 0, err: 0, warn: 0 };
+      for (let i = 0; i < lista.length; i++) {
+        resumen.textContent = 'Consultando ' + (i + 1) + ' de ' + lista.length + '...';
+        const fila = document.createElement('tr');
+        const celda = t => { const td = document.createElement('td'); td.textContent = t; fila.appendChild(td); return td; };
+        celda(lista[i]);
+        const tdEnviado = celda('');
+        let estado = '', clase = 'warn', mensajes = '';
+        try {
+          const r = await call('GET', '/integracion/estado?' + new URLSearchParams({ e_ncf: lista[i] }));
+          const j = r.json || {};
+          if (r.status === 200 && j.status === true) {
+            tdEnviado.textContent = j.fecha_emision || '';
+            estado = j.estado || (j.consulta && j.consulta.estado) || '?';
+            // Un aceptado trae mensajes:[{"valor":"","codigo":0}]: sin texto no se muestra.
+            const ms = (j.consulta && Array.isArray(j.consulta.mensajes)) ? j.consulta.mensajes : [];
+            mensajes = ms.map(m => {
+              const valor = (m && typeof m === 'object') ? String(m.valor || '').trim() : String(m || '').trim();
+              if (!valor) return '';
+              return valor + (m && typeof m === 'object' && m.codigo !== undefined ? ' (' + m.codigo + ')' : '');
+            }).filter(Boolean).join(' | ');
+            clase = /RECHAZADO/i.test(estado) ? 'err' : (/ACEPTADO/i.test(estado) ? 'ok' : 'warn');
+          } else {
+            estado = 'HTTP ' + r.status;
+            mensajes = (j && j.error) || r.txt.slice(0, 300);
+          }
+        } catch (err) {
+          estado = 'ERROR';
+          mensajes = err.message;
+        }
+        cuenta[clase]++;
+        const tdEstado = celda('');
+        const pill = document.createElement('span');
+        pill.className = 'pill ' + clase;
+        pill.style.marginLeft = '0';
+        pill.textContent = estado;
+        tdEstado.appendChild(pill);
+        celda(mensajes);
+        cuerpo.appendChild(fila);
+      }
+      resumen.textContent = lista.length + ' consultados: ' + cuenta.ok + ' aceptados, ' + cuenta.err +
+        ' rechazados, ' + cuenta.warn + ' en proceso / sin respuesta.';
+      e.target.disabled = false;
+    };
   }
 
   if (n === 4) {
@@ -419,7 +576,17 @@ function wire(n) {
 
     document.querySelectorAll('button[data-fase]').forEach(btn => {
       btn.onclick = async () => correrFase(btn);
+      btn.disabled = corriendo;
     });
+
+    $('btnBajarSalida').onclick = () => {
+      if (!salida) return;
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([salida.texto], { type: 'text/plain' }));
+      a.download = 'fase' + salida.fase + '_' + salida.cuando.replace(/[:.]/g, '-') + '.txt';
+      a.click();
+    };
+    pintarSalida();
   }
 
   if (n === 7) {
@@ -485,6 +652,12 @@ async function correrFase(btn) {
     fd.append('xlsx', input.files[0]);
     if (fase === '2' && $('f2filter').value.trim()) fd.append('filter', $('f2filter').value.trim());
   }
+  if (fase === '2') {
+    // 0 = mandar las notas sin esperar (el comportamiento de antes). Nada valida
+    // el min="30" del input: se acota aqui (un negativo apagaba la espera).
+    const espera = Math.min(1800, Math.max(30, Math.round(Number($('f2espera').value)) || 300));
+    fd.append('nota-wait-accepted', $('f2esperar').checked ? String(espera) : '0');
+  }
   if (fase === '4') {
     fd.append('encf_start', $('f4encf').value.trim());
     fd.append('emisor_rnc', $('f4rnc').value.trim());
@@ -494,10 +667,22 @@ async function correrFase(btn) {
     if ($('f4counts').value.trim()) fd.append('counts', $('f4counts').value.trim());
   }
 
-  const botones = document.querySelectorAll('button[data-fase]');
-  botones.forEach(b => b.disabled = true);
-  out.style.display = 'block';
-  out.textContent = 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') + '...\n\n';
+  corriendo = true;
+  document.querySelectorAll('button[data-fase]').forEach(b => b.disabled = true);
+  salida = { fase, dry: !!btn.dataset.dry, cuando: new Date().toISOString(), terminado: false,
+             actualizado: Date.now(),
+             texto: 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') + '...\n\n' };
+  guardarSalida();
+  pintarSalida();
+  // Se escribe en `salida` (no solo en el <pre>): si el usuario cambia de paso
+  // mientras corre, el <pre> se redibuja y la corrida sigue llegando aqui.
+  const anexar = t => {
+    salida.texto += t;
+    salida.actualizado = Date.now();
+    guardarSalida();
+    const o = $('outRunner');
+    if (o) { o.textContent = salida.texto; o.scrollTop = o.scrollHeight; }
+  };
   try {
     const res = await fetch('cert_run.php', { method: 'POST', body: fd });
     const reader = res.body.getReader();
@@ -505,13 +690,19 @@ async function correrFase(btn) {
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
-      out.textContent += dec.decode(value, { stream: true });
-      out.scrollTop = out.scrollHeight;
+      anexar(dec.decode(value, { stream: true }));
     }
+    // Solo un stream que llego al final cuenta como terminado; un corte de red
+    // deja terminado=false y la barra avisa que el server pudo seguir.
+    salida.terminado = true;
   } catch (e) {
-    out.textContent += '\nError de red: ' + e.message + '\n';
+    salida.cortada = e.message || 'error de red';
+    anexar('\nError de red: ' + e.message + '\n');
   } finally {
-    botones.forEach(b => b.disabled = false);
+    corriendo = false;
+    guardarSalida();
+    pintarSalida();
+    document.querySelectorAll('button[data-fase]').forEach(b => b.disabled = false);
   }
 }
 

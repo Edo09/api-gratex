@@ -166,6 +166,27 @@ DGII valida que el nombre sea `{RNCEmisor}{eNCF}.xml` (ej. `131256432E3100000000
 Nombres genéricos (`ecf.xml`) → rechazo código 3243. Lo construye
 `DgiiReceptionService::buildDgiiFilename()`.
 
+### Set de pruebas — la DGII compara el texto, no el número
+
+Rechazo: *"La propiedad DescuentoMonto no es válida debido a que el valor enviado (200) no
+coincide con el valor (200.00) del conjunto de datos entregados"*. El XSD acepta `200`, pero
+la DGII compara el **texto** contra su set. `EcfItemMapper` deja el descuento en float y el
+builder lo escribía con `(string)`. El set no siempre trae 2 decimales: E310000000004 de
+CAGLIARI tiene `MontoItem` `'3752'` entre otros `'11000.00'`. Regla de
+`ECFXmlBuilder::decimal()`: en el set (`strict_input`) los montos que llegan como texto del
+xlsx se firman tal cual si cumplen el patrón del XSD; en la emisión normal, `money()` (2
+decimales). Cubre `MontoItem`, `DescuentoMonto`, `RecargoMonto`, las subtablas y todo lo que
+pasa por `appendMoneyIfSet`. Pruebas: `php tools/test_ecf_montos_descuento.php`.
+
+### Set de pruebas — notas antes de que su original termine
+
+**Cualquier** rechazo reinicia el set: los originales ya aceptados dejan de contar, aunque
+ConsultaResultado los siga mostrando ACEPTADO. Una nota enviada después cae con *"El eNCF
+modificado no ha sido emitido"* (614): así cayeron las tres notas de CAGLIARI tras el rechazo
+de E410000000010. `tools/send_fase2.php` consulta todo lo enviado antes de las notas y no las
+manda si la DGII rechazó algo (`--nota-wait-accepted`; si se agota el tiempo, salen con
+aviso). Prueba: `php tools/test_send_fase2_espera.php`.
+
 ### El cert `.p12` debe ser AES-256/PBKDF2
 
 OpenSSL 3.x no carga `.p12` cifrados con 3DES/RC2 (legacy). Re-cifrar:

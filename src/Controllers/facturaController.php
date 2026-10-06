@@ -356,6 +356,9 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'rfce_comprador_override' => is_array($input['rfce_comprador'] ?? null) ? $input['rfce_comprador'] : null,
         'comprador' => $comprador,
         'items' => mapItemsForXml($items, $strictInput),
+        // Solo el set de pruebas (ECFEmissionService lo ignora fuera de strict).
+        'descuentos_o_recargos' => $strictInput && is_array($input['descuentos_o_recargos'] ?? null)
+            ? $input['descuentos_o_recargos'] : [],
         'totales' => $totales,
         'informacion_referencia' => $infoReferencia,
     ];

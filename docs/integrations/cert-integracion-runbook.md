@@ -112,7 +112,9 @@ curl "https://gratex.net/api/integracion/estado?e_ncf=<e_ncf>&track_id=<track_id
 
 ## Fase 5 — Set de pruebas
 
-El e-NCF de cada caso sale del xlsx de DGII.
+El e-NCF de cada caso sale del xlsx de DGII. Lo normal es correrlo desde la consola
+`public/integracion.html` (paso 6, "Correr fase 2"), que sube el xlsx a `cert_run.php` y corre
+este mismo runner en el server. Por consola:
 
 ```powershell
 php tools/send_fase2.php <set.xlsx> --api=https://gratex.net/api `
@@ -132,6 +134,22 @@ php tools/check_fase2_status.php --api=https://gratex.net/api `
   portal.
 - Si DGII rechaza **cualquier** comprobante, reinicia el set completo: hay que pasarlo
   limpio en una corrida.
+- **Notas (E33/E34):** el runner las manda al final y, antes de la primera, consulta en la
+  DGII todo lo que envió (`--nota-wait-accepted`, default 300 s; en la consola, la casilla
+  "Esperar a que la DGII acepte…"). Si la DGII rechazó algo, **no manda las notas** y muestra
+  el motivo de cada rechazo: el rechazo ya reinició el set y una nota enviada después cae con
+  *"El eNCF modificado no ha sido emitido"* (614). Si se agota el tiempo con algo aún en
+  proceso, las manda igual con un aviso (Gratex pasó su fase 2 sin esperar). En una corrida
+  parcial (filtro E33,E34, o `--case`) consulta también el último envío del resto del set por
+  e-NCF: tras un reinicio los originales siguen diciendo ACEPTADO, y solo el rechazo de otra
+  pieza lo delata.
+- Para ver por qué la DGII rechazó cada comprobante: consola, paso 3 → "Consultar varios"
+  (o un e-NCF a la vez). Busca el `track_id` en `master.ecf_integracion_backup` y devuelve los
+  `mensajes` de ConsultaResultado. `cert_run.php` borra el reporte de la corrida al terminar;
+  la consola conserva la salida en el navegador y la deja descargar.
+- Después de un reinicio se reenvía el **mismo xlsx**: los e-NCF rechazados vuelven con
+  `secuenciaUtilizada: false`, y el respaldo del master no tiene unique por e-NCF (la consulta
+  sin `track_id` toma el envío más reciente).
 
 ---
 
@@ -222,6 +240,8 @@ repite e-NCF y DGII los rechaza.
 | `Unable to read certificate ... unsupported` | `.p12` legacy (Fase 1 saltada) | Convertirlo y reemplazarlo en el server |
 | `Unable to read certificate ... mac verify failure` | Contraseña incorrecta o `cert_pass_encrypted` NULL | Re-cifrar con `public/encrypt_credential.php` |
 | `El formato del XML no es válido` | Un campo incumple el XSD y DGII no dice cuál | Validar los comprobantes contra los XSD oficiales: `php tools/validar_xml_dgii.php --tenant-id=<id>`, o el paso 7 de `public/integracion.html`. Dice el elemento y la regla exacta |
+| `El eNCF modificado no ha sido emitido` (614) en una nota | La nota llegó antes de que la DGII terminara su original, o después de un rechazo que reinició el set | No mandar notas a ciegas: dejar activa la espera (`--nota-wait-accepted`). Consultar qué se rechazó (paso 3), corregirlo y correr el set completo |
+| `La propiedad X no es válida debido a que el valor enviado (200) no coincide con el valor (200.00)` | La DGII compara el texto contra su set. Pasó con `DescuentoMonto` (corregido: en el set los montos se firman con el texto exacto del xlsx, también enteros como `3752`) | Comparar el XML contra el set antes de reenviar: un solo rechazo reinicia todo |
 | `La firma del XML no es válida` (y la firma sí es válida) | Retornos de carro (`\r`) en textos del payload | El backend normaliza y bloquea, pero conviene normalizar en el origen |
 | `404` en `/integracion/estado` | No hay respaldo de ese e-NCF, o es un RFCE sin `track_id` | Mandar `track_id`, o `codigo_seguridad` si es E32 <250k |
 | `NO_ENCONTRADO` al consultar estado | `track_id` de otro ambiente, o el envío nunca llegó | Confirmar el ambiente del tenant y reintentar la emisión |

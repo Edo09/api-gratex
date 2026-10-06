@@ -314,6 +314,12 @@ class ECFEmissionService
             'emisor' => $emisorMerged,
             'comprador' => $payload['comprador'] ?? [],
             'items' => $payload['items'] ?? [],
+            // Descuentos/recargos globales del documento: solo en el set de
+            // pruebas, cuyos totales ya los incluyen. La emision normal calcula
+            // los totales de las lineas (EcfItemMapper::totales) y no los
+            // restaria: la DGII rechazaria los montos gravados.
+            'descuentos_o_recargos' => $strictInput && is_array($payload['descuentos_o_recargos'] ?? null)
+                ? $payload['descuentos_o_recargos'] : [],
             'totales' => $payload['totales'] ?? [],
             'informacion_referencia' => $payload['informacion_referencia'] ?? null,
             'fecha_hora_firma' => $payload['fecha_hora_firma'] ?? date('d-m-Y H:i:s'),
