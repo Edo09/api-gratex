@@ -636,6 +636,47 @@ wa_chk('existeFactura: SELECT 1 por id; con fila -> true',
 wa_chk('existeFactura: sin fila -> false', puro_modelo(new GuionConexion())->existeFactura(999999) === false);
 
 // ---------------------------------------------------------------------------
+// 7) Guard de CR publico y estatico; dispenseNextECF lanza (Task 10)
+// ECFEmissionService corre el guard antes de reservar la fila: un CR tiene que
+// fallar con el numero todavia devolvible, no dentro de recibir().
+// ---------------------------------------------------------------------------
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/DgiiReceptionService.php';
+
+echo "\n== 7) Guard de retornos de carro y dispenseNextECF ==\n";
+$guardCr = new ReflectionMethod(DgiiReceptionService::class, 'assertSinCarriageReturn');
+$guardEstatico = $guardCr->isPublic() && $guardCr->isStatic();
+wa_chk('7: assertSinCarriageReturn es public static', $guardEstatico,
+    ['public' => $guardCr->isPublic(), 'static' => $guardCr->isStatic()]);
+// null = no se puede llamar asi (sigue privado); true = lanzo; false = lo dejo pasar.
+$lanzaCr = static function (string $xml) use ($guardEstatico): ?bool {
+    if (!$guardEstatico) {
+        return null;
+    }
+    try {
+        DgiiReceptionService::assertSinCarriageReturn($xml);
+        return false;
+    } catch (RuntimeException $e) {
+        return str_contains($e->getMessage(), 'retornos de carro');
+    }
+};
+wa_chk('7: lanza con un \r literal', $lanzaCr("<a>\r</a>") === true);
+wa_chk('7: lanza con &#13;', $lanzaCr('<a>&#13;</a>') === true);
+wa_chk('7: lanza con &#xD; (sin importar mayusculas)', $lanzaCr('<a>&#xD;</a>') === true);
+wa_chk('7: deja pasar un \n', $lanzaCr("<a>\n</a>") === false);
+$fuenteRecepcion = (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/DgiiReceptionService.php');
+wa_chk('7: recibir, recibirResumen y enviarAprobacionComercial lo siguen llamando (3 llamadas)',
+    substr_count($fuenteRecepcion, '$this->assertSinCarriageReturn(') === 3,
+    substr_count($fuenteRecepcion, '$this->assertSinCarriageReturn('));
+// El caso con la tabla renombrada corre en tools/test_reservar_confirmar.php
+// (necesita MySQL); aqui solo el texto, para tener senal sin base.
+$fuenteNcf = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Models/ncfModel.php'));
+$cuerpoDispense = preg_match('/function dispenseNextECF\(.*?\n    \}\n/s', $fuenteNcf, $mDispense) ? $mDispense[0] : '';
+wa_chk('7: dispenseNextECF convierte la PDOException en RuntimeException',
+    str_contains($cuerpoDispense, "throw new RuntimeException('ncf_sequences inaccesible: ' . \$e->getMessage(), 0, \$e);"));
+wa_chk('7: dispenseNextECF ya no devuelve null en el catch',
+    !preg_match('/catch \(PDOException \$e\) \{\s*return null;/', $cuerpoDispense));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

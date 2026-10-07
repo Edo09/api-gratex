@@ -436,6 +436,65 @@ wa_chk('existeFactura: true para la reserva y false para 999999',
     $modelo->existeFactura($reserva['factura_id']) === true && $modelo->existeFactura(999999) === false);
 
 // ---------------------------------------------------------------------------
+// dispenseNextECF lanza si ncf_sequences falla; rollbackECFSequence deja rastro
+// (Task 10). Se renombra la tabla en la base de prueba y se devuelve a su
+// nombre en finally.
+// ---------------------------------------------------------------------------
+require_once __DIR__ . '/../src/Models/ncfModel.php';
+
+echo "\n== ncf_sequences inaccesible ==\n";
+// Otra vez la base de prueba principal: un caso anterior pudo dejar Database
+// apuntando a la copia (--copia-db).
+$conNcf = wa_usar_base((string) wa_arg('tenant-db'));
+$hayTabla = static function (PDO $c, string $tabla): bool {
+    $st = $c->prepare('SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = :t');
+    $st->execute([':t' => $tabla]);
+    return (int) $st->fetchColumn() > 0;
+};
+// Una corrida anterior cortada a mitad pudo dejar la tabla renombrada.
+if (!$hayTabla($conNcf, 'ncf_sequences') && $hayTabla($conNcf, 'ncf_sequences_wa_off')) {
+    $conNcf->exec('RENAME TABLE ncf_sequences_wa_off TO ncf_sequences');
+}
+$ncfPrueba = new ncfModel();
+$logNcf = (string) tempnam(sys_get_temp_dir(), 'wa_ncf_');
+$logPrevio = ini_get('error_log');
+$conNcf->exec('RENAME TABLE ncf_sequences TO ncf_sequences_wa_off');
+try {
+    $lanzada = null;
+    try {
+        $ncfPrueba->dispenseNextECF('E31', 'certecf');
+    } catch (Throwable $e) {
+        $lanzada = $e;
+    }
+    // Detalle de fallo sin el mensaje completo: el de una PDOException trae usuario y host.
+    wa_chk('dispense con ncf_sequences renombrada: RuntimeException, no null',
+        $lanzada instanceof RuntimeException, $lanzada ? get_class($lanzada) : 'no lanzo');
+    wa_chk("dispense: el mensaje empieza con 'ncf_sequences inaccesible: '",
+        $lanzada !== null && str_starts_with($lanzada->getMessage(), 'ncf_sequences inaccesible: '),
+        $lanzada !== null ? substr($lanzada->getMessage(), 0, 30) : 'no lanzo');
+    wa_chk('dispense: la PDOException queda como getPrevious()', $lanzada?->getPrevious() instanceof PDOException,
+        $lanzada !== null ? rc_desc($lanzada->getPrevious()) : 'no lanzo');
+
+    ini_set('error_log', $logNcf);
+    $devuelto = $ncfPrueba->rollbackECFSequence('E31', 1, 'certecf', null);
+    ini_set('error_log', $logPrevio === false ? '' : $logPrevio);
+    $lineasNcf = (string) file_get_contents($logNcf);
+    wa_chk('rollback con ncf_sequences renombrada: false', $devuelto === false);
+    wa_chk("rollback: el error_log dice '[ECF] rollbackECFSequence fallo: '",
+        str_contains($lineasNcf, '[ECF] rollbackECFSequence fallo: '), substr($lineasNcf, 0, 40));
+} finally {
+    ini_set('error_log', $logPrevio === false ? '' : $logPrevio);
+    $conNcf->exec('RENAME TABLE ncf_sequences_wa_off TO ncf_sequences');
+    @unlink($logNcf);
+}
+wa_chk('ncf_sequences volvio a su nombre', $hayTabla($conNcf, 'ncf_sequences') && !$hayTabla($conNcf, 'ncf_sequences_wa_off'));
+// Un ambiente sin ninguna fila en ncf_sequences: db/tenant_schema.sql:311-350
+// siembra E31-E47 en certecf, ecf y testecf (E45 en :325, :336 y :347) con numero_hasta y
+// fecha_vencimiento NULL (sin limite), asi que ningun tipo de esos tres
+// ambientes sirve para probar "no hay rango".
+wa_chk('sin rango en ese ambiente, dispense sigue devolviendo null', $ncfPrueba->dispenseNextECF('E31', 'wa_sin_rango') === null);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_limpiar($pdo);

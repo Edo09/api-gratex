@@ -261,8 +261,12 @@ class DgiiReceptionService
      * normalizan \r -> \n; este guard corta cualquier via nueva que se
      * salte esa normalizacion, fallando local con un error accionable en
      * vez de un rechazo criptico de DGII.
+     *
+     * Publico y estatico: ECFEmissionService lo corre ANTES de reservar la fila
+     * (pre-vuelo), cuando el numero todavia se puede devolver. Los tres envios
+     * de esta clase lo siguen llamando con $this->, que en PHP 8 vale igual.
      */
-    private function assertSinCarriageReturn(string $signedXml): void
+    public static function assertSinCarriageReturn(string $signedXml): void
     {
         if (strpos($signedXml, '&#13;') !== false
             || stripos($signedXml, '&#xd;') !== false

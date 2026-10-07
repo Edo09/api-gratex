@@ -113,6 +113,9 @@ class ncfModel
      *
      * @return array|null ['e_ncf','valor','fecha_vencimiento','numero_hasta','restantes'] o null si
      *                    NO hay rango disponible (agotado/vencido: registrar uno nuevo).
+     * @throws RuntimeException si ncf_sequences no se puede leer o actualizar
+     *                    (base caida, tabla ausente). Antes devolvia null y el
+     *                    usuario leia "Se acabaron los numeros..." con la base caida.
      */
     public function dispenseNextECF(string $type, ?string $ambiente = null): ?array
     {
@@ -163,7 +166,9 @@ class ncfModel
             }
             return null;
         } catch (PDOException $e) {
-            return null;
+            // null significa "no hay rango"; una base que no responde es otra cosa
+            // y sale como error generico (spec 4.8).
+            throw new RuntimeException('ncf_sequences inaccesible: ' . $e->getMessage(), 0, $e);
         }
     }
 
@@ -221,6 +226,10 @@ class ncfModel
             ));
             return false;
         } catch (PDOException $e) {
+            // Sigue devolviendo false (el llamador lo trata como "no se pudo
+            // devolver"), pero con rastro: sin esto un fallo de la base se leia
+            // igual que "rollback sin coincidencia".
+            error_log('[ECF] rollbackECFSequence fallo: ' . $e->getMessage());
             return false;
         }
     }
