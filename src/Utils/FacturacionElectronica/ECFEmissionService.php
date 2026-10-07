@@ -609,20 +609,113 @@ class ECFEmissionService
             throw $e;
         }
 
+        // Envio. Desde aqui la DGII puede tener el e-CF: ningun fallo devuelve el
+        // numero. Con fila reservada, un fallo del envio, del mapeo o de
+        // 'confirmar' deja la fila en ENVIO_INCIERTO y sale como
+        // EcfEnvioInciertoException (con factura_id, para llevar al usuario a ella).
+        $ctxConfirmar = null;
+        $ok = true;
+        try {
+            if ($usaRFCE) {
+                $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
+                    'environment' => $ambiente,
+                ]);
+
+                $rfceEstado = $this->mapEstado($rfceReception);
+                $rfceTrackId = $this->extractTrackId($rfceReception);
+
+                if ($ctxReservar !== null) {
+                    $ctxConfirmar = $ctxReservar + [
+                        'reserva' => $reserva,
+                        'estado' => 'RFCE_' . $rfceEstado,
+                        'track_id' => null,
+                        'dgii_response' => null,
+                        'dgii_status_code' => null,
+                        'rfce_track_id' => $rfceTrackId,
+                        'rfce_estado' => $rfceEstado,
+                        'rfce_response' => $rfceReception['data'],
+                        'rfce_status_code' => $rfceReception['status_code'],
+                        'secuencia_utilizada' => self::parseSecuenciaUtilizada(
+                            is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : []
+                        ),
+                    ];
+                    // La fila queda final ANTES de tocar el contador (fila primero,
+                    // contador despues).
+                    $ok = (bool) $persistencia('confirmar', $ctxConfirmar);
+                }
+            } else {
+                $reception = $this->reception->recibir($signedXml, $bearerToken, [
+                    'environment' => $ambiente,
+                ]);
+
+                $estado = $this->mapEstado($reception);
+                $trackId = $this->extractTrackId($reception);
+
+                if ($ctxReservar !== null) {
+                    $ctxConfirmar = $ctxReservar + [
+                        'reserva' => $reserva,
+                        'estado' => $estado,
+                        'track_id' => $trackId,
+                        'dgii_response' => $reception['data'],
+                        'dgii_status_code' => $reception['status_code'],
+                        'rfce_track_id' => null,
+                        'rfce_estado' => null,
+                        'rfce_response' => null,
+                        'rfce_status_code' => null,
+                        'secuencia_utilizada' => self::parseSecuenciaUtilizada(
+                            is_array($reception['data'] ?? null) ? $reception['data'] : []
+                        ),
+                    ];
+                    $ok = (bool) $persistencia('confirmar', $ctxConfirmar);
+                }
+            }
+        } catch (Throwable $e) {
+            if ($persistencia !== null && $reserva !== null) {
+                $fase = $ctxConfirmar !== null ? 'confirmar' : 'envio';
+                $parcial = $ctxConfirmar !== null ? self::proyectarResultado($ctxConfirmar) : null;
+                $marcado = false;
+                try {
+                    $marcado = (bool) $persistencia('incierto', self::ctxSinXml($ctxReservar) + [
+                        'reserva' => $reserva,
+                        'fase_fallida' => $fase,
+                        'clase' => get_class($e),
+                        'error' => mb_substr($e->getMessage(), 0, 2000),
+                        'resultado_parcial' => $parcial,
+                    ]);
+                } catch (Throwable $h) {
+                    error_log('[ECF e-NCF=' . $eNcf . ' factura_id=' . $reserva['factura_id'] . '] marcar incierto fallo: ' . $h->getMessage());
+                }
+                // Si la DGII llego a contestar, estado y track_id quedan aqui aunque
+                // la base este caida (soporte los lee en el log, 10.2).
+                error_log(sprintf(
+                    '[ECF e-NCF=%s factura_id=%d] ENVIO_INCIERTO fase=%s marcado=%s estado=%s track_id=%s %s: %s',
+                    $eNcf, $reserva['factura_id'], $fase, $marcado ? 'si' : 'no',
+                    $parcial['estado'] ?? '-', $parcial['track_id'] ?? '-', get_class($e), $e->getMessage()
+                ));
+                throw new EcfEnvioInciertoException($eNcf, (int) $reserva['factura_id'], (string) $ambiente, $fase, $parcial, $marcado, $e);
+            }
+            // Integracion y gastos (sin gancho): la excepcion original, como siempre.
+            throw $e;
+        }
+
+        if (!$ok) {
+            // Otra escritura (soporte, otra peticion) ya movio la fila: su estado
+            // manda y la secuencia no se toca desde aqui.
+            error_log(sprintf(
+                '[ECF e-NCF=%s factura_id=%d] CONFIRM_RACE: otra escritura movio la fila; no se toca la secuencia',
+                $eNcf, $reserva['factura_id']
+            ));
+        }
+
         if ($usaRFCE) {
-            $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
-                'environment' => $ambiente,
-            ]);
-
-            $rfceEstado = $this->mapEstado($rfceReception);
-            $rfceTrackId = $this->extractTrackId($rfceReception);
-
-            $this->reclamarSecuenciaSiNoUtilizada(
-                $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
-                is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : [],
-                $rfceEstado,
-                $secuenciaRangoId
-            );
+            if ($ok) {
+                $this->reclamarSecuenciaSiNoUtilizada(
+                    $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
+                    is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : [],
+                    $rfceEstado,
+                    $secuenciaRangoId
+                );
+            }
 
             return [
                 'e_ncf' => $eNcf,
@@ -643,22 +736,18 @@ class ECFEmissionService
                 'rfce_response' => $rfceReception['data'],
                 'rfce_status_code' => $rfceReception['status_code'],
                 'aviso' => 'E32 con monto < 250,000: RFCE enviado a DGII. La factura integra debe cargarse manualmente al portal DGII.',
+                'factura_id' => $reserva['factura_id'] ?? null,
             ];
         }
 
-        $reception = $this->reception->recibir($signedXml, $bearerToken, [
-            'environment' => $ambiente,
-        ]);
-
-        $estado = $this->mapEstado($reception);
-        $trackId = $this->extractTrackId($reception);
-
-        $this->reclamarSecuenciaSiNoUtilizada(
-            $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
-            is_array($reception['data'] ?? null) ? $reception['data'] : [],
-            $estado,
-            $secuenciaRangoId
-        );
+        if ($ok) {
+            $this->reclamarSecuenciaSiNoUtilizada(
+                $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
+                is_array($reception['data'] ?? null) ? $reception['data'] : [],
+                $estado,
+                $secuenciaRangoId
+            );
+        }
 
         return [
             'e_ncf' => $eNcf,
@@ -672,6 +761,7 @@ class ECFEmissionService
             'dgii_response' => $reception['data'],
             'dgii_status_code' => $reception['status_code'],
             'flujo' => 'ECF',
+            'factura_id' => $reserva['factura_id'] ?? null,
         ];
     }
 

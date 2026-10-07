@@ -619,6 +619,175 @@ wa_chk('R13: ninguna fila ni movimiento de contador', $r['total_filas'] === 0 &&
 chkComun('R13', $r);
 
 // ---------------------------------------------------------------------------
+// 2) Confirmar o marcar incierto tras el envio (Task 13)
+// respuesta_dgii: las filas en vuelo llevan la meta 6.3, sin XML y bajo
+// 64 KB; una fila confirmada lleva lo que escribio confirmarFacturaECF: el
+// JSON de la respuesta (e-CF), el JSON del texto crudo (raw200) o NULL (RFCE).
+// ---------------------------------------------------------------------------
+echo "\n== 2) Confirmar o marcar incierto ==\n";
+
+const CLAVES_CONFIRMAR = [
+    'reserva', 'estado', 'track_id', 'dgii_response', 'dgii_status_code',
+    'rfce_track_id', 'rfce_estado', 'rfce_response', 'rfce_status_code', 'secuencia_utilizada',
+];
+const CLAVES_INCIERTO = [
+    'fase', 'desde', 'flujo', 'ambiente_secuencia', 'dispensado', 'rango_id', 'secuencia_valor',
+    'fase_fallida', 'clase', 'error', 'resultado_parcial', 'intentos',
+];
+const CLAVES_PROYECCION = [
+    'estado', 'track_id', 'dgii_status_code', 'dgii_response', 'rfce_estado', 'rfce_track_id', 'rfce_status_code', 'secuencia_utilizada',
+];
+
+/** Una fila en vuelo: respuesta_dgii con la meta 6.3, sin XML y bajo TEXT. */
+function chkEnVuelo(string $n, array $f, string $faseFallida): void
+{
+    $resp = (string) ($f['respuesta_dgii'] ?? '');
+    $meta = json_decode($resp, true);
+    wa_chk("{$n}: respuesta_dgii trae las claves de 6.3, en orden",
+        is_array($meta) && array_keys($meta) === CLAVES_INCIERTO, is_array($meta) ? array_keys($meta) : $resp);
+    wa_chk("{$n}: fase ENVIO_INCIERTO, fase_fallida {$faseFallida}, intentos 0",
+        ($meta['fase'] ?? null) === 'ENVIO_INCIERTO' && ($meta['fase_fallida'] ?? null) === $faseFallida && ($meta['intentos'] ?? null) === 0, $meta);
+    wa_chk("{$n}: respuesta_dgii bajo 65535 bytes", strlen($resp) < 65535, strlen($resp));
+    wa_chk("{$n}: respuesta_dgii sin XML",
+        !str_contains($resp, '<') && !str_contains($resp, 'signed_xml') && !str_contains($resp, 'rfce_xml') && !str_contains($resp, 'xml_firmado'));
+}
+
+// C1 acepta E31: fila final ANTES del contador, factura_id en la respuesta.
+$r = correr($pdo, $ids);
+$f = $r['filas'][0] ?? [];
+wa_chk('C1: fases [reservar, confirmar]', $r['fases'] === ['reservar', 'confirmar'], $r['fases']);
+wa_chk('C1: ctx confirmar = las 13 de reservar + reserva + las de confirmar, en orden',
+    array_keys($r['ctxs']['confirmar'] ?? []) === array_merge(CLAVES_RESERVAR, CLAVES_CONFIRMAR), array_keys($r['ctxs']['confirmar'] ?? []));
+wa_chk('C1: ctx confirmar con estado, track_id y secuencia_utilizada true',
+    ($r['ctxs']['confirmar']['estado'] ?? null) === 'ACEPTADO' && ($r['ctxs']['confirmar']['track_id'] ?? null) === 'track-' . $r['e_ncf']
+    && ($r['ctxs']['confirmar']['secuencia_utilizada'] ?? null) === true, $r['ctxs']['confirmar'] ?? null);
+wa_chk('C1: una fila ACEPTADO con track_id', count($r['filas']) === 1 && ($f['estado_dgii'] ?? null) === 'ACEPTADO'
+    && ($f['track_id'] ?? null) === 'track-' . $r['e_ncf'], $r['filas']);
+wa_chk('C1: secuencia_utilizada = 1', (string) ($f['secuencia_utilizada'] ?? '') === '1', $f['secuencia_utilizada'] ?? null);
+wa_chk('C1: respuesta_dgii es el JSON de la respuesta de la DGII',
+    json_decode((string) ($f['respuesta_dgii'] ?? ''), true) === ['trackId' => 'track-' . $r['e_ncf'], 'codigo' => 1, 'estado' => 'Aceptado', 'secuenciaUtilizada' => true],
+    $f['respuesta_dgii'] ?? null);
+wa_chk('C1: contador +1', $r['delta'] === 1, $r['delta']);
+wa_chk('C1: emitir devuelve factura_id = id de la fila', ($r['res']['factura_id'] ?? null) === (int) ($f['id'] ?? 0), $r['res']['factura_id'] ?? null);
+chkComun('C1', $r);
+
+// C2 rechaza: la fila queda RECHAZADO antes de devolver el numero; el reintento lo reusa.
+$r = correr($pdo, $ids, ['modo' => 'rechaza']);
+$iConfirmar = array_search('confirmar', $r['orden'], true);
+$iRollback = array_search('rollback', $r['orden'], true);
+wa_chk("C2: 'confirmar' antes que el rollback del contador",
+    $iConfirmar !== false && $iRollback !== false && $iConfirmar < $iRollback, $r['orden']);
+wa_chk('C2: fila RECHAZADO', count($r['filas']) === 1 && ($r['filas'][0]['estado_dgii'] ?? null) === 'RECHAZADO', $r['filas']);
+wa_chk('C2: contador devuelto (delta 0)', $r['delta'] === 0, $r['delta']);
+chkComun('C2', $r);
+$primerId = (int) ($r['filas'][0]['id'] ?? 0);
+$r2 = correr($pdo, $ids, ['limpiar' => false, 'modo' => 'acepta']);
+$porId = array_column($r2['filas'], null, 'id');
+wa_chk('C2: el reintento toma el mismo e-NCF', ($r2['ctxs']['reservar']['e_ncf'] ?? null) === $r['e_ncf'], $r2['ctxs']['reservar']['e_ncf'] ?? null);
+wa_chk('C2: la primera fila queda RECHAZADO_ARCHIVADO con e_ncf NULL',
+    ($porId[$primerId]['estado_dgii'] ?? null) === 'RECHAZADO_ARCHIVADO' && array_key_exists('e_ncf', $porId[$primerId] ?? [])
+    && $porId[$primerId]['e_ncf'] === null, $r2['filas']);
+wa_chk('C2: y hay una fila nueva ACEPTADO', count($r2['filas']) === 2 && (end($r2['filas'])['estado_dgii'] ?? null) === 'ACEPTADO', $r2['filas']);
+chkComun('C2 reintento', $r2);
+
+// C3 cuelga y html500: ENVIO_INCIERTO, contador intacto, excepcion con la fila.
+foreach (['cuelga' => 'HTTP request failed: timeout', 'html500' => 'DGII authenticated request failed: HTTP 500'] as $modo => $prefijo) {
+    $r = correr($pdo, $ids, ['modo' => $modo]);
+    $e = $r['err'];
+    $f = $r['filas'][0] ?? [];
+    wa_chk("C3 {$modo}: sale EcfEnvioInciertoException", $e instanceof EcfEnvioInciertoException, $e ? get_class($e) . ': ' . descErr($e) : null);
+    if ($e instanceof EcfEnvioInciertoException) {
+        wa_chk("C3 {$modo}: facturaId = la fila, e-NCF y ambiente",
+            $e->facturaId === (int) ($f['id'] ?? 0) && $e->eNcf === $r['e_ncf'] && $e->ambiente === 'certecf', [$e->facturaId, $e->eNcf, $e->ambiente]);
+        wa_chk("C3 {$modo}: faseFallida envio, marcado true, resultadoParcial null",
+            $e->faseFallida === 'envio' && $e->marcado === true && $e->resultadoParcial === null);
+        wa_chk("C3 {$modo}: getPrevious es la excepcion original",
+            $e->getPrevious() instanceof RuntimeException && str_starts_with($e->getPrevious()->getMessage(), $prefijo), descErr($e->getPrevious()));
+    }
+    wa_chk("C3 {$modo}: fases [reservar, incierto]", $r['fases'] === ['reservar', 'incierto'], $r['fases']);
+    wa_chk("C3 {$modo}: fila ENVIO_INCIERTO", count($r['filas']) === 1 && ($f['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $r['filas']);
+    wa_chk("C3 {$modo}: contador +1 y sin rollback", $r['delta'] === 1 && !in_array('rollback', $r['orden'], true), [$r['delta'], $r['orden']]);
+    wa_chk("C3 {$modo}: log ENVIO_INCIERTO", str_contains($r['log'], 'ENVIO_INCIERTO fase=envio marcado=si'));
+    chkEnVuelo("C3 {$modo}", $f, 'envio');
+    chkComun("C3 {$modo}", $r);
+}
+
+// C4 raw200: ENVIADO sin track_id; respuesta_dgii guarda el texto crudo como JSON.
+$r = correr($pdo, $ids, ['modo' => 'raw200']);
+$f = $r['filas'][0] ?? [];
+wa_chk('C4: fila ENVIADO con track_id NULL', ($f['estado_dgii'] ?? null) === 'ENVIADO' && array_key_exists('track_id', $f) && $f['track_id'] === null, $f);
+wa_chk('C4: respuesta_dgii = \'"Recibido"\'', ($f['respuesta_dgii'] ?? null) === '"Recibido"', $f['respuesta_dgii'] ?? null);
+chkComun('C4', $r);
+
+// C5 el gancho lanza en 'confirmar': la respuesta de la DGII queda en resultado_parcial.
+$r = correr($pdo, $ids, ['trucos' => ['confirmar' => function () {
+    throw new RuntimeException('base caida al confirmar');
+}]]);
+$e = $r['err'];
+$f = $r['filas'][0] ?? [];
+wa_chk('C5: EcfEnvioInciertoException con faseFallida confirmar',
+    $e instanceof EcfEnvioInciertoException && $e->faseFallida === 'confirmar' && $e->marcado === true, descErr($e));
+wa_chk('C5: resultadoParcial con las 8 claves y el track_id de la DGII',
+    $e instanceof EcfEnvioInciertoException && is_array($e->resultadoParcial) && array_keys($e->resultadoParcial) === CLAVES_PROYECCION
+    && $e->resultadoParcial['track_id'] === 'track-' . $r['e_ncf'] && $e->resultadoParcial['estado'] === 'ACEPTADO',
+    $e instanceof EcfEnvioInciertoException ? $e->resultadoParcial : null);
+$meta = facturaModel::metaEnvio($f['respuesta_dgii'] ?? null);
+wa_chk('C5: la fila guarda resultado_parcial.track_id', ($meta['resultado_parcial']['track_id'] ?? null) === 'track-' . $r['e_ncf'], $meta);
+wa_chk('C5: contador +1 (sin reclamar)', $r['delta'] === 1 && !in_array('rollback', $r['orden'], true), $r['delta']);
+chkEnVuelo('C5', $f, 'confirmar');
+chkComun('C5', $r);
+
+// C6 'confirmar' devuelve false (otra escritura movio la fila): no se reclama.
+$r = correr($pdo, $ids, ['modo' => 'rechaza', 'trucos' => ['confirmar' => fn() => false]]);
+wa_chk('C6: emitir termina sin excepcion', $r['err'] === null, descErr($r['err']));
+wa_chk("C6: log CONFIRM_RACE", str_contains($r['log'], "[ECF e-NCF={$r['e_ncf']} factura_id=") && str_contains($r['log'], 'CONFIRM_RACE: otra escritura movio la fila; no se toca la secuencia'));
+wa_chk('C6: no se llamo rollbackECFSequence', $r['ncf']->rollbacks === [], $r['ncf']->rollbacks);
+wa_chk('C6: contador +1', $r['delta'] === 1, $r['delta']);
+chkComun('C6', $r);
+
+// C7 'incierto' tambien falla: la fila queda PENDIENTE_ENVIO y marcado false.
+$r = correr($pdo, $ids, ['modo' => 'cuelga', 'trucos' => ['incierto' => function () {
+    throw new RuntimeException('base caida al marcar');
+}]]);
+$e = $r['err'];
+wa_chk('C7: EcfEnvioInciertoException con marcado false', $e instanceof EcfEnvioInciertoException && $e->marcado === false, descErr($e));
+wa_chk('C7: la fila sigue PENDIENTE_ENVIO', ($r['filas'][0]['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO', $r['filas']);
+wa_chk("C7: log 'marcar incierto fallo' y marcado=no",
+    str_contains($r['log'], 'marcar incierto fallo: base caida al marcar') && str_contains($r['log'], 'marcado=no'));
+chkComun('C7', $r);
+
+// C8 E32 < 250k acepta: RFCE_ACEPTADO con rfce_track_id.
+$r = correr($pdo, $ids, ['tipo' => '32']);
+$f = $r['filas'][0] ?? [];
+$st = $pdo->prepare('SELECT rfce_track_id, rfce_estado FROM facturas WHERE id = :id');
+$st->execute([':id' => (int) ($f['id'] ?? 0)]);
+$rfce = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+wa_chk('C8: fila RFCE_ACEPTADO', ($f['estado_dgii'] ?? null) === 'RFCE_ACEPTADO', $f);
+wa_chk('C8: rfce_track_id y rfce_estado guardados',
+    ($rfce['rfce_track_id'] ?? null) === 'track-' . $r['e_ncf'] && ($rfce['rfce_estado'] ?? null) === 'ACEPTADO', $rfce);
+wa_chk('C8: respuesta_dgii NULL en el flujo RFCE', array_key_exists('respuesta_dgii', $f) && $f['respuesta_dgii'] === null, $f['respuesta_dgii'] ?? null);
+wa_chk('C8: emitir devuelve estado RFCE_ACEPTADO y factura_id',
+    ($r['res']['estado'] ?? null) === 'RFCE_ACEPTADO' && ($r['res']['factura_id'] ?? null) === (int) ($f['id'] ?? 0), $r['res'] ?? null);
+chkComun('C8', $r);
+
+// C9 E32 < 250k NO_ENCONTRADO sin bandera: reintentable (REINTENTABLES).
+$r = correr($pdo, $ids, ['tipo' => '32', 'modo' => 'no_encontrado_sin_flag']);
+$iConfirmar = array_search('confirmar', $r['orden'], true);
+$iRollback = array_search('rollback', $r['orden'], true);
+wa_chk('C9: fila RFCE_NO_ENCONTRADO', ($r['filas'][0]['estado_dgii'] ?? null) === 'RFCE_NO_ENCONTRADO', $r['filas']);
+wa_chk("C9: 'confirmar' antes que el rollback", $iConfirmar !== false && $iRollback !== false && $iConfirmar < $iRollback, $r['orden']);
+wa_chk('C9: contador devuelto (delta 0)', $r['delta'] === 0, $r['delta']);
+chkComun('C9', $r);
+$primerId = (int) ($r['filas'][0]['id'] ?? 0);
+$r2 = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false]);
+$porId = array_column($r2['filas'], null, 'id');
+wa_chk('C9: el reintento archiva RFCE_NO_ENCONTRADO_ARCHIVADO con e_ncf NULL',
+    ($porId[$primerId]['estado_dgii'] ?? null) === 'RFCE_NO_ENCONTRADO_ARCHIVADO' && array_key_exists('e_ncf', $porId[$primerId] ?? [])
+    && $porId[$primerId]['e_ncf'] === null, $r2['filas']);
+wa_chk('C9: y hay una fila nueva RFCE_ACEPTADO', count($r2['filas']) === 2 && (end($r2['filas'])['estado_dgii'] ?? null) === 'RFCE_ACEPTADO', $r2['filas']);
+chkComun('C9 reintento', $r2);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_limpiar($pdo);
