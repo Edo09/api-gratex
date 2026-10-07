@@ -507,6 +507,135 @@ wa_chk('ambiente del token distinto del de la secuencia: una linea de log y rese
     $e === null && substr_count($log, 'distinto del de la secuencia certecf') === 1, $log);
 
 // ---------------------------------------------------------------------------
+// 6) confirmarFacturaECF, marcarEnvioIncierto y existeFactura (conexion falsa)
+// ---------------------------------------------------------------------------
+
+/** El ctx 'confirmar' de ECFEmissionService (las 13 claves + reserva + respuesta), con $cambios encima. */
+function puro_ctx_confirmar(array $cambios = []): array
+{
+    return $cambios + [
+        'reserva' => ['factura_id' => 41, 'e_ncf' => 'E310000000123', 'desde' => '2026-10-05 14:03:11'],
+        'estado' => 'ACEPTADO', 'track_id' => 'track-E310000000123',
+        'dgii_response' => ['trackId' => 'track-E310000000123', 'codigo' => 1, 'estado' => 'Aceptado', 'secuenciaUtilizada' => true],
+        'dgii_status_code' => 200, 'rfce_track_id' => null, 'rfce_estado' => null, 'rfce_response' => null,
+        'rfce_status_code' => null, 'secuencia_utilizada' => true,
+    ] + puro_ctx_reservar();
+}
+
+/**
+ * El ctx 'incierto' (ctxSinXml + reserva + el fallo), con $cambios encima. A
+ * proposito trae signed_xml, rfce_xml y xml_firmado: el modelo debe quitarlos.
+ */
+function puro_ctx_incierto(array $cambios = []): array
+{
+    return $cambios + [
+        'reserva' => ['factura_id' => 41, 'e_ncf' => 'E310000000123', 'desde' => '2026-10-05 14:03:11'],
+        'fase_fallida' => 'envio', 'clase' => 'RuntimeException', 'error' => 'HTTP request failed: timeout',
+        'resultado_parcial' => null, 'xml_firmado' => '<ECF/>',
+    ] + puro_ctx_reservar(['rfce_xml' => '<RFCE/>']);
+}
+
+echo "\n== 6) confirmarFacturaECF, marcarEnvioIncierto y existeFactura (conexion falsa) ==\n";
+$confirmar = static fn(GuionConexion $c, array $cambios = []): bool
+    => puro_modelo($c)->confirmarFacturaECF(41, puro_ctx_confirmar($cambios));
+$es = static fn(array $p, string $clave, $valor): bool => array_key_exists($clave, $p) && $p[$clave] === $valor;
+
+$c = new GuionConexion();
+$ok = $confirmar($c);
+$sql = (string) $c->sql('UPDATE facturas SET estado_dgii');
+wa_chk('confirmar: un solo UPDATE, sin transaccion, con la precondicion de estado en vuelo',
+    $ok === true && str_contains($sql, "WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO')")
+    && count($c->de('prepare')) === 1 && $c->de('beginTransaction') === [], [$sql, $c->llamadas]);
+$p = $c->params('UPDATE facturas SET estado_dgii') ?? [];
+wa_chk('confirmar: estado, track_id, la respuesta en JSON y el id',
+    $es($p, ':estado', 'ACEPTADO') && $es($p, ':track_id', 'track-E310000000123')
+    && $es($p, ':resp', json_encode(puro_ctx_confirmar()['dgii_response'])) && $es($p, ':rresp', null) && $es($p, ':id', 41), $p);
+$secs = [];
+foreach ([true, false, null] as $valor) {
+    $c = new GuionConexion();
+    $confirmar($c, ['secuencia_utilizada' => $valor]);
+    $p = $c->params('UPDATE facturas SET estado_dgii') ?? [];
+    $secs[] = array_key_exists(':sec', $p) ? $p[':sec'] : 'falta';
+}
+wa_chk("confirmar: :sec es 1, 0 o null (nunca '' con prepares emulados)", $secs === [1, 0, null], $secs);
+$c = new GuionConexion();
+$confirmar($c, ['dgii_response' => str_repeat('x', 200 * 1024), 'rfce_response' => str_repeat('y', 200 * 1024)]);
+$p = $c->params('UPDATE facturas SET estado_dgii') ?? [];
+wa_chk('confirmar: un cuerpo de texto de 200 KB se guarda recortado a 4000 (JSON <= 4002)',
+    strlen((string) ($p[':resp'] ?? '')) <= 4002 && json_decode((string) ($p[':resp'] ?? '')) === str_repeat('x', 4000)
+    && json_decode((string) ($p[':rresp'] ?? '')) === str_repeat('y', 4000),
+    [strlen((string) ($p[':resp'] ?? '')), strlen((string) ($p[':rresp'] ?? ''))]);
+$c = new GuionConexion();
+$confirmar($c, ['estado' => 'RFCE_ACEPTADO', 'track_id' => null, 'dgii_response' => null,
+    'rfce_track_id' => 'track-E320000000007', 'rfce_estado' => 'ACEPTADO', 'rfce_response' => ['codigo' => 1, 'estado' => 'Aceptado']]);
+$p = $c->params('UPDATE facturas SET estado_dgii') ?? [];
+wa_chk('confirmar RFCE: respuesta_dgii y track_id NULL; los rfce_* con la respuesta del resumen',
+    $es($p, ':estado', 'RFCE_ACEPTADO') && $es($p, ':resp', null) && $es($p, ':track_id', null)
+    && $es($p, ':rtid', 'track-E320000000007') && $es($p, ':rest', 'ACEPTADO')
+    && $es($p, ':rresp', '{"codigo":1,"estado":"Aceptado"}'), $p);
+$c = new GuionConexion();
+$c->rowCounts['UPDATE facturas SET estado_dgii'] = 0;
+wa_chk('confirmar: 0 filas (otra escritura movio la fila) -> false', $confirmar($c) === false);
+$c = new GuionConexion();
+$caida = puro_pdo_error(2006, 'HY000', 'MySQL server has gone away');
+$c->errores[] = ['UPDATE facturas SET estado_dgii', $caida];
+[, $e] = puro_con_log(static fn() => $confirmar($c));
+wa_chk('confirmar: un PDOException se propaga tal cual', $e === $caida, $e === null ? null : get_class($e));
+
+$marcar = static fn(GuionConexion $c, array $ctx): bool => puro_modelo($c)->marcarEnvioIncierto(41, $ctx);
+$c = new GuionConexion();
+$ok = $marcar($c, puro_ctx_incierto());
+$sql = (string) $c->sql("estado_dgii = 'ENVIO_INCIERTO'");
+$p = $c->params("estado_dgii = 'ENVIO_INCIERTO'") ?? [];
+wa_chk('marcar: ENVIO_INCIERTO solo desde PENDIENTE_ENVIO, sin transaccion',
+    $ok === true && str_contains($sql, "SET estado_dgii = 'ENVIO_INCIERTO', respuesta_dgii = :json")
+    && str_contains($sql, "WHERE id = :id AND estado_dgii = 'PENDIENTE_ENVIO'") && $es($p, ':id', 41)
+    && $c->de('beginTransaction') === [], $sql);
+$json = (string) ($p[':json'] ?? '');
+$meta = json_decode($json, true);
+wa_chk('marcar: el JSON de 6.3 con las claves en orden',
+    is_array($meta) && array_keys($meta) === ['fase', 'desde', 'flujo', 'ambiente_secuencia', 'dispensado', 'rango_id',
+        'secuencia_valor', 'fase_fallida', 'clase', 'error', 'resultado_parcial', 'intentos'], $meta);
+wa_chk('marcar: fase, meta de la secuencia, el fallo e intentos 0',
+    is_array($meta) && $meta['fase'] === 'ENVIO_INCIERTO' && $meta['desde'] === '2026-10-05 14:03:11' && $meta['flujo'] === 'ECF'
+    && $meta['ambiente_secuencia'] === 'ecf' && $meta['dispensado'] === true && $meta['rango_id'] === 7
+    && $meta['secuencia_valor'] === 123 && $meta['fase_fallida'] === 'envio' && $meta['clase'] === 'RuntimeException'
+    && $meta['error'] === 'HTTP request failed: timeout' && $meta['resultado_parcial'] === null && $meta['intentos'] === 0, $meta);
+wa_chk('marcar: ni signed_xml, ni rfce_xml, ni xml_firmado, ni XML',
+    $json !== '' && !preg_match('/signed_xml|rfce_xml|xml_firmado|</', $json), $json);
+$parcial = ['estado' => 'ACEPTADO', 'track_id' => 'track-E310000000123', 'dgii_status_code' => 200, 'dgii_response' => ['codigo' => 1],
+    'rfce_estado' => null, 'rfce_track_id' => null, 'rfce_status_code' => null, 'secuencia_utilizada' => true];
+$c = new GuionConexion();
+$marcar($c, puro_ctx_incierto(['fase_fallida' => 'confirmar', 'resultado_parcial' => $parcial]));
+$meta = json_decode((string) (($c->params("estado_dgii = 'ENVIO_INCIERTO'") ?? [])[':json'] ?? ''), true);
+wa_chk('marcar (fallo al confirmar): guarda resultado_parcial tal cual',
+    is_array($meta) && $meta['fase_fallida'] === 'confirmar' && $meta['resultado_parcial'] === $parcial, $meta);
+$cierre = puro_ctx_incierto(['fase_fallida' => 'shutdown', 'clase' => 'shutdown', 'error' => str_repeat('e', 3000)]);
+unset($cierre['resultado_parcial']);
+$c = new GuionConexion();
+$marcar($c, $cierre);
+$meta = json_decode((string) (($c->params("estado_dgii = 'ENVIO_INCIERTO'") ?? [])[':json'] ?? ''), true);
+wa_chk('marcar (registro de cierre): sin resultado_parcial queda null y el error se recorta a 2000',
+    is_array($meta) && array_key_exists('resultado_parcial', $meta) && $meta['resultado_parcial'] === null
+    && $meta['fase_fallida'] === 'shutdown' && mb_strlen((string) $meta['error']) === 2000, $meta);
+$c = new GuionConexion();
+$c->rowCounts["estado_dgii = 'ENVIO_INCIERTO'"] = 0;
+wa_chk('marcar: fila que ya no esta en PENDIENTE_ENVIO -> false', $marcar($c, puro_ctx_incierto()) === false);
+$c = new GuionConexion();
+$c->prepareFalla = true;
+[$ok, $e, $log] = puro_con_log(static fn() => $marcar($c, puro_ctx_incierto()));
+wa_chk('marcar: si la base falla devuelve false y no lanza', $ok === false && $e === null, $e?->getMessage());
+wa_chk('marcar: el log nombra el e-NCF y la factura',
+    str_contains($log, '[ECF e-NCF=E310000000123 factura_id=41] marcarEnvioIncierto fallo: se cayo la conexion'), $log);
+
+$c = new GuionConexion();
+$c->filas['SELECT 1 FROM facturas'] = [['1' => 1]];
+$existe = puro_modelo($c)->existeFactura(41);
+wa_chk('existeFactura: SELECT 1 por id; con fila -> true',
+    $existe === true && $c->params('SELECT 1 FROM facturas') === [':id' => 41], $c->llamadas);
+wa_chk('existeFactura: sin fila -> false', puro_modelo(new GuionConexion())->existeFactura(999999) === false);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

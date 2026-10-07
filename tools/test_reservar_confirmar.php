@@ -353,6 +353,89 @@ $sem = wa_sembrar($pdo);
 $factura = rc_factura($sem['client_id'], [$sem['product_id']]);
 
 // ---------------------------------------------------------------------------
+// confirmarFacturaECF, marcarEnvioIncierto y existeFactura
+// ---------------------------------------------------------------------------
+
+/** Lo que el modelo lee del ctx 'confirmar', con $cambios encima. */
+function rc_confirmar(array $cambios = []): array
+{
+    return $cambios + [
+        'estado' => 'ACEPTADO', 'track_id' => null, 'dgii_response' => null, 'rfce_track_id' => null,
+        'rfce_estado' => null, 'rfce_response' => null, 'secuencia_utilizada' => null,
+    ];
+}
+
+/** ctx 'incierto' de una reserva; trae signed_xml, rfce_xml y xml_firmado a proposito. */
+function rc_incierto(string $eNcf, array $reserva): array
+{
+    return rc_ctx($eNcf, ['rfce_xml' => '<RFCE><eNCF>' . $eNcf . '</eNCF></RFCE>']) + [
+        'xml_firmado' => '<ECF/>', 'reserva' => $reserva, 'fase_fallida' => 'envio', 'clase' => 'RuntimeException',
+        'error' => 'HTTP request failed: Operation timed out after 3001 milliseconds', 'resultado_parcial' => null,
+    ];
+}
+
+echo "\n== confirmarFacturaECF, marcarEnvioIncierto y existeFactura en {$base} ==\n";
+wa_limpiar($pdo);
+$modelo = new facturaModel();
+
+// Confirmar una reserva: el estado, el track_id, la secuencia y la respuesta.
+$eNcf = 'E310000000901';
+$reserva = $modelo->reservarFacturaECF($factura, rc_ctx($eNcf));
+$respuesta = ['trackId' => 'track-x', 'codigo' => 1, 'estado' => 'Aceptado', 'secuenciaUtilizada' => true];
+$ok = $modelo->confirmarFacturaECF($reserva['factura_id'], rc_confirmar([
+    'estado' => 'ACEPTADO', 'track_id' => 'track-x', 'dgii_response' => $respuesta, 'secuencia_utilizada' => true,
+]));
+$fila = wa_filas($pdo, $eNcf)[0] ?? [];
+wa_chk('confirmar ACEPTADO sobre PENDIENTE_ENVIO: true', $ok === true);
+wa_chk('confirmar: ACEPTADO, track-x, secuencia_utilizada 1 y respuesta_dgii = JSON de la respuesta',
+    ($fila['estado_dgii'] ?? null) === 'ACEPTADO' && ($fila['track_id'] ?? null) === 'track-x'
+    && ($fila['secuencia_utilizada'] ?? null) !== null && (int) $fila['secuencia_utilizada'] === 1
+    && json_decode((string) ($fila['respuesta_dgii'] ?? ''), true) === $respuesta, $fila);
+wa_chk('segundo confirmar sobre la misma fila: false (ya no esta en vuelo)',
+    $modelo->confirmarFacturaECF($reserva['factura_id'], rc_confirmar(['estado' => 'RECHAZADO'])) === false);
+$antes = wa_filas($pdo, $eNcf);
+wa_chk('marcar incierto una fila confirmada: false y la fila no cambia',
+    $modelo->marcarEnvioIncierto($reserva['factura_id'], rc_incierto($eNcf, $reserva)) === false
+    && wa_filas($pdo, $eNcf) === $antes, wa_filas($pdo, $eNcf));
+
+// Marcar incierto una reserva: el JSON de 6.3, sin XML.
+$eNcf = 'E310000000902';
+$reserva = $modelo->reservarFacturaECF($factura, rc_ctx($eNcf));
+$ok = $modelo->marcarEnvioIncierto($reserva['factura_id'], rc_incierto($eNcf, $reserva));
+$fila = wa_filas($pdo, $eNcf)[0] ?? [];
+$json = (string) ($fila['respuesta_dgii'] ?? '');
+$meta = json_decode($json, true);
+wa_chk('marcar incierto desde PENDIENTE_ENVIO: true y la fila en ENVIO_INCIERTO',
+    $ok === true && ($fila['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $fila);
+wa_chk('marcar: respuesta_dgii es el JSON de 6.3 (claves en orden, intentos 0)',
+    is_array($meta) && array_keys($meta) === ['fase', 'desde', 'flujo', 'ambiente_secuencia', 'dispensado', 'rango_id',
+        'secuencia_valor', 'fase_fallida', 'clase', 'error', 'resultado_parcial', 'intentos']
+    && $meta['fase'] === 'ENVIO_INCIERTO' && $meta['intentos'] === 0 && $meta['secuencia_valor'] === 902, $meta);
+wa_chk('marcar: sin signed_xml, rfce_xml, xml_firmado ni XML, y cabe en TEXT (< 65535)',
+    $json !== '' && !preg_match('/signed_xml|rfce_xml|xml_firmado|</', $json) && strlen($json) < 65535, $json);
+wa_chk('confirmar tambien acepta una fila en ENVIO_INCIERTO',
+    $modelo->confirmarFacturaECF($reserva['factura_id'], rc_confirmar(['estado' => 'ACEPTADO', 'track_id' => 'track-y'])) === true
+    && (wa_filas($pdo, $eNcf)[0]['estado_dgii'] ?? null) === 'ACEPTADO');
+
+// Modo estricto: secuencia_utilizada = false se guarda como 0 (no '').
+$modoPrevio = (string) $pdo->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+$pdo->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES'");
+$eNcf = 'E310000000903';
+$reserva = $modelo->reservarFacturaECF($factura, rc_ctx($eNcf));
+[$ok, $e] = rc_con_log(fn() => $modelo->confirmarFacturaECF($reserva['factura_id'], rc_confirmar([
+    'estado' => 'RECHAZADO', 'dgii_response' => ['codigo' => 2, 'estado' => 'Rechazado', 'secuenciaUtilizada' => false],
+    'secuencia_utilizada' => false,
+])));
+$fila = wa_filas($pdo, $eNcf)[0] ?? [];
+$pdo->prepare('SET SESSION sql_mode = :modo')->execute([':modo' => $modoPrevio]);
+wa_chk('modo estricto: confirmar con secuencia_utilizada false -> true y la columna guarda 0',
+    $e === null && $ok === true && ($fila['secuencia_utilizada'] ?? null) !== null && (int) $fila['secuencia_utilizada'] === 0,
+    $e !== null ? rc_desc($e) : $fila);
+
+wa_chk('existeFactura: true para la reserva y false para 999999',
+    $modelo->existeFactura($reserva['factura_id']) === true && $modelo->existeFactura(999999) === false);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_limpiar($pdo);

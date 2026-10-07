@@ -1391,6 +1391,99 @@ class facturaModel
     }
 
     /**
+     * Anota la respuesta de la DGII en una fila en vuelo (hook 'confirmar').
+     * Un solo UPDATE en autocommit con la precondicion de estado: si otra
+     * escritura ya movio la fila no la pisa y devuelve false (el servicio lo
+     * registra como CONFIRM_RACE y no toca la secuencia). Reemplaza la meta de
+     * respuesta_dgii por la respuesta: quien necesite rango_id o
+     * secuencia_valor la lee antes con metaEnvio().
+     *
+     * Un cuerpo de texto (2xx sin JSON, un error en HTML) se recorta a 4000
+     * caracteres antes de codificarlo: respuesta_dgii es TEXT. Una respuesta
+     * NULL (el flujo RFCE no tiene respuesta del e-CF) queda NULL.
+     * secuencia_utilizada va como entero o NULL: con prepares emulados un false
+     * llegaria como '' y el modo estricto lo rechaza (1366); updateECFEstado
+     * castea igual.
+     *
+     * Un PDOException se propaga: el servicio lo trata como fallo al confirmar.
+     *
+     * @param array $ctx lee estado, track_id, dgii_response, rfce_track_id, rfce_estado, rfce_response
+     *                   y secuencia_utilizada (?bool); el resto del ctx 'confirmar' se ignora
+     * @return bool false si la fila ya no estaba en vuelo
+     */
+    public function confirmarFacturaECF(int $id, array $ctx): bool
+    {
+        $recortar = static fn($cuerpo) => is_string($cuerpo) ? mb_substr($cuerpo, 0, 4000) : $cuerpo;
+        $secuencia = $ctx['secuencia_utilizada'] ?? null;
+        $stmt = $this->conexion->prepare(
+            'UPDATE facturas SET estado_dgii = :estado, track_id = :track_id, respuesta_dgii = :resp,
+                    secuencia_utilizada = :sec, rfce_track_id = :rtid, rfce_estado = :rest, rfce_respuesta = :rresp
+              WHERE id = :id AND estado_dgii IN (' . EstadosEcf::sql(EstadosEcf::EN_VUELO) . ')'
+        );
+        $stmt->execute([
+            ':estado' => (string) ($ctx['estado'] ?? ''),
+            ':track_id' => $ctx['track_id'] ?? null,
+            ':resp' => self::json($recortar($ctx['dgii_response'] ?? null)),
+            ':sec' => $secuencia === null ? null : (int) $secuencia,
+            ':rtid' => $ctx['rfce_track_id'] ?? null,
+            ':rest' => $ctx['rfce_estado'] ?? null,
+            ':rresp' => self::json($recortar($ctx['rfce_response'] ?? null)),
+            ':id' => $id,
+        ]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Deja la fila en ENVIO_INCIERTO (hook 'incierto'): el envio o la
+     * confirmacion fallaron y no se sabe si la DGII tiene el e-CF. Solo desde
+     * PENDIENTE_ENVIO. respuesta_dgii guarda la meta del envio y el fallo
+     * (spec 6.3), nunca XML: signed_xml, rfce_xml y xml_firmado se quitan del
+     * ctx por si acaso, y el error se recorta a 2000 caracteres.
+     *
+     * Nunca lanza: lo llaman el catch del envio y el registro de cierre
+     * (shutdown), donde una excepcion taparia el fallo original. Si no puede
+     * escribir deja una linea en el log con el e-NCF y devuelve false; la fila
+     * queda en PENDIENTE_ENVIO.
+     *
+     * @param array $ctx ctxSinXml(ctx 'reservar') + reserva + fase_fallida + clase + error
+     *                   + resultado_parcial (no viene desde el registro de cierre)
+     */
+    public function marcarEnvioIncierto(int $id, array $ctx): bool
+    {
+        try {
+            unset($ctx['signed_xml'], $ctx['rfce_xml'], $ctx['xml_firmado']);
+            $meta = ['fase' => EstadosEcf::ENVIO_INCIERTO] + self::metaEnVuelo($ctx) + [
+                'fase_fallida' => $ctx['fase_fallida'] ?? null,
+                'clase' => $ctx['clase'] ?? null,
+                'error' => isset($ctx['error']) ? mb_substr((string) $ctx['error'], 0, 2000) : null,
+                'resultado_parcial' => $ctx['resultado_parcial'] ?? null,
+                'intentos' => 0,
+            ];
+            $stmt = $this->conexion->prepare(
+                "UPDATE facturas SET estado_dgii = 'ENVIO_INCIERTO', respuesta_dgii = :json
+                  WHERE id = :id AND estado_dgii = 'PENDIENTE_ENVIO'"
+            );
+            $stmt->execute([':json' => self::json($meta), ':id' => $id]);
+            return $stmt->rowCount() > 0;
+        } catch (Throwable $e) {
+            error_log(sprintf('[ECF e-NCF=%s factura_id=%d] marcarEnvioIncierto fallo: %s',
+                (string) ($ctx['e_ncf'] ?? ($ctx['reserva']['e_ncf'] ?? '?')), $id, $e->getMessage()));
+            return false;
+        }
+    }
+
+    /**
+     * true si la fila existe. El catch de la emision lo usa para saber si una
+     * reserva sobrevivio (spec 4.7). Un PDOException se propaga.
+     */
+    public function existeFactura(int $id): bool
+    {
+        $stmt = $this->conexion->prepare('SELECT 1 FROM facturas WHERE id = :id');
+        $stmt->execute([':id' => $id]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Save a factura together with its e-CF emission result.
      * @param array $factura {date, client_id, client_name, total, items[], user_id?, tipo_ecf}
      * @param array $ecf {e_ncf, track_id, estado, codigo_seguridad, fecha_emision_dgii, ambiente, signed_xml, dgii_response}
