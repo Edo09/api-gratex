@@ -1029,6 +1029,31 @@ wa_chk('moverStockFacturaEcf: no mueve en SIN_STOCK ni en EN_VUELO y pregunta ya
     && strpos($s11Mover, "yaMovioDocumento('factura', \$facturaId)") < strpos($s11Mover, '->registrarVenta('));
 
 // ---------------------------------------------------------------------------
+// 12) facturaController: GET /estado en vuelo y filtro pendiente (Task 18).
+// Texto del controlador, como en la seccion 11.
+// ---------------------------------------------------------------------------
+echo "12) facturaController: GET /estado en vuelo, filtro pendiente\n";
+$s12Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php'));
+$s12Const = static fn(string $nombre): ?string
+    => preg_match("/\nconst {$nombre} = '([^']*)';/", $s12Ctl, $m) ? $m[1] : null;
+wa_chk('FACTURA_NOTA_EN_VUELO es la nota de la spec 7.3', $s12Const('FACTURA_NOTA_EN_VUELO')
+    === 'La DGII todavía no ha confirmado este comprobante. No lo emitas de nuevo; si sigue así en unos minutos, '
+    . 'avisa a soporte con el número %s.', $s12Const('FACTURA_NOTA_EN_VUELO'));
+wa_chk('FACTURA_NOTA_ENVIADO_SIN_TRACK es la nota de la spec 7.3', $s12Const('FACTURA_NOTA_ENVIADO_SIN_TRACK')
+    === 'La DGII recibió este comprobante, pero no devolvió su número de seguimiento y por eso no se puede consultar '
+    . 'su estado desde aquí. Si necesitas confirmarlo, avisa a soporte con el número %s.', $s12Const('FACTURA_NOTA_ENVIADO_SIN_TRACK'));
+$s12Consulta = preg_match('/\nfunction handleConsultarEstado\(.*?\n\}\n/s', $s12Ctl, $m) ? $m[0] : '';
+$s12Vuelo = strpos($s12Consulta, 'handleEstadoEnVuelo(');
+$s12Rfce = strpos($s12Consulta, "str_starts_with((string) (\$ecf['estado_dgii']");
+wa_chk('handleConsultarEstado atiende las filas en vuelo antes de la ruta RFCE',
+    $s12Vuelo !== false && $s12Rfce !== false && $s12Vuelo < $s12Rfce);
+$s12Filtro = preg_match('/\nfunction normalizeEstadoFilter\(.*?\n\}\n/s', $s12Ctl, $m) ? $m[0] : '';
+wa_chk("normalizeEstadoFilter acepta 'pendiente'", str_contains($s12Filtro, "return 'pendiente';"), $s12Filtro);
+wa_chk('ninguna respuesta lleva puede_reenviar (decision 7)', !str_contains($s12Ctl, 'puede_reenviar'));
+wa_chk('POST /reenviar sigue respondiendo 501 (decision 7)',
+    (bool) preg_match('/function handleReenviar\(.*?\n\{\n\s*respond\(false, [^\n]*, 501\);\n\}/s', $s12Ctl));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

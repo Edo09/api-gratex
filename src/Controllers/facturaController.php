@@ -24,6 +24,16 @@ const FACTURA_EMISION_FALLO_GENERICO = 'No se pudo emitir la factura en la DGII.
 // Texto fijado en la spec (4.7); el front lo muestra tal cual con "Ver factura".
 const FACTURA_EMISION_INCIERTA = 'No se pudo confirmar si la DGII recibió la factura %s. No la emitas de nuevo: ya quedó guardada. Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.';
 
+// Notas de GET /api/facturas/{id}/estado para una fila sin veredicto que la
+// app no puede consultar (spec 7.3, Release 1). %s = el e-NCF. Decision 7: la
+// app nunca reenvia un e-CF; la nota manda a soporte y pide no emitirlo de nuevo.
+const FACTURA_NOTA_EN_VUELO = 'La DGII todavía no ha confirmado este comprobante. No lo emitas de nuevo; si sigue así en unos minutos, avisa a soporte con el número %s.';
+const FACTURA_NOTA_ENVIADO_SIN_TRACK = 'La DGII recibió este comprobante, pero no devolvió su número de seguimiento y por eso no se puede consultar su estado desde aquí. Si necesitas confirmarlo, avisa a soporte con el número %s.';
+
+// Estados en que la DGII acepto el comprobante: el primer paso a uno de estos
+// desde la consulta de estado mueve el stock (una sola vez).
+const FACTURA_ESTADOS_ACEPTADOS = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO', 'RFCE_ACEPTADO_CONDICIONAL'];
+
 // format=datos (recibo de tirilla como pagina web) sin ancho de papel: la app
 // siempre manda el ancho que tiene guardado el equipo, asi que si falta es la
 // configuracion de la impresora de ese equipo.
@@ -779,6 +789,15 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         return;
     }
 
+    // Sin veredicto y sin forma de consultarlo: en vuelo (PENDIENTE_ENVIO,
+    // ENVIO_INCIERTO) o ENVIADO sin track_id. Nunca 422 para una fila que
+    // existe (spec 7.3). Va antes de la ruta RFCE y de updateECFEstado.
+    if (in_array($ecf['estado_dgii'], EstadosEcf::EN_VUELO, true)
+        || ($ecf['estado_dgii'] === 'ENVIADO' && empty($ecf['track_id']) && !empty($ecf['e_ncf']))) {
+        handleEstadoEnVuelo($facturaId, $ecf);
+        return;
+    }
+
     // E32 RFCE (< 250k): no genera trackId. Se consulta por RNC + e-NCF + codigo
     // de seguridad en el servicio RecepcionFC (ConsultaRFCE), no por ConsultaResultado.
     if (empty($ecf['track_id']) && str_starts_with((string) ($ecf['estado_dgii'] ?? ''), 'RFCE_')) {
@@ -796,7 +815,7 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
         $estadoNuevo = mapEstadoFromConsulta($consulta);
         if ($estadoNuevo !== null) {
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
-            $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
+            $actualizado = $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
             if ($estadoAnterior !== $estadoNuevo) {
                 AuditLogger::log([
@@ -807,6 +826,7 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
                     'description' => 'Transicion de estado e-CF: ' . $estadoAnterior . ' -> ' . $estadoNuevo . '.',
                 ]);
             }
+            moverStockPrimeraAceptacion($facturaModel, $facturaId, $ecf, $estadoAnterior, $estadoNuevo, $actualizado);
 
             // Si el e-CF es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
@@ -875,7 +895,7 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
         $estadoNuevo = $estadoBase !== null ? 'RFCE_' . $estadoBase : null;
         if ($estadoNuevo !== null) {
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
-            $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
+            $actualizado = $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
             if ($estadoAnterior !== $estadoNuevo) {
                 AuditLogger::log([
@@ -886,6 +906,7 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
                     'description' => 'Transicion de estado RFCE: ' . $estadoAnterior . ' -> ' . $estadoNuevo . '.',
                 ]);
             }
+            moverStockPrimeraAceptacion($facturaModel, $facturaId, $ecf, $estadoAnterior, $estadoNuevo, $actualizado);
 
             // Si el RFCE es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
@@ -925,6 +946,56 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
             . ' Se muestra el último estado guardado.';
         echo json_encode(['status' => true, 'data' => $respuestaGuardada]);
     }
+}
+
+/**
+ * GET /estado de una fila sin veredicto que no se puede consultar: en vuelo
+ * (PENDIENTE_ENVIO, ENVIO_INCIERTO) o ENVIADO sin track_id. Release 1 no llama
+ * a la DGII: devuelve el estado guardado y una nota que manda a soporte
+ * (spec 7.3). No ofrece ningun reenvio: la app nunca reenvia (decision 7).
+ */
+function handleEstadoEnVuelo(int $facturaId, array $ecf): void
+{
+    $estado = (string) ($ecf['estado_dgii'] ?? '');
+    $eNcf = (string) ($ecf['e_ncf'] ?? '');
+    $enVuelo = in_array($estado, EstadosEcf::EN_VUELO, true);
+    echo json_encode([
+        'status' => true,
+        'data' => [
+            'factura_id' => $facturaId,
+            'e_ncf' => $eNcf,
+            'tipo_ecf' => (string) ($ecf['tipo_ecf'] ?? ''),
+            'track_id' => ($ecf['track_id'] ?? '') !== '' ? (string) $ecf['track_id'] : null,
+            'estado_dgii' => $estado,
+            'secuencia_utilizada' => normalizeSecuenciaUtilizada($ecf['secuencia_utilizada'] ?? null),
+            'en_vuelo' => $enVuelo,
+            'nota' => sprintf($enVuelo ? FACTURA_NOTA_EN_VUELO : FACTURA_NOTA_ENVIADO_SIN_TRACK, $eNcf),
+        ],
+    ]);
+}
+
+/**
+ * Primera aceptacion vista por la consulta de estado (e-CF o RFCE): mueve el
+ * stock una sola vez (spec 4.7 y 10.5). Solo si el UPDATE de la consulta
+ * cambio la fila y el estado pasa de uno no aceptado a uno aceptado: una fila
+ * vieja que ya estaba ACEPTADO (ventas de antes del inventario) no mueve.
+ * moverStockFacturaEcf revisa ademas yaMovioDocumento.
+ */
+function moverStockPrimeraAceptacion(facturaModel $facturaModel, int $facturaId, array $ecf, string $estadoAnterior, string $estadoNuevo, bool $actualizado): void
+{
+    if (!$actualizado
+        || !in_array($estadoNuevo, FACTURA_ESTADOS_ACEPTADOS, true)
+        || in_array($estadoAnterior, FACTURA_ESTADOS_ACEPTADOS, true)) {
+        return;
+    }
+    $items = $facturaModel->getFacturaItems($facturaId);
+    if ($items === []) {
+        // getFacturaItems tambien da [] si la base fallo, y la proxima consulta
+        // ya no vera la transicion: que quede en el log para un ajuste a mano.
+        error_log(sprintf('[inventario] factura_id=%d %s aceptada sin lineas leidas: no se movio stock',
+            $facturaId, (string) ($ecf['e_ncf'] ?? '')));
+    }
+    moverStockFacturaEcf($facturaId, $items, (string) ($ecf['tipo_ecf'] ?? ''), RequestContext::userId(), $estadoNuevo, 'consulta');
 }
 
 function handleReenviar(int $facturaId, facturaModel $facturaModel): void
@@ -1335,8 +1406,10 @@ function handleECFStats(facturaModel $facturaModel): void
 
 /**
  * Normaliza el filtro `estado` del listado.
- * Acepta 'aprobado' (y la variante 'aprovado'), 'rechazado' y 'todos' en
- * cualquier capitalizacion. 'todos', vacio o ausente => null (sin filtro).
+ * Acepta 'aprobado' (y la variante 'aprovado'), 'rechazado', 'pendiente' y
+ * 'todos' en cualquier capitalizacion. 'pendiente' = sin veredicto de la DGII
+ * (EstadosEcf::SIN_VEREDICTO: en vuelo, ENVIADO, EN_PROCESO y sus RFCE_).
+ * 'todos', vacio o ausente => null (sin filtro).
  * @return string|null|false null = sin filtro, false = valor invalido
  */
 function normalizeEstadoFilter($raw)
@@ -1353,6 +1426,9 @@ function normalizeEstadoFilter($raw)
     }
     if ($estado === 'rechazado') {
         return 'rechazado';
+    }
+    if ($estado === 'pendiente') {
+        return 'pendiente';
     }
     return false;
 }

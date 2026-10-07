@@ -217,5 +217,130 @@ $d = $r['json']['data'] ?? [];
 wa_chk('200 con estado_dgii ACEPTADO_CONDICIONAL', $r['status'] === 200 && ($d['estado_dgii'] ?? null) === 'ACEPTADO_CONDICIONAL', $r);
 wa_chk('un movimiento de inventario', wa_movimientos($pdo, (int) ($d['factura_id'] ?? 0)) === 1);
 
+// ===========================================================================
+// Task 18: GET /estado de filas en vuelo, filtro pendiente y stock al aceptar.
+// ===========================================================================
+
+// Notas de facturaController.php (spec 7.3), letra por letra.
+const T_NOTA_EN_VUELO = 'La DGII todavía no ha confirmado este comprobante. No lo emitas de nuevo; si sigue así en unos minutos, avisa a soporte con el número %s.';
+const T_NOTA_ENVIADO_SIN_TRACK = 'La DGII recibió este comprobante, pero no devolvió su número de seguimiento y por eso no se puede consultar su estado desde aquí. Si necesitas confirmarlo, avisa a soporte con el número %s.';
+
+/** Una fila de facturas sembrada a mano en $estado, con $lineas lineas del producto. */
+function wa_fila_sembrada(PDO $pdo, array $ids, string $eNcf, string $estado, ?string $trackId, int $lineas = 0): int
+{
+    $pdo->prepare(
+        "INSERT INTO facturas (no_factura, date, client_id, client_name, total, tipo_pago, tipo_ecf, e_ncf, track_id,
+                               estado_dgii, codigo_seguridad, fecha_emision_dgii, ambiente_dgii)
+         VALUES (:nf, NOW(), :cid, 'WA cliente', 1180.00, 1, :tipo, :encf, :track, :estado, 'ABC123', NOW(), 'certecf')"
+    )->execute([':nf' => $eNcf, ':cid' => $ids['client_id'], ':tipo' => substr($eNcf, 1, 2), ':encf' => $eNcf,
+        ':track' => $trackId, ':estado' => $estado]);
+    $id = (int) $pdo->lastInsertId();
+    $item = $pdo->prepare(
+        "INSERT INTO factura_items (factura_id, product_id, description, amount, quantity, subtotal, itbis_amount)
+         VALUES (:f, :p, 'WA producto', 1000.0000, 1.000, 1000.00, 180.00)"
+    );
+    for ($i = 0; $i < $lineas; $i++) {
+        $item->execute([':f' => $id, ':p' => $ids['product_id']]);
+    }
+    return $id;
+}
+
+echo "C1) GET /estado de una factura en vuelo\n";
+$ids = wa_reiniciar($pdo, $srv, 'cuelga');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$id = (int) ($r['json']['data']['factura_id'] ?? 0);
+$eNcf = (string) ($r['json']['data']['e_ncf'] ?? '');
+wa_mock_log($srv['mock'], true);   // espera a que el mock termine de dormir y vacia el log
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+$d = $r['json']['data'] ?? [];
+wa_chk('200 con status true', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
+wa_chk('data trae exactamente las claves de la spec 7.3 (Release 1)', wa_claves($d)
+    === ['e_ncf', 'en_vuelo', 'estado_dgii', 'factura_id', 'nota', 'secuencia_utilizada', 'tipo_ecf', 'track_id'], wa_claves($d));
+wa_chk('ENVIO_INCIERTO y en_vuelo, sin track_id ni secuencia_utilizada',
+    ($d['factura_id'] ?? null) === $id && ($d['e_ncf'] ?? null) === $eNcf && ($d['tipo_ecf'] ?? null) === '31'
+    && ($d['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && ($d['en_vuelo'] ?? null) === true
+    && array_key_exists('track_id', $d) && $d['track_id'] === null
+    && array_key_exists('secuencia_utilizada', $d) && $d['secuencia_utilizada'] === null, $d);
+wa_chk('nota en vuelo con el e-NCF', ($d['nota'] ?? null) === sprintf(T_NOTA_EN_VUELO, $eNcf), $d['nota'] ?? null);
+wa_chk('sin campo de reenvio (decision 7)', !array_key_exists('puede_reenviar', $d), $d);
+wa_chk('no llamo a la DGII', wa_mock_log($srv['mock']) === []);
+
+echo "C2) GET /estado de un ENVIADO sin track_id\n";
+$ids = wa_reiniciar($pdo, $srv);
+$id = wa_fila_sembrada($pdo, $ids, 'E310000000901', 'ENVIADO', null);
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+$d = $r['json']['data'] ?? [];
+wa_chk('200, ENVIADO con en_vuelo false',
+    $r['status'] === 200 && ($d['estado_dgii'] ?? null) === 'ENVIADO' && ($d['en_vuelo'] ?? null) === false, $r);
+wa_chk('nota de ENVIADO sin numero de seguimiento', ($d['nota'] ?? null) === sprintf(T_NOTA_ENVIADO_SIN_TRACK, 'E310000000901'), $d);
+
+echo "C3) GET /api/facturas?estado=pendiente\n";
+$ids = wa_reiniciar($pdo, $srv, 'cuelga');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$eNcfVuelo = (string) ($r['json']['data']['e_ncf'] ?? '');
+wa_mock_modo($srv['mock'], 'acepta');   // espera a que termine el cuelga
+wa_fila_sembrada($pdo, $ids, 'E310000000901', 'ENVIADO', null);
+wa_fila_sembrada($pdo, $ids, 'E310000000902', 'EN_PROCESO', 'track-E310000000902');
+wa_fila_sembrada($pdo, $ids, 'E320000000903', 'RFCE_ENVIADO', null);
+wa_fila_sembrada($pdo, $ids, 'E310000000904', 'ACEPTADO', 'track-E310000000904');
+wa_fila_sembrada($pdo, $ids, 'E310000000905', 'RECHAZADO', 'track-E310000000905');
+$r = wa_get($srv, '/api/facturas?estado=pendiente&pageSize=50');
+$lista = array_column($r['json']['data'] ?? [], 'e_ncf');
+sort($lista);
+$esperada = [$eNcfVuelo, 'E310000000901', 'E310000000902', 'E320000000903'];
+sort($esperada);
+wa_chk('200', $r['status'] === 200, $r);
+wa_chk('lista la fila en vuelo, ENVIADO, EN_PROCESO y RFCE_ENVIADO; no ACEPTADO ni RECHAZADO', $lista === $esperada, $lista);
+wa_chk('pagination.total cuenta las mismas 4', ($r['json']['pagination']['total'] ?? null) === 4, $r['json']['pagination'] ?? null);
+$r = wa_get($srv, '/api/facturas?estado=foo');
+wa_chk('estado=foo sigue respondiendo 422', $r['status'] === 422, $r);
+
+echo "C4) Stock al aceptar por la consulta (e-CF)\n";
+$ids = wa_reiniciar($pdo, $srv, 'cuelga');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id']), wa_linea(500, 1, $ids['product_id'])]));
+$id = (int) ($r['json']['data']['factura_id'] ?? 0);
+$eNcf = (string) ($r['json']['data']['e_ncf'] ?? '');
+wa_mock_modo($srv['mock'], 'acepta');
+// Caso 1 del procedimiento 10.2: soporte le pone el trackId que da la DGII.
+$st = $pdo->prepare("UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = :T WHERE id = :id
+                     AND (estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO') OR (estado_dgii = 'ENVIADO' AND track_id IS NULL))");
+$st->execute([':T' => 'track-' . $eNcf, ':id' => $id]);
+wa_chk('el UPDATE del caso 1 de 10.2 toma la fila, todavia sin movimientos',
+    $st->rowCount() === 1 && wa_movimientos($pdo, $id) === 0, [$st->rowCount(), wa_movimientos($pdo, $id)]);
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('GET /estado: ACEPTADO', ($r['json']['data']['estado_dgii'] ?? null) === 'ACEPTADO', $r);
+wa_chk('el stock se movio, una vez por linea', wa_movimientos($pdo, $id) === 2, wa_movimientos($pdo, $id));
+wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('un segundo GET no mueve mas', wa_movimientos($pdo, $id) === 2, wa_movimientos($pdo, $id));
+
+echo "C5) Stock al aceptar por la consulta (RFCE)\n";
+$ids = wa_reiniciar($pdo, $srv, 'cuelga');
+$r = wa_emitir($srv, wa_factura('32', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$id = (int) ($r['json']['data']['factura_id'] ?? 0);
+wa_mock_modo($srv['mock'], 'acepta');
+// Caso RFCE del procedimiento 10.2.
+$st = $pdo->prepare("UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO')");
+$st->execute([':id' => $id]);
+wa_chk('el UPDATE del caso RFCE de 10.2 toma la fila, todavia sin movimientos',
+    $st->rowCount() === 1 && wa_movimientos($pdo, $id) === 0, [$st->rowCount(), wa_movimientos($pdo, $id)]);
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('GET /estado: RFCE_ACEPTADO', ($r['json']['data']['estado_dgii'] ?? null) === 'RFCE_ACEPTADO', $r);
+wa_chk('el stock se movio una vez', wa_movimientos($pdo, $id) === 1, wa_movimientos($pdo, $id));
+wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('un segundo GET no mueve mas', wa_movimientos($pdo, $id) === 1, wa_movimientos($pdo, $id));
+
+echo "C6) Una venta vieja ya ACEPTADO sin movimientos no mueve al consultarla\n";
+$ids = wa_reiniciar($pdo, $srv);
+$id = wa_fila_sembrada($pdo, $ids, 'E310000000906', 'ACEPTADO', 'track-E310000000906', 1);
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('GET /estado: sigue ACEPTADO', $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'ACEPTADO', $r);
+wa_chk('sin transicion no hay movimiento', wa_movimientos($pdo, $id) === 0, wa_movimientos($pdo, $id));
+
+echo "C7) NO_ENCONTRADO que la DGII acepta despues: mueve una vez\n";
+$id = wa_fila_sembrada($pdo, $ids, 'E310000000907', 'NO_ENCONTRADO', 'track-E310000000907', 1);
+$r = wa_get($srv, "/api/facturas/{$id}/estado");
+wa_chk('GET /estado: ACEPTADO', ($r['json']['data']['estado_dgii'] ?? null) === 'ACEPTADO', $r);
+wa_chk('el stock se movio una vez', wa_movimientos($pdo, $id) === 1, wa_movimientos($pdo, $id));
+
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();
