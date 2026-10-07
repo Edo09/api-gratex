@@ -571,6 +571,22 @@ wa_chk('R11: sin fila', $r['total_filas'] === 0, $r['filas']);
 wa_chk('R11: contador sin cambio (la devolucion no quedo dentro de la transaccion)', $r['delta'] === 0, $r['delta']);
 chkComun('R11', $r);
 
+// R11b el gancho COMMITEA su fila y DESPUES lanza: la fila es duena del numero
+// aunque el gancho no haya devuelto nada (lo decide la base), asi que el numero
+// NO vuelve y la excepcion sale tal cual.
+$falla = new RuntimeException('falla despues del commit');
+$r = correr($pdo, $ids, ['trucos' => ['reservar' => function (array $ctx) use ($pdo, $falla) {
+    insertarSinCommit($pdo, $ctx);
+    $pdo->commit();
+    throw $falla;
+}]]);
+wa_chk('R11b: sale la misma excepcion', $r['err'] === $falla, descErr($r['err']));
+wa_chk('R11b: contador +1 (la fila es duena del numero)', $r['delta'] === 1, $r['delta']);
+wa_chk('R11b: la fila sigue en PENDIENTE_ENVIO', count($r['filas']) === 1 && ($r['filas'][0]['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO', $r['filas']);
+wa_chk('R11b: no se intento devolver el numero', $r['ncf']->rollbacks === [], $r['ncf']->rollbacks);
+wa_chk("R11b: log 'fila reservada sin enviar'", str_contains($r['log'], "[ECF e-NCF={$r['e_ncf']} factura_id=") && str_contains($r['log'], '] fila reservada sin enviar'));
+chkComun('R11b', $r);
+
 // R12 = R3 con un rollback del contador que no coincide: queda en la bitacora.
 $r = correr($pdo, $ids, ['rollback_falso' => true, 'trucos' => ['reservar' => function () {
     throw new RuntimeException('falla de prueba en reservar');

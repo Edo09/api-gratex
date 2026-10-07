@@ -131,12 +131,13 @@ class ECFEmissionService
 
     /**
      * La reserva de la fila COMMITEADA en PENDIENTE_ENVIO de este e-NCF en este
-     * ambiente (el que guarda la reserva), o null si no hay. Es lo que decide
-     * quien es duena del numero cuando el retorno del gancho no es de fiar: la
-     * base manda, no lo que el gancho devolvio. Con fila, el catch no devuelve
-     * el numero a la secuencia; sin ella, si. Si la consulta falla no se sabe:
-     * se asume duena (factura_id 0), porque quemar un numero es mejor que
-     * repartirlo dos veces.
+     * ambiente (el que guarda la reserva), o null si no hay. Es el unico lugar
+     * que decide quien es duena del numero cuando el gancho no cumplio: la base
+     * manda, no lo que el gancho devolvio ni si lanzo despues de commitear. La
+     * llama el catch previo al envio, con la transaccion colgada ya cerrada.
+     * Con fila, el catch no devuelve el numero a la secuencia; sin ella, si. Si
+     * la consulta falla no se sabe: se asume duena (factura_id 0), porque
+     * quemar un numero es mejor que repartirlo dos veces.
      * @return array{factura_id:int, e_ncf:string, desde:string}|null
      */
     private function reservaEnLaBase(string $eNcf, string $ambiente, string $desde): ?array
@@ -534,19 +535,11 @@ class ECFEmissionService
                 ];
                 $reserva = $persistencia('reservar', $ctxReservar);
                 $idReserva = is_array($reserva) ? (int) ($reserva['factura_id'] ?? 0) : 0;
-                // Una transaccion que el gancho dejo abierta se cierra ANTES de mirar
-                // la base: lo que contiene no esta commiteado y no es de nadie.
-                $conexion = Database::getInstance()->getConnection();
-                $colgada = $conexion->inTransaction();
-                if ($colgada) {
-                    $conexion->rollBack();
-                }
+                $colgada = Database::getInstance()->getConnection()->inTransaction();
                 if ($idReserva <= 0 || $colgada) {
-                    // El retorno del gancho no dice si una fila es duena del numero
-                    // (pudo commitear y devolver basura, o dejar la reserva sin
-                    // commitear): lo decide la base, por e-NCF y ambiente. Con fila
-                    // el catch no devuelve el numero; sin ella, si.
-                    $reserva = $this->reservaEnLaBase($eNcf, (string) $ambiente, $ctxReservar['desde']);
+                    // Ese retorno no dice quien es duena del numero: el catch cierra la
+                    // transaccion que haya quedado abierta y lo decide la base.
+                    $reserva = null;
                     throw new RuntimeException(
                         $idReserva <= 0 ? 'persistencia no devolvio factura_id' : 'persistencia dejo una transaccion abierta'
                     );
@@ -566,6 +559,13 @@ class ECFEmissionService
                 } catch (Throwable $r) {
                     error_log('[ECF e-NCF=' . $eNcf . '] pre-envio: rollBack fallo: ' . $r->getMessage());
                 }
+            }
+            if ($reserva === null && $ctxReservar !== null && $dispensamosSecuencia && !($e instanceof EcfNumeroOcupadoException)) {
+                // Se llamo al gancho y el numero esta a punto de volver a la secuencia
+                // (lanzo, devolvio basura o dejo una transaccion abierta): quien es
+                // duena del numero lo decide la base, no el gancho. Una fila
+                // commiteada del gancho (aunque lanzara despues de commitear) lo es.
+                $reserva = $this->reservaEnLaBase($eNcf, $ctxReservar['ambiente'], $ctxReservar['desde']);
             }
             if ($reserva !== null) {
                 // La fila ya esta commiteada y es duena del numero: no se devuelve.
