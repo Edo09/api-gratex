@@ -1687,15 +1687,30 @@ class facturaModel
         try {
             $ambiente = $this->resolveActiveAmbiente();
             $ambFilter = $ambiente !== null ? "AND ambiente_dgii = '{$ambiente}'" : '';
+            // Filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO): la DGII aun no
+            // dio veredicto, asi que no son dinero ni ventas. Se cuentan como
+            // filas (total_ecf, por_tipo.total, por_estado, total_emitidos)
+            // pero no suman en ningun monto ni serie de ventas.
+            $enVuelo = EstadosEcf::sql(EstadosEcf::EN_VUELO);
+            // Los dos criterios que repiten varias consultas, armados una sola vez.
+            // $montoSinVuelo: SUM(total) sin las filas en vuelo (resumen.monto_total
+            // y por_tipo.monto_total). $estadoCuenta: el estado de una fila que si
+            // cuenta (resumen.monto_neto y, con el AND, $notRechazado). "IS NULL OR
+            // (...)": NULL NOT IN (...) da NULL y dejaria fuera una fila sin estado
+            // que hoy si cuenta; en el CASE de $montoSinVuelo el NULL cae en ELSE.
+            $montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) THEN 0 ELSE total END), 0)";
+            $estadoCuenta = "estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo}))";
 
+            // monto_total: la suma de los e-CF, sin las filas en vuelo (la
+            // nota de credito suma y los rechazados tambien, como siempre).
             // monto_neto: lo que de verdad se emitio. La nota de credito (E34)
-            // resta y los rechazados no cuentan (cubre RECHAZADO,
-            // RECHAZADO_ARCHIVADO y RFCE_RECHAZADO, como $notRechazado mas
-            // abajo). monto_total sigue siendo la suma cruda.
+            // resta; no cuentan los rechazados (RECHAZADO, RECHAZADO_ARCHIVADO,
+            // RFCE_RECHAZADO, el mismo criterio de $notRechazado mas abajo) ni
+            // las filas en vuelo.
             $resumen = $this->conexion->query(
                 "SELECT COUNT(*) as total_ecf,
-                        COALESCE(SUM(total), 0) as monto_total,
-                        COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%'
+                        {$montoSinVuelo} as monto_total,
+                        COALESCE(SUM(CASE WHEN {$estadoCuenta}
                                           THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END
                                           ELSE 0 END), 0) as monto_neto,
                         COUNT(DISTINCT tipo_ecf) as tipos_distintos,
@@ -1707,7 +1722,7 @@ class facturaModel
             $porTipo = $this->conexion->query(
                 "SELECT tipo_ecf,
                         COUNT(*) as total,
-                        COALESCE(SUM(total), 0) as monto_total,
+                        {$montoSinVuelo} as monto_total,
                         SUM(CASE WHEN estado_dgii = 'ACEPTADO' THEN 1 ELSE 0 END) as aceptados,
                         SUM(CASE WHEN estado_dgii LIKE 'RFCE_%' THEN 1 ELSE 0 END) as rfce,
                         SUM(CASE WHEN estado_dgii LIKE '%RECHAZADO%' THEN 1 ELSE 0 END) as rechazados,
@@ -1726,10 +1741,11 @@ class facturaModel
             )->fetchAll(PDO::FETCH_ASSOC);
 
             // e-CF emitidos por mes, de todos los tipos (compras E41/E43/E47
-            // incluidas). Sin los rechazados: cubre RECHAZADO, RECHAZADO_ARCHIVADO
-            // y RFCE_RECHAZADO; conserva NULL/PENDIENTE. NO son ventas: para eso
-            // estan ventas_por_mes / ventas_por_dia.
-            $notRechazado = "AND (estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%')";
+            // incluidas). Sin los rechazados (RECHAZADO, RECHAZADO_ARCHIVADO,
+            // RFCE_RECHAZADO) ni las filas en vuelo; conserva NULL/PENDIENTE.
+            // NO son ventas: para eso estan ventas_por_mes / ventas_por_dia, que
+            // usan este mismo filtro por $esVenta.
+            $notRechazado = "AND ({$estadoCuenta})";
             $porMes = $this->conexion->query(
                 "SELECT DATE_FORMAT(fecha_emision_dgii, '%Y-%m') as mes,
                         COUNT(*) as total,

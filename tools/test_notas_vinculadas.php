@@ -336,10 +336,14 @@ $cs = new ConexionStats();
 $conModelo($cs)->getECFStats();
 $sqlResumen = preg_replace('/\s+/', ' ', $cs->consultas[0] ?? '');
 $chk('stats: el resumen es la primera consulta', str_contains($sqlResumen, 'as total_ecf'), $sqlResumen);
-$chk('stats: monto_total sigue siendo la suma cruda', str_contains($sqlResumen, 'COALESCE(SUM(total), 0) as monto_total'), $sqlResumen);
-$chk('stats: monto_neto resta la E34 y deja fuera los rechazados',
+$chk('stats: monto_total deja fuera las filas en vuelo',
     str_contains($sqlResumen,
-        "COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR estado_dgii NOT LIKE '%RECHAZADO%' "
+        "COALESCE(SUM(CASE WHEN estado_dgii IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO') THEN 0 ELSE total END), 0) as monto_total"),
+    $sqlResumen);
+$chk('stats: monto_neto resta la E34 y deja fuera los rechazados y las filas en vuelo',
+    str_contains($sqlResumen,
+        "COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' "
+        . "AND estado_dgii NOT IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO')) "
         . "THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END ELSE 0 END), 0) as monto_neto"),
     $sqlResumen);
 $chk('stats: monto_neto sobre las mismas filas del resumen (e-CF del ambiente)',

@@ -832,6 +832,142 @@ if (!method_exists(inventoryModel::class, 'yaMovioDocumento')) {
 }
 
 // ---------------------------------------------------------------------------
+// 10) Stats y reporte de ventas sin filas en vuelo (Task 16). getECFStats pasa
+// su conexion a ncfModel::sqlSecuenciaActual(PDO ...), asi que la falsa es un
+// PDO (sin conectar) que anota CADA consulta y devuelve sentencias vacias.
+// ---------------------------------------------------------------------------
+echo "\n== 10) Stats y reporte de ventas sin filas en vuelo ==\n";
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EstadosEcf.php';
+require_once __DIR__ . '/../src/Models/facturaModel.php';
+require_once __DIR__ . '/../src/Models/ReporteVentasModel.php';
+
+final class WaS10Sentencia extends PDOStatement
+{
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        return false;
+    }
+
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        return [];
+    }
+}
+
+final class WaS10Grabadora extends PDO
+{
+    public array $consultas = [];
+
+    public function __construct()
+    {
+        // Sin parent::__construct: nunca abre una conexion.
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        $this->consultas[] = preg_replace('/\s+/', ' ', $query);
+        return new WaS10Sentencia();
+    }
+
+    public function quote(string $string, int $type = PDO::PARAM_STR): string|false
+    {
+        return "'" . str_replace(["\\", "'"], ["\\\\", "\\'"], $string) . "'";
+    }
+}
+
+putenv('MULTI_TENANT_ENABLED=false');
+putenv('DGII_ECF_ENVIRONMENT=ecf');
+$s10Ref = new ReflectionClass(facturaModel::class);
+$s10Modelo = $s10Ref->newInstanceWithoutConstructor();
+$s10Con = new WaS10Grabadora();
+$s10Ref->getProperty('conexion')->setValue($s10Modelo, $s10Con);
+$s10Modelo->getECFStats();
+$s10Sql = static function (string $marca) use ($s10Con): string {
+    foreach ($s10Con->consultas as $q) {
+        if (str_contains($q, $marca)) {
+            return $q;
+        }
+    }
+    return '';
+};
+$enVuelo = "'PENDIENTE_ENVIO', 'ENVIO_INCIERTO'";
+$montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) THEN 0 ELSE total END), 0) as monto_total";
+$notRechazado = "AND (estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo})))";
+
+wa_chk('stats: corre las 7 consultas', count($s10Con->consultas) === 7, $s10Con->consultas);
+$q = $s10Sql('as total_ecf');
+wa_chk('resumen: monto_total deja fuera las filas en vuelo', str_contains($q, $montoSinVuelo), $q);
+wa_chk('resumen: total_ecf sigue contando todas las filas', str_contains($q, 'SELECT COUNT(*) as total_ecf,'), $q);
+wa_chk('resumen: monto_neto deja fuera rechazados y filas en vuelo (NULL sigue contando)', str_contains($q,
+    "COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo})) "
+    . "THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END ELSE 0 END), 0) as monto_neto"), $q);
+$q = $s10Sql('GROUP BY tipo_ecf ORDER BY tipo_ecf');
+wa_chk('por_tipo: total sigue siendo COUNT(*) y monto_total sin filas en vuelo',
+    str_contains($q, 'COUNT(*) as total, ' . $montoSinVuelo), $q);
+foreach ([
+    'por_mes' => "DATE_FORMAT(fecha_emision_dgii, '%Y-%m') as mes",
+    'ventas_por_mes' => "DATE_FORMAT(date, '%Y-%m') as mes",
+    'ventas_por_dia' => "DATE_FORMAT(date, '%Y-%m-%d') as dia",
+] as $serie => $marca) {
+    $q = $s10Sql($marca);
+    wa_chk("{$serie}: sin rechazados ni filas en vuelo", str_contains($q, $notRechazado), $q);
+}
+$q = $s10Sql("COALESCE(estado_dgii, 'PENDIENTE') as estado");
+wa_chk('por_estado: igual que antes (cada estado con su cubeta)', $q ===
+    "SELECT COALESCE(estado_dgii, 'PENDIENTE') as estado, COUNT(*) as total, COALESCE(SUM(total), 0) as monto_total "
+    . "FROM facturas WHERE tipo_ecf IS NOT NULL AND ambiente_dgii = 'ecf' GROUP BY estado_dgii ORDER BY total DESC", $q);
+$q = $s10Sql('FROM ncf_sequences ns');
+wa_chk('secuencias: total_emitidos sigue contando filas, en vuelo incluidas',
+    str_contains($q, "SELECT CONCAT('E', tipo_ecf) as type, COUNT(*) as total_emitidos FROM facturas "
+        . "WHERE tipo_ecf IS NOT NULL AND ambiente_dgii = 'ecf' GROUP BY tipo_ecf") && !str_contains($q, 'PENDIENTE_ENVIO'), $q);
+
+// ReporteVentasModel::fetchDocumentos: la exclusion va en el SQL, con los
+// mismos parametros ? de antes.
+final class WaS10SentenciaReporte
+{
+    public function __construct(private WaS10Reporte $c, private string $sql)
+    {
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        $this->c->sql = $this->sql;
+        $this->c->params = $params ?? [];
+        return true;
+    }
+
+    public function fetchAll(int $modo = PDO::FETCH_DEFAULT): array
+    {
+        return [];
+    }
+}
+
+final class WaS10Reporte
+{
+    public string $sql = '';
+    public array $params = [];
+
+    public function prepare(string $sql): WaS10SentenciaReporte
+    {
+        return new WaS10SentenciaReporte($this, $sql);
+    }
+}
+
+$s10RefRep = new ReflectionClass(ReporteVentasModel::class);
+$s10Rep = $s10RefRep->newInstanceWithoutConstructor();
+$s10ConRep = new WaS10Reporte();
+$s10RefRep->getProperty('conexion')->setValue($s10Rep, $s10ConRep);
+$s10RefRep->getProperty('usuarios')->setValue($s10Rep, []);   // sin la consulta de usuarios
+(new ReflectionMethod(ReporteVentasModel::class, 'fetchDocumentos'))->invoke($s10Rep, '2026-10-01', '2026-10-31');
+$q = preg_replace('/\s+/', ' ', $s10ConRep->sql);
+wa_chk('reporte de ventas: excluye las filas en vuelo',
+    str_contains($q, "AND f.estado_dgii NOT LIKE '%RECHAZADO%' AND f.estado_dgii NOT IN ({$enVuelo})"), $q);
+wa_chk('reporte de ventas: un ? por parametro', substr_count($q, '?') === count($s10ConRep->params), [$q, $s10ConRep->params]);
+wa_chk('reporte de ventas: los mismos parametros de antes', $s10ConRep->params === [
+    '2026-10-01 00:00:00', '2026-11-01 00:00:00', '31', '32', '44', '45', '46', '33', '34', 'ecf',
+], $s10ConRep->params);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
