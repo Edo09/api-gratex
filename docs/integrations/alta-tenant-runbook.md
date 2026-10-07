@@ -163,6 +163,11 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
    Crear una cotización de prueba, abrir su PDF (logo, datos y pie del tenant; con un
    formato propio, sin la cuenta bancaria de Gratex) y borrarla. Pasos listos en
    `tests/test_cotizaciones_ferreteria.http`.
+5. **Migraciones:** en phpMyAdmin, entra a la base nueva y corre
+   `tools/verificar_migraciones_tenant.sql`. La columna `base` debe mostrar la base
+   del tenant (si dice `information_schema` u otra, selecciónala y córrelo otra vez)
+   y **todas** las filas deben decir `APLICADA`. La 027 y la 028 son la compuerta de
+   la emisión e-CF: sin ellas no se emite.
 
 ---
 
@@ -205,6 +210,7 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | Clientes de prueba DGII duplicados | El schema se aplicó dos veces sobre la misma DB | `DELETE FROM clients WHERE rnc IN ('131880681','533445861');` y dejar una corrida limpia |
 | La cotización sale con la cuenta bancaria y los textos de Gratex | El tenant sigue en `cotizacion_formato = 'gratex'` (el default) | Activar su formato (Fase 4) o quitar el módulo `cotizaciones` de sus roles |
 | Al guardar una cotización: "La pantalla de cotizaciones está desactualizada…" (`409`) | Se cambió `cotizacion_formato` con la pantalla abierta, o el navegador tiene el front de antes | Recargar la página |
+| Toda emisión responde "No se pudo asignar el número de comprobante. Inténtalo de nuevo." | Falta la migración 027 en la base del tenant: la clave vieja `uk_e_ncf` choca con el mismo número de otro ambiente y cada intento se salta un número | Correr `tools/verificar_migraciones_tenant.sql` en esa base y aplicar `db/migrations/027_e_ncf_unico_por_ambiente.sql` (se puede repetir) |
 
 ---
 

@@ -1054,6 +1054,42 @@ wa_chk('POST /reenviar sigue respondiendo 501 (decision 7)',
     (bool) preg_match('/function handleReenviar\(.*?\n\{\n\s*respond\(false, [^\n]*, 501\);\n\}/s', $s12Ctl));
 
 // ---------------------------------------------------------------------------
+// 13) Documentacion del write-ahead (Task 19): anclas de texto en los docs.
+// ---------------------------------------------------------------------------
+echo "\n== 13) Documentacion del write-ahead ==\n";
+$s13Leer = static fn(string $ruta): string
+    => str_replace("\r\n", "\n", (string) @file_get_contents(dirname(__DIR__) . '/' . $ruta));
+$s13Claude = $s13Leer('CLAUDE.md');
+$s13Criticos = preg_match('/\n## Critical facts\n(.*?)\n## /s', $s13Claude, $m) ? $m[1] : '';
+wa_chk('CLAUDE.md: "migraciones primero" con el verificador, dentro de Critical facts',
+    str_contains($s13Criticos, 'tools/verificar_migraciones_tenant.sql'), $s13Criticos);
+wa_chk('CLAUDE.md: produccion corre PHP 8.3', str_contains($s13Claude, 'PHP 8.3'));
+$s13Runbook = $s13Leer('docs/integrations/alta-tenant-runbook.md');
+wa_chk('runbook: Fase 5 corre el verificador de migraciones',
+    (bool) preg_match('/## Fase 5.*verificar_migraciones_tenant\.sql.*## Fase 6/s', $s13Runbook));
+wa_chk('runbook: troubleshooting de la 027', str_contains($s13Runbook, 'No se pudo asignar el número de comprobante'));
+$s13Dgii = $s13Leer('docs/integrations/dgii-ecf.md');
+wa_chk('dgii-ecf.md: listado de las filas sin confirmar', str_contains($s13Dgii, "estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO')"));
+wa_chk('dgii-ecf.md: devolucion del numero con su condicion',
+    str_contains($s13Dgii, 'current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor'));
+wa_chk('dgii-ecf.md: nunca un DELETE', str_contains($s13Dgii, 'Nunca un `DELETE`'));
+$s13Api = $s13Leer('docs/api/facturas.md');
+wa_chk('facturas.md: filtro pendiente, en_vuelo y el 502 con la factura guardada',
+    str_contains($s13Api, '`pendiente`') && str_contains($s13Api, 'en_vuelo') && str_contains($s13Api, 'ya quedó guardada'));
+wa_chk('facturas.md: ya no describe el 500 "se envió pero no se pudo guardar"',
+    !str_contains($s13Api, '`500` la DGII recibió el e-CF pero no se pudo guardar'));
+$s13Schema = $s13Leer('docs/database/schema.md');
+wa_chk('schema.md: uk_e_ncf_amb y no el indice viejo',
+    str_contains($s13Schema, 'uk_e_ncf_amb') && !str_contains($s13Schema, 'UNIQUE (`uk_e_ncf`)'));
+wa_chk('auditoria.md: EMIT del envio incierto con fase_fallida', str_contains($s13Leer('docs/modules/auditoria.md'), 'fase_fallida'));
+wa_chk('reporte-ventas.md: las filas en vuelo no son ventas', str_contains($s13Leer('docs/modules/reporte-ventas.md'), 'ENVIO_INCIERTO'));
+wa_chk('inventario.md: una venta e-CF mueve stock fuera de SIN_STOCK', str_contains($s13Leer('docs/modules/inventario.md'), 'SIN_STOCK'));
+wa_chk('architecture.md: ECFEmissionService reserva la fila antes de enviar',
+    str_contains($s13Leer('docs/architecture.md'), 'build → firmar → reservar fila → enviar → confirmar; hook `$persistencia`'));
+wa_chk('nada en src, docs ni CLAUDE.md nombra saveFacturaConECF',
+    wa_grep(['src', 'docs', 'CLAUDE.md'], 'saveFacturaConECF') === [], wa_grep(['src', 'docs', 'CLAUDE.md'], 'saveFacturaConECF'));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

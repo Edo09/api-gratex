@@ -214,7 +214,7 @@ aplica permisos por **rol del usuario**, con roles **per-tenant** en el master. 
 
 | Archivo | Responsabilidad |
 |---|---|
-| `ECFEmissionService.php` | orquesta emisión e-CF (build → firmar → enviar); flag `integration` |
+| `ECFEmissionService.php` | orquesta emisión e-CF (build → firmar → reservar fila → enviar → confirmar; hook `$persistencia`); flag `integration` |
 | `ECFXmlBuilder.php` | construye XML e-CF (E31–E47), type-aware (`ID_DOC_CONFIG`/`TOTALES_CONFIG`) |
 | `RFCEXmlBuilder.php` | construye RFCE (resumen E32 < 250k) |
 | `ACECFXmlBuilder.php` / `ACECFEmissionService.php` | construye/envía ACECF (aprobación comercial saliente) |

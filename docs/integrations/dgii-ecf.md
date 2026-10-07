@@ -139,6 +139,64 @@ servicios no existen en `certecf` (responden 404): solo `ecf` y `testecf`. Caso 
 motivó: E34 aceptado el 2026-10-05 cuyo INSERT falló por la clave `uk_e_ncf` vieja
 (migración 027 sin aplicar).
 
+### Resolver una factura sin confirmar (write-ahead)
+
+`POST /api/facturas` guarda la fila **antes** de enviar el e-CF a la DGII. Si el
+envío o la confirmación fallan, la factura queda en `ENVIO_INCIERTO` (o en
+`PENDIENTE_ENVIO` si el proceso murió) con su e-NCF, el XML firmado, el
+`codigo_seguridad` y las líneas. La app nunca la reenvía: la resuelve soporte. El
+procedimiento es un solo `UPDATE` que devuelve la fila al camino normal de
+`GET /api/facturas/{id}/estado`, que ya aplica el veredicto, escribe
+`STATUS_CHANGE`, devuelve la secuencia cuando la DGII no la usó y mueve el
+inventario una sola vez.
+
+1. **Listar** en la base del tenant:
+
+   ```sql
+   SELECT id, e_ncf, tipo_ecf, estado_dgii, track_id, ambiente_dgii, codigo_seguridad, respuesta_dgii
+   FROM facturas
+   WHERE estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO')
+      OR (estado_dgii = 'ENVIADO' AND track_id IS NULL AND e_ncf IS NOT NULL);
+   ```
+
+   - No toques una fila cuyo `respuesta_dgii.desde` tenga menos de 5 minutos: su
+     petición puede seguir corriendo.
+   - `respuesta_dgii` guarda la meta del envío (JSON, sin XML): `flujo` (`ECF` o
+     `RFCE`), `dispensado`, `rango_id` y `secuencia_valor` (para devolver el número)
+     y, en `ENVIO_INCIERTO`, también `fase_fallida`, `error` y `resultado_parcial`.
+   - **Hora:** el servidor (PHP y MySQL) corre en UTC-5, una hora detrás de la DGII
+     (UTC-4). `desde` y `fecha_emision_dgii` están en hora del servidor; el portal de
+     la DGII muestra la misma recepción una hora más tarde.
+
+2. **Preguntar a la DGII:**
+
+   ```bash
+   php tools/consultar_ecf_dgii.php --tenant-id=<id> --encf=<e_ncf> --codigo-seguridad=<codigo_seguridad>
+   ```
+
+   (o el wrapper web de la sección anterior). `--codigo-seguridad` evita el 400
+   "Cod_Seguridad" de ConsultaEstado. Cuando `respuesta_dgii.fase_fallida` es
+   `confirmar`, la DGII ya había respondido y `resultado_parcial` trae su respuesta
+   (`track_id`, `estado`): no hace falta consultar. Si la fila quedó en
+   `PENDIENTE_ENVIO` porque la base se cayó, esa respuesta está en la auditoría
+   (`EMIT` con `success=0`, `new_values.resultado_parcial`) y en la línea
+   `ENVIO_INCIERTO ... track_id=...` del `error_log`.
+
+3. **Aplicar un solo caso** y abrir la factura en la app (o
+   `GET /api/facturas/{id}/estado`), que hace el resto:
+
+   | Caso | SQL |
+   |---|---|
+   | e-CF, la DGII tiene un trackId `T` | `UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = :T WHERE id = :id AND (estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO') OR (estado_dgii = 'ENVIADO' AND track_id IS NULL));` |
+   | RFCE (`respuesta_dgii.flujo = 'RFCE'`) | `UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` La consulta RFCE usa el `codigo_seguridad` guardado. |
+   | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y después, con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
+   | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y la misma devolución de `ncf_sequences`. El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
+   | `certecf` (TrackIds responde 404 allí) | Decidir entre los casos de arriba con el portal de certificación de la DGII. Un error en `certecf` no tiene efecto fiscal. |
+
+   - Con `respuesta_dgii.dispensado = false` (el e-NCF vino en el payload) no hay
+     número que devolver: solo el `UPDATE` de `facturas`.
+   - Nunca un `DELETE`: la fila es la prueba de que ese número se usó.
+
 ---
 
 ## Bugs críticos resueltos en certificación

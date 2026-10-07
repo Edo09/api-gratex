@@ -60,7 +60,7 @@ distinto al `{status,...}` del resto):
 | `page` | `1` | Página |
 | `pageSize` | `10` | Resultados por página |
 | `query` | — | Busca en e-NCF, nº factura, cliente (nombre/razón social/RNC/correo/teléfono) y **descripción de los ítems** |
-| `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`) o `todos` |
+| `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`), `pendiente` o `todos`. `pendiente` = sin veredicto de la DGII: `PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `EN_PROCESO`, `RFCE_ENVIADO` y `RFCE_EN_PROCESO` (`EstadosEcf::SIN_VEREDICTO`). No incluye `NO_ENCONTRADO`, `RFCE_NO_ENCONTRADO` ni el `PENDIENTE` heredado, que el front también rotula "Pendiente": esos ya tienen respuesta. Cualquier otro valor → `422` |
 | `tipo_ecf` | — | Filtra por tipo: `E31`, `E32`, … `E47` (también acepta `31`, `32`, …) |
 
 #### Notas vinculadas: `notas` y `modifica` (listado y detalle)
@@ -90,10 +90,14 @@ qué comprobantes tienen nota de crédito/débito y a cuál modifica cada nota:
 
 - `notas` — siempre presente (lista, puede venir vacía), ordenada por `id`
   ascendente: las E33/E34 cuyo `ncf_modificado` es el `e_ncf` de la fila, en el
-  mismo `ambiente_dgii` (NULL con NULL), y solo si la DGII las tiene: `estado_dgii`
-  en `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO` o `ENVIADO` (la misma regla
-  que el saldo de `/api/facturas/modificables`). Una nota rechazada, en `ERROR`,
-  `NO_ENCONTRADO` o archivada no aparece. Fila sin `e_ncf` → `[]`.
+  mismo `ambiente_dgii` (NULL con NULL), y solo si la DGII las tiene o pudo
+  recibirlas: `estado_dgii` en `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`,
+  `ENVIADO`, `PENDIENTE_ENVIO` o `ENVIO_INCIERTO` (`facturaModel::ESTADOS_NOTA_VIGENTE`,
+  la misma regla que el saldo de `/api/facturas/modificables`). Una nota en vuelo
+  (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) ya aparece y ya resta saldo: el front la
+  rotula "(sin confirmar)" y no dice "Anulada por" hasta que la DGII la acepte.
+  Una nota rechazada, en `ERROR`, `NO_ENCONTRADO` o archivada no aparece. Fila sin
+  `e_ncf` → `[]`.
   - `tipo_ecf`: `"34"` nota de crédito, `"33"` nota de débito.
   - `codigo_modificacion`: `"1"` anula, `"2"` corrige texto, `"3"` corrige montos,
     `"4"` reemplazo de contingencia, `"5"` referencia a factura de consumo; `null`
@@ -185,7 +189,7 @@ Aplica a `/pdf` y `/xml`. En lugar de descarga directa, retorna JSON:
 }
 ```
 
-Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `EN_PROCESO` · `RECHAZADO` · `NO_ENCONTRADO` · y variantes RFCE `RFCE_ACEPTADO` / `RFCE_RECHAZADO` / `RFCE_NO_ENCONTRADO`.
+Valores de `estado_dgii`: `PENDIENTE_ENVIO` · `ENVIO_INCIERTO` (en vuelo, ver abajo) · `ENVIADO` · `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `EN_PROCESO` · `RECHAZADO` · `NO_ENCONTRADO` · `ERROR` · y variantes RFCE `RFCE_ENVIADO` / `RFCE_EN_PROCESO` / `RFCE_ACEPTADO` / `RFCE_ACEPTADO_CONDICIONAL` / `RFCE_RECHAZADO` / `RFCE_NO_ENCONTRADO` / `RFCE_ERROR`.
 
 #### Manejo de RECHAZADO (importante)
 
@@ -198,6 +202,35 @@ Valores de `estado_dgii`: `ENVIADO` · `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `
 El motivo del rechazo viene en `consulta.mensajes[].valor` (+ `codigo`). Muéstralo al usuario.
 
 > RFCE (E32 <250k): se consulta por RNC + e-NCF + código de seguridad (no usa `track_id`). La respuesta trae los mismos campos.
+
+#### Filas sin veredicto que no se pueden consultar (`en_vuelo`)
+
+Para una fila en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) o en `ENVIADO` sin
+`track_id`, `/estado` no llama a la DGII: responde `200` con el estado guardado y
+una nota. Nunca responde `422` para una factura que existe.
+
+```json
+{
+  "status": true,
+  "data": {
+    "factura_id": 41, "e_ncf": "E310000000123", "tipo_ecf": "31", "track_id": null,
+    "estado_dgii": "ENVIO_INCIERTO", "secuencia_utilizada": null, "en_vuelo": true,
+    "nota": "La DGII todavía no ha confirmado este comprobante. No lo emitas de nuevo; si sigue así en unos minutos, avisa a soporte con el número E310000000123."
+  }
+}
+```
+
+- `en_vuelo: true` en `PENDIENTE_ENVIO`/`ENVIO_INCIERTO`. `en_vuelo: false` en
+  `ENVIADO` sin `track_id`, con esta nota: "La DGII recibió este comprobante, pero no
+  devolvió su número de seguimiento y por eso no se puede consultar su estado desde
+  aquí. Si necesitas confirmarlo, avisa a soporte con el número E310000000123."
+- No hay campo ni endpoint de reenvío: la app nunca reenvía un e-CF y
+  `POST /api/facturas/{id}/reenviar` sigue respondiendo `501`. Soporte resuelve la
+  fila ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md), "Resolver una
+  factura sin confirmar").
+- Cuando la consulta normal pasa una factura a `ACEPTADO`/`ACEPTADO_CONDICIONAL` (o
+  sus `RFCE_`) desde un estado sin aceptar, mueve el inventario de esa venta, una
+  sola vez.
 
 ---
 
@@ -266,21 +299,23 @@ X-API-KEY: <key>
 
 | Campo | Descripción |
 |-------|-------------|
-| `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos) |
-| `resumen.monto_total` | Suma de todos los montos emitidos (RD$), tal cual: la nota de crédito (E34) suma y los rechazados también |
-| `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) no cuentan. Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
+| `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos): cuenta filas, las en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) incluidas |
+| `resumen.monto_total` | Suma de los montos emitidos (RD$): la nota de crédito (E34) suma y los rechazados también. **No** suma las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`): la DGII todavía no dio veredicto, así que no son dinero |
+| `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y no cuentan los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) ni las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`). Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
 | `resumen.tipos_distintos` | Cantidad de tipos e-CF distintos utilizados |
 | `por_tipo[].tipo_ecf` | Código del tipo (31, 32, 33, …) |
 | `por_tipo[].nombre` | Nombre del tipo |
-| `por_tipo[].total` | Total emitido de este tipo |
+| `por_tipo[].total` | Total emitido de este tipo (filas, las en vuelo incluidas) |
+| `por_tipo[].monto_total` | Monto de este tipo (RD$), sin las filas en vuelo |
 | `por_tipo[].aceptados` | Cuántos tienen `estado_dgii = ACEPTADO` |
 | `por_tipo[].rfce` | Cuántos pasaron por flujo RFCE (E32 < 250k) |
 | `por_tipo[].rechazados` | Cuántos fueron rechazados por DGII |
-| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses. e-CF emitidos de **todos** los tipos (incluye E41/E43/E47 de compras), sin rechazados, por `fecha_emision_dgii`. No son ventas |
-| `ventas_por_mes[]` | Ventas en e-CF por mes (`mes`, `total` = documentos, `monto_total` neto), últimos 12 meses. Mismas reglas que el reporte de ventas (`ReporteVentasModel`): suman E31/E32/E44/E45/E46 y E33, **resta** E34, no entran E41/E43/E47 ni los rechazados. Por `date`, como el reporte. No incluye facturas simples (ver `GET /api/facturas-simples/stats`) |
+| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses. e-CF emitidos de **todos** los tipos (incluye E41/E43/E47 de compras), sin rechazados ni filas en vuelo, por `fecha_emision_dgii`. No son ventas |
+| `ventas_por_mes[]` | Ventas en e-CF por mes (`mes`, `total` = documentos, `monto_total` neto), últimos 12 meses. Mismas reglas que el reporte de ventas (`ReporteVentasModel`): suman E31/E32/E44/E45/E46 y E33, **resta** E34, no entran E41/E43/E47, los rechazados ni las filas en vuelo. Por `date`, como el reporte. No incluye facturas simples (ver `GET /api/facturas-simples/stats`) |
 | `ventas_por_dia[]` | Igual que `ventas_por_mes`, por día (`dia` = `YYYY-MM-DD`), últimos 31 días. Los días sin ventas no vienen |
 | `secuencias[].secuencia_actual` | Último número de secuencia asignado |
-| `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo |
+| `por_estado[]` | `estado`, `total` y `monto_total` por cada `estado_dgii`. Trae `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` cuando hay filas en vuelo: el front suma esas dos cubetas para el KPI "Sin confirmar" |
+| `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo (filas: cuenta también las en vuelo) |
 
 ---
 
@@ -1037,7 +1072,7 @@ pensado para mostrarse tal cual al usuario (español llano, sin nombres de campo
 { "status": false, "error": "Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo." }
 ```
 
-Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, unidad de medida, cantidad de una línea, RNC faltante, datos de la nota E33/E34, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII · `500` la DGII recibió el e-CF pero no se pudo guardar (el mensaje trae el e-NCF y pide no volver a emitirla).
+Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, unidad de medida, cantidad de una línea, RNC faltante, datos de la nota E33/E34, total que no se pudo calcular, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII: sin `data` no se guardó nada; con `data` la factura quedó guardada sin confirmación (ver abajo) · `500` error interno no manejado (`error_id`, sin `data`).
 
 En un `502` el texto depende del caso: los que el usuario puede resolver o
 reportar (rango e-NCF agotado, emisor o certificado sin configurar) traen su
@@ -1046,11 +1081,37 @@ resto es un texto genérico. El detalle técnico no va en la respuesta: queda en
 el `error_log` y en el audit log (`error_message`). Los integradores
 (`/api/integracion/*`) siguen recibiendo el texto técnico.
 
+#### `502` con la factura guardada (envío sin confirmar)
+
+La fila se guarda **antes** de enviar el e-CF a la DGII (write-ahead). Si el envío o
+la confirmación fallan (timeout, la DGII responde HTML, la base se cae después de la
+respuesta), la factura queda guardada en `ENVIO_INCIERTO`, o en `PENDIENTE_ENVIO` si ni
+eso se pudo escribir, y la respuesta trae `data`:
+
+```json
+{
+  "status": false,
+  "error": "No se pudo confirmar si la DGII recibió la factura E310000000123. No la emitas de nuevo: ya quedó guardada. Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.",
+  "data": { "factura_id": 41, "e_ncf": "E310000000123", "tipo_ecf": "31", "estado_dgii": "ENVIO_INCIERTO" }
+}
+```
+
+- `data.factura_id` es la fila guardada: el front abre su detalle ("Ver factura").
+- Un `502` **sin** `data` es un fallo antes del envío: nada llegó a la DGII y se puede
+  reintentar. Incluye `'No se pudo asignar el número de comprobante. Inténtalo de
+  nuevo.'`: otra fila ya tiene ese e-NCF y el reintento toma el siguiente.
+- `422` `'No se pudo calcular el total de la factura. Revisa las líneas e inténtalo de
+  nuevo.'`: un `strict_input` cuyo `totales` no trae un `monto_total` numérico. Se
+  corta antes de tomar el número.
+- La app no reenvía un e-CF: `POST /api/facturas/{id}/reenviar` responde `501`. Las
+  facturas sin confirmar las resuelve soporte
+  ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md)).
+
 ---
 
 ## Flujo recomendado para el front
 
-1. `POST /api/facturas` con el payload mínimo → recibe `factura_id`, `e_ncf`, `estado_dgii`.
+1. `POST /api/facturas` con el payload mínimo → recibe `factura_id`, `e_ncf`, `estado_dgii`. Un `502` con `data.factura_id` es una factura guardada sin confirmar: no reintentar; mostrar el texto (pide no emitirla de nuevo) y ofrecer "Ver factura" con `data.factura_id`. Un timeout del lado del front se trata igual: revisar el filtro `pendiente` antes de volver a emitir.
 2. (Opcional) Polling a `GET /api/facturas/{factura_id}/estado` hasta `ACEPTADO`/`RECHAZADO`.
 3. Mostrar/descargar PDF: `GET /api/facturas/{factura_id}/pdf` (o `?format=base64` para incrustar).
 4. E32 RFCE: descargar XML firmado en `GET /api/facturas/{factura_id}/xml` y subirlo al portal DGII.
@@ -1064,4 +1125,4 @@ GET /api/facturas/{factura_id}/estado
 X-API-KEY: <key>
 ```
 
-`estado_dgii` posibles valores: `ENVIADO`, `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO`, `NO_ENCONTRADO`, `RFCE_ACEPTADO`, `RFCE_RECHAZADO`, `RFCE_NO_ENCONTRADO`. La respuesta incluye `secuencia_utilizada` (ver "Manejo de RECHAZADO" arriba).
+`estado_dgii` posibles valores: `PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO`, `NO_ENCONTRADO`, `ERROR`, y sus `RFCE_*`. La respuesta incluye `secuencia_utilizada` (ver "Manejo de RECHAZADO" arriba). Para una fila en vuelo, o `ENVIADO` sin `track_id`, no consulta a la DGII: responde el estado guardado con `en_vuelo` y `nota` (ver "Filas sin veredicto" arriba).

@@ -59,6 +59,24 @@ productos) y [../database/schema.md](../database/schema.md).
 
 ---
 
+## Ventas e-CF
+
+Una factura e-CF (`/api/facturas`) mueve existencias en las líneas con `product_id` que
+el catálogo marca como bien: la venta sale como `VENTA` y la nota de crédito `E34` entra
+como `DEVOLUCION`, con `referencia_tipo = 'factura'` (`inventoryModel::registrarVenta`).
+
+- **Solo con un veredicto de la DGII.** La fila se guarda antes del envío (write-ahead) y
+  no mueve nada mientras está en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`). Tampoco
+  mueve con un veredicto de `EstadosEcf::SIN_STOCK`: `RECHAZADO`, `RFCE_RECHAZADO`,
+  `NO_ENCONTRADO`, `RFCE_NO_ENCONTRADO`, `ERROR`, `RFCE_ERROR`.
+- **Una sola vez por factura.** Mueve la emisión, cuando la DGII responde otro estado, o
+  `GET /api/facturas/{id}/estado` la primera vez que ve la factura pasar a
+  `ACEPTADO`/`ACEPTADO_CONDICIONAL` (o sus `RFCE_`). Los dos preguntan antes
+  `inventoryModel::yaMovioDocumento('factura', id)`: el que llega primero mueve.
+- **Un rechazo posterior no lo revierte**: se corrige con un ajuste, igual que en compras.
+- Una venta vieja que ya estaba aceptada sin movimientos (de antes del inventario) no
+  mueve al consultarla: solo cuenta el paso a aceptado.
+
 ## Compras
 
 Registrar una compra en `/api/gastos` mueve existencias en las líneas con `product_id`:

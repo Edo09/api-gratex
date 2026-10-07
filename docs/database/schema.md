@@ -181,14 +181,14 @@ Columnas base + tracking e-CF (migraciones 001/003/005/006).
 | `user_id` | int | nullable (referencia a `master.users.id`, sin FK cross-DB) |
 | **e-CF (001)** | | |
 | `tipo_ecf` | varchar(2) | 31,32,33,34,41,43,44,45,46,47 |
-| `e_ncf` | varchar(13) | UNIQUE (`uk_e_ncf`) |
+| `e_ncf` | varchar(13) | UNIQUE con `ambiente_dgii`: `uk_e_ncf_amb (e_ncf, ambiente_dgii)` (migración 027; certificación y producción numeran aparte) |
 | `track_id` | varchar(60) | TrackId DGII — INDEX |
-| `estado_dgii` | varchar(40) | PENDIENTE/ENVIADO/EN_PROCESO/ACEPTADO/ACEPTADO_CONDICIONAL/RECHAZADO/NO_ENCONTRADO/ERROR, `RFCE_` + estado (E32 < 250k), estado + `_ARCHIVADO` al reutilizar el número (migración 028) — INDEX |
+| `estado_dgii` | varchar(40) | `PENDIENTE` (default heredado) · `PENDIENTE_ENVIO` (fila guardada, todavía sin enviar) · `ENVIO_INCIERTO` (enviada sin confirmación de la DGII) · `ENVIADO` · `EN_PROCESO` · `ACEPTADO` · `ACEPTADO_CONDICIONAL` · `RECHAZADO` · `NO_ENCONTRADO` · `ERROR`; `RFCE_` + estado (E32 < 250k); estado + `_ARCHIVADO` al reutilizar el número. 40 desde la migración 028. Las listas viven en `src/Utils/FacturacionElectronica/EstadosEcf.php` — INDEX |
 | `codigo_seguridad` | varchar(10) | para QR / RI |
 | `fecha_emision_dgii` | datetime | debe coincidir con `FechaHoraFirma` del XML |
 | `ambiente_dgii` | varchar(20) | testecf/certecf/ecf |
 | `xml_firmado` | mediumtext | XML firmado enviado |
-| `respuesta_dgii` | text | última respuesta DGII (JSON) |
+| `respuesta_dgii` | text | última respuesta DGII (JSON). Mientras la fila está en vuelo guarda la meta del envío (nunca XML): `fase`, `desde`, `flujo`, `ambiente_secuencia`, `dispensado`, `rango_id`, `secuencia_valor` y, en `ENVIO_INCIERTO`, además `fase_fallida`, `clase`, `error`, `resultado_parcial`, `intentos`. Se lee con `facturaModel::metaEnvio()` |
 | **RFCE (003)** | | E32 < 250k |
 | `rfce_xml` / `rfce_track_id` / `rfce_estado` / `rfce_respuesta` | | resumen |
 | **Estado (005)** | | |

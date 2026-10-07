@@ -3,7 +3,7 @@
 ## Project
 
 PHP REST API for electronic invoicing (e-CF) in the Dominican Republic.
-Stack: PHP 8+, MySQL, Apache. No Composer. Single entry point `index.php` → `src/Router.php`.
+Stack: PHP 8.3 in production (local dev may run newer: no 8.4+ syntax), MySQL, Apache. No Composer. Single entry point `index.php` → `src/Router.php`.
 
 ## Status
 
@@ -29,6 +29,11 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 - cPanel account migrated `mtldtmte` → `smhynzte` (2026-08). Anything still naming
   `mtldtmte_*` is pre-migration. After such a move `tenants.db_*` keeps pointing at the old
   server (login works via master, business endpoints fail) — fix with `tools/update_tenant_db.php`
+- **Tenant migrations go first.** Every `db/migrations` file a change depends on must run in
+  **every** tenant DB before the code that needs it is deployed. Check each DB with
+  `tools/verificar_migraciones_tenant.sql` (its `base` column must show that tenant's DB; the DB list
+  comes from `tools/verificar_migraciones_master.sql`). 027 (`uk_e_ncf_amb`) and 028
+  (`estado_dgii` VARCHAR(40)) are the release gate of the e-CF write-ahead: both must say `APLICADA`.
 
 ## Key architecture
 

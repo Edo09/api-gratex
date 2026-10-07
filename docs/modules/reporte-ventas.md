@@ -39,6 +39,7 @@ Topes: rango máximo de 5 años, y fechas validadas con `checkdate` (un
 | E34 nota de crédito | sí | **resta** |
 | E41 compras, E43 gastos menores, E47 pagos al exterior | **no** | — |
 | Cualquiera con estado `%RECHAZADO%` | **no** | — |
+| Filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) | **no** | — |
 
 E41/E43/E47 los genera el emisor por lo que **compra**, no por lo que vende;
 incluirlos inflaría las ventas con gasto propio.
@@ -46,6 +47,10 @@ incluirlos inflaría las ventas con gasto propio.
 A diferencia del 607, aquí **sí** entran las facturas simples y las que están en
 `ENVIADO` sin respuesta de la DGII: son ventas reales del negocio aunque el acuse
 no haya llegado. El 607 exige `ACEPTADO` porque es una declaración fiscal.
+
+Las filas **en vuelo** (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: guardadas antes del envío y
+sin confirmación de la DGII) no entran: no se sabe si la DGII las tiene. Entran cuando
+soporte las resuelve a un estado de la DGII.
 
 También se aplica el filtro de ambiente (`AmbienteResolver::active()`), igual que
 listados y stats: la data de certificación no puede contaminar los montos.

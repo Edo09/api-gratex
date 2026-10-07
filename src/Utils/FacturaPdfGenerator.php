@@ -463,7 +463,7 @@ class FacturaPdfGenerator extends FPDF
 
         // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
         // NCF Modificado y el Motivo. Se persisten al emitir la nota (ver
-        // facturaModel::saveFacturaConECF y la migracion 006). El NCF Modificado
+        // facturaModel::reservarFacturaECF y la migracion 006). El NCF Modificado
         // va aqui en el encabezado; el Motivo se muestra como descripcion de la
         // linea en la tabla (mas abajo).
         $nota = $doc->notaModificacion();

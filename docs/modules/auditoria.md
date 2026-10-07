@@ -114,6 +114,8 @@ contenga: `password`, `pass`, `secret`, `api_secret`, `token`, `authorization`,
 | `DGII_AUTH_IN_OK` | `dgii-auth` | Token emitido a quien se autentica contra nuestro receptor (incluye los reintentos sobre una semilla ya canjeada). Sin empresa. |
 | `DGII_AUTH_IN_FAILED` | `dgii-auth` | Handshake rechazado: sin XML, firma inválida, semilla no reconocida / expirada / canjeada por otro RNC, error interno. Sin empresa. |
 | `DGII_AUTH_OUT_FAILED` | `dgii-auth` | La DGII no nos entregó el token (`DgiiAuthService::autenticar`), con el paso que falló. Solo los fallos: se pide un token por emisión y registrar los éxitos sería una fila por factura. |
+| `EMIT` con `success=0` (envío sin confirmar) | `facturas` | La factura quedó guardada antes del envío (write-ahead) pero no se sabe si la DGII la recibió; la respuesta fue el `502` con `data`. `entity_id` = e-NCF. `new_values`: `factura_id`, `tipo_ecf`, `client_id`, `estado_dgii` (`ENVIO_INCIERTO`, o `PENDIENTE_ENVIO` si ni eso se pudo escribir), `fase_fallida` (`envio`, `confirmar` o `reservar`) y `resultado_parcial` (la respuesta de la DGII ya recortada y sin XML, cuando falló la confirmación). `error_message`: el error original. Soporte la usa para resolver la fila ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md)). |
+| `NCF_SEQUENCE_UPDATE` con `success=0` | `ncf` | Un e-NCF quedó consumido sin fila: la emisión falló antes del envío y no se pudo devolver el número a la secuencia (`error_message` `rollback sin coincidencia`). `entity_id` = e-NCF. `new_values`: `e_ncf`, `tipo_ecf`, `rango_id`, `secuencia_valor`, `ambiente_secuencia`, `causa` (la clase del error). |
 
 Inmutabilidad e-CF: un e-CF emitido solo genera `EMIT`/`STATUS_CHANGE`; **nunca**
 hay `UPDATE`/`DELETE` sobre comprobantes emitidos.
@@ -169,7 +171,9 @@ cotizaciones y **facturas simples** (`facturas-simples`, entidad `factura_simple
 con antes/después). Gastos: alta/emisión exitosa **y fallida** (`success=0` con el
 motivo: un E41 que la DGII rechaza ya no desaparece sin rastro). Inventario:
 ajustes. Ciclo e-CF: emisión, transiciones de estado, ACECF saliente/entrante,
-recepción (ligada al token DGII), emisión/aprobación por integración. Auth: login
+recepción (ligada al token DGII), emisión/aprobación por integración, emisión sin
+confirmar de la DGII (`EMIT success=0` con la fila en `new_values`) y e-NCF consumidos
+sin fila (`NCF_SEQUENCE_UPDATE success=0`). Auth: login
 ok/fallido (en la empresa del usuario), logout. Accesos denegados (403).
 Autenticación DGII entrante (todo) y saliente (fallos).
 

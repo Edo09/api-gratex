@@ -357,8 +357,9 @@ UNIQUE `(rnc_proveedor, ncf)`. Índices: `categoria`, `tipo_gasto`, `rnc_proveed
 ### Flujo de emisión
 La emisión real reusa `ECFEmissionService::emitir()` — que internamente **dispensa
 la secuencia y envía** a DGII. Por eso el modelo, para auto-emision con el guard
-encendido, llama `emitir()` **primero** y luego guarda con el resultado (igual que
-`facturaController`/`saveFacturaConECF`). Si `emitir()` lanza, el gasto se guarda con
+encendido, llama `emitir()` **primero** y luego guarda con el resultado. Las facturas
+ya no lo hacen así: guardan la fila antes del envío (write-ahead, hook `$persistencia`
+de `emitir()`); los gastos adoptarán el mismo patrón en un cambio aparte. Si `emitir()` lanza, el gasto se guarda con
 `estado_dgii = ERROR` para trazabilidad.
 
 ```php
