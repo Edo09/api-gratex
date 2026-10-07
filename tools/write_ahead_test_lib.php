@@ -272,8 +272,11 @@ const WA_BASE_SIN_MARCA = 'wa_sin_marca';
 /**
  * Manejador de excepciones de la mitad con base: imprime solo la clase, el
  * archivo:linea y los codigos (SQLSTATE y errno de MySQL) de la excepcion y de
- * sus previas. Nunca getMessage() ni la traza: el mensaje del driver trae
- * usuario y host y la traza muestra los primeros caracteres de los argumentos.
+ * sus previas. Nunca getMessage() de una \Exception (PDOException incluida) ni
+ * la traza: el mensaje del driver trae usuario y host y la traza muestra los
+ * primeros caracteres de los argumentos. Los \Error (funcion o metodo no
+ * definido, TypeError, Class "PDO" not found) son errores del motor, sin texto
+ * del driver: de esos si se imprime el mensaje, para poder diagnosticarlos.
  */
 function wa_manejar_excepcion(Throwable $e): never
 {
@@ -285,6 +288,8 @@ function wa_manejar_excepcion(Throwable $e): never
             $txt .= $info !== []
                 ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?')
                 : ' codigo ' . $x->getCode();
+        } elseif ($x instanceof \Error) {
+            $txt .= ': ' . $x->getMessage();
         }
         $partes[] = $txt;
     }
@@ -300,6 +305,11 @@ function wa_credenciales(): array
         return $c;
     }
     set_exception_handler('wa_manejar_excepcion');
+    // Sin el driver no hay conexion posible: se avisa antes de leer nada.
+    if (!extension_loaded('pdo_mysql')) {
+        echo "[FALLO] falta la extension pdo_mysql: corre con php -d extension=pdo_mysql tools/<prueba>.php\n";
+        exit(1);
+    }
     $archivo = [];
     $ruta = __DIR__ . DIRECTORY_SEPARATOR . '.env';
     if (is_file($ruta)) {
