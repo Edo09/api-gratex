@@ -8,7 +8,7 @@
  * en cada fila:
  *   - "notas":    las E33/E34 que modifican esa fila (misma regla que
  *                 facturaModel::sqlReferencia: mismo ambiente con <=>, solo
- *                 aceptadas o en proceso), por id ascendente.
+ *                 aceptadas, en proceso o en vuelo), por id ascendente.
  *   - "modifica": en una E33/E34, el comprobante que modifica (id null si no
  *                 esta en facturas, p.ej. un NCF de papel).
  *
@@ -108,12 +108,13 @@ $r = facturaModel::vincularNotas([$origNull], [$notaNull, $notaEcf], []);
 $chk('ambiente NULL en los dos lados empareja; NULL contra ecf no', $ids($r[0]['notas'] ?? []) === [51], $r[0]['notas'] ?? null);
 
 // ---------------------------------------------------------------------------
-// 4) Misma regla de estado que sqlReferencia: rechazadas y archivadas no cuentan
+// 4) Misma regla de estado que sqlReferencia: rechazadas y archivadas no
+// cuentan; las en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO) si
 // ---------------------------------------------------------------------------
 $estados = [
     'ACEPTADO' => true, 'ACEPTADO_CONDICIONAL' => true, 'EN_PROCESO' => true, 'ENVIADO' => true,
     'RECHAZADO' => false, 'ERROR' => false, 'NO_ENCONTRADO' => false, 'PENDIENTE' => false,
-    'RECHAZADO_ARCHIVADO' => false,
+    'RECHAZADO_ARCHIVADO' => false, 'PENDIENTE_ENVIO' => true, 'ENVIO_INCIERTO' => true,
 ];
 foreach ($estados as $estado => $cuenta) {
     $n = $nota(['id' => '60', 'e_ncf' => 'E340000000060', 'ncf_modificado' => 'E310000000020', 'estado_dgii' => $estado]);
@@ -125,7 +126,7 @@ $r = facturaModel::vincularNotas([$e31], [$noNota], []);
 $chk('un tipo que no es nota (31) con ncf_modificado no cuenta', ($r[0]['notas'] ?? null) === [], $r[0]['notas'] ?? null);
 $chk('la regla de estado es la de sqlReferencia',
     defined('facturaModel::ESTADOS_NOTA_VIGENTE')
-    && facturaModel::ESTADOS_NOTA_VIGENTE === ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO']);
+    && facturaModel::ESTADOS_NOTA_VIGENTE === ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', 'PENDIENTE_ENVIO', 'ENVIO_INCIERTO']);
 
 // ---------------------------------------------------------------------------
 // 5) La nota misma: "modifica" apunta al original
@@ -260,7 +261,8 @@ $chk('consulta de notas: un ? por e-NCF',
     $qNotas !== null && substr_count($qNotas['sql'], '?') === count($qNotas['params']), $qNotas);
 $chk('consulta de notas: filtra tipo 33/34 y los estados de sqlReferencia',
     $qNotas !== null && str_contains($qNotas['sql'], "tipo_ecf IN ('33', '34')")
-    && str_contains($qNotas['sql'], "estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO')"), $qNotas['sql'] ?? null);
+    && str_contains($qNotas['sql'], "estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', 'PENDIENTE_ENVIO', 'ENVIO_INCIERTO')"),
+    $qNotas['sql'] ?? null);
 $chk('consulta de notas: ordena por id', $qNotas !== null && str_contains($qNotas['sql'], 'ORDER BY id'), $qNotas['sql'] ?? null);
 $chk('consulta de originales: un solo e-NCF (repetido en dos notas)',
     ($qOrig['params'] ?? null) === ['E440000000001'], $qOrig);
@@ -310,7 +312,8 @@ $chk('si la base falla: filas con notas [] y modifica solo con el e-NCF',
 // ---------------------------------------------------------------------------
 $sqlRef = (new ReflectionMethod(facturaModel::class, 'sqlReferencia'))->invoke($conModelo(new ConexionRota()));
 $chk('sqlReferencia cuenta las notas con los mismos estados',
-    str_contains($sqlRef, "estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO')"), $sqlRef);
+    str_contains($sqlRef, "estado_dgii IN ('ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', 'PENDIENTE_ENVIO', 'ENVIO_INCIERTO')"),
+    $sqlRef);
 
 // ---------------------------------------------------------------------------
 // 11) /api/facturas/stats: resumen.monto_neto (E34 resta, rechazados fuera)

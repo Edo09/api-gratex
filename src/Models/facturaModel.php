@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../AmbienteResolver.php');
 require_once(__DIR__ . '/ReporteVentasModel.php');
 require_once(__DIR__ . '/ncfModel.php');
+require_once(__DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php');
 
 class facturaModel
 {
@@ -30,12 +31,16 @@ class facturaModel
 
     /**
      * Estados en que una nota E33/E34 cuenta contra la factura que modifica:
-     * los que la DGII tiene (aceptada o en proceso). Una en ERROR o
-     * NO_ENCONTRADO (o su intento archivado) no llego a valer. Lo usan
+     * los que la DGII tiene (aceptada o en proceso) y los en vuelo
+     * (EstadosEcf::EN_VUELO: guardada antes de enviar, sin respuesta todavia).
+     * Una nota en vuelo reserva saldo, para que no salga una segunda nota sobre
+     * el mismo monto mientras la primera no se resuelve, y sale vinculada en el
+     * listado y el detalle; el frontend la marca "sin confirmar". Una en ERROR
+     * o NO_ENCONTRADO (o su intento archivado) no llego a valer. Lo usan
      * sqlReferencia() (saldo para una nota nueva) y vincularNotas() (listado y
      * detalle), para que pantalla y emision cuenten las mismas notas.
      */
-    public const ESTADOS_NOTA_VIGENTE = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO'];
+    public const ESTADOS_NOTA_VIGENTE = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', ...EstadosEcf::EN_VUELO];
 
     public function __construct()
     {
@@ -1055,7 +1060,7 @@ class facturaModel
     /** ESTADOS_NOTA_VIGENTE como lista SQL: 'ACEPTADO', 'ACEPTADO_CONDICIONAL', ... */
     private static function sqlEstadosNotaVigente(): string
     {
-        return "'" . implode("', '", self::ESTADOS_NOTA_VIGENTE) . "'";
+        return EstadosEcf::sql(self::ESTADOS_NOTA_VIGENTE);
     }
 
     public function getFacturasCount($query = null, $estado = null, $tipoEcf = null)
@@ -1096,9 +1101,14 @@ class facturaModel
     }
 
     /**
-     * Filtros compartidos del listado: estado ('aprobado'|'rechazado', ya
-     * normalizado por el controller; 'aprobado' incluye ACEPTADO_CONDICIONAL y
-     * los estados RFCE_*) y tipo_ecf ('31'..'47', sin la 'E').
+     * Filtros compartidos del listado: estado ('aprobado'|'rechazado'|'pendiente',
+     * ya normalizado por el controller) y tipo_ecf ('31'..'47', sin la 'E').
+     * 'aprobado' incluye ACEPTADO_CONDICIONAL y los estados RFCE_*. 'pendiente'
+     * es EstadosEcf::SIN_VEREDICTO: todo lo que no tiene veredicto de la DGII,
+     * las filas en vuelo incluidas.
+     *
+     * Solo marcadores con nombre (:est0, :tipo_ecf): los mismos $params van a
+     * bindValue() en getFacturasPaginated y a execute() en getFacturasCount.
      */
     private function applyEstadoTipoFilters(array &$conditions, array &$params, $estado, $tipoEcf): void
     {
@@ -1106,6 +1116,13 @@ class facturaModel
             $conditions[] = "f.estado_dgii LIKE '%ACEPTADO%'";
         } elseif ($estado === 'rechazado') {
             $conditions[] = "f.estado_dgii LIKE '%RECHAZADO%'";
+        } elseif ($estado === 'pendiente') {
+            $marcas = [];
+            foreach (EstadosEcf::SIN_VEREDICTO as $i => $estadoSinVeredicto) {
+                $marcas[] = ":est{$i}";
+                $params[":est{$i}"] = $estadoSinVeredicto;
+            }
+            $conditions[] = 'f.estado_dgii IN (' . implode(', ', $marcas) . ')';
         }
         if ($tipoEcf !== null && $tipoEcf !== '') {
             $conditions[] = "f.tipo_ecf = :tipo_ecf";
@@ -1508,6 +1525,25 @@ class facturaModel
         }
     }
 
+    /**
+     * Meta del envio que respuesta_dgii guarda mientras la fila esta en vuelo
+     * (spec 6.3): fase, desde, flujo, ambiente_secuencia, dispensado, rango_id,
+     * secuencia_valor y, en ENVIO_INCIERTO, el fallo. [] si no hay meta: NULL,
+     * JSON roto o el JSON de un texto (filas ENVIADO viejas, de una DGII que
+     * respondio 2xx sin JSON). Quien lea rango_id, secuencia_valor o
+     * ambiente_secuencia pasa por aqui, y antes de que la confirmacion pise la
+     * columna con la respuesta de la DGII. Sin rango_id = rollback heredado por
+     * tipo + ambiente (ncfModel::rollbackECFSequence).
+     */
+    public static function metaEnvio(?string $respuestaDgii): array
+    {
+        if ($respuestaDgii === null || $respuestaDgii === '') {
+            return [];
+        }
+        $meta = json_decode($respuestaDgii, true);
+        return is_array($meta) ? $meta : [];
+    }
+
     public function getECFData(int $facturaId): ?array
     {
         try {
@@ -1604,9 +1640,10 @@ class facturaModel
     }
 
     /**
-     * Factura + lo que ya le ajustaron las notas que la referencian. Solo
-     * cuentan las notas aceptadas o en proceso en la DGII: una rechazada, en
-     * ERROR o NO_ENCONTRADO no ajusto nada y el usuario debe poder reintentarla.
+     * Factura + lo que ya le ajustaron las notas que la referencian. Cuentan
+     * las notas de ESTADOS_NOTA_VIGENTE: aceptadas, en proceso o en vuelo (una
+     * en vuelo reserva saldo hasta que se resuelva). Una rechazada, en ERROR o
+     * NO_ENCONTRADO no ajusto nada y el usuario debe poder reintentarla.
      */
     private function sqlReferencia(): string
     {
@@ -1625,9 +1662,10 @@ class facturaModel
                            SUM(CASE WHEN tipo_ecf = '33' THEN total ELSE 0 END) AS notas_debito
                     FROM facturas
                     WHERE tipo_ecf IN ('33', '34') AND ncf_modificado IS NOT NULL
-                      -- Solo notas que la DGII tiene: aceptadas o en proceso. Una en ERROR o
-                      -- NO_ENCONTRADO (o su intento archivado) no llego a valer, y contarla
-                      -- bloquearia el reintento que el propio mensaje le pide al usuario.
+                      -- Solo notas vigentes: aceptadas, en proceso o en vuelo (en vuelo
+                      -- reserva saldo). Una en ERROR o NO_ENCONTRADO (o su intento archivado)
+                      -- no llego a valer, y contarla bloquearia el reintento que el propio
+                      -- mensaje le pide al usuario.
                       AND estado_dgii IN ({$estados})
                     GROUP BY ncf_modificado, ambiente_dgii
                 ) n ON n.ncf_modificado = f.e_ncf AND n.ambiente_dgii <=> f.ambiente_dgii";

@@ -104,6 +104,43 @@ wa_chk('Incierto: es RuntimeException y no EcfUsuarioException',
     $incierto instanceof RuntimeException && !($incierto instanceof EcfUsuarioException));
 
 // ---------------------------------------------------------------------------
+// 3) facturaModel: metaEnvio, filtro 'pendiente' y notas en vuelo (spec 4.6, 2.1)
+// ---------------------------------------------------------------------------
+require_once __DIR__ . '/../src/Models/facturaModel.php';
+
+echo "\n== 3) facturaModel: metaEnvio, filtro pendiente, notas en vuelo ==\n";
+wa_chk('metaEnvio(null) = []', facturaModel::metaEnvio(null) === []);
+wa_chk('metaEnvio(\'"Recibido"\') = [] (fila ENVIADO vieja: JSON de un texto)', facturaModel::metaEnvio('"Recibido"') === []);
+wa_chk("metaEnvio('{bad') = [] (JSON roto)", facturaModel::metaEnvio('{bad') === []);
+$metaReserva = '{"fase":"PENDIENTE_ENVIO","desde":"2026-10-05 14:03:11","flujo":"ECF","ambiente_secuencia":"ecf",'
+    . '"dispensado":true,"rango_id":7,"secuencia_valor":123}';
+$meta = facturaModel::metaEnvio($metaReserva);
+wa_chk('metaEnvio(JSON 6.3) trae rango_id 7 y secuencia_valor 123',
+    ($meta['rango_id'] ?? null) === 7 && ($meta['secuencia_valor'] ?? null) === 123 && ($meta['fase'] ?? null) === 'PENDIENTE_ENVIO', $meta);
+
+$filtros = static function ($estado, $tipoEcf): array {
+    $modelo = (new ReflectionClass(facturaModel::class))->newInstanceWithoutConstructor();
+    $condiciones = [];
+    $params = [];
+    $args = [&$condiciones, &$params, $estado, $tipoEcf];
+    (new ReflectionMethod(facturaModel::class, 'applyEstadoTipoFilters'))->invokeArgs($modelo, $args);
+    return [$condiciones, $params];
+};
+[$cond, $par] = $filtros('pendiente', null);
+wa_chk("'pendiente': una condicion IN con marcadores con nombre",
+    $cond === ['f.estado_dgii IN (:est0, :est1, :est2, :est3, :est4, :est5)'], $cond);
+wa_chk("'pendiente': los parametros son SIN_VEREDICTO en orden",
+    $par === array_combine([':est0', ':est1', ':est2', ':est3', ':est4', ':est5'], EstadosEcf::SIN_VEREDICTO), $par);
+[$cond, $par] = $filtros('pendiente', '31');
+wa_chk("'pendiente' + tipo 31: suma la condicion y :tipo_ecf",
+    count($cond) === 2 && $cond[1] === 'f.tipo_ecf = :tipo_ecf' && ($par[':tipo_ecf'] ?? null) === '31' && count($par) === 7, [$cond, $par]);
+wa_chk("'aprobado' sin cambios", $filtros('aprobado', null) === [["f.estado_dgii LIKE '%ACEPTADO%'"], []], $filtros('aprobado', null));
+wa_chk("'rechazado' sin cambios", $filtros('rechazado', null) === [["f.estado_dgii LIKE '%RECHAZADO%'"], []], $filtros('rechazado', null));
+wa_chk('sin estado: ninguna condicion', $filtros(null, null) === [[], []], $filtros(null, null));
+wa_chk('ESTADOS_NOTA_VIGENTE termina con EstadosEcf::EN_VUELO (una sola lista)',
+    array_slice(facturaModel::ESTADOS_NOTA_VIGENTE, -2) === EstadosEcf::EN_VUELO, facturaModel::ESTADOS_NOTA_VIGENTE);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
