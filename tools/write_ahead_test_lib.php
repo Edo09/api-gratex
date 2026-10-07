@@ -240,7 +240,15 @@ function wa_mock_log(string $mockUrl, bool $limpiar = false): array
 // Red de seguridad: toda funcion de esta mitad se niega a tocar una base sin
 // la tabla marca zz_write_ahead_scratch, y --preparar solo crea o completa
 // bases que empiezan con "wa_" (sin el prefijo) y que estan vacias o ya tienen
-// la marca.
+// la marca. wa_sin_marca es la excepcion: la autoprueba la necesita SIN marca
+// (una base con tablas y sin la marca, en miniatura), asi que --preparar nunca
+// la marca y la autoprueba se niega a correr si alguien se la puso.
+//
+// Errores: el mensaje de una excepcion de PDO trae usuario y host. La primera
+// llamada a wa_credenciales() instala wa_manejar_excepcion, que imprime solo la
+// clase y los codigos (SQLSTATE y errno); wa_conectar calla los warnings de
+// mysqlnd (traen el host); wa_usar_base manda a un archivo el error_log de
+// Database.php (trae usuario@host). Nada de eso se imprime jamas.
 //
 // Lo que la base de prueba necesita, ademas de db/tenant_schema.sql:
 //   - users y api_tokens en version single-tenant (sin tenant_id ni FK a
@@ -258,6 +266,32 @@ function wa_mock_log(string $mockUrl, bool $limpiar = false): array
 
 const WA_MARCA = 'zz_write_ahead_scratch';
 
+/** Nombre corto de la base que la autoprueba usa SIN marca (reservado: --preparar no la toca). */
+const WA_BASE_SIN_MARCA = 'wa_sin_marca';
+
+/**
+ * Manejador de excepciones de la mitad con base: imprime solo la clase, el
+ * archivo:linea y los codigos (SQLSTATE y errno de MySQL) de la excepcion y de
+ * sus previas. Nunca getMessage() ni la traza: el mensaje del driver trae
+ * usuario y host y la traza muestra los primeros caracteres de los argumentos.
+ */
+function wa_manejar_excepcion(Throwable $e): never
+{
+    $partes = [];
+    for ($x = $e; $x !== null; $x = $x->getPrevious()) {
+        $txt = get_class($x) . ' (' . basename($x->getFile()) . ':' . $x->getLine() . ')';
+        if ($x instanceof PDOException) {
+            $info = (array) $x->errorInfo;
+            $txt .= $info !== []
+                ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?')
+                : ' codigo ' . $x->getCode();
+        }
+        $partes[] = $txt;
+    }
+    echo '[FALLO] excepcion sin atrapar: ' . implode(' <- ', $partes) . "\n";
+    exit(1);
+}
+
 /** Credenciales de la base de prueba (entorno o tools/.env). Nunca se imprimen. */
 function wa_credenciales(): array
 {
@@ -265,6 +299,7 @@ function wa_credenciales(): array
     if ($c !== null) {
         return $c;
     }
+    set_exception_handler('wa_manejar_excepcion');
     $archivo = [];
     $ruta = __DIR__ . DIRECTORY_SEPARATOR . '.env';
     if (is_file($ruta)) {
@@ -327,6 +362,10 @@ function wa_conectar(?string $base = null): PDO
 {
     $c = wa_credenciales();
     $dsn = "mysql:host={$c['host']};port={$c['port']};charset=utf8mb4" . ($base !== null ? ';dbname=' . wa_base_real($base) : '');
+    // Segun la version de PHP/mysqlnd, un fallo de conexion lanza antes de la
+    // excepcion un E_WARNING con el host ("getaddrinfo for <host> failed"): se
+    // calla mientras dura el new PDO y se restaura el manejador del llamador.
+    set_error_handler(static fn (): bool => true);
     try {
         return new PDO($dsn, $c['user'], $c['pass'], [
             PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
@@ -336,6 +375,8 @@ function wa_conectar(?string $base = null): PDO
         // El mensaje del driver puede traer usuario y host: solo el codigo.
         echo "[FALLO] no se pudo conectar a la base de prueba (codigo {$e->getCode()}). Revisa WA_DB_* y que corra con -d extension=pdo_mysql\n";
         exit(1);
+    } finally {
+        restore_error_handler();
     }
 }
 
@@ -409,14 +450,41 @@ function wa_usar_base(string $base): PDO
     }
     require_once dirname(__DIR__) . '/src/Database.php';
     Database::setCredentials(['host' => $c['host'], 'port' => $c['port'], 'name' => $real, 'user' => $c['user'], 'pass' => $c['pass']]);
-    return Database::getInstance()->getConnection();
+    // Si no conecta, Database hace error_log("(usuario@host/base): mensaje del
+    // driver"): en el CLI eso sale por stderr. Se manda a un archivo temporal que
+    // se borra; la excepcion que sube la imprime wa_manejar_excepcion sin mensaje.
+    $log = tempnam(sys_get_temp_dir(), 'wa_dblog_');
+    if ($log === false) {
+        echo "[FALLO] no se pudo crear el log temporal de Database\n";
+        exit(1);
+    }
+    $antes = ini_set('error_log', $log);
+    try {
+        return Database::getInstance()->getConnection();
+    } finally {
+        ini_set('error_log', $antes === false ? '' : $antes);
+        @unlink($log);
+    }
+}
+
+/** CREATE DATABASE de una base de prueba (nombre real). Si el usuario no puede: solo el codigo y exit 1. */
+function wa_crear_base(PDO $srv, string $real): void
+{
+    try {
+        $srv->exec("CREATE DATABASE IF NOT EXISTS `{$real}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    } catch (PDOException $e) {
+        // En cPanel el usuario de prueba puede no tener CREATE sobre bases nuevas: solo el codigo.
+        echo "[FALLO] no se pudo crear {$real} (codigo {$e->getCode()}): creala en cPanel\n";
+        exit(1);
+    }
 }
 
 /**
  * Crea (o completa) una base de prueba: CREATE DATABASE, la marca, el esquema
  * de tenant y las tablas que la API necesita en modo single-tenant. Se niega a
- * tocar una base con tablas y sin la marca (protege una base real). Acepta el
- * nombre corto o el completo; la regla "wa_" va sobre el corto.
+ * tocar una base con tablas y sin la marca (protege una base real) y nunca
+ * marca wa_sin_marca (la autoprueba la necesita sin marca). Acepta el nombre
+ * corto o el completo; la regla "wa_" va sobre el corto.
  */
 function wa_preparar(string $base): void
 {
@@ -435,13 +503,13 @@ function wa_preparar(string $base): void
         echo "[FALLO] {$corta} tiene {$tablas} tablas y no es una base de prueba: no se toca\n";
         exit(1);
     }
-    try {
-        $srv->exec("CREATE DATABASE IF NOT EXISTS `{$real}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
-    } catch (PDOException $e) {
-        // En cPanel el usuario de prueba puede no tener CREATE sobre bases nuevas: solo el codigo.
-        echo "[FALLO] no se pudo crear {$real} (codigo {$e->getCode()}): creala en cPanel\n";
+    // Despues de la guarda de arriba: una wa_sin_marca con tablas y sin marca se
+    // rechaza por eso; las que llegan aqui son la vacia o la ya marcada.
+    if ($corta === WA_BASE_SIN_MARCA) {
+        echo '[FALLO] ' . WA_BASE_SIN_MARCA . " esta reservada para la autoprueba (debe quedar sin marca): --preparar no la toca\n";
         exit(1);
     }
+    wa_crear_base($srv, $real);
     $pdo = wa_conectar($real);
     // La marca primero: si la carga del esquema falla a mitad, la base queda
     // marcada y --preparar la puede completar en la siguiente corrida.
@@ -647,6 +715,8 @@ function wa_cert_prueba(): array
  * usuario wa_prueba (admin, clave al azar que no se imprime) e inicia sesion.
  * Sale con 1 si no logra iniciar sesion. Si ya hay una API del mismo nombre en
  * el puerto, se reutiliza tal cual y $env no se vuelve a aplicar.
+ * $env agrega o cambia variables del hijo, pero NUNCA DB_* ni MASTER_DB_*: esas
+ * se aplican al final con la base que paso la guarda de la marca.
  * @return array{api:string, mock:string, token:string}
  */
 function wa_api(string $base, array $env = [], int $puertoApi = 8098): array
@@ -655,10 +725,12 @@ function wa_api(string $base, array $env = [], int $puertoApi = 8098): array
     $real = wa_base_real($base);
     $cert = wa_cert_prueba();
     $mock = wa_servidor('mock_dgii', 'tools/mock_dgii.php', 8099, ['MOCK_DGII_CUELGA_SEG' => '5']);
-    $entorno = array_merge(wa_env_base($real), [
+    $varsBase = wa_env_base($real);
+    $db = array_filter($varsBase, static fn (string $k): bool => preg_match('/^(MASTER_)?DB_/', $k) === 1, ARRAY_FILTER_USE_KEY);
+    $entorno = array_merge($varsBase, [
         'DGII_ECF_BASE_URL' => $mock, 'DGII_FC_BASE_URL' => $mock, 'DGII_ECF_TIMEOUT' => '3',
         'DGII_ECF_CERT_PATH' => $cert['path'], 'DGII_ECF_CERT_PASSWORD' => $cert['password'],
-    ], $env);
+    ], $env, $db);
     $api = wa_servidor('api_' . wa_base_corta($base), 'index.php', $puertoApi, $entorno);
 
     $clave = bin2hex(random_bytes(16));
@@ -697,16 +769,22 @@ function wa_autoprueba(string $base): never
     wa_chk("guarda: 'mysql' no es una base de prueba", wa_es_base_de_prueba($srv, 'mysql') === false);
 
     // Una base con tablas y sin la marca (una base real, en miniatura) no se toca.
-    $sinMarca = wa_base_real('wa_sin_marca');
-    $srv->exec("CREATE DATABASE IF NOT EXISTS `{$sinMarca}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci");
+    $sinMarca = wa_base_real(WA_BASE_SIN_MARCA);
+    // Si alguien la marco, el hijo de abajo pasaria wa_pdo y correria la autoprueba
+    // completa, que lanzaria otro hijo igual: se corta antes de tocar nada.
+    if (wa_es_base_de_prueba($srv, $sinMarca)) {
+        echo '[FALLO] ' . WA_BASE_SIN_MARCA . ' tiene la marca ' . WA_MARCA . " y la autoprueba la necesita sin ella: borra esa tabla de la base (no con --preparar)\n";
+        exit(1);
+    }
+    wa_crear_base($srv, $sinMarca);
     $srv->exec("CREATE TABLE IF NOT EXISTS `{$sinMarca}`.`t` (id INT PRIMARY KEY)");
-    $r = wa_correr(array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--preparar=wa_sin_marca']));
+    $r = wa_correr(array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--preparar=' . WA_BASE_SIN_MARCA]));
     wa_chk('--preparar sobre una base con tablas y sin marca sale con 1',
         $r['codigo'] === 1 && str_contains($r['salida'], 'no es una base de prueba'), $r);
     $st = $srv->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = '{$sinMarca}'");
     wa_chk('--preparar no le agrego tablas', (int) $st->fetchColumn() === 1);
     // wa_pdo es la guarda de todo lo demas: sobre una base sin marca sale con 1.
-    $r = wa_correr(array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--autoprueba', '--tenant-db=wa_sin_marca']));
+    $r = wa_correr(array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--autoprueba', '--tenant-db=' . WA_BASE_SIN_MARCA]));
     wa_chk('guarda: wa_pdo se niega a abrir una base sin marca',
         $r['codigo'] === 1 && str_contains($r['salida'], 'no es una base de prueba'), $r);
 
