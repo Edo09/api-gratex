@@ -60,7 +60,7 @@ distinto al `{status,...}` del resto):
 | `page` | `1` | Página |
 | `pageSize` | `10` | Resultados por página |
 | `query` | — | Busca en e-NCF, nº factura, cliente (nombre/razón social/RNC/correo/teléfono) y **descripción de los ítems** |
-| `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`), `pendiente` o `todos`. `pendiente` = sin veredicto de la DGII: `PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `EN_PROCESO`, `RFCE_ENVIADO` y `RFCE_EN_PROCESO` (`EstadosEcf::SIN_VEREDICTO`). No incluye `NO_ENCONTRADO`, `RFCE_NO_ENCONTRADO` ni el `PENDIENTE` heredado, que el front también rotula "Pendiente": esos ya tienen respuesta. Cualquier otro valor → `422` |
+| `estado` | `todos` | `aprobado` (incluye `ACEPTADO`, `ACEPTADO_CONDICIONAL` y `RFCE_*` aceptados), `rechazado` (incluye `RFCE_RECHAZADO`), `pendiente` o `todos`. `pendiente` = sin resultado final de la DGII (ni aceptada ni rechazada): `PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `EN_PROCESO`, `RFCE_ENVIADO` y `RFCE_EN_PROCESO` (`EstadosEcf::SIN_VEREDICTO`). No incluye `NO_ENCONTRADO`, `RFCE_NO_ENCONTRADO` ni el `PENDIENTE` heredado, que el front también rotula "Pendiente": esos ya tienen respuesta. Cualquier otro valor → `422` |
 | `tipo_ecf` | — | Filtra por tipo: `E31`, `E32`, … `E47` (también acepta `31`, `32`, …) |
 
 #### Notas vinculadas: `notas` y `modifica` (listado y detalle)
@@ -300,7 +300,7 @@ X-API-KEY: <key>
 | Campo | Descripción |
 |-------|-------------|
 | `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos): cuenta filas, las en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) incluidas |
-| `resumen.monto_total` | Suma de los montos emitidos (RD$): la nota de crédito (E34) suma y los rechazados también. **No** suma las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`): la DGII todavía no dio veredicto, así que no son dinero |
+| `resumen.monto_total` | Suma de los montos emitidos (RD$): la nota de crédito (E34) suma y los rechazados también. **No** suma las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`): la app todavía no sabe si la DGII las recibió, así que no son dinero |
 | `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y no cuentan los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) ni las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`). Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
 | `resumen.tipos_distintos` | Cantidad de tipos e-CF distintos utilizados |
 | `por_tipo[].tipo_ecf` | Código del tipo (31, 32, 33, …) |

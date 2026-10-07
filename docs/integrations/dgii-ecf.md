@@ -145,8 +145,9 @@ motivó: E34 aceptado el 2026-10-05 cuyo INSERT falló por la clave `uk_e_ncf` v
 envío o la confirmación fallan, la factura queda en `ENVIO_INCIERTO` (o en
 `PENDIENTE_ENVIO` si el proceso murió) con su e-NCF, el XML firmado, el
 `codigo_seguridad` y las líneas. La app nunca la reenvía: la resuelve soporte. El
-procedimiento es un solo `UPDATE` que devuelve la fila al camino normal de
-`GET /api/facturas/{id}/estado`, que ya aplica el veredicto, escribe
+procedimiento es un `UPDATE` de la fila (y, si la DGII no tiene el comprobante, un
+segundo `UPDATE` que devuelve el número a la secuencia) que la devuelve al camino
+normal de `GET /api/facturas/{id}/estado`, que ya aplica el veredicto, escribe
 `STATUS_CHANGE`, devuelve la secuencia cuando la DGII no la usó y mueve el
 inventario una sola vez.
 
@@ -183,19 +184,38 @@ inventario una sola vez.
    `ENVIO_INCIERTO ... track_id=...` del `error_log`.
 
 3. **Aplicar un solo caso** y abrir la factura en la app (o
-   `GET /api/facturas/{id}/estado`), que hace el resto:
+   `GET /api/facturas/{id}/estado`), que hace el resto. Los `:id`, `:T`, `:rango_id` y
+   `:secuencia_valor` de las sentencias son marcadores y phpMyAdmin los rechaza:
+   reemplaza cada uno por su valor literal (el `id` de la fila; el trackId entre
+   comillas; `rango_id` y `secuencia_valor` de la meta leída en el paso 1).
 
    | Caso | SQL |
    |---|---|
    | e-CF, la DGII tiene un trackId `T` | `UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = :T WHERE id = :id AND (estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO') OR (estado_dgii = 'ENVIADO' AND track_id IS NULL));` |
    | RFCE (`respuesta_dgii.flujo = 'RFCE'`) | `UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` La consulta RFCE usa el `codigo_seguridad` guardado. |
-   | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y después, con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
-   | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y la misma devolución de `ncf_sequences`. El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
+   | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y después, **solo si ese `UPDATE` afectó 1 fila** (si afectó 0, no devuelvas el número y vuelve al paso 1), con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si este segundo `UPDATE` afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
+   | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y la misma devolución de `ncf_sequences`, con la misma condición (solo si ese `UPDATE` afectó 1 fila; si afectó 0, no devuelvas el número y vuelve al paso 1). El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
    | `certecf` (TrackIds responde 404 allí) | Decidir entre los casos de arriba con el portal de certificación de la DGII. Un error en `certecf` no tiene efecto fiscal. |
 
+   - Si el `UPDATE` de `facturas` afecta 0 filas, la fila cambió de estado mientras
+     tanto (por ejemplo, la petición que seguía corriendo ya confirmó) y sigue siendo
+     dueña de su número: no apliques nada más y vuelve al paso 1.
+   - `NO_ENCONTRADO` y `RFCE_NO_ENCONTRADO` son dos pasos y el orden importa: el
+     `UPDATE` de `ncf_sequences` va **solo si** el de `facturas` afectó 1 fila. Con 0
+     filas no devuelvas el número: lo posee una fila que ya no está en vuelo.
    - Con `respuesta_dgii.dispensado = false` (el e-NCF vino en el payload) no hay
      número que devolver: solo el `UPDATE` de `facturas`.
    - Nunca un `DELETE`: la fila es la prueba de que ese número se usó.
+   - Ejemplo con valores literales, caso "La DGII no lo tiene" (factura `id` 41,
+     e-NCF `E310000000123`, meta con `rango_id` 7 y `secuencia_valor` 123):
+
+     ```sql
+     UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO'
+      WHERE id = 41 AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');
+     -- Solo si afectó 1 fila:
+     UPDATE ncf_sequences SET current_value = current_value - 1
+      WHERE id = 7 AND current_value = 123;
+     ```
 
 ---
 
