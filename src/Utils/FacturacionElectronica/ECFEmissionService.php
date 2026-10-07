@@ -8,8 +8,12 @@ require_once __DIR__ . '/RFCEXmlBuilder.php';
 require_once __DIR__ . '/EcfItemMapper.php';
 require_once __DIR__ . '/EcfUsuarioException.php';
 require_once __DIR__ . '/EstadosEcf.php';
+require_once __DIR__ . '/EcfNumeroOcupadoException.php';
+require_once __DIR__ . '/EcfEnvioInciertoException.php';
 require_once __DIR__ . '/InformacionReferencia.php';
+require_once __DIR__ . '/../../AuditLogger.php';
 require_once __DIR__ . '/../../CertResolver.php';
+require_once __DIR__ . '/../../Database.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/../../Models/ncfModel.php';
 require_once __DIR__ . '/../../Models/provinciaMunicipioModel.php';
@@ -148,12 +152,44 @@ class ECFEmissionService
     /**
      * @param array $payload Required keys:
      *   tipo_ecf, comprador (assoc), items (array of assoc), totales (assoc).
+     * @param callable|null $persistencia Gancho write-ahead,
+     *   fn(string $fase, array $ctx): mixed. Sin el (integracion, gastos) la
+     *   emision queda como antes. Con el:
+     *   - 'reservar': ultima sentencia del try protegido, despues de autenticar.
+     *       ctx: tipo_ecf, e_ncf, ambiente (el del token: el que guarda la fila),
+     *       ambiente_secuencia (el del dispensador), signed_xml, codigo_seguridad,
+     *       fecha_emision_dgii (Y-m-d H:i:s), flujo (ECF|RFCE), rfce_xml (?string),
+     *       dispensado (bool), rango_id (?int), secuencia_valor (?int; null con
+     *       un e_ncf override), desde (Y-m-d H:i:s del servidor).
+     *       Tiene que COMMITEAR la fila (XML e items) y devolver
+     *       ['factura_id' => int, 'e_ncf' => string, 'desde' => string], sin
+     *       dejar una transaccion abierta.
+     *   - 'confirmar': despues de mapEstado/extractTrackId y ANTES de reclamar
+     *       la secuencia. ctx: lo de 'reservar' + reserva, estado (con RFCE_ en
+     *       el flujo RFCE), track_id, dgii_response, dgii_status_code,
+     *       rfce_track_id, rfce_estado, rfce_response, rfce_status_code,
+     *       secuencia_utilizada (?bool). Devuelve bool: false = otra escritura
+     *       ya movio la fila (CONFIRM_RACE: la secuencia no se toca).
+     *   - 'incierto': lanzo el envio, el mapeo o 'confirmar', o el proceso murio
+     *       con la fila en vuelo (registro de cierre). ctx: ctxSinXml(lo de
+     *       'reservar') + reserva, fase_fallida (envio|confirmar|shutdown),
+     *       clase, error (<= 2000 caracteres), resultado_parcial
+     *       (proyectarResultado o null; el cierre no la manda). Devuelve bool:
+     *       true = la fila quedo ENVIO_INCIERTO.
      * @return array {
-     *   e_ncf, tipo_ecf, signed_xml, codigo_seguridad,
-     *   track_id, estado, ambiente, fecha_emision_dgii, dgii_response
+     *   e_ncf, tipo_ecf, signed_xml, codigo_seguridad, track_id, estado,
+     *   ambiente, fecha_emision_dgii, dgii_response, dgii_status_code,
+     *   flujo (ECF|RFCE), factura_id (?int: la fila reservada; null sin gancho);
+     *   en el flujo RFCE ademas: monto_total, rfce_xml, rfce_track_id,
+     *   rfce_estado, rfce_response, rfce_status_code, aviso
      * }
+     * @throws InvalidArgumentException integracion con gancho (no hay DB de tenant)
+     * @throws EcfNumeroOcupadoException otra fila ya es duena del e-NCF: el
+     *   contador queda avanzado y el reintento toma el siguiente
+     * @throws EcfEnvioInciertoException con fila reservada, el envio o su
+     *   confirmacion fallaron: la DGII puede tener el e-CF
      */
-    public function emitir(array $payload): array
+    public function emitir(array $payload, ?callable $persistencia = null): array
     {
         $tipoEcf = (string) ($payload['tipo_ecf'] ?? '');
         if (!preg_match('/^(31|32|33|34|41|43|44|45|46|47)$/', $tipoEcf)) {
@@ -163,6 +199,10 @@ class ECFEmissionService
         // Modo integracion: sin DB propia. El emisor viene en el payload y el
         // cliente envia el e_ncf (no dispensamos secuencia ni leemos emisor_config).
         $integration = !empty($payload['integration']);
+        if ($integration && $persistencia !== null) {
+            // Un tenant de integracion no tiene DB propia: no hay donde reservar.
+            throw new InvalidArgumentException('write-ahead no aplica a integracion (sin DB de tenant)');
+        }
         if ($integration) {
             $emisor = is_array($payload['emisor'] ?? null) ? $payload['emisor'] : [];
             if (empty($emisor['rnc']) || empty($emisor['razon_social']) || empty($emisor['direccion'])) {
@@ -353,6 +393,15 @@ class ECFEmissionService
         // firma la semilla). Si armar, firmar o autenticar falla, el e-NCF que
         // dispensamos no se uso: se devuelve para que el proximo intento lo
         // reutilice en vez de dejar un hueco en el rango.
+        // Con $persistencia, la ULTIMA sentencia de este try es la reserva
+        // ('reservar'): commitea la fila (XML firmado, RFCE, codigo de seguridad
+        // e items) antes de cualquier envio. Desde ese commit la fila es duena
+        // del numero y el catch ya no lo devuelve.
+        $reserva = null;
+        $signedRfce = null;
+        $ctxReservar = null;
+        $montoTotal = (float) ($payload['totales']['monto_total'] ?? 0);
+        $usaRFCE = $tipoEcf === '32' && $montoTotal < self::RFCE_THRESHOLD;
         try {
             $this->resolveUbicaciones($xmlData);
 
@@ -376,13 +425,134 @@ class ECFEmissionService
             $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
             $codigoSeguridad = $this->extractCodigoSeguridad($signedXml);
 
+            // RFCE (E32 < 250k): se arma y firma aqui, antes de enviar nada. Fuera
+            // del try un fallo dejaba el numero consumido sin documento, y la
+            // reserva necesita este XML para guardarlo en la fila.
+            if ($usaRFCE) {
+                $rfceEmisorOverride = is_array($payload['rfce_emisor_override'] ?? null) ? $payload['rfce_emisor_override'] : [];
+                $rfceCompradorOverride = is_array($payload['rfce_comprador_override'] ?? null) ? $payload['rfce_comprador_override'] : [];
+
+                $rfceEmisor = array_merge(
+                    [
+                        'rnc' => $emisorMerged['rnc'],
+                        'razon_social' => $emisorMerged['razon_social'],
+                    ],
+                    array_filter($rfceEmisorOverride, fn($v) => $v !== null && $v !== '')
+                );
+                $rfceComprador = array_merge(
+                    [
+                        'rnc' => $payload['comprador']['rnc'] ?? null,
+                        'identificador_extranjero' => $payload['comprador']['identificador_extranjero'] ?? null,
+                        'razon_social' => $payload['comprador']['razon_social'] ?? null,
+                    ],
+                    array_filter($rfceCompradorOverride, fn($v) => $v !== null && $v !== '')
+                );
+
+                $rfceXmlData = [
+                    'tipo_ecf' => '32',
+                    'e_ncf' => $eNcf,
+                    'tipo_ingresos' => $xmlData['tipo_ingresos'],
+                    'tipo_pago' => $xmlData['tipo_pago'],
+                    'formas_pago' => $payload['formas_pago'] ?? [],
+                    'emisor' => $rfceEmisor,
+                    'fecha_emision' => $xmlData['fecha_emision'],
+                    'comprador' => $rfceComprador,
+                    'totales' => $payload['totales'] ?? [],
+                    'codigo_seguridad_ecf' => $codigoSeguridad,
+                ];
+
+                $unsignedRfce = $this->rfceBuilder->build($rfceXmlData);
+                $signedRfce = $this->signer->sign($certContent, $certPassword, $unsignedRfce);
+            }
+
+            // Pre-vuelo del guard de CR: recibir()/recibirResumen() lo repiten,
+            // pero ahi ya habria fila reservada. Aqui el numero todavia vuelve a
+            // la secuencia.
+            DgiiReceptionService::assertSinCarriageReturn($signedXml);
+            if ($signedRfce !== null) {
+                DgiiReceptionService::assertSinCarriageReturn($signedRfce);
+            }
+
             // El mismo cert firma la semilla de autenticacion DGII.
             $tokenInfo = $this->auth->autenticar([
                 'environment' => $payload['ambiente'] ?? null,
                 'certificate_content' => $certContent,
                 'certificate_password' => $certPassword,
             ]);
+            // Pre-vuelo del token. normalizeTokenResponse solo rechaza un token
+            // empty(): uno de puros espacios pasaria y normalizeBearerToken lo
+            // rechazaria DENTRO de recibir(), con la fila ya reservada (un envio
+            // "incierto" que nunca salio). Mismo texto que normalizeBearerToken,
+            // para que los integradores lean lo de siempre.
+            if (trim((string) ($tokenInfo['token'] ?? '')) === '') {
+                throw new RuntimeException('DGII bearer token is required.');
+            }
+            // Dentro del try: la reserva guarda $ambiente (el del token).
+            $bearerToken = $tokenInfo['token'];
+            $ambiente = $tokenInfo['ambiente'];
+
+            if ($persistencia !== null) {
+                $ctxReservar = [
+                    'tipo_ecf' => $tipoEcf,
+                    'e_ncf' => $eNcf,
+                    'ambiente' => (string) $ambiente,
+                    'ambiente_secuencia' => (string) $ambienteEarly,
+                    'signed_xml' => $signedXml,
+                    'codigo_seguridad' => $codigoSeguridad,
+                    'fecha_emision_dgii' => $fechaEmisionDgii,
+                    'flujo' => $usaRFCE ? 'RFCE' : 'ECF',
+                    'rfce_xml' => $signedRfce,
+                    'dispensado' => $dispensamosSecuencia,
+                    'rango_id' => $secuenciaRangoId !== null ? (int) $secuenciaRangoId : null,
+                    'secuencia_valor' => $dispensamosSecuencia ? $secuenciaValor : null,
+                    'desde' => date('Y-m-d H:i:s'),
+                ];
+                $reserva = $persistencia('reservar', $ctxReservar);
+                $idReserva = is_array($reserva) ? (int) ($reserva['factura_id'] ?? 0) : 0;
+                if ($idReserva <= 0) {
+                    // Sin id no hay fila de la que fiarse: el catch devuelve el numero.
+                    $reserva = null;
+                    throw new RuntimeException('persistencia no devolvio factura_id');
+                }
+                $conexion = Database::getInstance()->getConnection();
+                if ($conexion->inTransaction()) {
+                    // El gancho se porto mal: se cierra la transaccion y se mira si
+                    // la fila sobrevivio. Si no, la transaccion abierta ERA la
+                    // reserva: nadie es dueno del numero y el catch lo devuelve.
+                    $conexion->rollBack();
+                    $st = $conexion->prepare('SELECT 1 FROM facturas WHERE id = :id');
+                    $st->execute([':id' => $idReserva]);
+                    if ($st->fetchColumn() === false) {
+                        $reserva = null;
+                    }
+                    throw new RuntimeException('persistencia dejo una transaccion abierta');
+                }
+                error_log(sprintf('[ECF e-NCF=%s factura_id=%d] reservado, enviando', $eNcf, $idReserva));
+            }
         } catch (Throwable $e) {
+            // Un gancho que lanzo con su transaccion abierta: sin este rollBack el
+            // UPDATE que devuelve el numero correria DENTRO de ella y se perderia
+            // al terminar la peticion (numero quemado sin rastro).
+            if ($persistencia !== null) {
+                try {
+                    $conexion = Database::getInstance()->getConnection();
+                    if ($conexion->inTransaction()) {
+                        $conexion->rollBack();
+                    }
+                } catch (Throwable $r) {
+                    error_log('[ECF e-NCF=' . $eNcf . '] pre-envio: rollBack fallo: ' . $r->getMessage());
+                }
+            }
+            if ($reserva !== null) {
+                // La fila ya esta commiteada y es duena del numero: no se devuelve.
+                error_log(sprintf('[ECF e-NCF=%s factura_id=%d] fila reservada sin enviar', $eNcf, (int) $reserva['factura_id']));
+                throw $e;
+            }
+            if ($e instanceof EcfNumeroOcupadoException) {
+                // Otra fila ya tiene el numero: devolverlo lo repartiria otra vez.
+                error_log(sprintf('[ECF] e-NCF %s ocupado al reservar: la secuencia queda avanzada', $eNcf));
+                throw $e;
+            }
             if ($dispensamosSecuencia) {
                 $devuelto = $this->ncfModel()->rollbackECFSequence(
                     $secuenciaType, $secuenciaValor, $ambienteEarly, $secuenciaRangoId
@@ -391,51 +561,31 @@ class ECFEmissionService
                     '[ECF] fallo antes de enviar a DGII (%s): e-NCF %s %s',
                     get_class($e), $eNcf, $devuelto ? 'devuelto a la secuencia' : 'no se pudo devolver (rollback sin coincidencia)'
                 ));
+                if (!$devuelto) {
+                    // Numero consumido sin fila que lo explique: queda en la bitacora.
+                    AuditLogger::log([
+                        'module' => 'ncf',
+                        'action' => 'NCF_SEQUENCE_UPDATE',
+                        'entity_type' => 'ncf_sequence',
+                        'entity_id' => $eNcf,
+                        'success' => false,
+                        'error_message' => 'rollback sin coincidencia',
+                        'new_values' => [
+                            'e_ncf' => $eNcf,
+                            'tipo_ecf' => $tipoEcf,
+                            'rango_id' => $secuenciaRangoId,
+                            'secuencia_valor' => $secuenciaValor,
+                            'ambiente_secuencia' => $ambienteEarly,
+                            'causa' => get_class($e),
+                        ],
+                        'description' => 'e-NCF consumido sin fila: no se pudo devolver a la secuencia.',
+                    ]);
+                }
             }
             throw $e;
         }
-        $bearerToken = $tokenInfo['token'];
-        $ambiente = $tokenInfo['ambiente'];
-
-        $montoTotal = (float) ($payload['totales']['monto_total'] ?? 0);
-        $usaRFCE = $tipoEcf === '32' && $montoTotal < self::RFCE_THRESHOLD;
 
         if ($usaRFCE) {
-            $rfceEmisorOverride = is_array($payload['rfce_emisor_override'] ?? null) ? $payload['rfce_emisor_override'] : [];
-            $rfceCompradorOverride = is_array($payload['rfce_comprador_override'] ?? null) ? $payload['rfce_comprador_override'] : [];
-
-            $rfceEmisor = array_merge(
-                [
-                    'rnc' => $emisorMerged['rnc'],
-                    'razon_social' => $emisorMerged['razon_social'],
-                ],
-                array_filter($rfceEmisorOverride, fn($v) => $v !== null && $v !== '')
-            );
-            $rfceComprador = array_merge(
-                [
-                    'rnc' => $payload['comprador']['rnc'] ?? null,
-                    'identificador_extranjero' => $payload['comprador']['identificador_extranjero'] ?? null,
-                    'razon_social' => $payload['comprador']['razon_social'] ?? null,
-                ],
-                array_filter($rfceCompradorOverride, fn($v) => $v !== null && $v !== '')
-            );
-
-            $rfceXmlData = [
-                'tipo_ecf' => '32',
-                'e_ncf' => $eNcf,
-                'tipo_ingresos' => $xmlData['tipo_ingresos'],
-                'tipo_pago' => $xmlData['tipo_pago'],
-                'formas_pago' => $payload['formas_pago'] ?? [],
-                'emisor' => $rfceEmisor,
-                'fecha_emision' => $xmlData['fecha_emision'],
-                'comprador' => $rfceComprador,
-                'totales' => $payload['totales'] ?? [],
-                'codigo_seguridad_ecf' => $codigoSeguridad,
-            ];
-
-            $unsignedRfce = $this->rfceBuilder->build($rfceXmlData);
-            $signedRfce = $this->signer->sign($certContent, $certPassword, $unsignedRfce);
-
             $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
                 'environment' => $ambiente,
             ]);
