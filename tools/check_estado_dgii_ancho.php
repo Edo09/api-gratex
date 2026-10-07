@@ -17,6 +17,8 @@
  *   - Los estados base salen del codigo (returns de mapEstado y literales de
  *     gastoModel), se combinan con el prefijo RFCE_ y el sufijo _ARCHIVADO que
  *     el codigo realmente usa, y el mas largo cabe en el ancho del snapshot.
+ *   - Los estados en vuelo del write-ahead (EstadosEcf::EN_VUELO) y cada
+ *     reintentable archivado (EstadosEcf::REINTENTABLES + _ARCHIVADO) caben.
  *   - El snapshot y la migracion 028 usan el mismo ancho y el mismo COMMENT.
  *   - La 028 toca las dos columnas, cada PREPARE tiene su EXECUTE y su
  *     DEALLOCATE PREPARE, y el verificador de migraciones tiene la fila 028.
@@ -53,6 +55,9 @@ $snapshot = $leer('db/tenant_schema.sql');
 $migracion = $leer('db/migrations/028_estado_dgii_ancho.sql');
 $verificador = $leer('tools/verificar_migraciones_tenant.sql');
 $readme = $leer('db/migrations/README.md');
+// Las listas de EstadosEcf (en vuelo y reintentables). Es una clase de solo
+// constantes: cargarla no toca la DB ni la red.
+require_once $raiz . '/src/Utils/FacturacionElectronica/EstadosEcf.php';
 
 // ---------------------------------------------------------------------------
 // 1) Estados que el codigo puede escribir
@@ -83,6 +88,9 @@ foreach ($base as $e) {
     }
 }
 $posibles = array_keys($posibles);
+// En vuelo (write-ahead): sin prefijo ni sufijo. Una fila en vuelo nunca se
+// archiva sola y PENDIENTE_ENVIO / ENVIO_INCIERTO no pasan por RFCE_.
+$posibles = array_values(array_unique(array_merge($posibles, EstadosEcf::EN_VUELO)));
 usort($posibles, fn($a, $b) => strlen($b) <=> strlen($a));
 $maximo = $posibles !== [] ? strlen($posibles[0]) : 0;
 echo "         mas largo: {$posibles[0]} ({$maximo})\n";
@@ -109,6 +117,12 @@ $chk("snapshot: facturas.estado_dgii ({$anchoF}) >= estado mas largo ({$maximo})
 $chk("snapshot: gastos.estado_dgii ({$anchoG}) >= estado mas largo ({$maximo})", $anchoG >= $maximo);
 $chk('snapshot: defaults intactos (PENDIENTE / REGISTRADO)',
     ($snapF['default'] ?? '') === 'PENDIENTE' && ($snapG['default'] ?? '') === 'REGISTRADO');
+$largoEnVuelo = max(array_map('strlen', EstadosEcf::EN_VUELO));
+$chk("EstadosEcf: los estados en vuelo caben en facturas.estado_dgii ({$largoEnVuelo} <= {$anchoF})", $largoEnVuelo <= $anchoF);
+$archivados = array_map(fn($e) => $e . '_ARCHIVADO', EstadosEcf::REINTENTABLES);
+$largoArchivado = max(array_map('strlen', $archivados));
+$chk("EstadosEcf: cada reintentable archivado cabe ({$largoArchivado} <= {$anchoF})", $largoArchivado <= $anchoF,
+    implode(', ', $archivados));
 
 // ---------------------------------------------------------------------------
 // 3) Migracion 028
