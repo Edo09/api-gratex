@@ -57,6 +57,53 @@ wa_chk('EstadosEcf no carga otros archivos (sin require ni include)',
 wa_chk('EstadosEcf es final', (new ReflectionClass(EstadosEcf::class))->isFinal());
 
 // ---------------------------------------------------------------------------
+// 2) Excepciones: numero ocupado y envio incierto (spec 4.5)
+// ---------------------------------------------------------------------------
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfNumeroOcupadoException.php';
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfEnvioInciertoException.php';
+
+echo "\n== 2) EcfNumeroOcupadoException y EcfEnvioInciertoException ==\n";
+$causaPdo = new PDOException('Duplicate entry');
+$ocupado = new EcfNumeroOcupadoException('E310000000123', 'ecf', 'fila 9 en ACEPTADO', $causaPdo);
+wa_chk('Ocupado es EcfUsuarioException (el 502 de la app muestra su texto)', $ocupado instanceof EcfUsuarioException);
+wa_chk('Ocupado: texto para el usuario exacto',
+    $ocupado->getMensajeUsuario() === 'No se pudo asignar el número de comprobante. Inténtalo de nuevo.', $ocupado->getMensajeUsuario());
+wa_chk('Ocupado: MENSAJE_USUARIO es ese mismo texto', EcfNumeroOcupadoException::MENSAJE_USUARIO === $ocupado->getMensajeUsuario());
+wa_chk('Ocupado: el texto tecnico trae e-NCF, ambiente y causa',
+    $ocupado->getMessage() === 'e-NCF E310000000123 ocupado en ambiente ecf: fila 9 en ACEPTADO', $ocupado->getMessage());
+wa_chk('Ocupado: conserva la excepcion anterior', $ocupado->getPrevious() === $causaPdo);
+wa_chk('Ocupado sin excepcion anterior: getPrevious() null',
+    (new EcfNumeroOcupadoException('E310000000124', 'ecf', 'archivo sin coincidencia'))->getPrevious() === null);
+
+$causaRed = new RuntimeException('HTTP request failed: timeout');
+$parcial = ['estado' => 'ACEPTADO', 'track_id' => 'track-E310000000123', 'dgii_status_code' => 200, 'dgii_response' => ['codigo' => 1],
+    'rfce_estado' => null, 'rfce_track_id' => null, 'rfce_status_code' => null, 'secuencia_utilizada' => true];
+$incierto = new EcfEnvioInciertoException('E310000000123', 41, 'ecf', 'envio', $parcial, true, $causaRed);
+wa_chk('Incierto: mensaje del spec',
+    $incierto->getMessage() === 'Envio a la DGII sin confirmar: e-NCF E310000000123, factura_id 41, fase envio', $incierto->getMessage());
+wa_chk('Incierto: las propiedades guardan lo recibido',
+    [$incierto->eNcf, $incierto->facturaId, $incierto->ambiente, $incierto->faseFallida, $incierto->resultadoParcial, $incierto->marcado]
+    === ['E310000000123', 41, 'ecf', 'envio', $parcial, true]);
+$sinParcial = new EcfEnvioInciertoException('E320000000007', 42, 'certecf', 'confirmar', null, false);
+wa_chk('Incierto: resultadoParcial null y marcado false se aceptan',
+    $sinParcial->resultadoParcial === null && $sinParcial->marcado === false && $sinParcial->getPrevious() === null);
+$soloLectura = array_filter(
+    ['eNcf', 'facturaId', 'ambiente', 'faseFallida', 'resultadoParcial', 'marcado'],
+    static fn(string $p): bool => (new ReflectionProperty(EcfEnvioInciertoException::class, $p))->isReadOnly()
+);
+wa_chk('Incierto: las seis propiedades son readonly', count($soloLectura) === 6, array_values($soloLectura));
+try {
+    $incierto->marcado = false;
+    $escribio = true;
+} catch (Error $e) {
+    $escribio = false;
+}
+wa_chk('Incierto: escribir marcado lanza Error', $escribio === false && $incierto->marcado === true);
+wa_chk('Incierto: conserva la excepcion original', $incierto->getPrevious() === $causaRed);
+wa_chk('Incierto: es RuntimeException y no EcfUsuarioException',
+    $incierto instanceof RuntimeException && !($incierto instanceof EcfUsuarioException));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
