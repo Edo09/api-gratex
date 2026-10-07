@@ -8,7 +8,9 @@
  * La copia queda rota a proposito (indice global uk_e_ncf, estado_dgii
  * VARCHAR(20)): la usan tools/test_reservar_confirmar.php (desborde 6.2) y
  * tools/test_write_ahead_api.php (12.0, pasos 3-4). Sobre --tenant-db no se
- * escribe nada. Se puede correr las veces que haga falta.
+ * escribe nada: antes de romper la copia se verifica (solo lectura) que
+ * --tenant-db tenga 027 y 028 APLICADA, y si no se sale con 2 (argumentos
+ * cruzados). Se puede correr las veces que haga falta.
  *
  * Los nombres de base se dan sin el prefijo de WA_DB_PREFIX (con el tambien
  * valen: wa_base_real es idempotente). Lo que se imprime lleva el nombre real.
@@ -69,6 +71,16 @@ function wa_facturas_esquema(PDO $pdo, string $base, string $indice): array
 $pdoBase = wa_pdo($base);
 $pdoCopia = wa_pdo($copia);
 
+// Guarda contra argumentos cruzados: el ALTER de abajo solo se corre si
+// --tenant-db es de verdad la base buena (027 y 028 APLICADA, solo lectura).
+// Si no, se corta con 2 sin tocar ninguna de las dos bases.
+$vBase = wa_verificar_migraciones($pdoBase);
+if (($vBase['027']['estado'] ?? null) !== 'APLICADA' || ($vBase['028']['estado'] ?? null) !== 'APLICADA') {
+    echo "[FALLO] {$base} no tiene 027 y 028 APLICADA: argumentos cruzados? --tenant-db debe ser la base con 027/028 aplicadas"
+        . " y --copia-db la que se rompe a proposito. No se toco ninguna base.\n";
+    exit(2);
+}
+
 // Romper la copia: deshacer 027 (vuelve la clave global uk_e_ncf) y 028
 // (estado_dgii a VARCHAR(20)). Cada ALTER mira information_schema antes, para
 // que el script se pueda repetir.
@@ -83,7 +95,7 @@ if ($esq['ancho'] > 20) {
 }
 
 echo "Base de prueba ({$base})\n";
-$v = wa_verificar_migraciones($pdoBase);
+$v = $vBase;
 wa_chk("base: la columna base dice {$base} en todas las filas",
     $v !== [] && array_unique(array_column($v, 'base')) === [$base], array_unique(array_column($v, 'base')));
 wa_chk('base: 027 APLICADA', ($v['027']['estado'] ?? null) === 'APLICADA', $v['027'] ?? null);
