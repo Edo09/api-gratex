@@ -141,6 +141,41 @@ wa_chk('ESTADOS_NOTA_VIGENTE termina con EstadosEcf::EN_VUELO (una sola lista)',
     array_slice(facturaModel::ESTADOS_NOTA_VIGENTE, -2) === EstadosEcf::EN_VUELO, facturaModel::ESTADOS_NOTA_VIGENTE);
 
 // ---------------------------------------------------------------------------
+// 4) facturaModel::normalizarNotaReferencia (campos de la nota E33/E34)
+// ---------------------------------------------------------------------------
+echo "\n== 4) facturaModel::normalizarNotaReferencia ==\n";
+$conRef = static fn(array $info): array => ['informacion_referencia' => $info];
+$credito = facturaModel::normalizarNotaReferencia($conRef([
+    'ncf_modificado' => 'E310000000020', 'fecha_ncf_modificado' => '05-10-2026',
+    'codigo_modificacion' => '3', 'razon_modificacion' => '',
+]), '34');
+wa_chk('E34 con razon vacia: el default de credito',
+    $credito['razon_modificacion'] === 'Nota de credito por ajuste de monto', $credito);
+wa_chk("fecha '05-10-2026' (d-m-Y del payload) -> '2026-10-05' (DATE)", $credito['fecha_ncf_modificado'] === '2026-10-05', $credito);
+wa_chk("codigo_modificacion '3' -> '3'", $credito['codigo_modificacion'] === '3', $credito);
+wa_chk('ncf_modificado se guarda tal cual', $credito['ncf_modificado'] === 'E310000000020', $credito);
+wa_chk('las cuatro claves, en el orden de las columnas',
+    array_keys($credito) === ['ncf_modificado', 'fecha_ncf_modificado', 'codigo_modificacion', 'razon_modificacion'], array_keys($credito));
+$debito = facturaModel::normalizarNotaReferencia($conRef(['ncf_modificado' => 'E310000000020', 'razon_modificacion' => '']), '33');
+wa_chk('E33 con razon vacia: el default de debito', $debito['razon_modificacion'] === 'Nota de debito por ajuste de monto', $debito);
+$vacio = ['ncf_modificado' => null, 'fecha_ncf_modificado' => null, 'codigo_modificacion' => null, 'razon_modificacion' => null];
+wa_chk('E31 sin informacion_referencia: las cuatro en null', facturaModel::normalizarNotaReferencia([], '31') === $vacio,
+    facturaModel::normalizarNotaReferencia([], '31'));
+wa_chk('informacion_referencia que no es arreglo se ignora',
+    facturaModel::normalizarNotaReferencia(['informacion_referencia' => 'x'], '31') === $vacio);
+wa_chk('E31 con razon vacia: sin default (solo las notas lo llevan)',
+    facturaModel::normalizarNotaReferencia($conRef(['razon_modificacion' => '']), '31')['razon_modificacion'] === null);
+wa_chk("fecha '2026-10-05' (formato equivocado) -> null",
+    facturaModel::normalizarNotaReferencia($conRef(['fecha_ncf_modificado' => '2026-10-05']), '34')['fecha_ncf_modificado'] === null);
+wa_chk("ncf_modificado '' -> null",
+    facturaModel::normalizarNotaReferencia($conRef(['ncf_modificado' => '']), '34')['ncf_modificado'] === null);
+wa_chk('una razon explicita se conserva',
+    facturaModel::normalizarNotaReferencia($conRef(['razon_modificacion' => 'Devolucion parcial']), '34')['razon_modificacion'] === 'Devolucion parcial');
+$textoModelo = (string) file_get_contents(__DIR__ . '/../src/Models/facturaModel.php');
+wa_chk("facturaModel usa TIPOS_NOTA: la lista ['33', '34'] aparece una sola vez (la constante)",
+    substr_count($textoModelo, "['33', '34']") === 1, substr_count($textoModelo, "['33', '34']"));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

@@ -1149,6 +1149,41 @@ class facturaModel
     }
 
     /**
+     * Campos de InformacionReferencia (notas E33/E34) tal como los guarda la
+     * fila. Se persisten para mostrar el NCF modificado y el motivo en la
+     * representacion impresa (norma DGII). Pura: no toca la DB.
+     *
+     * La razon se completa con un default si viene vacia, igual que
+     * ECFXmlBuilder::normalizeNotaReferenceData(), para que el PDF y el XML
+     * firmado muestren el mismo texto. El payload trae la fecha en d-m-Y y la
+     * columna es DATE (Y-m-d); una fecha que no se puede leer queda null.
+     *
+     * @param array $factura lee solo 'informacion_referencia' (arreglo o ausente)
+     * @return array{ncf_modificado:?string, fecha_ncf_modificado:?string, codigo_modificacion:?string, razon_modificacion:?string}
+     */
+    public static function normalizarNotaReferencia(array $factura, string $tipoEcf): array
+    {
+        $infoRef = is_array($factura['informacion_referencia'] ?? null) ? $factura['informacion_referencia'] : [];
+        $razon = (string) ($infoRef['razon_modificacion'] ?? '');
+        if ($razon === '' && in_array($tipoEcf, self::TIPOS_NOTA, true)) {
+            $razon = $tipoEcf === '34'
+                ? 'Nota de credito por ajuste de monto'
+                : 'Nota de debito por ajuste de monto';
+        }
+        $fecha = null;
+        if (($infoRef['fecha_ncf_modificado'] ?? '') !== '') {
+            $dt = DateTime::createFromFormat('d-m-Y', (string) $infoRef['fecha_ncf_modificado']);
+            $fecha = $dt ? $dt->format('Y-m-d') : null;
+        }
+        return [
+            'ncf_modificado' => ($infoRef['ncf_modificado'] ?? '') !== '' ? (string) $infoRef['ncf_modificado'] : null,
+            'fecha_ncf_modificado' => $fecha,
+            'codigo_modificacion' => ($infoRef['codigo_modificacion'] ?? '') !== '' ? (string) $infoRef['codigo_modificacion'] : null,
+            'razon_modificacion' => $razon !== '' ? $razon : null,
+        ];
+    }
+
+    /**
      * Save a factura together with its e-CF emission result.
      * @param array $factura {date, client_id, client_name, total, items[], user_id?, tipo_ecf}
      * @param array $ecf {e_ncf, track_id, estado, codigo_seguridad, fecha_emision_dgii, ambiente, signed_xml, dgii_response}
@@ -1163,28 +1198,8 @@ class facturaModel
         try {
             $this->conexion->beginTransaction();
 
-            // InformacionReferencia (Notas E33/E34): se persiste para mostrar el
-            // NCF Modificado y el Motivo en la Representacion Impresa (norma DGII).
-            // La razon se completa con un default si viene vacia, igual que
-            // ECFXmlBuilder::normalizeNotaReferenceData(), para que el PDF y el
-            // XML firmado muestren el mismo texto.
-            $infoRef = is_array($factura['informacion_referencia'] ?? null) ? $factura['informacion_referencia'] : [];
-            $tipoEcfNota = (string) ($ecf['tipo_ecf'] ?? '');
-            $ncfModificado = ($infoRef['ncf_modificado'] ?? '') !== '' ? (string) $infoRef['ncf_modificado'] : null;
-            $codigoModificacion = ($infoRef['codigo_modificacion'] ?? '') !== '' ? (string) $infoRef['codigo_modificacion'] : null;
-            $razonModificacion = (string) ($infoRef['razon_modificacion'] ?? '');
-            if (in_array($tipoEcfNota, ['33', '34'], true) && $razonModificacion === '') {
-                $razonModificacion = $tipoEcfNota === '34'
-                    ? 'Nota de credito por ajuste de monto'
-                    : 'Nota de debito por ajuste de monto';
-            }
-            $razonModificacion = $razonModificacion !== '' ? $razonModificacion : null;
-            // El payload trae la fecha en formato d-m-Y; la columna es DATE (Y-m-d).
-            $fechaNcfModificado = null;
-            if (($infoRef['fecha_ncf_modificado'] ?? '') !== '') {
-                $dt = DateTime::createFromFormat('d-m-Y', (string) $infoRef['fecha_ncf_modificado']);
-                $fechaNcfModificado = $dt ? $dt->format('Y-m-d') : null;
-            }
+            // Campos de la nota (E33/E34): ver normalizarNotaReferencia().
+            $nota = self::normalizarNotaReferencia($factura, (string) ($ecf['tipo_ecf'] ?? ''));
 
             // Reintento de un e-CF RECHAZADO: cuando DGII rechaza sin consumir la
             // secuencia (secuenciaUtilizada=false, p.ej. codigo 135) el contador se
@@ -1258,10 +1273,10 @@ class facturaModel
                 ':rfce_track_id' => $ecf['rfce_track_id'] ?? null,
                 ':rfce_estado' => $ecf['rfce_estado'] ?? null,
                 ':rfce_respuesta' => isset($ecf['rfce_response']) ? json_encode($ecf['rfce_response']) : null,
-                ':ncf_modificado' => $ncfModificado,
-                ':fecha_ncf_modificado' => $fechaNcfModificado,
-                ':codigo_modificacion' => $codigoModificacion,
-                ':razon_modificacion' => $razonModificacion,
+                ':ncf_modificado' => $nota['ncf_modificado'],
+                ':fecha_ncf_modificado' => $nota['fecha_ncf_modificado'],
+                ':codigo_modificacion' => $nota['codigo_modificacion'],
+                ':razon_modificacion' => $nota['razon_modificacion'],
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
 
