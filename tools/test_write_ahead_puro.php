@@ -677,6 +677,90 @@ wa_chk('7: dispenseNextECF ya no devuelve null en el catch',
     !preg_match('/catch \(PDOException \$e\) \{\s*return null;/', $cuerpoDispense));
 
 // ---------------------------------------------------------------------------
+// 8) ECFEmissionService: inyeccion, proyecciones sin XML y REINTENTABLES (Task 11)
+// Nada de esto toca la base: el ncfModel inyectado se crea sin constructor.
+// ---------------------------------------------------------------------------
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php';
+
+echo "\n== 8) ECFEmissionService: inyeccion y proyecciones ==\n";
+$propDe = static fn(object $o, string $p): mixed => (new ReflectionProperty($o, $p))->getValue($o);
+$authInyectado = new DgiiAuthService();
+$signerInyectado = new DgiiXmlSigner();
+$recepcionInyectada = new DgiiReceptionService($authInyectado);
+$ncfInyectado = (new ReflectionClass(ncfModel::class))->newInstanceWithoutConstructor();
+$svcInyectado = new ECFEmissionService($authInyectado, $signerInyectado, $recepcionInyectada, $ncfInyectado);
+wa_chk('8: constructor usa el auth, el signer, la recepcion y el ncfModel inyectados',
+    $propDe($svcInyectado, 'auth') === $authInyectado
+    && $propDe($svcInyectado, 'signer') === $signerInyectado
+    && $propDe($svcInyectado, 'reception') === $recepcionInyectada
+    && $propDe($svcInyectado, 'ncfModel') === $ncfInyectado);
+$svcSoloAuth = new ECFEmissionService($authInyectado);
+wa_chk('8: con solo el auth, la recepcion por defecto usa ese mismo auth',
+    $propDe($propDe($svcSoloAuth, 'reception'), 'auth') === $authInyectado);
+$svcPorDefecto = new ECFEmissionService();
+wa_chk('8: sin argumentos no toca la base (ncfModel sigue null)',
+    $propDe($svcPorDefecto, 'ncfModel') === null
+    && $propDe($svcPorDefecto, 'auth') instanceof DgiiAuthService
+    && $propDe($svcPorDefecto, 'reception') instanceof DgiiReceptionService);
+
+$fuenteServicio = (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php');
+wa_chk("8: sin la lista literal ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO']",
+    !str_contains($fuenteServicio, "['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO']"));
+wa_chk('8: eNcfYaUsado usa EstadosEcf::REINTENTABLES',
+    str_contains($fuenteServicio, 'in_array((string) $estado, EstadosEcf::REINTENTABLES, true)'));
+wa_chk('8: ya no nombra saveFacturaConECF', !str_contains($fuenteServicio, 'saveFacturaConECF'));
+wa_chk("8: la reclamacion sigue probando ['RECHAZADO', 'NO_ENCONTRADO'] (el RFCE pasa el estado base)",
+    str_contains($fuenteServicio, "\$esRechazo = in_array(\$estado, ['RECHAZADO', 'NO_ENCONTRADO'], true);"));
+wa_chk('8: la reclamacion lee la bandera con parseSecuenciaUtilizada',
+    str_contains($fuenteServicio, '$utilizada = self::parseSecuenciaUtilizada($receptionData);'));
+
+$hayProyecciones = method_exists(ECFEmissionService::class, 'ctxSinXml')
+    && method_exists(ECFEmissionService::class, 'proyectarResultado')
+    && method_exists(ECFEmissionService::class, 'parseSecuenciaUtilizada');
+wa_chk('8: existen ctxSinXml, proyectarResultado y parseSecuenciaUtilizada', $hayProyecciones);
+if ($hayProyecciones) {
+    $ctxPrueba = [
+        'tipo_ecf' => '31', 'e_ncf' => 'E310000000123', 'signed_xml' => '<ECF>firmado</ECF>',
+        'rfce_xml' => '<RFCE>firmado</RFCE>', 'codigo_seguridad' => 'QUJDRE', 'reserva' => ['factura_id' => 41],
+    ];
+    $sinXml = ECFEmissionService::ctxSinXml($ctxPrueba);
+    wa_chk('8: ctxSinXml quita signed_xml y rfce_xml y deja lo demas, en orden',
+        $sinXml === ['tipo_ecf' => '31', 'e_ncf' => 'E310000000123', 'codigo_seguridad' => 'QUJDRE', 'reserva' => ['factura_id' => 41]],
+        $sinXml);
+
+    $clavesProyeccion = ['estado', 'track_id', 'dgii_status_code', 'dgii_response', 'rfce_estado', 'rfce_track_id', 'rfce_status_code', 'secuencia_utilizada'];
+    $proy = ECFEmissionService::proyectarResultado($ctxPrueba + ['estado' => 'ACEPTADO', 'track_id' => 't-1', 'secuencia_utilizada' => false]);
+    wa_chk('8: proyectarResultado devuelve exactamente las 8 claves, en orden', array_keys($proy) === $clavesProyeccion, array_keys($proy));
+    wa_chk('8: proyectarResultado deja null las ausentes, conserva false y descarta las extra (el XML tambien)',
+        $proy['estado'] === 'ACEPTADO' && $proy['track_id'] === 't-1' && $proy['rfce_estado'] === null
+        && $proy['secuencia_utilizada'] === false
+        && !array_key_exists('signed_xml', $proy) && !array_key_exists('e_ncf', $proy) && !array_key_exists('reserva', $proy), $proy);
+    $grande = str_repeat('á', 100 * 1024);   // 200 KB de texto (2 bytes por caracter)
+    $proy = ECFEmissionService::proyectarResultado(['dgii_response' => $grande]);
+    wa_chk('8: un dgii_response de texto de 200 KB queda en 4000 caracteres (mb_substr, UTF-8 valido)',
+        is_string($proy['dgii_response']) && mb_strlen($proy['dgii_response']) === 4000 && mb_check_encoding($proy['dgii_response'], 'UTF-8'),
+        mb_strlen((string) $proy['dgii_response']));
+    $arreglo = ['trackId' => 't-2', 'codigo' => 1, 'estado' => 'Aceptado', 'mensajes' => [['valor' => 'ok']]];
+    $proy = ECFEmissionService::proyectarResultado(['dgii_response' => $arreglo]);
+    wa_chk('8: un dgii_response arreglo pasa intacto', $proy['dgii_response'] === $arreglo, $proy['dgii_response']);
+
+    $parse = new ReflectionMethod(ECFEmissionService::class, 'parseSecuenciaUtilizada');
+    wa_chk('8: parseSecuenciaUtilizada es private static', $parse->isPrivate() && $parse->isStatic());
+    $casosParse = [
+        'true' => [['secuenciaUtilizada' => true], true],
+        'false' => [['secuenciaUtilizada' => false], false],
+        '"true"' => [['secuenciaUtilizada' => 'true'], true],
+        '"false"' => [['secuenciaUtilizada' => 'false'], false],
+        'ausente' => [['codigo' => 2], null],
+        '"abc"' => [['secuenciaUtilizada' => 'abc'], null],
+    ];
+    foreach ($casosParse as $nombre => [$datos, $esperado]) {
+        $obtenido = $parse->invoke(null, $datos);
+        wa_chk("8: parseSecuenciaUtilizada({$nombre}) === " . var_export($esperado, true), $obtenido === $esperado, $obtenido);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

@@ -7,6 +7,7 @@ require_once __DIR__ . '/ECFXmlBuilder.php';
 require_once __DIR__ . '/RFCEXmlBuilder.php';
 require_once __DIR__ . '/EcfItemMapper.php';
 require_once __DIR__ . '/EcfUsuarioException.php';
+require_once __DIR__ . '/EstadosEcf.php';
 require_once __DIR__ . '/InformacionReferencia.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
@@ -25,6 +26,12 @@ require_once __DIR__ . '/../../Models/provinciaMunicipioModel.php';
 class ECFEmissionService
 {
     private const RFCE_THRESHOLD = 250000.00;
+
+    /** Claves de proyectarResultado(), en este orden. */
+    private const CLAVES_PROYECCION = ['estado', 'track_id', 'dgii_status_code', 'dgii_response', 'rfce_estado', 'rfce_track_id', 'rfce_status_code', 'secuencia_utilizada'];
+
+    /** Tope de un dgii_response que llego como texto (cuerpo crudo, DgiiAuthService.php:150). */
+    private const MAX_RESPUESTA = 4000;
 
     // Nombre de cada tipo como lo ve el usuario, para los mensajes de
     // EcfUsuarioException (el texto tecnico sigue diciendo "E31").
@@ -53,11 +60,22 @@ class ECFEmissionService
     private ?EmisorConfigModel $emisorModel = null;
     private ?ncfModel $ncfModel = null;
 
-    public function __construct()
-    {
-        $this->auth = new DgiiAuthService();
-        $this->signer = new DgiiXmlSigner();
-        $this->reception = new DgiiReceptionService($this->auth);
+    /**
+     * Las cuatro dependencias son opcionales: sin argumentos queda igual que
+     * antes. Las pruebas inyectan dobles (tools/test_write_ahead_ecf.php). Un
+     * ncfModel no inyectado sigue perezoso (ncfModel()).
+     */
+    public function __construct(
+        ?DgiiAuthService $auth = null,
+        ?DgiiXmlSigner $signer = null,
+        ?DgiiReceptionService $reception = null,
+        ?ncfModel $ncf = null
+    ) {
+        $this->auth = $auth ?? new DgiiAuthService();
+        $this->signer = $signer ?? new DgiiXmlSigner();
+        // La recepcion por defecto usa el MISMO auth, inyectado o no (como antes).
+        $this->reception = $reception ?? new DgiiReceptionService($this->auth);
+        $this->ncfModel = $ncf;
         $this->builder = new ECFXmlBuilder();
         $this->rfceBuilder = new RFCEXmlBuilder();
     }
@@ -75,18 +93,17 @@ class ECFEmissionService
     }
 
     /**
-     * Resuelve municipio/provincia de emisor y comprador al código DGII de 6
-     * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
-     */
-    /**
      * true si el e-NCF ya lo ocupa, en ESTE ambiente, una factura que NO se
      * puede re-emitir. Certificacion y produccion numeran aparte (migracion
      * 027): contar los de prueba hacia saltar el rango que la DGII autoriza en
      * produccion. Una fila sin ambiente (anterior a la columna) cuenta como
-     * ocupada: no se sabe de cual era.
-     * Mismos estados reintentables que facturaModel::saveFacturaConECF, para que
-     * los dos chequeos no puedan discrepar. Fail-open: ante un error de consulta
-     * devuelve false y deja que el chequeo del modelo siga siendo la red.
+     * ocupada: no se sabe de cual era. Una fila en vuelo (PENDIENTE_ENVIO,
+     * ENVIO_INCIERTO) tambien: no esta en REINTENTABLES.
+     * Mismos estados reintentables (EstadosEcf::REINTENTABLES) que
+     * facturaModel::reservarFacturaECF, para que los dos chequeos no puedan
+     * discrepar. Fail-open: ante un error de consulta devuelve false; la
+     * reserva (SELECT ... FOR UPDATE) y la clave unica uk_e_ncf_amb siguen
+     * siendo la red.
      */
     private function eNcfYaUsado(string $eNcf, string $ambiente): bool
     {
@@ -96,9 +113,8 @@ class ECFEmissionService
                  WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL)'
             );
             $stmt->execute([':e' => $eNcf, ':amb' => $ambiente]);
-            $reintentables = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'];
             foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $estado) {
-                if (!in_array((string) $estado, $reintentables, true)) {
+                if (!in_array((string) $estado, EstadosEcf::REINTENTABLES, true)) {
                     return true;
                 }
             }
@@ -109,6 +125,10 @@ class ECFEmissionService
         }
     }
 
+    /**
+     * Resuelve municipio/provincia de emisor y comprador al código DGII de 6
+     * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
+     */
     private function resolveUbicaciones(array &$xmlData): void
     {
         $cat = new provinciaMunicipioModel();
@@ -506,14 +526,7 @@ class ECFEmissionService
         if (!$dispensamos) {
             return;
         }
-        $utilizada = null;
-        if (array_key_exists('secuenciaUtilizada', $receptionData)) {
-            $utilizada = filter_var(
-                $receptionData['secuenciaUtilizada'],
-                FILTER_VALIDATE_BOOLEAN,
-                FILTER_NULL_ON_FAILURE
-            );
-        }
+        $utilizada = self::parseSecuenciaUtilizada($receptionData);
         $esRechazo = in_array($estado, ['RECHAZADO', 'NO_ENCONTRADO'], true);
         $debeRevertir = ($utilizada === false) || ($utilizada === null && $esRechazo);
 
@@ -530,6 +543,53 @@ class ECFEmissionService
             '[ECF] reclamar secuencia: type=%s valor=%d ambiente=%s estado=%s dispensamos=si utilizada=%s rango_id=%s -> %s',
             $type, $valor, $ambiente, $estado, $flagTxt, $rangoId !== null ? (string) $rangoId : 'null', $resultado
         ));
+    }
+
+    /**
+     * Bandera secuenciaUtilizada de una respuesta de recepcion: true/false, o
+     * null si no vino o no se entiende. Una sola lectura para el ctx de
+     * 'confirmar' y para reclamarSecuenciaSiNoUtilizada.
+     */
+    private static function parseSecuenciaUtilizada(array $data): ?bool
+    {
+        $utilizada = null;
+        if (array_key_exists('secuenciaUtilizada', $data)) {
+            $utilizada = filter_var(
+                $data['secuenciaUtilizada'],
+                FILTER_VALIDATE_BOOLEAN,
+                FILTER_NULL_ON_FAILURE
+            );
+        }
+        return $utilizada;
+    }
+
+    /**
+     * Copia del ctx sin los XML firmados (MEDIUMTEXT). Es lo unico que llega a
+     * respuesta_dgii (TEXT), a la bitacora y al registro de cierre.
+     */
+    public static function ctxSinXml(array $ctx): array
+    {
+        unset($ctx['signed_xml'], $ctx['rfce_xml']);
+        return $ctx;
+    }
+
+    /**
+     * Lo que se sabe de la respuesta de la DGII, sin XML y con tope: siempre las
+     * 8 claves de CLAVES_PROYECCION (null si faltan). Un dgii_response de texto
+     * (cuerpo crudo de un 2xx sin JSON) se corta a MAX_RESPUESTA caracteres para
+     * que nunca desborde respuesta_dgii TEXT. mb_substr: mbstring ya es
+     * obligatorio en la emision (ECFXmlBuilder lo usa en cada e-CF).
+     */
+    public static function proyectarResultado(array $ctx): array
+    {
+        $r = [];
+        foreach (self::CLAVES_PROYECCION as $clave) {
+            $r[$clave] = $ctx[$clave] ?? null;
+        }
+        if ($r['dgii_response'] !== null && !is_array($r['dgii_response'])) {
+            $r['dgii_response'] = mb_substr((string) $r['dgii_response'], 0, self::MAX_RESPUESTA);
+        }
+        return $r;
     }
 
     /**
