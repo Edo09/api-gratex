@@ -543,6 +543,22 @@ wa_chk('R10: contador sin cambio (devuelto)', $r['delta'] === 0, $r['delta']);
 wa_chk('R10: sin fila ni envio', $r['total_filas'] === 0 && $r['rec']->llamadas === []);
 chkComun('R10', $r);
 
+// R10b el gancho COMMITEA su fila y devuelve algo sin factura_id: la fila es
+// duena del numero aunque el retorno no lo diga (lo decide la base, no el
+// retorno), asi que el numero NO vuelve.
+$r = correr($pdo, $ids, ['trucos' => ['reservar' => function (array $ctx) use ($pdo) {
+    insertarSinCommit($pdo, $ctx);
+    $pdo->commit();
+    return ['x' => 1];
+}]]);
+wa_chk("R10b: RuntimeException('persistencia no devolvio factura_id')",
+    $r['err'] instanceof RuntimeException && $r['err']->getMessage() === 'persistencia no devolvio factura_id', descErr($r['err']));
+wa_chk('R10b: contador +1 (la fila es duena del numero)', $r['delta'] === 1, $r['delta']);
+wa_chk('R10b: la fila sigue en PENDIENTE_ENVIO', count($r['filas']) === 1 && ($r['filas'][0]['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO', $r['filas']);
+wa_chk('R10b: no se intento devolver el numero', $r['ncf']->rollbacks === [], $r['ncf']->rollbacks);
+wa_chk("R10b: log 'fila reservada sin enviar'", str_contains($r['log'], "[ECF e-NCF={$r['e_ncf']} factura_id=") && str_contains($r['log'], '] fila reservada sin enviar'));
+chkComun('R10b', $r);
+
 // R11 el gancho abre transaccion, inserta y lanza: el catch la cierra
 // ANTES de devolver el numero (si no, la devolucion se perderia con ella).
 $falla = new RuntimeException('falla de prueba con la transaccion abierta');
