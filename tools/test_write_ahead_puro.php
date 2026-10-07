@@ -49,7 +49,7 @@ $rechaza = static function (array $estados): bool {
         return true;
     }
 };
-wa_chk('sql() rechaza un valor con comilla', $rechaza(["ACEPTADO' OR '1'='1"]));
+wa_chk('sql() rechaza comilla y salto de linea final', $rechaza(["ACEPTADO' OR '1'='1"]) && $rechaza(["ABC\n"]));
 wa_chk('sql() rechaza la lista vacia (IN () no es SQL)', $rechaza([]));
 $textoClase = (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/EstadosEcf.php');
 wa_chk('EstadosEcf no carga otros archivos (sin require ni include)',

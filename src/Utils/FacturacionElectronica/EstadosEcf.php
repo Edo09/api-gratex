@@ -60,7 +60,7 @@ final class EstadosEcf
             throw new InvalidArgumentException('EstadosEcf::sql: lista vacia');
         }
         foreach ($estados as $estado) {
-            if (!is_string($estado) || !preg_match('/^[A-Z][A-Z_]*$/', $estado)) {
+            if (!is_string($estado) || !preg_match('/^[A-Z][A-Z_]*\z/', $estado)) {
                 throw new InvalidArgumentException('EstadosEcf::sql: estado no valido');
             }
         }
