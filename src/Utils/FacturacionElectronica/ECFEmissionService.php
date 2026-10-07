@@ -682,7 +682,6 @@ class ECFEmissionService
             }
         } catch (Throwable $e) {
             if ($persistencia !== null && $reserva !== null) {
-                self::desarmarEnVuelo((int) $reserva['factura_id']);
                 $fase = $ctxConfirmar !== null ? 'confirmar' : 'envio';
                 $parcial = $ctxConfirmar !== null ? self::proyectarResultado($ctxConfirmar) : null;
                 $marcado = false;
@@ -697,6 +696,10 @@ class ECFEmissionService
                 } catch (Throwable $h) {
                     error_log('[ECF e-NCF=' . $eNcf . ' factura_id=' . $reserva['factura_id'] . '] marcar incierto fallo: ' . $h->getMessage());
                 }
+                // Sale del registro DESPUES de 'incierto', no antes: si un fatal o un
+                // timeout mata el proceso dentro de esa llamada, el cierre reintenta
+                // (el UPDATE solo toca PENDIENTE_ENVIO: si ya marco, no hace nada).
+                self::desarmarEnVuelo((int) $reserva['factura_id']);
                 // Si la DGII llego a contestar, estado y track_id quedan aqui aunque
                 // la base este caida (soporte los lee en el log, 10.2).
                 error_log(sprintf(
@@ -891,6 +894,16 @@ class ECFEmissionService
         }
         self::$shutdownRegistrado = true;
         register_shutdown_function(static function (): void {
+            // Lo PRIMERO: tras un fatal por memoria PHP restaura el limite, pero el
+            // heap sigue casi lleno si el proceso crecio de a poco, y el UPDATE de
+            // 'incierto' (prepare/execute de PDO) volveria a agotarlo: un segundo
+            // fatal dentro del cierre, que ningun catch atrapa, con la fila en
+            // PENDIENTE_ENVIO. Con holgura el cierre cabe. @ por si el host
+            // prohibe ini_set: sin permiso no se avisa, solo se intenta.
+            $holgura = self::limiteConHolgura((string) ini_get('memory_limit'));
+            if ($holgura !== null) {
+                @ini_set('memory_limit', $holgura);
+            }
             $err = error_get_last();
             foreach (self::$enVuelo as [$p, $r, $c]) {
                 try {
@@ -913,6 +926,25 @@ class ECFEmissionService
     private static function desarmarEnVuelo(int $facturaId): void
     {
         unset(self::$enVuelo[$facturaId]);
+    }
+
+    /**
+     * memory_limit para la funcion de cierre: el actual (con sufijo K/M/G) mas
+     * 64M. null si no hay que tocarlo: sin tope (-1), 0 o un valor que no se
+     * entiende.
+     */
+    private static function limiteConHolgura(string $limite): ?string
+    {
+        if (!preg_match('/^\s*(\d+)\s*([KMG]?)\s*$/i', $limite, $m)) {
+            return null;
+        }
+        $bytes = (int) $m[1] * match (strtoupper($m[2])) {
+            'G' => 1073741824,
+            'M' => 1048576,
+            'K' => 1024,
+            default => 1,
+        };
+        return $bytes > 0 ? (string) ($bytes + 64 * 1048576) : null;
     }
 
     /**

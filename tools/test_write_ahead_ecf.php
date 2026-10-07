@@ -150,11 +150,16 @@ final class FakeReception extends DgiiReceptionService
                 ($this->reentrada)();
                 return $this->json(200, ['trackId' => $track, 'codigo' => 1, 'estado' => 'Aceptado', 'secuenciaUtilizada' => true]);
             case 'fatal':
-                // Fatal real (memoria agotada): ni catch ni finally corren, solo
-                // las funciones de cierre.
-                ini_set('memory_limit', '64M');
-                str_repeat('x', 256 * 1024 * 1024);
-                return $this->json(200, []);
+                // Fatal real (memoria agotada) INCREMENTAL, como un proceso que
+                // crece hasta el tope: el heap queda lleno al morir (una sola
+                // reserva enorme lo deja vacio y no prueba nada). Ni catch ni
+                // finally corren, solo las funciones de cierre, que tienen que
+                // ampliar el limite para poder escribir en la base.
+                ini_set('memory_limit', '32M');
+                $ocupa = [];
+                while (true) {
+                    $ocupa[] = str_repeat('x', 64 * 1024);
+                }
         }
         throw new LogicException('FakeReception: modo desconocido ' . $this->modo);
     }
@@ -402,11 +407,21 @@ $ids = wa_sembrar($pdo);
 // y un fatal real en la segunda. Ni catch ni finally corren: solo el registro
 // de cierre puede marcar las dos filas. El padre revisa la base al terminar.
 if (wa_arg('hijo') === 'shutdown') {
+    // El UPDATE de 'incierto' pide solo unos 6 KB (medido) y cuanto aire le deja
+    // al heap el fatal depende del detalle de su disposicion (cambia hasta con el
+    // nombre del archivo), asi que el hijo no lo deja al azar: el gancho reserva
+    // ademas 8 MB en 'incierto' (mas de lo que un heap lleno puede dar sin
+    // ampliar el limite) y avisa con que limite corrio.
+    $trucosHijo = ['incierto' => function (array $ctx, facturaModel $m) {
+        echo 'LIMITE_CIERRE=', ini_get('memory_limit'), "\n";
+        $trabajo = str_repeat('x', 8 * 1024 * 1024);
+        return $m->marcarEnvioIncierto((int) $ctx['reserva']['factura_id'], $ctx) && $trabajo !== '';
+    }];
     $fases1 = $ctxs1 = $fases2 = $ctxs2 = [];
     $auth2 = new FakeAuth();
     $svc2 = new ECFEmissionService($auth2, new FakeSigner(), new FakeReception($auth2, 'fatal'), new FakeNcf());
     $em2 = emision($pdo, $ids, '31');
-    $gancho2 = gancho(new facturaModel(), $em2['factura'], $fases2, $ctxs2);
+    $gancho2 = gancho(new facturaModel(), $em2['factura'], $fases2, $ctxs2, $trucosHijo);
     $auth1 = new FakeAuth();
     $rec1 = new FakeReception($auth1, 'reentrar');
     $rec1->reentrada = function () use ($svc2, $em2, $gancho2): void {
@@ -414,7 +429,7 @@ if (wa_arg('hijo') === 'shutdown') {
     };
     $svc1 = new ECFEmissionService($auth1, new FakeSigner(), $rec1, new FakeNcf());
     $em1 = emision($pdo, $ids, '31');
-    $svc1->emitir($em1['payload'], gancho(new facturaModel(), $em1['factura'], $fases1, $ctxs1));
+    $svc1->emitir($em1['payload'], gancho(new facturaModel(), $em1['factura'], $fases1, $ctxs1, $trucosHijo));
     echo "NO DEBIO LLEGAR AQUI\n";
     exit(3);
 }
@@ -841,6 +856,9 @@ if ($pidHijo > 0) {
 }
 wa_chk('S1: el hijo murio con un fatal (codigo 255, no llego al final)',
     $codigoHijo === 255 && !str_contains($salida, 'NO DEBIO LLEGAR AQUI'), ['codigo' => $codigoHijo, 'salida' => mb_substr($salida, 0, 400)]);
+preg_match_all('/^LIMITE_CIERRE=(\S+?)\r?$/m', $salida, $limitesCierre);
+wa_chk('S1: el cierre amplio el limite de memoria antes de escribir (32M + 64M), en las dos filas',
+    $limitesCierre[1] === ['100663296', '100663296'], $limitesCierre[1]);
 $filasHijo = $pdo->query('SELECT id, e_ncf, estado_dgii, respuesta_dgii FROM facturas ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
 wa_chk('S1: el hijo reservo E310000000001 y E310000000002',
     array_column($filasHijo, 'e_ncf') === ['E310000000001', 'E310000000002'], $filasHijo);
@@ -872,6 +890,33 @@ $r = correr($pdo, $ids, ['trucos' => ['reservar' => function (array $ctx, factur
 }]]);
 wa_chk('S5: tras la transaccion abierta el registro esta vacio (nunca se armo)',
     $r['err'] instanceof RuntimeException && $r['err']->getMessage() === 'persistencia dejo una transaccion abierta' && enVuelo() === [], enVuelo());
+
+// S6 la fila sale del registro DESPUES de 'incierto', no antes: si un fatal o un
+// timeout mata el proceso dentro de esa llamada, el cierre reintenta (el UPDATE
+// solo toca PENDIENTE_ENVIO, asi que si ya habia marcado el reintento no hace nada).
+$vistoEnIncierto = null;
+$r = correr($pdo, $ids, ['modo' => 'cuelga', 'trucos' => ['incierto' => function (array $ctx, facturaModel $m) use (&$vistoEnIncierto) {
+    $vistoEnIncierto = array_keys(enVuelo() ?? []);
+    return $m->marcarEnvioIncierto((int) $ctx['reserva']['factura_id'], $ctx);
+}]]);
+$idS6 = (int) ($r['filas'][0]['id'] ?? 0);
+wa_chk('S6: mientras corre el gancho incierto la fila sigue en el registro',
+    $idS6 > 0 && $vistoEnIncierto === [$idS6], ['visto' => $vistoEnIncierto, 'fila' => $idS6]);
+wa_chk('S6: la fila quedo ENVIO_INCIERTO y el registro vacio al salir',
+    $r['err'] instanceof EcfEnvioInciertoException && ($r['filas'][0]['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && enVuelo() === [],
+    ['err' => descErr($r['err']), 'estado' => $r['filas'][0]['estado_dgii'] ?? null, 'registro' => enVuelo()]);
+
+// S7 el limite de memoria con holgura que pide el cierre (+64M sobre el actual).
+$holgura = method_exists(ECFEmissionService::class, 'limiteConHolgura')
+    ? new ReflectionMethod(ECFEmissionService::class, 'limiteConHolgura') : null;
+$obtenidoS7 = [];
+foreach (['-1' => null, '' => null, 'abc' => null, '64M' => '134217728', '128m' => '201326592', '1G' => '1140850688',
+          '512K' => '67633152', '134217728' => '201326592'] as $entrada => $esperado) {
+    $obtenidoS7[$entrada] = $holgura?->invoke(null, (string) $entrada);
+}
+wa_chk('S7: limiteConHolgura (-1 y basura sin tocar; K/M/G + 64M)',
+    $holgura !== null && $obtenidoS7 === ['-1' => null, '' => null, 'abc' => null, '64M' => '134217728', '128m' => '201326592',
+        '1G' => '1140850688', '512K' => '67633152', '134217728' => '201326592'], $obtenidoS7);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
