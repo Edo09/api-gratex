@@ -1,0 +1,221 @@
+<?php
+/**
+ * test_write_ahead_api.php — /api/facturas de punta a punta: la API real
+ * (php -S index.php) sobre la base de prueba y la DGII falsa
+ * (tools/mock_dgii.php). Nunca produccion (decision 6): wa_pdo() se niega a
+ * usar una base sin la tabla marca.
+ *
+ * Uso:
+ *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_write_ahead_api.php --tenant-db=wa_scratch
+ *
+ * Cada escenario arranca con el mock en un modo conocido, wa_limpiar +
+ * wa_sembrar y el log del mock vacio. Tras un "cuelga" el mock sigue
+ * durmiendo unos segundos (php -S atiende de a uno): wa_mock_modo() espera.
+ */
+
+require_once __DIR__ . '/write_ahead_test_lib.php';
+
+// Textos que ve el usuario, copiados letra por letra de facturaController.php
+// (FACTURA_EMISION_INCIERTA, FACTURA_EMISION_FALLO_GENERICO, guarda del total)
+// y de EcfNumeroOcupadoException::MENSAJE_USUARIO. Si cambian alla, aqui tambien.
+const T_EMISION_INCIERTA = 'No se pudo confirmar si la DGII recibió la factura %s. No la emitas de nuevo: ya quedó guardada. Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.';
+const T_FALLO_GENERICO = 'No se pudo emitir la factura en la DGII. Espera unos minutos y vuelve a intentarlo; si sigue fallando, avisa a soporte.';
+const T_TOTAL_INVALIDO = 'No se pudo calcular el total de la factura. Revisa las líneas e inténtalo de nuevo.';
+const T_NUMERO_OCUPADO = 'No se pudo asignar el número de comprobante. Inténtalo de nuevo.';
+const RUTA_RECEPCION = '/Recepcion/api/FacturasElectronicas';
+const RUTA_RECEPCION_FC = '/RecepcionFC/api/recepcion/ecf';
+
+/** Una linea del body de POST /api/facturas (bien, ITBIS 18%). */
+function wa_linea(float $precio, float $cantidad = 1, ?int $productId = null): array
+{
+    return [
+        'nombre_item' => $productId !== null ? 'WA producto' : 'WA linea libre',
+        'indicador_facturacion' => 1,
+        'indicador_bien_servicio' => 1,
+        'cantidad' => $cantidad,
+        'precio_unitario' => $precio,
+    ] + ($productId !== null ? ['product_id' => $productId] : []);
+}
+
+/** Body de POST /api/facturas para el cliente sembrado. */
+function wa_factura(string $tipo, array $ids, array $lineas, array $extra = []): array
+{
+    return $extra + ['tipo_ecf' => $tipo, 'client_id' => $ids['client_id'], 'tipo_pago' => 1, 'items' => $lineas];
+}
+
+/** POST /api/facturas con el token de wa_prueba. */
+function wa_emitir(array $srv, array $cuerpo): array
+{
+    return wa_http('POST', $srv['api'] . '/api/facturas', $cuerpo, ['X-API-KEY: ' . $srv['token']], 60);
+}
+
+/** GET a la API con el token de wa_prueba. */
+function wa_get(array $srv, string $ruta): array
+{
+    return wa_http('GET', $srv['api'] . $ruta, null, ['X-API-KEY: ' . $srv['token']], 60);
+}
+
+/** Escenario nuevo: mock en $modo (espera a un cuelga anterior), base limpia, log vacio. */
+function wa_reiniciar(PDO $pdo, array $srv, string $modo = 'acepta'): array
+{
+    wa_mock_modo($srv['mock'], $modo);
+    wa_limpiar($pdo);
+    $ids = wa_sembrar($pdo);
+    wa_mock_log($srv['mock'], true);
+    return $ids;
+}
+
+/** Peticiones de recepcion (e-CF o RFCE) que vio el mock. */
+function wa_recepciones(array $log): array
+{
+    return array_values(array_filter($log, static fn(array $e): bool
+        => str_ends_with((string) $e['ruta'], RUTA_RECEPCION) || str_ends_with((string) $e['ruta'], RUTA_RECEPCION_FC)));
+}
+
+/** Filas EMIT con success=0 de audit_logs, con new_values decodificado. */
+function wa_emit_fallidos(PDO $pdo): array
+{
+    $filas = $pdo->query("SELECT entity_id, new_values FROM audit_logs WHERE action = 'EMIT' AND success = 0 ORDER BY id")
+        ->fetchAll(PDO::FETCH_ASSOC);
+    return array_map(static fn(array $f): array => ['entity_id' => $f['entity_id'],
+        'new_values' => json_decode((string) $f['new_values'], true)], $filas);
+}
+
+/** Las claves de un array, ordenadas (para comparar formas). */
+function wa_claves(mixed $a): array
+{
+    $k = is_array($a) ? array_keys($a) : [];
+    sort($k);
+    return $k;
+}
+
+$base = (string) wa_arg('tenant-db', '');
+$pdo = wa_pdo($base);
+wa_limpiar($pdo);
+wa_sembrar($pdo);
+$srv = wa_api($base);
+
+// ---------------------------------------------------------------------------
+// E1) acepta, E31 con dos lineas de producto: 200, las 10 claves de siempre y
+// el stock se mueve una vez por linea.
+// ---------------------------------------------------------------------------
+echo "E1) acepta: E31 con dos lineas de producto\n";
+$ids = wa_reiniciar($pdo, $srv);
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id']), wa_linea(500, 1, $ids['product_id'])]));
+$d = $r['json']['data'] ?? [];
+wa_chk('200 con status true', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
+wa_chk('data trae exactamente las 10 claves de la spec 7.1', wa_claves($d) === wa_claves(array_flip([
+    'factura_id', 'e_ncf', 'track_id', 'estado_dgii', 'codigo_seguridad', 'total', 'tipo_ecf', 'ambiente',
+    'fecha_emision_dgii', 'dgii_response'])), wa_claves($d));
+wa_chk('estado_dgii ACEPTADO', ($d['estado_dgii'] ?? null) === 'ACEPTADO', $d);
+$fila = wa_filas($pdo, (string) ($d['e_ncf'] ?? ''))[0] ?? [];
+wa_chk('la fila quedo ACEPTADO con track_id del mock y secuencia_utilizada 1',
+    (int) ($fila['id'] ?? 0) === (int) ($d['factura_id'] ?? -1) && ($fila['estado_dgii'] ?? null) === 'ACEPTADO'
+    && ($fila['track_id'] ?? null) === 'track-' . ($d['e_ncf'] ?? '') && (string) ($fila['secuencia_utilizada'] ?? '') === '1', $fila);
+wa_chk('dos movimientos de inventario (una por linea)', wa_movimientos($pdo, (int) ($d['factura_id'] ?? 0)) === 2,
+    wa_movimientos($pdo, (int) ($d['factura_id'] ?? 0)));
+
+// ---------------------------------------------------------------------------
+// E2) rechaza y reintento: 422 con data, sin stock, el numero vuelve; el
+// reintento lo reusa, archiva la fila rechazada y mueve stock solo una vez.
+// ---------------------------------------------------------------------------
+echo "E2) rechaza, y reintento en acepta\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza');
+$cuerpo = wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]);
+$r = wa_emitir($srv, $cuerpo);
+$d1 = $r['json']['data'] ?? [];
+wa_chk('rechaza: 422 con data.factura_id', $r['status'] === 422 && is_int($d1['factura_id'] ?? null), $r);
+wa_chk('rechaza: sin movimientos de inventario', wa_movimientos($pdo, (int) ($d1['factura_id'] ?? 0)) === 0);
+wa_chk('rechaza: el contador de E31 vuelve a 0', wa_contador($pdo, 'E31') === 0, wa_contador($pdo, 'E31'));
+wa_mock_modo($srv['mock'], 'acepta');
+$r = wa_emitir($srv, $cuerpo);
+$d2 = $r['json']['data'] ?? [];
+wa_chk('reintento: 200 con el mismo e-NCF', $r['status'] === 200 && ($d2['e_ncf'] ?? null) === ($d1['e_ncf'] ?? '-'), [$d1, $d2]);
+$filas = wa_filas($pdo, (string) ($d1['e_ncf'] ?? ''));
+wa_chk('reintento: la fila rechazada queda RECHAZADO_ARCHIVADO sin e_ncf, y la nueva ACEPTADO',
+    count($filas) === 2 && (int) $filas[0]['id'] === (int) ($d1['factura_id'] ?? 0)
+    && $filas[0]['estado_dgii'] === 'RECHAZADO_ARCHIVADO' && $filas[0]['e_ncf'] === null
+    && (int) $filas[1]['id'] === (int) ($d2['factura_id'] ?? 0) && $filas[1]['estado_dgii'] === 'ACEPTADO', $filas);
+wa_chk('reintento: el stock se mueve solo para la fila nueva',
+    wa_movimientos($pdo, (int) ($d1['factura_id'] ?? 0)) === 0 && wa_movimientos($pdo, (int) ($d2['factura_id'] ?? 0)) === 1);
+
+// ---------------------------------------------------------------------------
+// E3) cuelga (timeout de la DGII) en los tres flujos: 502 incierto con data,
+// fila ENVIO_INCIERTO, sin stock, un EMIT fallido en auditoria y UNA recepcion.
+// ---------------------------------------------------------------------------
+foreach ([
+    ['E31', '31', 1000.0, RUTA_RECEPCION],
+    ['E32 >= 250k (e-CF)', '32', 300000.0, RUTA_RECEPCION],
+    ['E32 < 250k (RFCE)', '32', 1000.0, RUTA_RECEPCION_FC],
+] as [$nombre, $tipo, $precio, $rutaEsperada]) {
+    echo "E3) cuelga: {$nombre}\n";
+    $ids = wa_reiniciar($pdo, $srv, 'cuelga');
+    $r = wa_emitir($srv, wa_factura($tipo, $ids, [wa_linea($precio, 1, $ids['product_id'])]));
+    $d = $r['json']['data'] ?? [];
+    $eNcf = (string) ($d['e_ncf'] ?? '');
+    wa_chk("{$nombre}: 502 con el texto incierto y el e-NCF",
+        $r['status'] === 502 && str_starts_with($eNcf, 'E' . $tipo)
+        && ($r['json']['error'] ?? null) === sprintf(T_EMISION_INCIERTA, $eNcf), $r);
+    wa_chk("{$nombre}: data = factura_id, e_ncf, tipo_ecf, estado_dgii ENVIO_INCIERTO",
+        wa_claves($d) === ['e_ncf', 'estado_dgii', 'factura_id', 'tipo_ecf'] && is_int($d['factura_id'] ?? null)
+        && ($d['tipo_ecf'] ?? null) === $tipo && ($d['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $d);
+    $filas = wa_filas($pdo, $eNcf);
+    wa_chk("{$nombre}: la fila esta guardada en ENVIO_INCIERTO",
+        count($filas) === 1 && (int) $filas[0]['id'] === (int) ($d['factura_id'] ?? 0)
+        && $filas[0]['estado_dgii'] === 'ENVIO_INCIERTO' && (string) $filas[0]['tiene_xml'] === '1', $filas);
+    wa_chk("{$nombre}: sin movimientos de inventario", wa_movimientos($pdo, (int) ($d['factura_id'] ?? 0)) === 0);
+    $audit = wa_emit_fallidos($pdo);
+    wa_chk("{$nombre}: un EMIT success=0 con el factura_id de la fila",
+        count($audit) === 1 && ($audit[0]['new_values']['factura_id'] ?? null) === ($d['factura_id'] ?? -1)
+        && ($audit[0]['new_values']['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $audit);
+    wa_chk("{$nombre}: el numero queda tomado (contador +1)", wa_contador($pdo, 'E' . $tipo) === 1, wa_contador($pdo, 'E' . $tipo));
+    $recep = wa_recepciones(wa_mock_log($srv['mock']));   // espera a que el mock termine de dormir
+    wa_chk("{$nombre}: una sola recepcion, por {$rutaEsperada}",
+        count($recep) === 1 && str_ends_with((string) $recep[0]['ruta'], $rutaEsperada), $recep);
+}
+
+// ---------------------------------------------------------------------------
+// E4) strict_input sin monto_total: 422 antes de tocar la DGII o la secuencia.
+// Con strict_input el comprador sale SOLO del body (handleEmisionECF, $comprador):
+// sin `comprador`, ECFXmlBuilder::buildComprador lanza EcfUsuarioException para
+// la E31 sin RNC antes de enviar, y el caso nunca llegaria al bug de la spec 4.7
+// (un total NULL que se descubria al guardar, DESPUES de la respuesta de la DGII).
+// ---------------------------------------------------------------------------
+echo "E4) strict_input sin monto_total\n";
+$ids = wa_reiniciar($pdo, $srv);
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000)], [
+    'strict_input' => true,
+    'totales' => ['monto_gravado_total' => 1000],
+    'comprador' => ['rnc' => '000000001', 'razon_social' => 'WA CLIENTE DE PRUEBA SRL'],
+]));
+wa_chk('422 con el texto de la guarda del total', $r['status'] === 422 && ($r['json']['error'] ?? null) === T_TOTAL_INVALIDO, $r);
+wa_chk('sin recepcion en la DGII', wa_recepciones(wa_mock_log($srv['mock'])) === []);
+wa_chk('el contador de E31 no se movio', wa_contador($pdo, 'E31') === 0, wa_contador($pdo, 'E31'));
+
+// ---------------------------------------------------------------------------
+// E5) ncf_sequences ilegible: 502 generico, no "Se acabaron los numeros".
+// ---------------------------------------------------------------------------
+echo "E5) ncf_sequences ilegible\n";
+$ids = wa_reiniciar($pdo, $srv);
+try {
+    $pdo->exec('RENAME TABLE ncf_sequences TO ncf_sequences_wa_off');
+    $r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+} finally {
+    $pdo->exec('RENAME TABLE ncf_sequences_wa_off TO ncf_sequences');
+}
+wa_chk('502 con el texto generico exacto', $r['status'] === 502 && ($r['json']['error'] ?? null) === T_FALLO_GENERICO, $r);
+wa_chk('ninguna fila', (int) $pdo->query('SELECT COUNT(*) FROM facturas')->fetchColumn() === 0);
+wa_chk('sin recepcion en la DGII', wa_recepciones(wa_mock_log($srv['mock'])) === []);
+
+// ---------------------------------------------------------------------------
+// E6) acepta_condicional: 200 y el stock se mueve una vez.
+// ---------------------------------------------------------------------------
+echo "E6) acepta_condicional\n";
+$ids = wa_reiniciar($pdo, $srv, 'acepta_condicional');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d = $r['json']['data'] ?? [];
+wa_chk('200 con estado_dgii ACEPTADO_CONDICIONAL', $r['status'] === 200 && ($d['estado_dgii'] ?? null) === 'ACEPTADO_CONDICIONAL', $r);
+wa_chk('un movimiento de inventario', wa_movimientos($pdo, (int) ($d['factura_id'] ?? 0)) === 1);
+
+wa_mock_modo($srv['mock'], 'acepta');
+wa_fin();

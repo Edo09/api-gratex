@@ -968,6 +968,67 @@ wa_chk('reporte de ventas: los mismos parametros de antes', $s10ConRep->params =
 ], $s10ConRep->params);
 
 // ---------------------------------------------------------------------------
+// 11) facturaController: emision write-ahead (Task 17). El controlador se lee
+// como texto: incluirlo manda headers, valida el token y corre el router.
+// ---------------------------------------------------------------------------
+echo "\n== 11) facturaController: emision write-ahead ==\n";
+require_once __DIR__ . '/../src/Models/facturaModel.php';
+
+/** Archivos .php/.md bajo $rutas (relativas a la raiz del API) que contienen $aguja. */
+function wa_grep(array $rutas, string $aguja): array
+{
+    $raiz = dirname(__DIR__);
+    $hallados = [];
+    foreach ($rutas as $ruta) {
+        $abs = $raiz . DIRECTORY_SEPARATOR . $ruta;
+        $archivos = is_file($abs) ? [new SplFileInfo($abs)]
+            : (is_dir($abs) ? new RecursiveIteratorIterator(new RecursiveDirectoryIterator($abs, FilesystemIterator::SKIP_DOTS)) : []);
+        foreach ($archivos as $f) {
+            if (in_array($f->getExtension(), ['php', 'md'], true)
+                && str_contains((string) file_get_contents($f->getPathname()), $aguja)) {
+                $hallados[] = str_replace(DIRECTORY_SEPARATOR, '/', substr($f->getPathname(), strlen($raiz) + 1));
+            }
+        }
+    }
+    return $hallados;
+}
+
+$s11Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php'));
+$s11Emision = preg_match('/\nfunction handleEmisionECF\(.*?\n\}\n/s', $s11Ctl, $m) ? $m[0] : '';
+wa_chk('controlador: se encontro handleEmisionECF', $s11Emision !== '');
+$s11Texto = preg_match("/\nconst FACTURA_EMISION_INCIERTA = '([^']*)';/", $s11Ctl, $m) ? $m[1] : null;
+wa_chk('FACTURA_EMISION_INCIERTA es el texto de la spec 4.7, letra por letra', $s11Texto
+    === 'No se pudo confirmar si la DGII recibió la factura %s. No la emitas de nuevo: ya quedó guardada. '
+    . 'Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.', $s11Texto);
+wa_chk('handleEmisionECF emite con el hook de persistencia',
+    str_contains($s11Emision, '(new ECFEmissionService())->emitir($payload, $persistencia)'));
+wa_chk('el 502 incierto lleva data con factura_id, e_ncf, tipo_ecf y estado_dgii',
+    str_contains($s11Emision, "'error' => sprintf(FACTURA_EMISION_INCIERTA, \$eNcfFila)")
+    && str_contains($s11Emision, "'factura_id' => \$filaId,"));
+wa_chk('guarda del total: 422 antes de emitir',
+    strpos($s11Emision, "!is_numeric(\$totales['monto_total'])") !== false
+    && strpos($s11Emision, "!is_numeric(\$totales['monto_total'])") < strpos($s11Emision, '->emitir('));
+$s11Estado = strpos($s11Emision, '$estadoFinal =');
+$s11Stock = strpos($s11Emision, 'moverStockFacturaEcf(');
+wa_chk('el stock se mueve despues de conocer $estadoFinal',
+    $s11Estado !== false && $s11Stock !== false && $s11Stock > $s11Estado);
+wa_chk('el codigo ya no llama ni define saveFacturaConECF',
+    wa_grep(['src/Controllers', 'src/Models', 'src/Utils/FacturacionElectronica'], 'saveFacturaConECF') === [],
+    wa_grep(['src/Controllers', 'src/Models', 'src/Utils/FacturacionElectronica'], 'saveFacturaConECF'));
+wa_chk('facturaModel no tiene saveFacturaConECF', !method_exists(facturaModel::class, 'saveFacturaConECF'));
+wa_chk('el catch toma cualquier Throwable posterior a la reserva como una fila por confirmar, no solo EcfEnvioInciertoException',
+    str_contains($s11Emision, '} elseif ($reserva !== null) {')
+    && str_contains($s11Emision, "\$facturaModel->existeFactura((int) \$reserva['factura_id'])"));
+wa_chk('la validacion del saldo de la nota corre antes de emitir (una nota en vuelo no cuenta contra si misma)',
+    strpos($s11Emision, 'validarFacturaModificada(') !== false
+    && strpos($s11Emision, 'validarFacturaModificada(') < strpos($s11Emision, '->emitir('));
+$s11Mover = preg_match('/\nfunction moverStockFacturaEcf\(.*?\n\}\n/s', $s11Ctl, $m) ? $m[0] : '';
+wa_chk('moverStockFacturaEcf: no mueve en SIN_STOCK ni en EN_VUELO y pregunta yaMovioDocumento antes de registrarVenta',
+    str_contains($s11Mover, 'EstadosEcf::SIN_STOCK') && str_contains($s11Mover, 'EstadosEcf::EN_VUELO')
+    && strpos($s11Mover, "yaMovioDocumento('factura', \$facturaId)") !== false
+    && strpos($s11Mover, "yaMovioDocumento('factura', \$facturaId)") < strpos($s11Mover, '->registrarVenta('));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

@@ -11,11 +11,18 @@ require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/InformacionReferencia.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfEnvioInciertoException.php';
 
 // Texto para cualquier fallo de la emision que NO sea un caso de negocio
 // (EcfUsuarioException): DGII caida, XML, firma, un Error de PHP... El detalle
 // real va al error_log y al audit log, nunca al cajero.
 const FACTURA_EMISION_FALLO_GENERICO = 'No se pudo emitir la factura en la DGII. Espera unos minutos y vuelve a intentarlo; si sigue fallando, avisa a soporte.';
+
+// La DGII pudo haber recibido el e-CF pero no se sabe: la fila YA esta guardada
+// (write-ahead) en ENVIO_INCIERTO o PENDIENTE_ENVIO. %s = el e-NCF de la fila.
+// Texto fijado en la spec (4.7); el front lo muestra tal cual con "Ver factura".
+const FACTURA_EMISION_INCIERTA = 'No se pudo confirmar si la DGII recibió la factura %s. No la emitas de nuevo: ya quedó guardada. Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.';
 
 // format=datos (recibo de tirilla como pagina web) sin ancho de papel: la app
 // siempre manda el ancho que tiene guardado el equipo, asi que si falta es la
@@ -235,6 +242,14 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     } elseif ($totalesOverride) {
         $totales = array_merge($totales, $totalesOverride);
     }
+    // Sin un monto_total numerico (p.ej. strict_input con `totales` incompleto)
+    // la fila no se puede guardar: facturas.total es NOT NULL. Antes eso se
+    // descubria DESPUES de la respuesta de la DGII; ahora se corta aqui, antes
+    // de reservar el e-NCF.
+    if (!isset($totales['monto_total']) || !is_numeric($totales['monto_total'])) {
+        respond(false, 'No se pudo calcular el total de la factura. Revisa las líneas e inténtalo de nuevo.', 422);
+        return;
+    }
 
     // La cadena de respaldo salta los vacios, no solo los NULL: un cliente
     // importado con razon_social = '' dejaba RazonSocialComprador en blanco y la
@@ -363,30 +378,10 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'informacion_referencia' => $infoReferencia,
     ];
 
-    try {
-        $service = new ECFEmissionService();
-        $result = $service->emitir($payload);
-    } catch (Throwable $e) {
-        // El audit y el error_log guardan el texto tecnico, como siempre.
-        error_log('[ECF] fallo en emision tipo=' . $tipoEcf . ': ' . get_class($e) . ': ' . $e->getMessage());
-        AuditLogger::log([
-            'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
-            'entity_id' => $input['e_ncf'] ?? null,
-            'new_values' => ['tipo_ecf' => $tipoEcf, 'client_id' => $clientId],
-            'success' => false, 'error_message' => $e->getMessage(),
-            'description' => 'Fallo en emision e-CF a DGII.',
-        ]);
-        // Al cajero, solo lo que puede entender: los casos de negocio (rango
-        // agotado, emisor o certificado sin configurar...) traen su propio
-        // texto; cualquier otra cosa es un fallo interno y va el generico.
-        respond(false, $e instanceof EcfUsuarioException
-            ? $e->getMensajeUsuario()
-            : FACTURA_EMISION_FALLO_GENERICO, 502);
-        return;
-    }
-
+    // Write-ahead (spec 4.7): la fila se arma ANTES de emitir y el servicio la
+    // guarda (hook 'reservar') antes de mandar nada a la DGII. Sin
+    // 'no_factura': reservarFacturaECF lo llena con el e-NCF reservado.
     $facturaInput = [
-        'no_factura' => $result['e_ncf'],
         'date' => $input['date'] ?? date('Y-m-d H:i:s'),
         'client_id' => $clientId,
         'client_name' => $client['client_name'] ?? 'Consumidor Final',
@@ -420,49 +415,121 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         }, mapItemsForXml($items)),
     ];
 
-    $saved = $facturaModel->saveFacturaConECF($facturaInput, $result);
-    if ($saved[0] !== 'success') {
-        // A esta altura la DGII YA recibio el e-CF: que quede en el audit con el
-        // motivo tecnico ($saved[2]) para que soporte lo pueda cuadrar. Al
-        // usuario va $saved[1], que le pide no volver a emitirla.
+    // Hook de persistencia (spec 4.4): 'reservar' guarda la fila (XML firmado,
+    // codigo de seguridad y lineas) antes del envio; 'confirmar' le pone la
+    // respuesta de la DGII; 'incierto' la deja en ENVIO_INCIERTO si el envio o
+    // la confirmacion fallan. $reserva va por referencia: el catch la lee.
+    $reserva = null;
+    $persistencia = function (string $fase, array $ctx) use ($facturaModel, $facturaInput, &$reserva) {
+        switch ($fase) {
+            case 'reservar':  return $reserva = $facturaModel->reservarFacturaECF($facturaInput, $ctx);
+            case 'confirmar': return $facturaModel->confirmarFacturaECF((int) $reserva['factura_id'], $ctx);
+            case 'incierto':  return $facturaModel->marcarEnvioIncierto((int) $reserva['factura_id'], $ctx);
+        }
+        return null;
+    };
+
+    try {
+        $result = (new ECFEmissionService())->emitir($payload, $persistencia);
+    } catch (Throwable $e) {
+        // ¿Quedo una fila guardada? Con EcfEnvioInciertoException el servicio
+        // lo dice. Si no, la falla pudo llegar despues de la reserva (un hook
+        // que dejo una transaccion abierta, spec 4.4 paso 4), y esa misma falla
+        // pudo borrar la fila: se confirma en la base antes de nombrarla.
+        $filaId = null;
+        if ($e instanceof EcfEnvioInciertoException) {
+            $filaId = $e->facturaId;
+        } elseif ($reserva !== null) {
+            try {
+                $existe = $facturaModel->existeFactura((int) $reserva['factura_id']);
+            } catch (Throwable $sinBase) {
+                // Sin base no se puede confirmar la fila, y solo se nombra una
+                // fila confirmada (spec 4.7; seccion 5 fila 18: nunca un
+                // factura_id fantasma). Este camino es el paso 4 de 4.4: despues
+                // de la reserva y antes del envio, asi que nada llego a la DGII y
+                // el 502 generico de abajo es correcto. Si la fila existe, queda
+                // en PENDIENTE_ENVIO y sale en el filtro Pendientes.
+                error_log('[ECF] no se pudo confirmar la fila reservada factura_id='
+                    . (int) $reserva['factura_id'] . ' e-NCF=' . (string) ($reserva['e_ncf'] ?? '')
+                    . ': ' . $sinBase->getMessage());
+                $existe = false;
+            }
+            if ($existe) {
+                $filaId = (int) $reserva['factura_id'];
+            }
+        }
+
+        if ($filaId !== null) {
+            // El e-NCF sale de la fila, no del payload: $eNcf es el override del
+            // body, que en el flujo normal (el servicio dispensa) es null.
+            $eNcfFila = $e instanceof EcfEnvioInciertoException ? $e->eNcf : (string) $reserva['e_ncf'];
+            // El estado que la fila tiene de verdad: 'incierto' puede fallar
+            // (base caida) y un hook con la transaccion abierta nunca llega a el.
+            $estadoFila = ($e instanceof EcfEnvioInciertoException && $e->marcado) ? 'ENVIO_INCIERTO' : 'PENDIENTE_ENVIO';
+            $faseFila = $e instanceof EcfEnvioInciertoException ? $e->faseFallida : 'reservar';
+            error_log(sprintf(
+                '[ECF e-NCF=%s factura_id=%d] emision sin confirmar: estado=%s fase=%s %s: %s',
+                $eNcfFila, $filaId, $estadoFila, $faseFila, get_class($e), $e->getMessage()
+            ));
+            AuditLogger::log([
+                'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+                'entity_id' => $eNcfFila,
+                'new_values' => [
+                    'factura_id' => $filaId, 'tipo_ecf' => $tipoEcf, 'client_id' => $clientId,
+                    'estado_dgii' => $estadoFila, 'fase_fallida' => $faseFila,
+                    'resultado_parcial' => $e instanceof EcfEnvioInciertoException ? $e->resultadoParcial : null,
+                ],
+                'success' => false, 'error_message' => ($e->getPrevious() ?? $e)->getMessage(),
+                'description' => 'e-CF reservado y enviado sin confirmación de la DGII (envío incierto).',
+            ]);
+            // respond() no lleva `data`: el front necesita factura_id para "Ver factura".
+            http_response_code(502);
+            echo json_encode([
+                'status' => false,
+                'error' => sprintf(FACTURA_EMISION_INCIERTA, $eNcfFila),
+                'data' => [
+                    'factura_id' => $filaId,
+                    'e_ncf' => $eNcfFila,
+                    'tipo_ecf' => $tipoEcf,
+                    'estado_dgii' => $estadoFila,
+                ],
+            ]);
+            return;
+        }
+
+        // Sin fila: nada llego a la DGII (o la reserva no se pudo hacer). El
+        // audit y el error_log guardan el texto tecnico, como siempre.
+        error_log('[ECF] fallo en emision tipo=' . $tipoEcf . ': ' . get_class($e) . ': ' . $e->getMessage());
         AuditLogger::log([
             'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
-            'entity_id' => $result['e_ncf'] ?? null,
-            'new_values' => ['tipo_ecf' => $tipoEcf, 'client_id' => $clientId, 'estado_dgii' => $result['estado'] ?? null],
-            'success' => false, 'error_message' => $saved[2] ?? $saved[1],
-            'description' => 'e-CF enviado a DGII pero no se pudo guardar en la base de datos.',
+            'entity_id' => $input['e_ncf'] ?? null,
+            'new_values' => ['tipo_ecf' => $tipoEcf, 'client_id' => $clientId],
+            'success' => false, 'error_message' => $e->getMessage(),
+            'description' => 'Fallo en emision e-CF a DGII.',
         ]);
-        respond(false, $saved[1], 500);
+        // Al cajero, solo lo que puede entender: los casos de negocio (rango
+        // agotado, numero ocupado, emisor o certificado sin configurar...) traen
+        // su propio texto; cualquier otra cosa es un fallo interno y va el generico.
+        respond(false, $e instanceof EcfUsuarioException
+            ? $e->getMensajeUsuario()
+            : FACTURA_EMISION_FALLO_GENERICO, 502);
         return;
     }
 
-    // Inventario: la venta descuenta (la Nota de Credito repone). Va DESPUES de
-    // guardar y de que DGII acepto — a esta altura el e-CF ya existe, asi que
-    // un problema de inventario no puede tumbar la factura: se registra en el
-    // log y se corrige con un ajuste.
-    try {
-        // is_file antes del require: un require que falla es un fatal que este
-        // try/catch NO atrapa, y tumbaria la respuesta de una factura que DGII
-        // ya acepto. Asi el fallo baja a excepcion y solo queda en el log.
-        $rutaInventario = __DIR__ . '/../Models/inventoryModel.php';
-        if (!is_file($rutaInventario)) {
-            throw new RuntimeException('falta ' . $rutaInventario);
-        }
-        require_once $rutaInventario;
-        (new inventoryModel())->registrarVenta(
-            (int) ($saved[1]['factura_id'] ?? 0),
-            $facturaInput['items'],
-            $tipoEcf,
-            $input['user_id'] ?? null
-        );
-    } catch (Throwable $e) {
-        error_log('[inventario] no se pudo descontar la factura: ' . $e->getMessage());
-    }
+    // La fila ya esta guardada y confirmada: emitir() devuelve su factura_id.
+    $facturaId = (int) $result['factura_id'];
 
     // La respuesta de DGII puede venir en dgii_response (e-CF integro) o
     // rfce_response (RFCE E32 < 250k).
     $dgiiResp = $result['dgii_response'] ?? $result['rfce_response'] ?? null;
-    $data = $saved[1] + [
+    // Las mismas 10 claves de siempre (spec 7.1).
+    $data = [
+        'factura_id' => $facturaId,
+        'e_ncf' => $result['e_ncf'],
+        'track_id' => $result['track_id'] ?? null,
+        'estado_dgii' => $result['estado'],
+        'codigo_seguridad' => $result['codigo_seguridad'],
+        'total' => $totales['monto_total'],
         'tipo_ecf' => $result['tipo_ecf'],
         'ambiente' => $result['ambiente'],
         'fecha_emision_dgii' => $result['fecha_emision_dgii'],
@@ -476,6 +543,21 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     // con `data` incluido para confirmar que se guardo y con que e-NCF.
     $estadoFinal = (string) ($result['estado'] ?? '');
     $rechazado = in_array($estadoFinal, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO', 'ERROR'], true);
+
+    // Inventario: despues del veredicto. moverStockFacturaEcf no mueve nada en
+    // un estado de EstadosEcf::SIN_STOCK (aqui no se usa $rechazado: le faltan
+    // RFCE_NO_ENCONTRADO y RFCE_ERROR) ni dos veces la misma factura, y nunca
+    // lanza: la factura ya existe y un problema de inventario se corrige con
+    // un ajuste.
+    moverStockFacturaEcf(
+        $facturaId,
+        $facturaInput['items'],
+        $tipoEcf,
+        isset($input['user_id']) ? (int) $input['user_id'] : null,
+        $estadoFinal,
+        'emision'
+    );
+
     if ($rechazado) {
         AuditLogger::log([
             'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
@@ -503,6 +585,49 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'status' => true,
         'data' => $data,
     ]);
+}
+
+/**
+ * inventoryModel con require_once guardado: is_file antes del require, porque
+ * un require que falla es un fatal que ningun try/catch atrapa, y tumbaria la
+ * respuesta de una factura que la DGII ya acepto. Asi baja a excepcion.
+ * @throws RuntimeException si falta el archivo del modelo
+ */
+function inventarioModelo(): inventoryModel
+{
+    $ruta = __DIR__ . '/../Models/inventoryModel.php';
+    if (!is_file($ruta)) {
+        throw new RuntimeException('falta ' . $ruta);
+    }
+    require_once $ruta;
+    return new inventoryModel();
+}
+
+/**
+ * Mueve el stock de una factura e-CF UNA sola vez (spec 4.2.4 y 10.5), desde
+ * la emision o desde la primera aceptacion que ve GET /estado ($origen solo
+ * va al log). No mueve nada si $estado esta en EstadosEcf::SIN_STOCK o en
+ * EstadosEcf::EN_VUELO (sin veredicto), ni si yaMovioDocumento('factura', id)
+ * ya encuentra movimientos. Nunca lanza: anota en error_log '[inventario] ...'
+ * y sigue (si no se puede saber si ya movio, no mueve).
+ */
+function moverStockFacturaEcf(int $facturaId, array $items, string $tipoEcf, ?int $userId, string $estado, string $origen): void
+{
+    if ($facturaId <= 0
+        || in_array($estado, EstadosEcf::SIN_STOCK, true)
+        || in_array($estado, EstadosEcf::EN_VUELO, true)) {
+        return;
+    }
+    try {
+        $inventario = inventarioModelo();
+        if ($inventario->yaMovioDocumento('factura', $facturaId)) {
+            return;
+        }
+        $inventario->registrarVenta($facturaId, $items, $tipoEcf, $userId);
+    } catch (Throwable $e) {
+        error_log('[inventario] no se pudo mover el stock de la factura ' . $facturaId
+            . ' (' . $origen . ', ' . $estado . '): ' . $e->getMessage());
+    }
 }
 
 /**
@@ -576,9 +701,13 @@ function dgiiMensajeRechazoUsuario($dgiiResponse, string $estado): string
  * si todo cuadra.
  *
  * El tope de una nota de credito es el saldo de la factura: su total, mas las
- * notas de debito, menos las de credito que la DGII acepto o tiene en proceso
- * (una rechazada, en ERROR o NO_ENCONTRADO no cuenta: se debe poder reintentar). Sin el tope, dos notas por el total restaban la
- * misma venta dos veces en el reporte y en el dashboard.
+ * notas de debito, menos las de credito que la DGII acepto, tiene en proceso o
+ * siguen en vuelo (PENDIENTE_ENVIO y ENVIO_INCIERTO: ya estan guardadas y
+ * reservan saldo hasta que se resuelvan). Una rechazada, en ERROR o
+ * NO_ENCONTRADO no cuenta: se debe poder reintentar. Sin el tope, dos notas por
+ * el total restaban la misma venta dos veces en el reporte y en el dashboard.
+ * Esta validacion corre ANTES de reservar la nota nueva (va antes de emitir),
+ * asi que una nota en vuelo nunca cuenta contra su propio saldo.
  *
  * @param int|string|null $clientId
  */
