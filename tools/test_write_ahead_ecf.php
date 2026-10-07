@@ -398,6 +398,27 @@ function insertarSinCommit(PDO $pdo, array $ctx): int
 $pdo = wa_usar_base($base);
 $ids = wa_sembrar($pdo);
 
+// Modo hijo del escenario S1 (seccion 3): dos emisiones anidadas en un proceso
+// y un fatal real en la segunda. Ni catch ni finally corren: solo el registro
+// de cierre puede marcar las dos filas. El padre revisa la base al terminar.
+if (wa_arg('hijo') === 'shutdown') {
+    $fases1 = $ctxs1 = $fases2 = $ctxs2 = [];
+    $auth2 = new FakeAuth();
+    $svc2 = new ECFEmissionService($auth2, new FakeSigner(), new FakeReception($auth2, 'fatal'), new FakeNcf());
+    $em2 = emision($pdo, $ids, '31');
+    $gancho2 = gancho(new facturaModel(), $em2['factura'], $fases2, $ctxs2);
+    $auth1 = new FakeAuth();
+    $rec1 = new FakeReception($auth1, 'reentrar');
+    $rec1->reentrada = function () use ($svc2, $em2, $gancho2): void {
+        $svc2->emitir($em2['payload'], $gancho2);
+    };
+    $svc1 = new ECFEmissionService($auth1, new FakeSigner(), $rec1, new FakeNcf());
+    $em1 = emision($pdo, $ids, '31');
+    $svc1->emitir($em1['payload'], gancho(new facturaModel(), $em1['factura'], $fases1, $ctxs1));
+    echo "NO DEBIO LLEGAR AQUI\n";
+    exit(3);
+}
+
 // Payload de un tenant de integracion: trae su emisor y su e-NCF.
 $integracion = [
     'integration' => true,
@@ -786,6 +807,71 @@ wa_chk('C9: el reintento archiva RFCE_NO_ENCONTRADO_ARCHIVADO con e_ncf NULL',
     && $porId[$primerId]['e_ncf'] === null, $r2['filas']);
 wa_chk('C9: y hay una fila nueva RFCE_ACEPTADO', count($r2['filas']) === 2 && (end($r2['filas'])['estado_dgii'] ?? null) === 'RFCE_ACEPTADO', $r2['filas']);
 chkComun('C9 reintento', $r2);
+
+// ---------------------------------------------------------------------------
+// 3) Registro de cierre para e-CF en vuelo (Task 14)
+// ---------------------------------------------------------------------------
+echo "\n== 3) Registro de cierre ==\n";
+
+/** ECFEmissionService::$enVuelo (privado y estatico); null si todavia no existe. */
+function enVuelo(): ?array
+{
+    return property_exists(ECFEmissionService::class, 'enVuelo')
+        ? (new ReflectionProperty(ECFEmissionService::class, 'enVuelo'))->getValue()
+        : null;
+}
+
+// S1 un proceso hijo muere con un fatal real con dos filas en vuelo.
+wa_limpiar($pdo);
+$antesHijo = wa_contador($pdo, 'E31');
+$salidaHijo = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_hijo_' . getmypid() . '.out';
+$proceso = proc_open(
+    array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--hijo=shutdown', '--tenant-db=' . $base]),
+    [1 => ['file', $salidaHijo, 'w'], 2 => ['file', $salidaHijo, 'a']],
+    $tuberias,
+    dirname(__DIR__)
+);
+$pidHijo = is_resource($proceso) ? (int) (proc_get_status($proceso)['pid'] ?? 0) : 0;
+$codigoHijo = is_resource($proceso) ? proc_close($proceso) : -1;
+$salida = (string) @file_get_contents($salidaHijo);
+@unlink($salidaHijo);
+// El hijo escribe su error_log en un archivo propio (como este proceso, arriba).
+if ($pidHijo > 0) {
+    @unlink(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_' . $pidHijo . '.log');
+}
+wa_chk('S1: el hijo murio con un fatal (codigo 255, no llego al final)',
+    $codigoHijo === 255 && !str_contains($salida, 'NO DEBIO LLEGAR AQUI'), ['codigo' => $codigoHijo, 'salida' => mb_substr($salida, 0, 400)]);
+$filasHijo = $pdo->query('SELECT id, e_ncf, estado_dgii, respuesta_dgii FROM facturas ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+wa_chk('S1: el hijo reservo E310000000001 y E310000000002',
+    array_column($filasHijo, 'e_ncf') === ['E310000000001', 'E310000000002'], $filasHijo);
+wa_chk('S1: contador +2', wa_contador($pdo, 'E31') - $antesHijo === 2);
+foreach ($filasHijo as $f) {
+    $meta = facturaModel::metaEnvio($f['respuesta_dgii']);
+    wa_chk("S1 {$f['e_ncf']}: ENVIO_INCIERTO", $f['estado_dgii'] === 'ENVIO_INCIERTO', $f['estado_dgii']);
+    wa_chk("S1 {$f['e_ncf']}: clase shutdown y el error del fatal",
+        ($meta['clase'] ?? null) === 'shutdown' && str_contains((string) ($meta['error'] ?? ''), 'Allowed memory size'), $meta);
+    wa_chk("S1 {$f['e_ncf']}: sin resultado_parcial (el cierre no lo manda)", array_key_exists('resultado_parcial', $meta) && $meta['resultado_parcial'] === null, $meta);
+    chkEnVuelo("S1 {$f['e_ncf']}", $f, 'shutdown');
+}
+
+// S2-S5 en este proceso: el registro queda vacio en cada salida.
+$r = correr($pdo, $ids);
+wa_chk('S2: tras una emision aceptada el registro esta vacio', $r['err'] === null && enVuelo() === [], enVuelo());
+$r = correr($pdo, $ids, ['modo' => 'cuelga']);
+wa_chk('S3: tras EcfEnvioInciertoException el registro esta vacio',
+    $r['err'] instanceof EcfEnvioInciertoException && enVuelo() === [], enVuelo());
+$r = correr($pdo, $ids, ['trucos' => ['reservar' => function (array $ctx) {
+    throw new EcfNumeroOcupadoException((string) $ctx['e_ncf'], (string) $ctx['ambiente'], 'prueba');
+}]]);
+wa_chk('S4: tras un ocupado el registro esta vacio (nunca se armo)',
+    $r['err'] instanceof EcfNumeroOcupadoException && enVuelo() === [], enVuelo());
+$r = correr($pdo, $ids, ['trucos' => ['reservar' => function (array $ctx, facturaModel $m, array $factura) use ($pdo) {
+    $reserva = $m->reservarFacturaECF($factura, $ctx);
+    $pdo->beginTransaction();
+    return $reserva;
+}]]);
+wa_chk('S5: tras la transaccion abierta el registro esta vacio (nunca se armo)',
+    $r['err'] instanceof RuntimeException && $r['err']->getMessage() === 'persistencia dejo una transaccion abierta' && enVuelo() === [], enVuelo());
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.

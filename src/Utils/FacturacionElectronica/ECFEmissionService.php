@@ -65,6 +65,16 @@ class ECFEmissionService
     private ?ncfModel $ncfModel = null;
 
     /**
+     * Filas reservadas cuyo envio sigue en curso en ESTE proceso:
+     * factura_id => [callable $persistencia, array $reserva, array $ctxSinXml].
+     * Estatico a proposito: cubre a cualquier instancia del servicio en la misma
+     * peticion. El registro de cierre las marca ENVIO_INCIERTO si el proceso
+     * muere (fatal, memoria, timeout) antes de 'confirmar'/'incierto'.
+     */
+    private static array $enVuelo = [];
+    private static bool $shutdownRegistrado = false;
+
+    /**
      * Las cuatro dependencias son opcionales: sin argumentos queda igual que
      * antes. Las pruebas inyectan dobles (tools/test_write_ahead_ecf.php). Un
      * ncfModel no inyectado sigue perezoso (ncfModel()).
@@ -544,6 +554,7 @@ class ECFEmissionService
                         $idReserva <= 0 ? 'persistencia no devolvio factura_id' : 'persistencia dejo una transaccion abierta'
                     );
                 }
+                self::armarEnVuelo($persistencia, $reserva, $ctxReservar);
                 error_log(sprintf('[ECF e-NCF=%s factura_id=%d] reservado, enviando', $eNcf, $idReserva));
             }
         } catch (Throwable $e) {
@@ -671,6 +682,7 @@ class ECFEmissionService
             }
         } catch (Throwable $e) {
             if ($persistencia !== null && $reserva !== null) {
+                self::desarmarEnVuelo((int) $reserva['factura_id']);
                 $fase = $ctxConfirmar !== null ? 'confirmar' : 'envio';
                 $parcial = $ctxConfirmar !== null ? self::proyectarResultado($ctxConfirmar) : null;
                 $marcado = false;
@@ -696,6 +708,10 @@ class ECFEmissionService
             }
             // Integracion y gastos (sin gancho): la excepcion original, como siempre.
             throw $e;
+        }
+        if ($reserva !== null) {
+            // 'confirmar' ya dejo la fila final (o CONFIRM_RACE): nada que marcar.
+            self::desarmarEnVuelo((int) $reserva['factura_id']);
         }
 
         if (!$ok) {
@@ -854,6 +870,49 @@ class ECFEmissionService
             $r['dgii_response'] = mb_substr((string) $r['dgii_response'], 0, self::MAX_RESPUESTA);
         }
         return $r;
+    }
+
+    /**
+     * Anota una fila reservada como en vuelo y, una vez por proceso, registra la
+     * funcion de cierre que la marca ENVIO_INCIERTO si el proceso muere antes de
+     * 'confirmar'/'incierto' (spec 4.4 paso 9).
+     *
+     * Orden: index.php registra ErrorHandler (ErrorHandler.php:21-30) antes de
+     * cualquier emision, y PHP llama las funciones de cierre en orden de
+     * registro; esta corre DESPUES de ErrorHandler::onShutdown, que solo puede
+     * registrar un error_id anonimo. Si a esa altura PDO ya no sirve, la fila
+     * queda en PENDIENTE_ENVIO (resolucion manual, 10.2).
+     */
+    private static function armarEnVuelo(callable $persistencia, array $reserva, array $ctxReservar): void
+    {
+        self::$enVuelo[(int) $reserva['factura_id']] = [$persistencia, $reserva, self::ctxSinXml($ctxReservar)];
+        if (self::$shutdownRegistrado) {
+            return;
+        }
+        self::$shutdownRegistrado = true;
+        register_shutdown_function(static function (): void {
+            $err = error_get_last();
+            foreach (self::$enVuelo as [$p, $r, $c]) {
+                try {
+                    $p('incierto', $c + [
+                        'reserva' => $r,
+                        'fase_fallida' => 'shutdown',
+                        'clase' => 'shutdown',
+                        'error' => (string) ($err['message'] ?? 'shutdown sin respuesta'),
+                    ]);
+                } catch (Throwable) {
+                    // Cierre del proceso: no hay a quien avisar. La fila queda en
+                    // PENDIENTE_ENVIO y se resuelve a mano (10.2).
+                }
+            }
+            self::$enVuelo = [];
+        });
+    }
+
+    /** La fila ya tiene destino ('confirmar' o 'incierto'): fuera del registro. */
+    private static function desarmarEnVuelo(int $facturaId): void
+    {
+        unset(self::$enVuelo[$facturaId]);
     }
 
     /**
