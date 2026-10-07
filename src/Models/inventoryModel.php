@@ -220,6 +220,30 @@ class inventoryModel
     }
 
     /**
+     * true si el documento ya tiene algun movimiento de inventario (por
+     * ejemplo referencia_tipo 'factura' y su id). Lo usa la emision e-CF y la
+     * consulta de estado para mover el stock de una factura UNA sola vez,
+     * llegue primero quien llegue (spec 4.2.4 y 10.5).
+     *
+     * Quien llama lo pregunta ANTES de registrarVenta. registrarVenta no lo
+     * revisa a proposito: la factura simple llama revertirVenta y despues
+     * registrarVenta sobre el mismo id cuando reemplaza sus lineas, y eso
+     * tiene que seguir moviendo.
+     *
+     * Una PDOException sale tal cual: el que llama la atrapa y NO mueve el
+     * stock (mejor un movimiento de menos, que se corrige con un ajuste, que
+     * uno repetido). Usa el indice idx_referencia.
+     */
+    public function yaMovioDocumento(string $referenciaTipo, int $referenciaId): bool
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT 1 FROM inventory_movements WHERE referencia_tipo = :t AND referencia_id = :id LIMIT 1'
+        );
+        $stmt->execute([':t' => $referenciaTipo, ':id' => $referenciaId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * Mueve el inventario de una compra (gasto) ya guardada.
      *
      * Que comprobantes mueven existencias. Espejo de efectoInventario() en el

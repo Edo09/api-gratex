@@ -761,6 +761,77 @@ if ($hayProyecciones) {
 }
 
 // ---------------------------------------------------------------------------
+// 9) inventoryModel::yaMovioDocumento (Task 15): una conexion falsa puesta en
+// la propiedad privada conexion; nunca toca MySQL.
+// ---------------------------------------------------------------------------
+echo "\n== 9) inventoryModel::yaMovioDocumento ==\n";
+require_once __DIR__ . '/../src/Models/inventoryModel.php';
+
+final class WaS9Sentencia
+{
+    public function __construct(private WaS9Conexion $c, private string $sql)
+    {
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        $this->c->consultas[] = ['sql' => $this->sql, 'params' => $params ?? []];
+        return true;
+    }
+
+    public function fetchColumn(int $columna = 0): mixed
+    {
+        return $this->c->hayFila ? '1' : false;
+    }
+}
+
+final class WaS9Conexion
+{
+    public array $consultas = [];
+
+    public function __construct(public bool $hayFila, private bool $rota = false)
+    {
+    }
+
+    public function prepare(string $sql): WaS9Sentencia
+    {
+        if ($this->rota) {
+            throw new PDOException('se cayo la conexion');
+        }
+        return new WaS9Sentencia($this, $sql);
+    }
+}
+
+$s9Inventario = static function (WaS9Conexion $c): inventoryModel {
+    $ref = new ReflectionClass(inventoryModel::class);
+    $m = $ref->newInstanceWithoutConstructor();
+    $ref->getProperty('conexion')->setValue($m, $c);
+    return $m;
+};
+
+if (!method_exists(inventoryModel::class, 'yaMovioDocumento')) {
+    wa_chk('inventoryModel::yaMovioDocumento existe', false);
+} else {
+    $c = new WaS9Conexion(true);
+    wa_chk('con un movimiento de la factura: true', $s9Inventario($c)->yaMovioDocumento('factura', 41) === true);
+    $c = new WaS9Conexion(false);
+    wa_chk('sin movimientos: false', $s9Inventario($c)->yaMovioDocumento('factura', 41) === false);
+    $sql = preg_replace('/\s+/', ' ', $c->consultas[0]['sql'] ?? '');
+    wa_chk('consulta por referencia_tipo y referencia_id con LIMIT 1 (idx_referencia)',
+        str_contains($sql, 'FROM inventory_movements') && str_contains($sql, 'referencia_tipo = :t AND referencia_id = :id')
+        && str_contains($sql, 'LIMIT 1'), $sql);
+    wa_chk("parametros [':t' => 'factura', ':id' => 41]",
+        ($c->consultas[0]['params'] ?? null) === [':t' => 'factura', ':id' => 41], $c->consultas[0]['params'] ?? null);
+    $lanzo = null;
+    try {
+        $s9Inventario(new WaS9Conexion(false, true))->yaMovioDocumento('factura', 41);
+    } catch (PDOException $e) {
+        $lanzo = $e;
+    }
+    wa_chk('si la base falla, la PDOException sale (el que llama no mueve stock)', $lanzo instanceof PDOException);
+}
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
