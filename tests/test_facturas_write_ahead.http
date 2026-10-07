@@ -1,0 +1,256 @@
+### ============================================================================
+### Facturas e-CF con write-ahead -> /api/facturas (spec 2026-10-05, Release 1)
+### La fila se guarda ANTES de enviar a la DGII. Si el envio no se confirma, queda
+### en ENVIO_INCIERTO y el POST responde 502 con data.factura_id.
+###
+### SOLO contra una API local o de staging apuntada a la DGII falsa
+### (tools/mock_dgii.php). NUNCA contra produccion (decision 6 de la spec).
+###
+### Estos mismos escenarios, con asserts, los corre:
+###   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_write_ahead_api.php --tenant-db=wa_scratch --copia-db=wa_scratch_sin_gate
+### Para recorrerlos a mano, levanta el mock y la API con wa_api() de
+### tools/write_ahead_test_lib.php desde un script de un solo uso que imprima api,
+### mock, token y los ids de wa_sembrar() y se quede vivo (wa_api apaga los dos
+### servidores al terminar). Llena las variables de abajo con eso; los puertos son los que
+### imprima el lanzador (WA_PUERTO_OFFSET los mueve).
+### Despues de un "cuelga" el mock sigue durmiendo unos segundos: el siguiente
+### cambio de modo espera a que termine. "(en la base)" = SQL en la base de prueba.
+### ============================================================================
+
+@base = http://127.0.0.1:8098
+@mock = http://127.0.0.1:8099
+@token = <token que imprime el lanzador (sesion de wa_prueba)>
+@cliente = <client_id de 'WA cliente'>
+@producto = <product_id de 'WA producto'>
+@facturaId = <factura_id que devolvio el paso anterior>
+
+### Login (solo con un usuario de prueba propio; el lanzador ya trae @token)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "<usuario de prueba>",
+  "password": "<clave de prueba>"
+}
+
+### ---------------------------------------------------------------------------
+### Emision (Task 17)
+### ---------------------------------------------------------------------------
+
+### E1a Mock en acepta
+GET {{mock}}/__mock/modo?valor=acepta
+
+### E1b E31 con dos lineas de producto -> 200 con las 10 claves de siempre y estado_dgii ACEPTADO.
+### (en la base) dos inventory_movements con referencia_tipo 'factura' y ese factura_id
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [
+    { "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 },
+    { "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 500 }
+  ]
+}
+
+### E2a Mock en rechaza
+GET {{mock}}/__mock/modo?valor=rechaza
+
+### E2b E31 -> 422 con data (estado_dgii RECHAZADO); sin movimientos; ncf_sequences E31 vuelve atras
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### E2c Mock en acepta
+GET {{mock}}/__mock/modo?valor=acepta
+
+### E2d El mismo body de E2b -> 200 con el MISMO e_ncf; la fila de E2b queda RECHAZADO_ARCHIVADO con e_ncf NULL
+### y el stock se mueve solo para la fila nueva
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### E3a Mock en cuelga (duerme MOCK_DGII_CUELGA_SEG; la API corta a los 3 s)
+GET {{mock}}/__mock/modo?valor=cuelga
+
+### E3b E31 -> 502 "No se pudo confirmar si la DGII recibió la factura E31... No la emitas de nuevo..." con
+### data {factura_id, e_ncf, tipo_ecf "31", estado_dgii "ENVIO_INCIERTO"}. (en la base) la fila queda ENVIO_INCIERTO,
+### sin movimientos, y audit_logs tiene un EMIT success=0 con new_values.factura_id
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### E3c E32 >= 250k (flujo e-CF, Recepcion) -> igual que E3b con tipo_ecf "32"
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "32", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 300000 }]
+}
+
+### E3d E32 < 250k (flujo RFCE, RecepcionFC) -> igual que E3b con tipo_ecf "32"
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "32", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### E3e Lo que vio el mock: UNA recepcion por cada POST de E3 (Recepcion, Recepcion, RecepcionFC); lo vacia
+GET {{mock}}/__mock/log?limpiar=1
+
+### E4a Mock en acepta
+GET {{mock}}/__mock/modo?valor=acepta
+
+### E4b strict_input con totales sin monto_total -> 422 "No se pudo calcular el total de la factura. Revisa las
+### líneas e inténtalo de nuevo."; el log del mock no tiene recepcion; ncf_sequences no se mueve.
+### Con strict_input el comprador sale solo del body: sin "comprador" la E31 se cae antes por falta de RNC.
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1, "strict_input": true,
+  "totales": { "monto_gravado_total": 1000 },
+  "comprador": { "rnc": "000000001", "razon_social": "WA CLIENTE DE PRUEBA SRL" },
+  "items": [{ "nombre_item": "WA linea libre", "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### E5 (en la base) RENAME TABLE ncf_sequences TO ncf_sequences_wa_off; y repetir E2d -> 502 con exactamente
+### "No se pudo emitir la factura en la DGII. Espera unos minutos..." (no "Se acabaron..."), ninguna fila nueva.
+### Despues, siempre: RENAME TABLE ncf_sequences_wa_off TO ncf_sequences;
+
+### E6a Mock en acepta_condicional
+GET {{mock}}/__mock/modo?valor=acepta_condicional
+
+### E6b Repetir E2d -> 200 con estado_dgii ACEPTADO_CONDICIONAL y un movimiento
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "31", "client_id": {{cliente}}, "tipo_pago": 1,
+  "items": [{ "nombre_item": "WA producto", "product_id": {{producto}}, "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 1000 }]
+}
+
+### ---------------------------------------------------------------------------
+### Consulta de estado y filtro (Task 18)
+### ---------------------------------------------------------------------------
+
+### C1 Estado de la factura de E3b -> 200 {factura_id, e_ncf, tipo_ecf, track_id null, estado_dgii "ENVIO_INCIERTO",
+### secuencia_utilizada null, en_vuelo true, nota "La DGII todavía no ha confirmado este comprobante. No lo emitas
+### de nuevo; si sigue así en unos minutos, avisa a soporte con el número E31..."}; sin puede_reenviar;
+### el mock no recibe ninguna consulta
+GET {{base}}/api/facturas/{{facturaId}}/estado
+X-API-KEY: {{token}}
+
+### C2 (en la base) una fila ENVIADO con track_id NULL -> 200, en_vuelo false, nota "La DGII recibió este
+### comprobante, pero no devolvió su número de seguimiento..."
+GET {{base}}/api/facturas/{{facturaId}}/estado
+X-API-KEY: {{token}}
+
+### C3 Filtro Pendientes -> PENDIENTE_ENVIO, ENVIO_INCIERTO, ENVIADO, EN_PROCESO, RFCE_ENVIADO y RFCE_EN_PROCESO;
+### nunca ACEPTADO ni RECHAZADO
+GET {{base}}/api/facturas?estado=pendiente&pageSize=50
+X-API-KEY: {{token}}
+
+### C3b Un filtro que no existe sigue respondiendo 422
+GET {{base}}/api/facturas?estado=foo
+X-API-KEY: {{token}}
+
+### C4 Stock al aceptar (e-CF). Con la fila de E3b en ENVIO_INCIERTO y el mock en acepta, (en la base):
+###   UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = 'track-<e_ncf>' WHERE id = <id>
+###     AND (estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO') OR (estado_dgii = 'ENVIADO' AND track_id IS NULL));
+### -> estado_dgii ACEPTADO y un movimiento por linea; una segunda consulta no agrega nada
+GET {{base}}/api/facturas/{{facturaId}}/estado
+X-API-KEY: {{token}}
+
+### C5 Stock al aceptar (RFCE). Con la fila de E3d, (en la base):
+###   UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = <id> AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');
+### -> RFCE_ACEPTADO y un movimiento; una segunda consulta no agrega nada
+GET {{base}}/api/facturas/{{facturaId}}/estado
+X-API-KEY: {{token}}
+
+### C6 (en la base) una venta vieja ACEPTADO con track_id y lineas, sin movimientos -> sigue ACEPTADO, 0 movimientos
+### C7 (en la base) una fila NO_ENCONTRADO con track_id y lineas -> ACEPTADO y un movimiento
+GET {{base}}/api/facturas/{{facturaId}}/estado
+X-API-KEY: {{token}}
+
+### ---------------------------------------------------------------------------
+### Stats, reportes, impresion y saldo (Task 20)
+### ---------------------------------------------------------------------------
+
+### R1 Con una E31 aceptada (1180.00) y una en vuelo (2360.00): total_ecf y por_tipo[].total cuentan las dos;
+### monto_total, monto_neto, por_tipo[].monto_total, por_mes, ventas_por_mes y ventas_por_dia solo la aceptada;
+### por_estado trae la cubeta ENVIO_INCIERTO
+GET {{base}}/api/facturas/stats
+X-API-KEY: {{token}}
+
+### R2a Reporte de ventas de ayer a mañana -> trae la aceptada, no la fila en vuelo
+GET {{base}}/api/reportes/ventas?desde=<aaaa-mm-dd de ayer>&hasta=<aaaa-mm-dd de mañana>
+X-API-KEY: {{token}}
+
+### R2b 607 del mes -> trae la aceptada, no la fila en vuelo
+GET {{base}}/api/reportes/607/preview?periodo=<aaaamm>
+X-API-KEY: {{token}}
+
+### R3a La fila en vuelo de R1 (@facturaId) imprime como cualquier otra (decision 4) -> 200; data.content decodifica a %PDF
+GET {{base}}/api/facturas/{{facturaId}}/pdf?format=base64
+X-API-KEY: {{token}}
+
+### R3b Su XML firmado -> 200 con su <eNCF>
+GET {{base}}/api/facturas/{{facturaId}}/xml
+X-API-KEY: {{token}}
+
+### R4a Con una E31 aceptada de 1180.00 y el mock en cuelga: una E34 de 590.00 -> 502 incierto (queda en vuelo)
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "34", "client_id": {{cliente}}, "tipo_pago": 1,
+  "informacion_referencia": { "ncf_modificado": "<e_ncf de la E31>", "fecha_ncf_modificado": "<dd-mm-aaaa de hoy>", "codigo_modificacion": "3", "razon_modificacion": "Ajuste de prueba WA" },
+  "items": [{ "nombre_item": "WA linea libre", "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 500 }]
+}
+
+### R4b Mock en acepta y una segunda E34 de 708.00 -> 422 "...solo le quedan RD$ 590.00 por acreditar...":
+### la nota en vuelo ya resta saldo; el mock no ve recepcion
+POST {{base}}/api/facturas
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "tipo_ecf": "34", "client_id": {{cliente}}, "tipo_pago": 1,
+  "informacion_referencia": { "ncf_modificado": "<e_ncf de la E31>", "fecha_ncf_modificado": "<dd-mm-aaaa de hoy>", "codigo_modificacion": "3", "razon_modificacion": "Ajuste de prueba WA" },
+  "items": [{ "nombre_item": "WA linea libre", "indicador_facturacion": 1, "indicador_bien_servicio": 1, "cantidad": 1, "precio_unitario": 600 }]
+}
+
+### R5/R6 Compuerta 12.0 pasos 3-4: los corre tools/test_write_ahead_api.php con --copia-db=wa_scratch_sin_gate (una
+### segunda API en el puerto 8097 sobre la copia sin 027/028). A mano: en la copia, una fila ACEPTADO con el siguiente e-NCF y
+### ambiente_dgii 'ecf'; emitir en acepta -> 502 "No se pudo asignar el número de comprobante. Inténtalo de nuevo."
+### sin fila nueva ni recepcion. Luego, con sql_mode estricto, una E32 < 250k en acepta_condicional -> 502 incierto y
+### respuesta_dgii.resultado_parcial.estado = RFCE_ACEPTADO_CONDICIONAL.
+
+### Decision 7: la app no reenvia -> POST /reenviar sigue respondiendo 501
+POST {{base}}/api/facturas/{{facturaId}}/reenviar
+X-API-KEY: {{token}}

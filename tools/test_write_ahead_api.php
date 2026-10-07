@@ -6,7 +6,7 @@
  * usar una base sin la tabla marca.
  *
  * Uso:
- *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_write_ahead_api.php --tenant-db=wa_scratch
+ *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_write_ahead_api.php --tenant-db=wa_scratch [--copia-db=wa_scratch_sin_gate]
  *
  * Cada escenario arranca con el mock en un modo conocido, wa_limpiar +
  * wa_sembrar y el log del mock vacio. Tras un "cuelga" el mock sigue
@@ -341,6 +341,116 @@ $id = wa_fila_sembrada($pdo, $ids, 'E310000000907', 'NO_ENCONTRADO', 'track-E310
 $r = wa_get($srv, "/api/facturas/{$id}/estado");
 wa_chk('GET /estado: ACEPTADO', ($r['json']['data']['estado_dgii'] ?? null) === 'ACEPTADO', $r);
 wa_chk('el stock se movio una vez', wa_movimientos($pdo, $id) === 1, wa_movimientos($pdo, $id));
+
+// ===========================================================================
+// Task 20: stats, reportes, impresion, saldo de una E34 en vuelo y la
+// compuerta 12.0 pasos 3-4 sobre la copia rota (--copia-db).
+// ===========================================================================
+
+echo "R1) Stats con una factura aceptada (1180.00) y una en vuelo (2360.00)\n";
+$ids = wa_reiniciar($pdo, $srv);
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000)]));
+$aceptada = $r['json']['data'] ?? [];
+wa_mock_modo($srv['mock'], 'cuelga');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(2000)]));
+$enVuelo = $r['json']['data'] ?? [];
+wa_mock_modo($srv['mock'], 'acepta');   // espera a que termine el cuelga
+$r = wa_get($srv, '/api/facturas/stats');
+$stats = $r['json']['data'] ?? [];
+$tipo31 = array_values(array_filter($stats['por_tipo'] ?? [], static fn(array $t): bool => (string) ($t['tipo_ecf'] ?? '') === '31'))[0] ?? [];
+$cerca = static fn(mixed $v, float $x): bool => is_numeric($v) && abs((float) $v - $x) < 0.005;
+// [documentos, monto] de una serie: las filas de la prueba son las unicas de la base.
+$suma = static fn(array $serie): array => [(int) array_sum(array_column($serie, 'total')), round((float) array_sum(array_column($serie, 'monto_total')), 2)];
+wa_chk('precondicion: una ACEPTADO y una ENVIO_INCIERTO',
+    ($aceptada['estado_dgii'] ?? null) === 'ACEPTADO' && ($enVuelo['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', [$aceptada, $enVuelo]);
+wa_chk('resumen.total_ecf cuenta las dos filas', ($stats['resumen']['total_ecf'] ?? null) === 2, $stats['resumen'] ?? null);
+wa_chk('resumen.monto_total suma solo la aceptada', $cerca($stats['resumen']['monto_total'] ?? null, 1180.0), $stats['resumen'] ?? null);
+wa_chk('resumen.monto_neto suma solo la aceptada', $cerca($stats['resumen']['monto_neto'] ?? null, 1180.0), $stats['resumen'] ?? null);
+wa_chk('por_tipo[31].total cuenta las dos filas', ($tipo31['total'] ?? null) === 2, $tipo31);
+wa_chk('por_tipo[31].monto_total suma solo la aceptada', $cerca($tipo31['monto_total'] ?? null, 1180.0), $tipo31);
+wa_chk('por_mes: solo la aceptada', $suma($stats['por_mes'] ?? []) === [1, 1180.0], $stats['por_mes'] ?? null);
+wa_chk('ventas_por_mes: solo la aceptada', $suma($stats['ventas_por_mes'] ?? []) === [1, 1180.0], $stats['ventas_por_mes'] ?? null);
+wa_chk('ventas_por_dia: solo la aceptada', $suma($stats['ventas_por_dia'] ?? []) === [1, 1180.0], $stats['ventas_por_dia'] ?? null);
+$cubeta = array_values(array_filter($stats['por_estado'] ?? [], static fn(array $e): bool => ($e['estado'] ?? '') === 'ENVIO_INCIERTO'))[0] ?? [];
+wa_chk('por_estado trae la cubeta ENVIO_INCIERTO con una fila', ($cubeta['total'] ?? null) === 1, $stats['por_estado'] ?? null);
+
+echo "R2) Reportes de ventas y 607\n";
+$desde = date('Y-m-d', strtotime('-1 day'));
+$hasta = date('Y-m-d', strtotime('+1 day'));
+$r = wa_get($srv, "/api/reportes/ventas?desde={$desde}&hasta={$hasta}");
+$docs = array_column($r['json']['data']['filas'] ?? [], 'documento');
+wa_chk('ventas: 200 con la aceptada', $r['status'] === 200 && in_array($aceptada['e_ncf'] ?? '-', $docs, true), $r);
+wa_chk('ventas: sin la fila en vuelo', !in_array($enVuelo['e_ncf'] ?? '-', $docs, true), $docs);
+$r = wa_get($srv, '/api/reportes/607/preview?periodo=' . date('Ym'));
+$ncfs = array_column($r['json']['data']['registros'] ?? [], 'ncf');
+wa_chk('607: 200 con la aceptada y sin la fila en vuelo', $r['status'] === 200
+    && in_array($aceptada['e_ncf'] ?? '-', $ncfs, true) && !in_array($enVuelo['e_ncf'] ?? '-', $ncfs, true), [$r['status'], $ncfs]);
+
+echo "R3) La fila en vuelo imprime como cualquier otra (decision 4)\n";
+$idVuelo = (int) ($enVuelo['factura_id'] ?? 0);
+$r = wa_get($srv, "/api/facturas/{$idVuelo}/pdf?format=base64");
+wa_chk('PDF: 200 y el contenido es un PDF',
+    $r['status'] === 200 && str_starts_with((string) base64_decode((string) ($r['json']['data']['content'] ?? '')), '%PDF'), $r['status']);
+$r = wa_get($srv, "/api/facturas/{$idVuelo}/xml");
+wa_chk('XML firmado: 200 con su e-NCF',
+    $r['status'] === 200 && str_contains($r['body'], '<eNCF>' . ($enVuelo['e_ncf'] ?? '-') . '</eNCF>'), $r['status']);
+
+echo "R4) Saldo: una nota de credito en vuelo ya resta\n";
+$ids = wa_reiniciar($pdo, $srv);
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000)]));   // 1180.00
+$original = $r['json']['data'] ?? [];
+wa_chk('E31 original ACEPTADO', $r['status'] === 200 && ($original['estado_dgii'] ?? null) === 'ACEPTADO', $r);
+$referencia = ['ncf_modificado' => (string) ($original['e_ncf'] ?? ''), 'fecha_ncf_modificado' => date('d-m-Y'),
+    'codigo_modificacion' => '3', 'razon_modificacion' => 'Ajuste de prueba WA'];
+wa_mock_modo($srv['mock'], 'cuelga');
+$r = wa_emitir($srv, wa_factura('34', $ids, [wa_linea(500)], ['informacion_referencia' => $referencia]));   // 590.00
+wa_chk('primera E34 (590.00) queda en vuelo: 502 incierto',
+    $r['status'] === 502 && ($r['json']['data']['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $r);
+wa_mock_modo($srv['mock'], 'acepta');
+wa_mock_log($srv['mock'], true);
+$r = wa_emitir($srv, wa_factura('34', $ids, [wa_linea(600)], ['informacion_referencia' => $referencia]));   // 708.00
+wa_chk('segunda E34 (708.00) supera el saldo que deja la nota en vuelo: 422',
+    $r['status'] === 422 && str_contains((string) ($r['json']['error'] ?? ''), 'solo le quedan RD$ 590.00'), $r);
+wa_chk('la segunda E34 no llego a la DGII', wa_recepciones(wa_mock_log($srv['mock'])) === []);
+
+// 12.0 pasos 3-4: una segunda API (puerto 8097) sobre la copia rota a proposito
+// (sin 027 ni 028; ver tools/test_write_ahead_gate.php). Sin --copia-db se omiten.
+$copia = (string) wa_arg('copia-db', '');
+if ($copia === '') {
+    echo "  (sin --copia-db: no se corren los pasos 3 y 4 de la compuerta 12.0)\n";
+} else {
+    echo "R5) 12.0 paso 3: sin la 027, el numero tomado en otro ambiente se rechaza antes del envio\n";
+    $pdoCopia = wa_pdo($copia);
+    $srvCopia = wa_api($copia, [], 8097);
+    $idsCopia = wa_reiniciar($pdoCopia, $srvCopia);
+    $pdoCopia->exec("INSERT INTO facturas (no_factura, client_name, total, tipo_ecf, e_ncf, estado_dgii, ambiente_dgii)
+                     VALUES ('E310000000001', 'WA otro ambiente', 100.00, '31', 'E310000000001', 'ACEPTADO', 'ecf')");
+    $r = wa_emitir($srvCopia, wa_factura('31', $idsCopia, [wa_linea(1000)]));
+    wa_chk('502 con el texto de numero ocupado y sin data',
+        $r['status'] === 502 && ($r['json']['error'] ?? null) === T_NUMERO_OCUPADO && !isset($r['json']['data']), $r);
+    wa_chk('el contador de E31 queda en 1: el numero se salta', wa_contador($pdoCopia, 'E31') === 1, wa_contador($pdoCopia, 'E31'));
+    $filas = wa_filas($pdoCopia, 'E310000000001');
+    wa_chk('ninguna fila nueva: solo la del otro ambiente', count($filas) === 1 && $filas[0]['ambiente_dgii'] === 'ecf', $filas);
+    wa_chk('sin recepcion en la DGII', wa_recepciones(wa_mock_log($srvCopia['mock'])) === []);
+
+    echo "R6) 12.0 paso 4: sin la 028 y en modo estricto, la confirmacion RFCE queda incierta\n";
+    // El servidor de prueba es el mismo de siempre y no se le cambia el sql_mode:
+    // solo se verifica que sea estricto (sin eso el desborde de VARCHAR(20) se
+    // trunca en silencio y esta prueba no prueba nada).
+    $modo = (string) $pdoCopia->query('SELECT @@GLOBAL.sql_mode')->fetchColumn();
+    $estricto = str_contains($modo, 'STRICT_ALL_TABLES') || str_contains($modo, 'STRICT_TRANS_TABLES');
+    wa_chk('el servidor de prueba corre en modo estricto', $estricto, $modo);
+    $idsCopia = wa_reiniciar($pdoCopia, $srvCopia, 'acepta_condicional');
+    $r = wa_emitir($srvCopia, wa_factura('32', $idsCopia, [wa_linea(1000)]));
+    $d = $r['json']['data'] ?? [];
+    wa_chk('502 incierto con data.estado_dgii ENVIO_INCIERTO',
+        $r['status'] === 502 && ($d['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $r);
+    $fila = wa_filas($pdoCopia, (string) ($d['e_ncf'] ?? ''))[0] ?? [];
+    wa_chk('la fila quedo ENVIO_INCIERTO', ($fila['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $fila);
+    $meta = json_decode((string) ($fila['respuesta_dgii'] ?? ''), true);
+    wa_chk('resultado_parcial guarda la respuesta real: RFCE_ACEPTADO_CONDICIONAL',
+        ($meta['resultado_parcial']['estado'] ?? null) === 'RFCE_ACEPTADO_CONDICIONAL', $meta);
+}
 
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();
