@@ -59,6 +59,29 @@ function wa_arg(string $nombre, ?string $defecto = null): ?string
 }
 
 /**
+ * Corre $fn con error_log() a un archivo temporal (se restaura y se borra al
+ * terminar): [resultado, excepcion o null, texto del log]. Atrapa Throwable, asi
+ * que un Error (metodo no definido) tampoco corta la prueba.
+ */
+function wa_con_log(callable $fn): array
+{
+    $archivo = (string) tempnam(sys_get_temp_dir(), 'wa_log_');
+    $previo = ini_set('error_log', $archivo);
+    $resultado = null;
+    $error = null;
+    try {
+        $resultado = $fn();
+    } catch (Throwable $e) {
+        $error = $e;
+    } finally {
+        ini_set('error_log', $previo === false ? '' : $previo);
+    }
+    $log = (string) file_get_contents($archivo);
+    @unlink($archivo);
+    return [$resultado, $error, $log];
+}
+
+/**
  * Flags -d para un php hijo: solo las extensiones que el php.ini NO carga.
  * Se le pregunta a un php sin flags (lo que vera el hijo), no a este proceso:
  * este pudo arrancar con -d extension=... y el hijo no lo hereda.

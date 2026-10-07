@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../AmbienteResolver.php');
 require_once(__DIR__ . '/ReporteVentasModel.php');
 require_once(__DIR__ . '/ncfModel.php');
 require_once(__DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php');
+require_once(__DIR__ . '/../Utils/FacturacionElectronica/EcfNumeroOcupadoException.php');
 
 class facturaModel
 {
@@ -1181,6 +1182,212 @@ class facturaModel
             'codigo_modificacion' => ($infoRef['codigo_modificacion'] ?? '') !== '' ? (string) $infoRef['codigo_modificacion'] : null,
             'razon_modificacion' => $razon !== '' ? $razon : null,
         ];
+    }
+
+    /**
+     * Write-ahead (spec 4.6): guarda la fila del e-CF ANTES de enviarlo a la
+     * DGII, en PENDIENTE_ENVIO, con el XML firmado (y el RFCE), el
+     * codigo_seguridad y los items. Es una sola transaccion y se confirma aqui
+     * mismo: al volver, la fila ya ocupa el numero y no queda ninguna
+     * transaccion abierta durante el envio.
+     *
+     * Otra fila del mismo ambiente (o sin ambiente) con el mismo e-NCF:
+     *   - reintentable (EstadosEcf::REINTENTABLES): se archiva
+     *     (<estado>_ARCHIVADO, e_ncf NULL) y se inserta la nueva;
+     *   - cualquier otro estado: EcfNumeroOcupadoException, sin tocar nada.
+     *
+     * SELECT ... FOR UPDATE sobre un e-NCF que no existe toma gap locks que dos
+     * sesiones pueden tener a la vez (REPEATABLE READ): el arbitro es la clave
+     * unica uk_e_ncf_amb al insertar. 1062 es "ocupado"; 1213 (deadlock: InnoDB
+     * ya deshizo la transaccion) se reintenta una vez y la segunda es "ocupado".
+     * Cualquier otro PDOException (1048, 1452 de un producto borrado, 1205,
+     * 1406 sin la migracion 028, la DB caida) se relanza: no queda fila, y la
+     * emision devuelve el numero a la secuencia.
+     *
+     * @param array $factura {date, client_id, client_name, total, tipo_pago, user_id, informacion_referencia, items[]}
+     *                       ($facturaInput del controller; sin 'no_factura', que toma el e-NCF)
+     * @param array $ctx     ctx 'reservar' de ECFEmissionService::emitir: tipo_ecf, e_ncf, ambiente,
+     *                       ambiente_secuencia, signed_xml, codigo_seguridad, fecha_emision_dgii, flujo,
+     *                       rfce_xml, dispensado, rango_id, secuencia_valor, desde
+     * @return array{factura_id:int, e_ncf:string, desde:string}
+     * @throws EcfNumeroOcupadoException|PDOException|InvalidArgumentException
+     */
+    public function reservarFacturaECF(array $factura, array $ctx): array
+    {
+        // Con ambiente NULL la clave (e_ncf, ambiente_dgii) no protege la fila:
+        // un indice unico deja repetir NULL.
+        if (trim((string) ($ctx['ambiente'] ?? '')) === '') {
+            throw new InvalidArgumentException('reservarFacturaECF: ambiente vacio; uk_e_ncf_amb no protegeria la fila');
+        }
+        $eNcf = (string) ($ctx['e_ncf'] ?? '');
+        $ambiente = trim((string) $ctx['ambiente']);
+        $ambienteSecuencia = (string) ($ctx['ambiente_secuencia'] ?? '');
+        if ($ambiente !== $ambienteSecuencia) {
+            // Riesgo 6 del spec: el numero salio de la secuencia de un ambiente
+            // y la fila queda en el ambiente del token. Se avisa y se sigue.
+            error_log(sprintf('[ECF e-NCF=%s] reservar: ambiente del token %s distinto del de la secuencia %s',
+                $eNcf, $ambiente, $ambienteSecuencia));
+        }
+        $nota = self::normalizarNotaReferencia($factura, (string) ($ctx['tipo_ecf'] ?? ''));
+
+        for ($intento = 1; ; $intento++) {
+            try {
+                $this->conexion->beginTransaction();
+
+                $previas = $this->conexion->prepare(
+                    'SELECT id, estado_dgii FROM facturas
+                     WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL) FOR UPDATE'
+                );
+                $previas->execute([':e' => $eNcf, ':amb' => $ambiente]);
+                foreach ($previas->fetchAll(PDO::FETCH_ASSOC) as $previa) {
+                    $estadoPrevio = (string) ($previa['estado_dgii'] ?? '');
+                    if (!in_array($estadoPrevio, EstadosEcf::REINTENTABLES, true)) {
+                        $this->deshacer();
+                        throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'fila ' . (int) $previa['id'] . ' en ' . $estadoPrevio);
+                    }
+                    // Intento anterior que la DGII no uso: se archiva para guardar
+                    // la historia, y e_ncf NULL libera la clave unica. El estado
+                    // leido va en el WHERE (compare-and-set) aunque el FOR UPDATE
+                    // ya lo proteja.
+                    $archivo = $this->conexion->prepare(
+                        "UPDATE facturas SET e_ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO') WHERE id = :id AND estado_dgii = :visto"
+                    );
+                    $archivo->execute([':id' => (int) $previa['id'], ':visto' => $estadoPrevio]);
+                    if ($archivo->rowCount() === 0) {
+                        $this->deshacer();
+                        throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'archivo sin coincidencia');
+                    }
+                }
+
+                $stmt = $this->conexion->prepare('INSERT INTO facturas
+                    (no_factura, date, client_id, client_name, total, tipo_pago, NCF, user_id,
+                     tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
+                     fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
+                     rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta, secuencia_utilizada,
+                     ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion)
+                    VALUES
+                    (:no_factura, :date, :client_id, :client_name, :total, :tipo_pago, NULL, :user_id,
+                     :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
+                     :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
+                     :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta, :secuencia_utilizada,
+                     :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion)');
+                $stmt->execute([
+                    ':no_factura' => $eNcf,
+                    ':date' => $factura['date'],
+                    ':client_id' => $factura['client_id'],
+                    ':client_name' => $factura['client_name'],
+                    ':total' => $factura['total'],
+                    ':tipo_pago' => (int) ($factura['tipo_pago'] ?? 1),
+                    ':user_id' => $factura['user_id'] ?? null,
+                    ':tipo_ecf' => (string) ($ctx['tipo_ecf'] ?? ''),
+                    ':e_ncf' => $eNcf,
+                    ':track_id' => null,
+                    ':estado_dgii' => EstadosEcf::PENDIENTE_ENVIO,
+                    ':codigo_seguridad' => $ctx['codigo_seguridad'] ?? null,
+                    ':fecha_emision_dgii' => $ctx['fecha_emision_dgii'] ?? null,
+                    ':ambiente_dgii' => $ambiente,
+                    ':xml_firmado' => $ctx['signed_xml'] ?? null,
+                    // Solo la meta del envio (spec 6.3), nunca XML.
+                    ':respuesta_dgii' => self::json(['fase' => EstadosEcf::PENDIENTE_ENVIO] + self::metaEnVuelo($ctx)),
+                    ':rfce_xml' => $ctx['rfce_xml'] ?? null,
+                    ':rfce_track_id' => null,
+                    ':rfce_estado' => null,
+                    ':rfce_respuesta' => null,
+                    ':secuencia_utilizada' => null,
+                    ':ncf_modificado' => $nota['ncf_modificado'],
+                    ':fecha_ncf_modificado' => $nota['fecha_ncf_modificado'],
+                    ':codigo_modificacion' => $nota['codigo_modificacion'],
+                    ':razon_modificacion' => $nota['razon_modificacion'],
+                ]);
+                $facturaId = (int) $this->conexion->lastInsertId();
+
+                $itemSql = 'INSERT INTO factura_items
+                    (factura_id, product_id, description, amount, quantity, subtotal, descuento_monto,
+                     indicador_facturacion, indicador_bien_servicio, unidad_medida, itbis_amount)
+                    VALUES
+                    (:factura_id, :product_id, :description, :amount, :quantity, :subtotal, :descuento_monto,
+                     :indicador_facturacion, :indicador_bien_servicio, :unidad_medida, :itbis_amount)';
+                $itemStmt = $this->conexion->prepare($itemSql);
+                foreach ($factura['items'] as $item) {
+                    // Precio a 4 y cantidad a 3, lo que guardan amount DECIMAL(18,4) y
+                    // quantity DECIMAL(12,3). La emision ya los manda normalizados
+                    // (EcfItemMapper::normalizarCantidadPrecio: 4 y 2, lo del XML);
+                    // esto solo deja explicito lo que queda en la base.
+                    $amount = round((float) ($item['amount'] ?? 0), 4);
+                    $quantity = round((float) ($item['quantity'] ?? 1), 3);
+                    $subtotal = isset($item['subtotal']) ? (float) $item['subtotal'] : round($amount * $quantity, 2);
+                    $itemStmt->execute([
+                        ':factura_id' => $facturaId,
+                        ':product_id' => $item['product_id'] ?? null,
+                        ':description' => $item['description'] ?? '',
+                        ':amount' => $amount,
+                        ':quantity' => $quantity,
+                        ':subtotal' => $subtotal,
+                        ':descuento_monto' => (float) ($item['descuento_monto'] ?? 0),
+                        ':indicador_facturacion' => (int) ($item['indicador_facturacion'] ?? 1),
+                        ':indicador_bien_servicio' => (int) ($item['indicador_bien_servicio'] ?? 2),
+                        ':unidad_medida' => (string) ($item['unidad_medida'] ?? '43'),
+                        ':itbis_amount' => (float) ($item['itbis_amount'] ?? 0),
+                    ]);
+                }
+
+                $this->conexion->commit();
+                return ['factura_id' => $facturaId, 'e_ncf' => $eNcf, 'desde' => (string) ($ctx['desde'] ?? '')];
+            } catch (PDOException $e) {
+                $this->deshacer();
+                // Codigo del driver, no el SQLSTATE: 23000 tambien cubre 1048 y 1452.
+                $codigo = (int) ($e->errorInfo[1] ?? 0);
+                if ($codigo === 1062) {
+                    throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'clave duplicada (1062)', $e);
+                }
+                if ($codigo === 1213 && $intento === 1) {
+                    error_log(sprintf('[ECF e-NCF=%s] reservar: deadlock (1213), reintento', $eNcf));
+                    continue;
+                }
+                if ($codigo === 1213) {
+                    throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'deadlock (1213) dos veces', $e);
+                }
+                throw $e;
+            } catch (Throwable $e) {
+                $this->deshacer();
+                throw $e;
+            }
+        }
+    }
+
+    /** Meta del envio para respuesta_dgii (spec 6.3), sin XML. La lee metaEnvio(). */
+    private static function metaEnVuelo(array $ctx): array
+    {
+        return [
+            'desde' => $ctx['desde'] ?? null,
+            'flujo' => $ctx['flujo'] ?? null,
+            'ambiente_secuencia' => $ctx['ambiente_secuencia'] ?? null,
+            'dispensado' => $ctx['dispensado'] ?? null,
+            'rango_id' => $ctx['rango_id'] ?? null,
+            'secuencia_valor' => $ctx['secuencia_valor'] ?? null,
+        ];
+    }
+
+    /** JSON para respuesta_dgii / rfce_respuesta: null queda null; UTF-8 invalido se sustituye en vez de fallar. */
+    private static function json(mixed $valor): ?string
+    {
+        if ($valor === null) {
+            return null;
+        }
+        $json = json_encode($valor, JSON_INVALID_UTF8_SUBSTITUTE);
+        return $json === false ? null : $json;
+    }
+
+    /** rollBack si hay transaccion abierta; un fallo del rollBack no tapa el error original. */
+    private function deshacer(): void
+    {
+        try {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+        } catch (Throwable $e) {
+            error_log('[ECF] reservarFacturaECF: rollBack fallo: ' . $e->getMessage());
+        }
     }
 
     /**

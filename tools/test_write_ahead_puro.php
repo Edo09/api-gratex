@@ -176,6 +176,337 @@ wa_chk("facturaModel usa TIPOS_NOTA: la lista ['33', '34'] aparece una sola vez 
     substr_count($textoModelo, "['33', '34']") === 1, substr_count($textoModelo, "['33', '34']"));
 
 // ---------------------------------------------------------------------------
+// 5) facturaModel::reservarFacturaECF: flujo de control con una conexion falsa
+// ---------------------------------------------------------------------------
+
+/** Sentencia de GuionConexion: anota execute() y responde segun el guion. */
+final class GuionSentencia
+{
+    public function __construct(private GuionConexion $c, private string $sql)
+    {
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        $this->c->llamadas[] = ['execute', $this->sql, $params ?? []];
+        $error = $this->c->tomarError($this->sql);
+        if ($error !== null) {
+            throw $error;
+        }
+        return true;
+    }
+
+    public function fetchAll(int $modo = PDO::FETCH_BOTH): array
+    {
+        return $this->c->filasPara($this->sql);
+    }
+
+    public function fetchColumn(int $columna = 0): mixed
+    {
+        $filas = $this->c->filasPara($this->sql);
+        return $filas === [] ? false : array_values($filas[0])[$columna];
+    }
+
+    public function rowCount(): int
+    {
+        return $this->c->rowCountPara($this->sql);
+    }
+}
+
+/**
+ * Conexion falsa con guion: filas, rowCount y errores por fragmento de SQL, y
+ * su propio estado de transaccion, como PDO. Anota cada llamada. Nunca toca MySQL.
+ */
+final class GuionConexion
+{
+    public array $llamadas = [];
+    public bool $enTransaccion = false;
+    /** @var array<int, array{0:string, 1:Throwable}> errores por consumir: el primero cuyo fragmento calce */
+    public array $errores = [];
+    /** @var array<string, array> fragmento de SQL => filas que devuelve */
+    public array $filas = [];
+    /** @var array<string, int> fragmento de SQL => rowCount (por defecto 1) */
+    public array $rowCounts = [];
+    public bool $prepareFalla = false;
+
+    public function beginTransaction(): bool
+    {
+        $this->llamadas[] = ['beginTransaction'];
+        $this->enTransaccion = true;
+        return true;
+    }
+
+    public function commit(): bool
+    {
+        $this->llamadas[] = ['commit'];
+        $this->enTransaccion = false;
+        return true;
+    }
+
+    public function rollBack(): bool
+    {
+        $this->llamadas[] = ['rollBack'];
+        $this->enTransaccion = false;
+        return true;
+    }
+
+    public function inTransaction(): bool
+    {
+        return $this->enTransaccion;
+    }
+
+    public function lastInsertId(?string $nombre = null): string
+    {
+        return '41';
+    }
+
+    public function prepare(string $sql): GuionSentencia
+    {
+        if ($this->prepareFalla) {
+            throw new PDOException('se cayo la conexion');
+        }
+        $this->llamadas[] = ['prepare', $sql];
+        return new GuionSentencia($this, $sql);
+    }
+
+    public function tomarError(string $sql): ?Throwable
+    {
+        foreach ($this->errores as $i => [$fragmento, $error]) {
+            if (str_contains($sql, $fragmento)) {
+                unset($this->errores[$i]);
+                return $error;
+            }
+        }
+        return null;
+    }
+
+    public function filasPara(string $sql): array
+    {
+        foreach ($this->filas as $fragmento => $filas) {
+            if (str_contains($sql, $fragmento)) {
+                return $filas;
+            }
+        }
+        return [];
+    }
+
+    public function rowCountPara(string $sql): int
+    {
+        foreach ($this->rowCounts as $fragmento => $n) {
+            if (str_contains($sql, $fragmento)) {
+                return $n;
+            }
+        }
+        return 1;
+    }
+
+    /** Llamadas de un tipo: 'prepare', 'execute', 'beginTransaction', 'commit', 'rollBack'. */
+    public function de(string $tipo): array
+    {
+        return array_values(array_filter($this->llamadas, static fn(array $l): bool => $l[0] === $tipo));
+    }
+
+    /** SQL (espacios colapsados) del primer prepare que contiene $fragmento, o null. */
+    public function sql(string $fragmento): ?string
+    {
+        foreach ($this->de('prepare') as $l) {
+            if (str_contains($l[1], $fragmento)) {
+                return (string) preg_replace('/\s+/', ' ', $l[1]);
+            }
+        }
+        return null;
+    }
+
+    /** Parametros del ultimo execute cuyo SQL contiene $fragmento, o null. */
+    public function params(string $fragmento): ?array
+    {
+        $params = null;
+        foreach ($this->de('execute') as $l) {
+            if (str_contains($l[1], $fragmento)) {
+                $params = $l[2];
+            }
+        }
+        return $params;
+    }
+}
+
+/** PDOException como la arma pdo_mysql: errorInfo[1] es el codigo del driver. */
+function puro_pdo_error(int $codigo, string $sqlstate, string $texto): PDOException
+{
+    $e = new PDOException("SQLSTATE[{$sqlstate}]: {$texto}");
+    $e->errorInfo = [$sqlstate, $codigo, $texto];
+    return $e;
+}
+
+/** wa_con_log: [resultado, excepcion o null, texto del log]. */
+function puro_con_log(callable $fn): array
+{
+    return wa_con_log($fn);
+}
+
+/** facturaModel sin constructor (sin DB) con la conexion dada. */
+function puro_modelo(object $conexion): facturaModel
+{
+    $ref = new ReflectionClass(facturaModel::class);
+    $modelo = $ref->newInstanceWithoutConstructor();
+    $ref->getProperty('conexion')->setValue($modelo, $conexion);
+    return $modelo;
+}
+
+/** El ctx 'reservar' de ECFEmissionService (sus 13 claves), con $cambios encima. */
+function puro_ctx_reservar(array $cambios = []): array
+{
+    return $cambios + [
+        'tipo_ecf' => '31', 'e_ncf' => 'E310000000123', 'ambiente' => 'ecf', 'ambiente_secuencia' => 'ecf',
+        'signed_xml' => '<ECF><Encabezado><eNCF>E310000000123</eNCF></Encabezado></ECF>', 'codigo_seguridad' => 'Ab12Cd',
+        'fecha_emision_dgii' => '2026-10-05 14:03:00', 'flujo' => 'ECF', 'rfce_xml' => null,
+        'dispensado' => true, 'rango_id' => 7, 'secuencia_valor' => 123, 'desde' => '2026-10-05 14:03:11',
+    ];
+}
+
+/** El $facturaInput del controller (sin no_factura), con una linea. */
+function puro_factura(array $cambios = []): array
+{
+    return $cambios + [
+        'date' => '2026-10-05 14:03:00', 'client_id' => 5, 'client_name' => 'Cliente prueba', 'total' => 118.0,
+        'tipo_pago' => 1, 'user_id' => 3, 'informacion_referencia' => null,
+        'items' => [[
+            'product_id' => 9, 'description' => 'Producto', 'amount' => 100.0, 'quantity' => 1.0, 'subtotal' => 100.0,
+            'descuento_monto' => 0.0, 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1,
+            'unidad_medida' => '43', 'itbis_amount' => 18.0,
+        ]],
+    ];
+}
+
+echo "\n== 5) facturaModel::reservarFacturaECF (conexion falsa) ==\n";
+$reservar = static fn(GuionConexion $c, array $ctx = [], array $factura = []): array => puro_con_log(
+    static fn() => puro_modelo($c)->reservarFacturaECF(puro_factura($factura), puro_ctx_reservar($ctx))
+);
+
+$c = new GuionConexion();
+[, $e] = $reservar($c, ['ambiente' => '  ']);
+wa_chk('ambiente vacio: InvalidArgumentException antes de cualquier consulta',
+    $e instanceof InvalidArgumentException && $c->llamadas === [], [$e?->getMessage(), $c->llamadas]);
+
+$c = new GuionConexion();
+[$r, $e] = $reservar($c);
+wa_chk('camino feliz: devuelve factura_id, e_ncf y desde',
+    $e === null && $r === ['factura_id' => 41, 'e_ncf' => 'E310000000123', 'desde' => '2026-10-05 14:03:11'], $e?->getMessage() ?? $r);
+$select = (string) $c->sql('estado_dgii FROM facturas');
+wa_chk('el SELECT bloquea (FOR UPDATE) con el predicado de eNcfYaUsado',
+    str_contains($select, 'FOR UPDATE') && str_contains($select, '(ambiente_dgii = :amb OR ambiente_dgii IS NULL)'), $select);
+wa_chk('el SELECT usa el e-NCF y el ambiente del token',
+    $c->params('FOR UPDATE') === [':e' => 'E310000000123', ':amb' => 'ecf'], $c->params('FOR UPDATE'));
+$fila = $c->params('INSERT INTO facturas') ?? [];
+wa_chk('fila: PENDIENTE_ENVIO, no_factura = e-NCF, track_id y secuencia_utilizada NULL',
+    ($fila[':estado_dgii'] ?? null) === 'PENDIENTE_ENVIO' && ($fila[':no_factura'] ?? null) === 'E310000000123'
+    && array_key_exists(':track_id', $fila) && $fila[':track_id'] === null
+    && array_key_exists(':secuencia_utilizada', $fila) && $fila[':secuencia_utilizada'] === null, $fila);
+wa_chk('fila: XML firmado, codigo_seguridad, fecha y ambiente del ctx; sin respuesta RFCE',
+    ($fila[':xml_firmado'] ?? null) === '<ECF><Encabezado><eNCF>E310000000123</eNCF></Encabezado></ECF>'
+    && ($fila[':codigo_seguridad'] ?? null) === 'Ab12Cd' && ($fila[':fecha_emision_dgii'] ?? null) === '2026-10-05 14:03:00'
+    && ($fila[':ambiente_dgii'] ?? null) === 'ecf' && ($fila[':tipo_ecf'] ?? null) === '31'
+    && $fila[':rfce_track_id'] === null && $fila[':rfce_estado'] === null && $fila[':rfce_respuesta'] === null, $fila);
+$meta = json_decode((string) ($fila[':respuesta_dgii'] ?? ''), true);
+wa_chk('respuesta_dgii: las 7 claves de 6.3, en orden, con los valores del ctx',
+    $meta === ['fase' => 'PENDIENTE_ENVIO', 'desde' => '2026-10-05 14:03:11', 'flujo' => 'ECF', 'ambiente_secuencia' => 'ecf',
+        'dispensado' => true, 'rango_id' => 7, 'secuencia_valor' => 123], $meta);
+wa_chk('respuesta_dgii: sin XML', !str_contains((string) ($fila[':respuesta_dgii'] ?? ''), '<')
+    && !str_contains((string) ($fila[':respuesta_dgii'] ?? ''), 'signed_xml'));
+wa_chk('una transaccion, el item con el id nuevo, commit y nada abierto',
+    count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1 && $c->de('rollBack') === []
+    && ($c->params('INSERT INTO factura_items')[':factura_id'] ?? null) === 41 && !$c->inTransaction(), $c->llamadas);
+
+$c = new GuionConexion();
+[, $e] = $reservar($c, ['tipo_ecf' => '34', 'e_ncf' => 'E340000000002'],
+    ['informacion_referencia' => ['ncf_modificado' => 'E310000000020', 'fecha_ncf_modificado' => '05-10-2026', 'codigo_modificacion' => '3']]);
+$fila = $c->params('INSERT INTO facturas') ?? [];
+wa_chk('nota E34: los campos de normalizarNotaReferencia van a la fila',
+    $e === null && ($fila[':ncf_modificado'] ?? null) === 'E310000000020' && ($fila[':fecha_ncf_modificado'] ?? null) === '2026-10-05'
+    && ($fila[':codigo_modificacion'] ?? null) === '3' && ($fila[':razon_modificacion'] ?? null) === 'Nota de credito por ajuste de monto', $fila);
+
+$c = new GuionConexion();
+[, $e] = $reservar($c, ['tipo_ecf' => '32', 'e_ncf' => 'E320000000007', 'flujo' => 'RFCE', 'rfce_xml' => '<RFCE><eNCF>E320000000007</eNCF></RFCE>']);
+$fila = $c->params('INSERT INTO facturas') ?? [];
+wa_chk('RFCE: el XML del resumen y flujo RFCE quedan en la reserva',
+    $e === null && ($fila[':rfce_xml'] ?? null) === '<RFCE><eNCF>E320000000007</eNCF></RFCE>'
+    && (json_decode((string) $fila[':respuesta_dgii'], true)['flujo'] ?? null) === 'RFCE', $fila);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [['id' => '9', 'estado_dgii' => 'ACEPTADO']];
+[, $e] = $reservar($c);
+wa_chk('fila previa ACEPTADO: EcfNumeroOcupadoException con la causa',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 9 en ACEPTADO'), $e?->getMessage());
+wa_chk('fila previa ACEPTADO: sin UPDATE ni INSERT, rollBack y sin commit',
+    $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null
+    && count($c->de('rollBack')) === 1 && $c->de('commit') === [] && !$c->inTransaction(), $c->llamadas);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [['id' => '9', 'estado_dgii' => 'RECHAZADO']];
+[$r, $e] = $reservar($c);
+$archivo = (string) $c->sql('_ARCHIVADO');
+wa_chk("fila previa RECHAZADO: se archiva con CONCAT(estado_dgii, '_ARCHIVADO') y compare-and-set",
+    str_contains($archivo, "SET e_ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO')")
+    && str_contains($archivo, 'WHERE id = :id AND estado_dgii = :visto'), $archivo);
+wa_chk('archivo: :visto es el estado leido', $c->params('_ARCHIVADO') === [':id' => 9, ':visto' => 'RECHAZADO'], $c->params('_ARCHIVADO'));
+wa_chk('archivo y fila nueva en la misma transaccion',
+    $e === null && ($r['factura_id'] ?? null) === 41 && count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1, $c->llamadas);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [['id' => '9', 'estado_dgii' => 'RFCE_NO_ENCONTRADO']];
+$c->rowCounts['_ARCHIVADO'] = 0;
+[, $e] = $reservar($c);
+wa_chk('archivo sin coincidencia (rowCount 0): ocupado, sin INSERT ni commit',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'archivo sin coincidencia')
+    && $c->sql('INSERT INTO') === null && $c->de('commit') === [] && !$c->inTransaction(), $e?->getMessage());
+
+$c = new GuionConexion();
+$duplicado = puro_pdo_error(1062, '23000', "Duplicate entry 'E310000000123-ecf' for key 'uk_e_ncf_amb'");
+$c->errores[] = ['INSERT INTO facturas', $duplicado];
+[, $e] = $reservar($c);
+wa_chk('1062 al insertar: ocupado, con el PDOException como previa',
+    $e instanceof EcfNumeroOcupadoException && $e->getPrevious() === $duplicado
+    && str_contains($e->getMessage(), 'clave duplicada (1062)'), $e?->getMessage());
+wa_chk('1062: rollBack y sin commit', count($c->de('rollBack')) === 1 && $c->de('commit') === [] && !$c->inTransaction());
+
+$c = new GuionConexion();
+$c->errores[] = ['INSERT INTO facturas', puro_pdo_error(1213, '40001', 'Deadlock found when trying to get lock')];
+[$r, $e, $log] = $reservar($c);
+wa_chk('1213 una vez: reintenta (dos BEGIN) y reserva',
+    $e === null && ($r['factura_id'] ?? null) === 41 && count($c->de('beginTransaction')) === 2 && count($c->de('commit')) === 1,
+    $e?->getMessage() ?? $c->llamadas);
+wa_chk('1213 una vez: una sola linea de reintento en el log',
+    substr_count($log, '[ECF e-NCF=E310000000123] reservar: deadlock (1213), reintento') === 1, $log);
+
+$c = new GuionConexion();
+$c->errores[] = ['INSERT INTO facturas', puro_pdo_error(1213, '40001', 'Deadlock found when trying to get lock')];
+$c->errores[] = ['INSERT INTO facturas', puro_pdo_error(1213, '40001', 'Deadlock found when trying to get lock')];
+[, $e] = $reservar($c);
+wa_chk('1213 dos veces: ocupado, sin tercer intento',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'deadlock (1213) dos veces')
+    && count($c->de('beginTransaction')) === 2 && $c->de('commit') === [], $e?->getMessage());
+
+$c = new GuionConexion();
+$sinProducto = puro_pdo_error(1452, '23000', 'Cannot add or update a child row: a foreign key constraint fails');
+$c->errores[] = ['INSERT INTO factura_items', $sinProducto];
+[, $e] = $reservar($c);
+wa_chk('1452 (producto borrado): el mismo PDOException, no ocupado', $e === $sinProducto, $e === null ? null : get_class($e));
+wa_chk('1452: rollBack, sin commit y nada abierto',
+    count($c->de('rollBack')) === 1 && $c->de('commit') === [] && !$c->inTransaction(), $c->llamadas);
+
+$c = new GuionConexion();
+$c->errores[] = ['INSERT INTO facturas', new RuntimeException('se lleno el disco')];
+[, $e] = $reservar($c);
+wa_chk('otra excepcion dentro de la transaccion: rollBack y se relanza la misma',
+    $e instanceof RuntimeException && !($e instanceof EcfNumeroOcupadoException) && $e->getMessage() === 'se lleno el disco'
+    && count($c->de('rollBack')) === 1 && $c->de('commit') === [] && !$c->inTransaction(), $e?->getMessage());
+
+$c = new GuionConexion();
+[, $e, $log] = $reservar($c, ['ambiente_secuencia' => 'certecf']);
+wa_chk('ambiente del token distinto del de la secuencia: una linea de log y reserva igual',
+    $e === null && substr_count($log, 'distinto del de la secuencia certecf') === 1, $log);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
