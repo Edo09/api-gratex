@@ -270,10 +270,12 @@ En factura simple, cada precio lleva su ITBIS dentro.
 ### Conduces de mercancía (Ferretería)
 
 El conduce es la nota de entrega que va con la mercancía y que el cliente firma. Sale de una
-cotización de Ferretería (botón "Conduce" en la lista de cotizaciones), se puede editar antes
-y después de guardarlo, lleva su propio número `CON-000001` y se imprime con la hoja de la
-cotización, pero sin precios ni totales. Una cotización puede dar varios conduces (uno por
-entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
+cotización de Ferretería (botón "Conduce" en la lista de cotizaciones) o se crea sin cotización
+(botón "Nuevo conduce" en la pantalla Conduces; decisión del 2026-10-08, antes solo se podía
+desde una cotización), se puede editar antes y después de guardarlo, lleva su propio número
+`CON-000001` y se imprime con la hoja de la cotización, pero sin precios ni totales. Una
+cotización puede dar varios conduces (uno por entrega). Referencia de la API:
+[../api/conduces.md](../api/conduces.md).
 
 - **Solo `ferreteria`.** No es parte del contrato `CotizacionFormato`: es código propio de
   Ferretería (`FerreteriaConduce`). `/api/conduces` responde `422` "Los conduces no están
@@ -297,11 +299,13 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
   UPDATE` y `GREATEST(ultimo, MAX(numero)) + 1` en la transacción de crear, con el `UNIQUE`
   de `numero` como red de seguridad.
 - **Nada se borra.** Eliminar pone `activo = 0`; editar pone `activo = 0` a las líneas de
-  antes e inserta las nuevas. Si se borra la cotización de origen, el conduce se queda con
-  `cotizacion_id` `NULL` ("cotización eliminada"). Restaurar uno eliminado es un
+  antes e inserta las nuevas. Un conduce sin cotización tiene `cotizacion_id` `NULL`, y si se
+  borra la cotización de origen el conduce queda igual (FK `ON DELETE SET NULL`): los dos
+  casos son la misma fila y la pantalla dice "Sin cotización". Restaurar uno eliminado es un
   `UPDATE conduces SET activo = 1` de soporte.
 - **El PDF** es `FerreteriaCotizacionPdf` con `documento => 'conduce'`: título
-  `CONDUCE DE MERCANCÍA`, la línea `Cotización: COT-…`, las columnas `Cantidad | Unidad |
+  `CONDUCE DE MERCANCÍA`, la línea `Cotización: COT-…` (solo si el conduce tiene cotización),
+  las columnas `Cantidad | Unidad |
   Descripción mercancías` con el nombre de cada unidad, sin valores ni totales, y el mismo
   "Recibido por:" y pie. El renderizador sigue puro: `FerreteriaConduce` le pasa los nombres
   de las unidades ya resueltos.

@@ -43,7 +43,7 @@ Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`
 
 > `conduces` **no es un módulo**: `/api/conduces` (los conduces de mercancía de Ferretería)
 > usa el módulo `cotizaciones` (`'conduces' => 'cotizaciones'` en `routes`), porque un conduce
-> sale de una cotización. Quien tiene `cotizaciones` ve y usa los conduces; sin él, 403 como
+> sale de una cotización (o se crea sin ella, pero es del mismo trabajo). Quien tiene `cotizaciones` ve y usa los conduces; sin él, 403 como
 > en cualquier módulo. Aparte del rol, el controller responde 422 a las empresas que no están
 > en el formato de cotización `ferreteria` ([../api/conduces.md](../api/conduces.md)).
 

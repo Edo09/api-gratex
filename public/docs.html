@@ -872,7 +872,7 @@ Header: Authorization: Bearer your-token</code></pre>
         <!-- Conduces Section -->
         <section id="conduces">
             <h2>🚚 Conduces (Delivery Notes)</h2>
-            <p>Delivery notes (<em>conduces de mercancía</em>) for companies on the <code>ferreteria</code> quotation format. A conduce is created from a Ferretería quotation, prints like it but without prices or totals, and gets its own number (<code>CON-000001</code>). Numbers are never reused and nothing is physically deleted: deleting sets <code>activo = 0</code>. Full reference: <code>docs/api/conduces.md</code>.</p>
+            <p>Delivery notes (<em>conduces de mercancía</em>) for companies on the <code>ferreteria</code> quotation format. A conduce is created from a Ferretería quotation or without one, prints like a quotation but without prices or totals, and gets its own number (<code>CON-000001</code>). Numbers are never reused and nothing is physically deleted: deleting sets <code>activo = 0</code>. Full reference: <code>docs/api/conduces.md</code>.</p>
 
             <div class="info-box">
                 <strong>Checks, in this order:</strong> a valid session token (<code>401</code>), the <code>cotizaciones</code> module in the user's role (<code>403</code>), and the company's quotation format: for any format other than <code>ferreteria</code>, every route answers <code>422</code> <code>"Los conduces no están disponibles para tu empresa."</code> Errors always carry their HTTP code, with <code>{"status": false, "error": "..."}</code>.
@@ -929,7 +929,7 @@ Header: Authorization: Bearer your-token</code></pre>
                     <span class="method method-post">POST</span>
                     <span class="endpoint-path">/api/conduces</span>
                     <span class="auth-badge">🔒 Auth Required</span>
-                    <span class="endpoint-desc">Create a delivery note from a quotation</span>
+                    <span class="endpoint-desc">Create a delivery note, from a quotation or without one</span>
                 </div>
                 <div class="endpoint-body">
                     <span class="code-label">Request Body</span>
@@ -951,7 +951,7 @@ Header: Authorization: Bearer your-token</code></pre>
 }</code></pre>
                     <table>
                         <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-                        <tr><td><code>cotizacion_id</code> <span class="required">*</span></td><td>integer</td><td>Source quotation; it must exist and be on the <code>ferreteria</code> format</td></tr>
+                        <tr><td><code>cotizacion_id</code></td><td>integer</td><td>Source quotation. Missing or <code>null</code> = a conduce without a quotation. If sent, it must be a positive integer of an existing quotation on the <code>ferreteria</code> format (anything else, such as <code>0</code>, <code>"abc"</code> or <code>""</code>, answers <code>422</code>)</td></tr>
                         <tr><td><code>client_id</code> <span class="required">*</span></td><td>integer</td><td>Client ID; it must exist</td></tr>
                         <tr><td><code>date</code></td><td>string</td><td><code>YYYY-MM-DD HH:MM:SS</code> or <code>YYYY-MM-DD</code> (current Santo Domingo time added). Missing = now</td></tr>
                         <tr><td><code>items</code> <span class="required">*</span></td><td>array</td><td>At least one line, with the quotation's line rules; <code>amount</code> may be 0, never negative</td></tr>
