@@ -918,17 +918,22 @@ GET {{base}}/api/cotizaciones?id={{cotFerreteria}}
 X-API-KEY: {{tokenFerreteria}}
 
 ### ============================================================================
-### Produccion (pruebas de humo del despliegue, spec 7.4). Solo esto, con datos reales:
-###   Ferreteria: C1 sobre una cotizacion real (o desde el front: boton Conduce), C3, C11, una edicion (C7 o
-###   desde el front), D1 sobre ESE conduce y C4 (ya no sale). El conduce de prueba queda con activo = 0 y
-###   GASTA su numero: el primer conduce real ya no sera CON-000001. Si Ferreteria quiere empezar en
-###   CON-000001, hacer solo C9 (la vista previa no gasta numero) y C4.
-###   Limite de esa alternativa: sin ningun conduce no hay fila sobre la que pulsar Facturar, asi que ni el
-###   bloqueo de la linea sin precio (riesgo de MontoItem 0 en la DGII) ni crear, editar y eliminar se
-###   ejercitan solo con la vista previa; hay que elegir entre gastar CON-000001 en la prueba (el numero nunca
-###   se reusa) o apoyarse en las comprobaciones de antes de produccion (el navegador contra el mock y los
-###   bloques C y D de este archivo en un stack de prueba), y eso lo decide el dueño.
-###   Facturar desde el front sin emitir: una linea sin precio no deja emitir ni guardar.
+### Produccion (pruebas de humo del despliegue, spec 7.4). Solo esto, con datos reales.
+### DECISION DEL 2026-10-08: se hace la prueba COMPLETA y GASTA CON-000001 (el conduce de prueba queda con
+### activo = 0 y su numero no se reusa): el primer conduce real de Ferreteria sera CON-000002.
+###   Ferreteria, en este orden:
+###   1. Crear: C1 sobre una cotizacion real (o desde el front: boton Conduce de la cotizacion), con una linea
+###      libre SIN precio (C1 ya trae CORTE DE TUBO con amount 0). Anotar su id y su code (CON-000001) y
+###      comprobar con C3.
+###   2. Editar sin quitar esa linea: C7 con la linea libre agregada a su cuerpo (C7 trae una sola linea y la
+###      quitaria), o desde la pantalla del conduce. Repetir C3.
+###   3. PDF: C11 (o el boton PDF de la lista): CONDUCE DE MERCANCÍA, sin precios.
+###   4. Facturar e-CF desde el front (no hay bloque para esto): Conduces > Facturar > Factura electronica (e-CF).
+###      La linea sin precio llega en 0: Emitir (y Vista previa) tiene que quedar bloqueado, con "Escribe el
+###      precio: en el conduce esta linea no tenia." bajo la linea. No escribir el precio, no emitir, salir sin
+###      guardar (riesgo de MontoItem 0 en la DGII).
+###   5. Eliminar: D1 con el id de ese conduce (ponerlo en @conduce2), o Eliminar en la lista; C4 ya no lo lista.
+###   La comprobacion de solo la vista previa (C9) existe y no gasta numero, pero no ejercita el bloqueo del precio 0.
 ###   Gratex: G0, G1 y el bloque G de tests/test_cotizaciones_ferreteria.http; sin menu Conduces.
 ### Nunca en produccion: M10 (cinco conduces de prueba), D8 y el bloque Q. (M15 no se corre en ningun
 ### servidor: la cubre M0.)

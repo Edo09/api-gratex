@@ -182,15 +182,19 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
    Crear una cotización de prueba, abrir su PDF (logo, datos y pie del tenant; con un
    formato propio, sin la cuenta bancaria de Gratex) y borrarla. Pasos listos en
    `tests/test_cotizaciones_ferreteria.http`.
-5. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, crear un conduce desde
-   ella, abrir su PDF (`CONDUCE DE MERCANCÍA`, sin precios) y eliminarlo. El conduce de prueba
-   gasta su número (no se reusa); si el cliente quiere empezar en `CON-000001`, prueba solo la
-   vista previa. Con solo la vista previa no hay ningún conduce sobre el que pulsar Facturar,
-   así que ni el bloqueo de la línea sin precio (el riesgo de `MontoItem` 0 ante la DGII) ni
-   crear, editar y eliminar se ejercitan: hay que elegir entre gastar `CON-000001` en la
-   prueba (el número no se reusa nunca) o apoyarse en las comprobaciones de antes de producción
-   (el navegador contra el mock y los bloques C y D de `tests/test_conduces.http` en un stack de
-   prueba), y lo decide el dueño. Pasos listos en `tests/test_conduces.http`.
+5. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, la prueba completa, que
+   **gasta `CON-000001`** (decisión del 2026-10-08: el primer conduce real será `CON-000002`; el
+   de prueba queda con `activo = 0` y su número no se reusa). En este orden:
+   1. crear un conduce desde esa cotización, con una línea libre sin precio;
+   2. editarlo sin quitar esa línea;
+   3. abrir su PDF (`CONDUCE DE MERCANCÍA`, sin precios);
+   4. Facturar > Factura electrónica (e-CF) desde la lista de Conduces: con la línea en precio 0,
+      Emitir (y Vista previa) tiene que bloquearse («Escribe el precio: en el conduce esta línea
+      no tenía.»); no escribir el precio ni emitir;
+   5. eliminarlo (deja de salir en la lista).
+
+   La comprobación de solo la vista previa existe y no gasta número, pero no ejercita el
+   bloqueo del precio 0. Pasos listos en `tests/test_conduces.http` (sección Producción).
 
 ---
 

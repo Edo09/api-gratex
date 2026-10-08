@@ -463,8 +463,11 @@ la fila del conduce (`GET ?id=`) y lo emite con los endpoints de siempre (`/api/
 - A mano contra un servidor, con las comprobaciones de la 031 y de la base:
   [../../tests/test_conduces.http](../../tests/test_conduces.http).
 - **En producción**, cada conduce de prueba **gasta su número** (queda con `activo = 0` y
-  no se reusa): el primer conduce real ya no sería `CON-000001`. La vista previa no gasta
-  número.
+  no se reusa). Decisión del 2026-10-08: la prueba de humo del despliegue es la completa
+  (crear, editar, PDF, Facturar con una línea sin precio, que tiene que bloquearse, y
+  eliminar) y gasta `CON-000001`: el primer conduce real será `CON-000002`. Los pasos están
+  en la sección Producción de [../../tests/test_conduces.http](../../tests/test_conduces.http).
+  La vista previa no gasta número, pero no ejercita el bloqueo del precio 0.
 
 ### Migración 031 (datos)
 

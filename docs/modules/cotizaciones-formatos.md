@@ -338,20 +338,25 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
    decir `APLICADA`, y en el master la 012, antes de desplegar.
 7. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
    `cotizacion_formato = 'ferreteria'`.
-8. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
-   - como Ferretería: un conduce desde una cotización, su PDF, una edición y Eliminar (deja de
-     salir en la lista); Facturar sin emitir, comprobando que una línea sin precio no deja
-     emitir;
-   - como Gratex: nada cambió y no hay menú Conduces.
+8. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción). **Decisión del
+   2026-10-08:** se hace la prueba completa y **gasta `CON-000001`** (el conduce de prueba queda
+   con `activo = 0` y su número no se reusa): el primer conduce real de Ferretería será
+   `CON-000002`. Como Ferretería, en este orden:
+   1. crear un conduce desde una cotización real, con una línea libre sin precio (bloque C1, o
+      el botón Conduce de la cotización);
+   2. editarlo sin quitar esa línea (bloque C7 con la línea libre añadida a su cuerpo, o desde
+      la pantalla del conduce);
+   3. abrir su PDF (bloque C11, o el botón PDF de la lista): `CONDUCE DE MERCANCÍA`, sin precios;
+   4. Facturar > Factura electrónica (e-CF) desde la lista de Conduces, con esa línea en precio
+      0: Emitir (y Vista previa) tiene que quedar bloqueado, con «Escribe el precio: en el
+      conduce esta línea no tenía.» bajo la línea. No escribir el precio, no emitir y salir sin
+      guardar (es la prueba del riesgo de `MontoItem` 0 ante la DGII, y se hace en la pantalla,
+      no en el `.http`);
+   5. eliminarlo (bloque D1 con el id de ese conduce, o Eliminar en la lista): queda con
+      `activo = 0` y deja de salir en la lista.
 
-   El conduce de prueba gasta su número: el primer conduce real de Ferretería ya no será
-   `CON-000001`. Si eso importa, probar solo la vista previa, que no gasta número. Con solo la
-   vista previa no hay ningún conduce sobre el que pulsar Facturar, así que ni el bloqueo de la
-   línea sin precio (el riesgo de `MontoItem` 0 ante la DGII) ni crear, editar y eliminar se
-   ejercitan: hay que elegir entre gastar `CON-000001` en la prueba (el número no se reusa
-   nunca) o apoyarse en las comprobaciones de antes de producción (el navegador contra el mock
-   y los bloques C y D de `tests/test_conduces.http` en un stack de prueba), y lo decide el
-   dueño.
+   Como Gratex: nada cambió y no hay menú Conduces. La comprobación de solo la vista previa
+   (bloque C9) sigue existiendo y no gasta número, pero no ejercita el bloqueo del precio 0.
 
 ### Redondeo
 
