@@ -668,9 +668,14 @@ class ECFXmlBuilder
         if ($tipoEcf === '47') {
             return !empty($data['comprador']['identificador_extranjero'] ?? '');
         }
-        if (in_array($tipoEcf, ['31', '34', '41', '45', '46'], true)) {
+        if (in_array($tipoEcf, ['31', '41', '45', '46'], true)) {
             return true;
         }
+        // E34 (como E32 y E33): solo si hay datos del comprador. El XSD del E34
+        // tiene <Comprador> minOccurs=0, y la nota de credito de un E32 a
+        // consumidor final no tiene comprador: forzarlo escribia
+        // <RazonSocialComprador></RazonSocialComprador>, que viola su
+        // minLength 1. Toda E34 con cliente sigue llevandolo.
         return $this->hasAnyValue($data['comprador'] ?? []);
     }
 

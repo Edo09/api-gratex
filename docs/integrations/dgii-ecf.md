@@ -104,7 +104,9 @@ Endpoints internos (token de API propio vía `X-API-KEY`), útiles para diagnós
 
 Referencia completa de payloads: [../api/facturas.md](../api/facturas.md). Datos clave:
 
-- E32 < 250k → flujo RFCE (`fc.dgii.gov.do`), sin `track_id`, el XML se sube manual al portal.
+- E32 < 250k → flujo RFCE (`fc.dgii.gov.do`), sin `track_id`. En producción basta el RFCE; el XML íntegro queda firmado en la factura (subirlo al portal fue un paso de la certificación).
+- E32 ≥ 250k → va el XML entero y **tiene que identificar al comprador** (norma de la RI; sin cliente el XML sale sin `<Comprador>` y el XSD lo exige): la emisión responde 422 antes de reservar el e-NCF.
+- `IndicadorMontoGravado = 1` (precios con ITBIS, `precios_incluyen_itbis`): la DGII calcula los montos gravados **por tasa** (`round(suma de MontoItem / 1.18, 2)`) y el ITBIS como diferencia. Verificado contra su set de pruebas (E450000000003); ver `EcfItemMapper::desglosarIncluido`.
 - E33/E34: `RNCOtroContribuyente` debe ir null (no el RNC del comprador) o DGII devuelve error 614.
 - URL QR `ConsultaTimbre`: incluir `&RncComprador=` para todos los tipos EXCEPTO E43 y E47.
 - `CodigoSeguridad`: primeros 6 caracteres crudos de `SignatureValue` — solo quitar

@@ -149,6 +149,8 @@ concepto)`; solo se guardan los montos distintos de cero. Detalle:
 Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
 `unidad_medida` (código DGII), `indicador_facturacion` (1=ITBIS18, 4=Exento, 2=16%,
 3=Tasa cero, 0=No facturable), `indicador_bien_servicio`, `activo`, timestamps.
+`precio` .. `precio_4` van **sin ITBIS** y con **4 decimales** desde la migración 029
+(`DECIMAL(18,4)`): con 2, el precio de góndola no se recuperaba exacto (RD$10 → 8.47 → 9.99).
 
 ### `proveedores` (migración 013)
 Directorio para autocompletar/gestionar proveedores: `id`, `rnc`, `nombre`, contacto…
@@ -313,7 +315,7 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 |---|---|
 | `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–028). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–028 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–029 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 

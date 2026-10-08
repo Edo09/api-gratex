@@ -6,7 +6,9 @@ require_once __DIR__ . '/EcfUsuarioException.php';
  * Builds the RFCE (Resumen de Factura de Consumo Electronica) XML according to
  * the DGII XSD "RFCE 32 v.1.0.xsd". A RFCE is the summary that must be sent
  * for every E32 (Factura de Consumo Electronica) whose total amount is below
- * RD$ 250,000. The factura integra is later loaded into the DGII portal.
+ * RD$ 250,000. In production the RFCE is all the DGII receives; the signed
+ * full e-CF stays stored in facturas.xml_firmado. (Uploading it to the DGII
+ * portal was a certification step, not an operating rule.)
  *
  * Input shape (assoc array):
  *   tipo_ecf (must be '32'),

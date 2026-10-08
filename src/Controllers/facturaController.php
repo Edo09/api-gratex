@@ -160,9 +160,13 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
     // E32 (Consumo) y E43 (Gastos Menores) pueden emitirse sin comprador: el e-CF
-    // no exige RNCComprador (ver ECFXmlBuilder::requiereComprador). Para el resto
+    // no exige RNCComprador (ver ECFXmlBuilder::requiereComprador). Tampoco la
+    // nota de credito de un E32 a consumidor final (devolucion del POS): su
+    // factura no tenia comprador y el XSD del E34 admite omitirlo. Para el resto
     // el client_id sigue siendo obligatorio.
-    $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true);
+    $permiteSinCliente = in_array($tipoEcf, ['32', '43'], true)
+        || ($tipoEcf === '34' && !$clientId
+            && notaDeConsumoSinCliente($facturaModel, $input['informacion_referencia'] ?? null));
     if (!$clientId && !$permiteSinCliente) {
         respond(false, 'Elige un cliente para esta factura. Solo las facturas de consumo y de gastos menores pueden ir sin cliente.', 422);
         return;
@@ -176,6 +180,19 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     }
 
     $strictInput = !empty($input['strict_input']);
+
+    // Precios con ITBIS incluido (IndicadorMontoGravado = 1): el precio de cada
+    // linea es el que paga el cliente y el total sale exacto (ver
+    // EcfItemMapper::desglosarIncluido). Lo usa el POS. Va en su propio campo y
+    // NO se lee de `indicador_monto_gravado`: un bundle viejo del front mandaba
+    // ese en "1" con precios SIN ITBIS (ver el payload abajo), y leerlo ahora le
+    // quitaria el impuesto a facturas que lo deben llevar encima.
+    $preciosConItbis = !$strictInput
+        && filter_var($input['precios_incluyen_itbis'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    if ($preciosConItbis && !in_array($tipoEcf, EcfItemMapper::TIPOS_PRECIOS_CON_ITBIS, true)) {
+        respond(false, 'Los precios con ITBIS incluido solo se admiten en facturas de crédito fiscal y de consumo, y en sus notas de débito y crédito.', 422);
+        return;
+    }
 
     // Cantidad y precio con los decimales del XML, UNA vez y antes de todo: el
     // descuento del cliente, los totales, las lineas del XML y lo que se guarda
@@ -226,7 +243,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         }
     }
 
-    $totales = computeTotales($items);
+    $totales = computeTotales($items, $preciosConItbis);
     $totalesOverride = is_array($input['totales'] ?? null)
         ? array_filter($input['totales'], fn($v) => $v !== null && $v !== '')
         : [];
@@ -264,6 +281,17 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
     $comprador = $strictInput
         ? $compradorOverride
         : array_merge($compradorBase, array_filter($compradorOverride, fn($v) => $v !== null && $v !== ''));
+
+    // Norma DGII de la RI: la factura de consumo de RD$250,000 o mas tiene que
+    // identificar al comprador (docs/business-rules/representacion-impresa.md).
+    // Sin cliente el builder omite <Comprador>, que el XSD del E32 exige, y como
+    // a ese monto no va por RFCE la DGII recibe el XML entero y lo rechaza. Se
+    // corta antes de reservar el e-NCF.
+    if (!$strictInput && $tipoEcf === '32' && (float) ($totales['monto_total'] ?? 0) >= 250000
+        && trim((string) ($comprador['rnc'] ?? '')) === '') {
+        respond(false, 'Las facturas de consumo de RD$250,000 o más tienen que identificar al comprador. Elige un cliente con RNC o cédula.', 422);
+        return;
+    }
 
     // No se puede facturar a si mismo: el RNCComprador no puede ser el RNC del
     // emisor. Cubre tanto el override del body como el RNC tomado del cliente.
@@ -342,12 +370,15 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'fecha_desde' => $input['fecha_desde'] ?? null,
         'fecha_hasta' => $input['fecha_hasta'] ?? null,
         'total_paginas' => $input['total_paginas'] ?? null,
-        // XSD DGII: 0 = los montos de las lineas NO incluyen ITBIS, 1 = si. Esta
-        // ruta siempre calcula el ITBIS encima del precio (EcfItemMapper), asi
-        // que el XML debe decir 0. El front mandaba "1" con precios sin ITBIS
-        // (al reves); un bundle viejo en cache lo seguiria mandando. El set de
-        // pruebas (strict_input) trae sus propios montos y su indicador.
-        'indicador_monto_gravado' => $strictInput ? ($input['indicador_monto_gravado'] ?? null) : '0',
+        // XSD DGII: 0 = los montos de las lineas NO incluyen ITBIS, 1 = si. Por
+        // defecto esta ruta calcula el ITBIS encima del precio (EcfItemMapper),
+        // asi que el XML dice 0. El front mandaba "1" con precios sin ITBIS (al
+        // reves); un bundle viejo en cache lo seguiria mandando, por eso el 1
+        // solo sale de `precios_incluyen_itbis`. El set de pruebas
+        // (strict_input) trae sus propios montos y su indicador.
+        'indicador_monto_gravado' => $strictInput
+            ? ($input['indicador_monto_gravado'] ?? null)
+            : ($preciosConItbis ? '1' : '0'),
         'indicador_nota_credito' => $indicadorNotaCredito,
         'ambiente' => $input['ambiente'] ?? null,
         'strict_input' => $strictInput,
@@ -355,7 +386,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'rfce_emisor_override' => is_array($input['rfce_emisor'] ?? null) ? $input['rfce_emisor'] : null,
         'rfce_comprador_override' => is_array($input['rfce_comprador'] ?? null) ? $input['rfce_comprador'] : null,
         'comprador' => $comprador,
-        'items' => mapItemsForXml($items, $strictInput),
+        'items' => mapItemsForXml($items, $strictInput, $preciosConItbis),
         // Solo el set de pruebas (ECFEmissionService lo ignora fuera de strict).
         'descuentos_o_recargos' => $strictInput && is_array($input['descuentos_o_recargos'] ?? null)
             ? $input['descuentos_o_recargos'] : [],
@@ -396,7 +427,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
         // en la Representacion Impresa (norma DGII).
         'informacion_referencia' => $payload['informacion_referencia'],
-        'items' => array_map(function ($item) {
+        'items' => array_map(function ($item) use ($preciosConItbis) {
             // `descripcion` viene de mapItemsForXml como '' cuando el front solo
             // envia `nombre_item` (caso comun). `??` no cae con string vacio, asi
             // que se usa el nombre_item como respaldo explicito para no guardar ''.
@@ -407,7 +438,12 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
                 'quantity' => $item['cantidad'] ?? 1,
                 // Vinculo con el catalogo: sin esto la venta no puede descontar.
                 'product_id' => $item['product_id'] ?? null,
-                'subtotal' => $item['monto_item'] ?? 0,
+                // subtotal es SIEMPRE la base sin ITBIS: el reporte de ventas y
+                // el 607 lo suman como base y le suman itbis_amount aparte. Con
+                // precios con ITBIS el MontoItem lo trae adentro, asi que se guarda
+                // la parte neta (subtotal + itbis_amount = MontoItem firmado; la RI
+                // lo vuelve a juntar, ver EcfDocumento::preciosIncluyenItbis).
+                'subtotal' => $preciosConItbis ? ($item['monto_neto'] ?? 0) : ($item['monto_item'] ?? 0),
                 // monto_item ya viene neto; el descuento se guarda aparte para
                 // que la Representacion Impresa y el detalle lo puedan mostrar.
                 'descuento_monto' => $item['descuento_monto'] ?? 0,
@@ -417,7 +453,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
                 'unidad_medida' => $item['unidad_medida'] ?? '43',
                 'itbis_amount' => $item['itbis_amount'] ?? 0,
             ];
-        }, mapItemsForXml($items)),
+        }, mapItemsForXml($items, false, $preciosConItbis)),
     ];
 
     $saved = $facturaModel->saveFacturaConECF($facturaInput, $result);
@@ -503,6 +539,27 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'status' => true,
         'data' => $data,
     ]);
+}
+
+/**
+ * true si la nota apunta a una factura de consumo (E32) de esta base emitida
+ * sin cliente: su nota de credito tampoco lo lleva (no hay a quien ponerle) y
+ * el XML sale sin <Comprador>, que el XSD del E34 permite omitir.
+ *
+ * Solo E32 sin cliente: una factura con cliente se acredita a ese cliente
+ * (validarFacturaModificada lo exige), y una que no esta en la base no se
+ * puede comprobar aqui.
+ *
+ * @param mixed $ref informacion_referencia del body, tal como llego.
+ */
+function notaDeConsumoSinCliente(facturaModel $facturaModel, $ref): bool
+{
+    $ncf = is_array($ref) ? (string) preg_replace('/\s+/', '', (string) ($ref['ncf_modificado'] ?? '')) : '';
+    if ($ncf === '') {
+        return false;
+    }
+    $original = $facturaModel->getReferenciaOriginal($ncf);
+    return $original !== null && $original['tipo_ecf'] === '32' && $original['client_id'] === null;
 }
 
 /**
@@ -836,6 +893,13 @@ function handlePreview(clientModel $clientModel): void
     }
     $items = EcfItemMapper::normalizarCantidadPrecio($items);
 
+    // Mismo campo y misma regla que la emision (ver handleEmisionECF).
+    $preciosConItbis = filter_var($input['precios_incluyen_itbis'] ?? false, FILTER_VALIDATE_BOOLEAN);
+    if ($preciosConItbis && !in_array($tipoEcf, EcfItemMapper::TIPOS_PRECIOS_CON_ITBIS, true)) {
+        respond(false, 'Los precios con ITBIS incluido solo se admiten en facturas de crédito fiscal y de consumo, y en sus notas de débito y crédito.', 422);
+        return;
+    }
+
     $client = null;
     if ($clientId) {
         $clients = $clientModel->getClients($clientId);
@@ -846,7 +910,7 @@ function handlePreview(clientModel $clientModel): void
         $client = $clients[0];
     }
 
-    $totales = computeTotales($items);
+    $totales = computeTotales($items, $preciosConItbis);
 
     $factura = [
         'no_factura'         => $input['ncf'] ?? 'PREVIEW',
@@ -863,7 +927,9 @@ function handlePreview(clientModel $clientModel): void
         'client_id'          => $clientId,
         'client_name'        => $client['client_name'] ?? '',
         'company_name'       => $client['company_name'] ?? null,
-        'items'              => mapItemsForXml($items),
+        'items'              => mapItemsForXml($items, false, $preciosConItbis),
+        // Sin XML firmado la RI no puede leer el indicador del documento: va aqui.
+        'indicador_monto_gravado' => $preciosConItbis ? 1 : 0,
     ];
     // Notas: la vista previa muestra a que factura modifican, igual que el
     // PDF de la nota emitida (EcfDocumento::notaModificacion). Sin validar: es
@@ -1026,10 +1092,10 @@ function enrichFacturaTotales(array $factura): array
     return $factura;
 }
 
-function computeTotales(array $items): array
+function computeTotales(array $items, bool $preciosConItbis = false): array
 {
     // Implementacion compartida con la ruta de integracion.
-    return EcfItemMapper::totales($items);
+    return EcfItemMapper::totales($items, $preciosConItbis);
 }
 
 /**
@@ -1095,11 +1161,11 @@ function assertCantidadesEcf(array $items): bool
     return true;
 }
 
-function mapItemsForXml(array $items, bool $strict = false): array
+function mapItemsForXml(array $items, bool $strict = false, bool $preciosConItbis = false): array
 {
     // La implementacion vive en EcfItemMapper para que la ruta de
     // integracion (que no pasa por este controller) normalice igual.
-    return EcfItemMapper::map($items, $strict);
+    return EcfItemMapper::map($items, $strict, $preciosConItbis);
 }
 
 function mapEstadoFromConsulta(array $consulta): ?string
