@@ -902,11 +902,23 @@ class ECFEmissionService
             // 'incierto' (prepare/execute de PDO) volveria a agotarlo: un segundo
             // fatal dentro del cierre, que ningun catch atrapa, con la fila en
             // PENDIENTE_ENVIO. Con holgura el cierre cabe. @ por si el host
-            // prohibe ini_set: sin permiso no se avisa, solo se intenta.
-            $holgura = self::limiteConHolgura((string) ini_get('memory_limit'));
-            if ($holgura !== null) {
-                @ini_set('memory_limit', $holgura);
+            // prohibe ini_set: sin permiso no se avisa, solo se intenta. Pero si
+            // ini_get/ini_set estan en disable_functions, PHP 8 lanza Error (el @
+            // no lo calla) y el cierre moriria aqui sin marcar ninguna fila: por
+            // eso se pregunta antes con function_exists y se atrapa cualquier
+            // Throwable. Esto nunca puede tumbar el cierre; sin holgura, se sigue.
+            try {
+                if (function_exists('ini_get') && function_exists('ini_set')) {
+                    $holgura = self::limiteConHolgura((string) ini_get('memory_limit'));
+                    if ($holgura !== null) {
+                        @ini_set('memory_limit', $holgura);
+                    }
+                }
+            } catch (Throwable) {
+                // Sin permiso para ampliar el limite: se sigue con el que hay.
             }
+            // Ya con el limite resuelto y antes de cualquier otra llamada que pueda
+            // dejar un error propio: el mensaje del fatal que mato el proceso.
             $err = error_get_last();
             foreach (self::$enVuelo as [$p, $r, $c]) {
                 try {

@@ -1067,12 +1067,18 @@ wa_chk('CLAUDE.md: produccion corre PHP 8.3', str_contains($s13Claude, 'PHP 8.3'
 $s13Runbook = $s13Leer('docs/integrations/alta-tenant-runbook.md');
 wa_chk('runbook: Fase 5 corre el verificador de migraciones',
     (bool) preg_match('/## Fase 5.*verificar_migraciones_tenant\.sql.*## Fase 6/s', $s13Runbook));
+wa_chk('runbook: Fase 5 verifica las migraciones ANTES de la emision de prueba',
+    (bool) preg_match('/## Fase 5.*\*\*Migraciones.*\*\*Emisión.*## Fase 6/s', $s13Runbook));
 wa_chk('runbook: troubleshooting de la 027', str_contains($s13Runbook, 'No se pudo asignar el número de comprobante'));
 $s13Dgii = $s13Leer('docs/integrations/dgii-ecf.md');
 wa_chk('dgii-ecf.md: listado de las filas sin confirmar', str_contains($s13Dgii, "estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO')"));
 wa_chk('dgii-ecf.md: devolucion del numero con su condicion',
     str_contains($s13Dgii, 'current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor'));
 wa_chk('dgii-ecf.md: nunca un DELETE', str_contains($s13Dgii, 'Nunca un `DELETE`'));
+wa_chk('dgii-ecf.md: en los casos "la DGII no lo tiene" la app no devuelve el numero',
+    str_contains($s13Dgii, 'la app **no devuelve el número**'));
+wa_chk('dgii-ecf.md: una fila heredada ENVIADO sin track_id que la DGII no tiene no se fuerza',
+    str_contains($s13Dgii, 'Fila heredada `ENVIADO` sin `track_id`') && str_contains($s13Dgii, '**No se fuerza**'));
 $s13Api = $s13Leer('docs/api/facturas.md');
 wa_chk('facturas.md: filtro pendiente, en_vuelo y el 502 con la factura guardada',
     str_contains($s13Api, '`pendiente`') && str_contains($s13Api, 'en_vuelo') && str_contains($s13Api, 'ya quedó guardada'));

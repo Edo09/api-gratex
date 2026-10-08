@@ -37,8 +37,12 @@ if ($base === '') {
 // error_log a un archivo propio: cada escenario lee sus lineas con logNuevo().
 $GLOBALS['wa_ecf_log'] = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_' . getmypid() . '.log';
 @unlink($GLOBALS['wa_ecf_log']);
-ini_set('log_errors', '1');
-ini_set('error_log', $GLOBALS['wa_ecf_log']);
+// El hijo de S1b corre con ini_set en disable_functions: sin ini_set el log
+// queda donde estaba (stderr del hijo) y no hay a quien leerselo.
+if (function_exists('ini_set')) {
+    ini_set('log_errors', '1');
+    ini_set('error_log', $GLOBALS['wa_ecf_log']);
+}
 
 // CertResolver::resolve() es estatico y sigue corriendo (CertResolver.php:44-55):
 // cualquier archivo legible con una password no vacia basta, porque FakeSigner
@@ -155,7 +159,10 @@ final class FakeReception extends DgiiReceptionService
                 // reserva enorme lo deja vacio y no prueba nada). Ni catch ni
                 // finally corren, solo las funciones de cierre, que tienen que
                 // ampliar el limite para poder escribir en la base.
-                ini_set('memory_limit', '32M');
+                // Sin ini_set (hijo de S1b) el tope ya viene de -d memory_limit=32M.
+                if (function_exists('ini_set')) {
+                    ini_set('memory_limit', '32M');
+                }
                 $ocupa = [];
                 while (true) {
                     $ocupa[] = str_repeat('x', 64 * 1024);
@@ -412,7 +419,30 @@ if (wa_arg('hijo') === 'shutdown') {
     // nombre del archivo), asi que el hijo no lo deja al azar: el gancho reserva
     // ademas 8 MB en 'incierto' (mas de lo que un heap lleno puede dar sin
     // ampliar el limite) y avisa con que limite corrio.
-    $trucosHijo = ['incierto' => function (array $ctx, facturaModel $m) {
+    //
+    // Variante S1b: ini_get/ini_set en disable_functions. Ahi el cierre no puede
+    // ampliar el limite, asi que el gancho NO reserva los 8 MB (no cabrian y el
+    // UPDATE, que pide unos 6 KB, tiene que caber en lo que deja el fatal) y
+    // avisa con el limite original: el de -d memory_limit, que get_cfg_var lee
+    // sin ini_get.
+    $iniDeshabilitado = !function_exists('ini_get') && !function_exists('ini_set');
+    echo 'INI_DESHABILITADO=', $iniDeshabilitado ? '1' : '0', "\n";
+    if ($iniDeshabilitado) {
+        // Sin el truco de los 8 MB, el aire que deja el fatal depende de la
+        // disposicion del heap. Un lastre de 1 MB, que una funcion de cierre
+        // registrada ANTES de la del servicio libera, le da al UPDATE un margen
+        // que no depende de ella: lo que S1b prueba es que el cierre no muere
+        // por ini_get/ini_set, no cuanto aire deja el fatal.
+        $lastre = str_repeat('l', 1024 * 1024);
+        register_shutdown_function(static function () use (&$lastre): void {
+            $lastre = null;
+        });
+    }
+    $trucosHijo = ['incierto' => function (array $ctx, facturaModel $m) use ($iniDeshabilitado) {
+        if ($iniDeshabilitado) {
+            echo 'LIMITE_CIERRE=', (string) get_cfg_var('memory_limit'), "\n";
+            return $m->marcarEnvioIncierto((int) $ctx['reserva']['factura_id'], $ctx);
+        }
         echo 'LIMITE_CIERRE=', ini_get('memory_limit'), "\n";
         $trabajo = str_repeat('x', 8 * 1024 * 1024);
         return $m->marcarEnvioIncierto((int) $ctx['reserva']['factura_id'], $ctx) && $trabajo !== '';
@@ -836,24 +866,36 @@ function enVuelo(): ?array
         : null;
 }
 
+/**
+ * Corre el hijo del escenario S1 (--hijo=shutdown) con $flagsExtra de php (-d ...)
+ * y devuelve [codigo de salida, stdout+stderr].
+ */
+function correrHijoShutdown(string $base, array $flagsExtra = []): array
+{
+    $salidaHijo = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_hijo_' . getmypid() . '.out';
+    $proceso = proc_open(
+        array_merge([PHP_BINARY], wa_php_flags(), $flagsExtra, [__FILE__, '--hijo=shutdown', '--tenant-db=' . $base]),
+        // stderr al mismo descriptor que stdout: con dos manijas al archivo el
+        // hijo de S1b (sin ini_set, su error_log sale por stderr) se pisaria solo.
+        [1 => ['file', $salidaHijo, 'w'], 2 => ['redirect', 1]],
+        $tuberias,
+        dirname(__DIR__)
+    );
+    $pidHijo = is_resource($proceso) ? (int) (proc_get_status($proceso)['pid'] ?? 0) : 0;
+    $codigoHijo = is_resource($proceso) ? proc_close($proceso) : -1;
+    $salida = (string) @file_get_contents($salidaHijo);
+    @unlink($salidaHijo);
+    // El hijo escribe su error_log en un archivo propio (como este proceso, arriba).
+    if ($pidHijo > 0) {
+        @unlink(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_' . $pidHijo . '.log');
+    }
+    return [$codigoHijo, $salida];
+}
+
 // S1 un proceso hijo muere con un fatal real con dos filas en vuelo.
 wa_limpiar($pdo);
 $antesHijo = wa_contador($pdo, 'E31');
-$salidaHijo = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_hijo_' . getmypid() . '.out';
-$proceso = proc_open(
-    array_merge([PHP_BINARY], wa_php_flags(), [__FILE__, '--hijo=shutdown', '--tenant-db=' . $base]),
-    [1 => ['file', $salidaHijo, 'w'], 2 => ['file', $salidaHijo, 'a']],
-    $tuberias,
-    dirname(__DIR__)
-);
-$pidHijo = is_resource($proceso) ? (int) (proc_get_status($proceso)['pid'] ?? 0) : 0;
-$codigoHijo = is_resource($proceso) ? proc_close($proceso) : -1;
-$salida = (string) @file_get_contents($salidaHijo);
-@unlink($salidaHijo);
-// El hijo escribe su error_log en un archivo propio (como este proceso, arriba).
-if ($pidHijo > 0) {
-    @unlink(sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_ecf_' . $pidHijo . '.log');
-}
+[$codigoHijo, $salida] = correrHijoShutdown($base);
 wa_chk('S1: el hijo murio con un fatal (codigo 255, no llego al final)',
     $codigoHijo === 255 && !str_contains($salida, 'NO DEBIO LLEGAR AQUI'), ['codigo' => $codigoHijo, 'salida' => mb_substr($salida, 0, 400)]);
 preg_match_all('/^LIMITE_CIERRE=(\S+?)\r?$/m', $salida, $limitesCierre);
@@ -870,6 +912,36 @@ foreach ($filasHijo as $f) {
         ($meta['clase'] ?? null) === 'shutdown' && str_contains((string) ($meta['error'] ?? ''), 'Allowed memory size'), $meta);
     wa_chk("S1 {$f['e_ncf']}: sin resultado_parcial (el cierre no lo manda)", array_key_exists('resultado_parcial', $meta) && $meta['resultado_parcial'] === null, $meta);
     chkEnVuelo("S1 {$f['e_ncf']}", $f, 'shutdown');
+}
+
+// S1b lo mismo con ini_get e ini_set en disable_functions (hosting compartido):
+// en PHP 8 llamar a una funcion deshabilitada lanza Error, y el @ no lo calla.
+// Antes de la guarda, el primer paso del cierre (ampliar el limite) lo lanzaba y
+// el cierre moria sin marcar ninguna fila. Ahora se salta el paso y marca igual:
+// el limite queda en el original (-d memory_limit=32M) y el UPDATE cabe en lo
+// que deja el fatal.
+wa_limpiar($pdo);
+$antesHijoB = wa_contador($pdo, 'E31');
+[$codigoHijoB, $salidaB] = correrHijoShutdown($base, ['-d', 'disable_functions=ini_get,ini_set', '-d', 'memory_limit=32M']);
+wa_chk('S1b: el hijo corrio con ini_get e ini_set deshabilitados',
+    (bool) preg_match('/^INI_DESHABILITADO=1\r?$/m', $salidaB), mb_substr($salidaB, 0, 400));
+wa_chk('S1b: el hijo murio con un fatal (codigo 255, no llego al final)',
+    $codigoHijoB === 255 && !str_contains($salidaB, 'NO DEBIO LLEGAR AQUI'), ['codigo' => $codigoHijoB, 'salida' => mb_substr($salidaB, 0, 400)]);
+preg_match_all('/^LIMITE_CIERRE=(\S+?)\r?$/m', $salidaB, $limitesCierreB);
+wa_chk('S1b: el cierre no amplio el limite (queda el original, 32M), en las dos filas',
+    $limitesCierreB[1] === ['32M', '32M'], $limitesCierreB[1]);
+wa_chk('S1b: el cierre no mostro ningun Error de funcion deshabilitada',
+    !str_contains($salidaB, 'undefined function') && !str_contains($salidaB, 'has been disabled'), mb_substr($salidaB, 0, 400));
+$filasHijoB = $pdo->query('SELECT id, e_ncf, estado_dgii, respuesta_dgii FROM facturas ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+wa_chk('S1b: el hijo reservo E310000000001 y E310000000002',
+    array_column($filasHijoB, 'e_ncf') === ['E310000000001', 'E310000000002'], $filasHijoB);
+wa_chk('S1b: contador +2', wa_contador($pdo, 'E31') - $antesHijoB === 2);
+foreach ($filasHijoB as $f) {
+    $meta = facturaModel::metaEnvio($f['respuesta_dgii']);
+    wa_chk("S1b {$f['e_ncf']}: ENVIO_INCIERTO", $f['estado_dgii'] === 'ENVIO_INCIERTO', $f['estado_dgii']);
+    wa_chk("S1b {$f['e_ncf']}: clase shutdown y el error del fatal",
+        ($meta['clase'] ?? null) === 'shutdown' && str_contains((string) ($meta['error'] ?? ''), 'Allowed memory size'), $meta);
+    chkEnVuelo("S1b {$f['e_ncf']}", $f, 'shutdown');
 }
 
 // S2-S5 en este proceso: el registro queda vacio en cada salida.

@@ -491,11 +491,16 @@ function wa_usar_base(string $base): PDO
         echo "[FALLO] no se pudo crear el log temporal de Database\n";
         exit(1);
     }
-    $antes = ini_set('error_log', $log);
+    // Un hijo con ini_set en disable_functions (S1b de test_write_ahead_ecf.php)
+    // tambien pasa por aqui: sin ini_set el error_log queda como estaba.
+    $puedeIni = function_exists('ini_set');
+    $antes = $puedeIni ? ini_set('error_log', $log) : false;
     try {
         return Database::getInstance()->getConnection();
     } finally {
-        ini_set('error_log', $antes === false ? '' : $antes);
+        if ($puedeIni) {
+            ini_set('error_log', $antes === false ? '' : $antes);
+        }
         @unlink($log);
     }
 }

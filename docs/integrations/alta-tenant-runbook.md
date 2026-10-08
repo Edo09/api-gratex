@@ -176,13 +176,22 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
 
 2. **Aislamiento de datos:** `GET /api/clients` con el token en `X-API-KEY` debe
    devolver solo los 2 clientes de prueba DGII de SU DB.
-3. **Emisión:** crear una factura de prueba y confirmar que el PDF trae los datos del
+3. **Migraciones** (antes de emitir nada: las migraciones del tenant van primero): en
+   phpMyAdmin, entra a la base nueva y corre `tools/verificar_migraciones_tenant.sql`. La
+   columna `base` debe mostrar la base del tenant (si dice `information_schema` u otra,
+   selecciónala y córrelo otra vez) y **todas** las filas deben decir `APLICADA`. La 027 y
+   la 028 son además la compuerta del write-ahead del e-CF: sin la 028, un RFCE (E32 por
+   debajo de 250,000) llega a la DGII pero su estado no cabe en la columna ("Data too
+   long") y la fila queda `ENVIO_INCIERTO`; sin la 027, toda emisión responde "No se pudo
+   asignar el número de comprobante…". Si falta alguna migración, aplícala y repite el
+   verificador antes de seguir con la emisión de prueba.
+4. **Emisión:** crear una factura de prueba y confirmar que el PDF trae los datos del
    cliente (no los de Gratex) y que DGII la acepta.
-4. **Cotización:** `GET /api/branding` devuelve el `cotizacion_formato` esperado.
+5. **Cotización:** `GET /api/branding` devuelve el `cotizacion_formato` esperado.
    Crear una cotización de prueba, abrir su PDF (logo, datos y pie del tenant; con un
    formato propio, sin la cuenta bancaria de Gratex) y borrarla. Pasos listos en
    `tests/test_cotizaciones_ferreteria.http`.
-5. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, la prueba completa, que
+6. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, la prueba completa, que
    **gasta `CON-000001`** (decisión del 2026-10-08: el primer conduce real será `CON-000002`; el
    de prueba queda con `activo = 0` y su número no se reusa). En este orden:
    1. crear un conduce desde esa cotización, con una línea libre sin precio;
@@ -195,12 +204,6 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
 
    La comprobación de solo la vista previa existe y no gasta número, pero no ejercita el
    bloqueo del precio 0. Pasos listos en `tests/test_conduces.http` (sección Producción).
-6. **Migraciones:** en phpMyAdmin, entra a la base nueva y corre
-   `tools/verificar_migraciones_tenant.sql`. La columna `base` debe mostrar la base
-   del tenant (si dice `information_schema` u otra, selecciónala y córrelo otra vez)
-   y **todas** las filas deben decir `APLICADA`. La 027 y la 028 son además la
-   compuerta del write-ahead del e-CF: si falta alguna, la emisión falla (número
-   ocupado o estado que no cabe) y no se debe desplegar.
 
 ---
 
