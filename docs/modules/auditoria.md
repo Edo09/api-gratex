@@ -165,8 +165,11 @@ herramienta de operaciones, no del cliente). Solo lectura.
 
 Mutaciones (CREATE/UPDATE/DELETE) de: clients, products, categories, warehouses,
 proveedores, users, roles (+ASSIGN), branding, landing, ncf (rangos/secuencia),
-cotizaciones y **facturas simples** (`facturas-simples`, entidad `factura_simple`,
-con antes/después). Gastos: alta/emisión exitosa **y fallida** (`success=0` con el
+cotizaciones, **facturas simples** (`facturas-simples`, entidad `factura_simple`,
+con antes/después) y **conduces** (`conduces`, entidad `conduce`, `entity_id` = el id del
+conduce: CREATE con el cuerpo en `new_values`, UPDATE con la fila de antes y el cuerpo,
+DELETE con la fila en `old_values`; el DELETE no borra, pone `activo = 0`). Gastos:
+alta/emisión exitosa **y fallida** (`success=0` con el
 motivo: un E41 que la DGII rechaza ya no desaparece sin rastro). Inventario:
 ajustes. Ciclo e-CF: emisión, transiciones de estado, ACECF saliente/entrante,
 recepción (ligada al token DGII), emisión/aprobación por integración. Auth: login

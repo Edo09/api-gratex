@@ -41,6 +41,12 @@ Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`
 > certificado ni secretos (viven en `master.tenants`). `PUT/POST/DELETE` (logo, plantilla,
 > color, preview) siguen exigiendo el módulo.
 
+> `conduces` **no es un módulo**: `/api/conduces` (los conduces de mercancía de Ferretería)
+> usa el módulo `cotizaciones` (`'conduces' => 'cotizaciones'` en `routes`), porque un conduce
+> sale de una cotización. Quien tiene `cotizaciones` ve y usa los conduces; sin él, 403 como
+> en cualquier módulo. Aparte del rol, el controller responde 422 a las empresas que no están
+> en el formato de cotización `ferreteria` ([../api/conduces.md](../api/conduces.md)).
+
 ## Aplicación — `PermissionGate` (Router)
 
 [`src/PermissionGate.php`](../../src/PermissionGate.php) corre en
@@ -120,7 +126,8 @@ El front decide qué páginas/menú mostrar con la **lista de módulos** del usu
 El front muestra/oculta por módulo: `perms.includes('*') || perms.includes('facturas')`.
 
 Si los ids de vista del front no coinciden con los nombres de módulo (ej. `clientes`→`clients`,
-`productos`→`products`, `compras`→`gastos`, `ecf`→`facturas`, `aprobar-ecf`→`aprobaciones`),
+`productos`→`products`, `compras`→`gastos`, `ecf`→`facturas`, `aprobar-ecf`→`aprobaciones`,
+`conduces`→`cotizaciones`),
 mantener un mapa `vista → módulo(s)` y mostrar con *any-of*. Vistas sin API (dashboard,
 tesorería) no se gatean (no hay 403 que dar).
 

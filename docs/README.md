@@ -27,6 +27,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [api/guia-cliente-integracion.md](api/guia-cliente-integracion.md) | **Entregable al cliente**: guía autocontenida para que su equipo técnico integre (alta, endpoints, tablas DGII, checklist de go-live) |
 | [api/facturas-simples.md](api/facturas-simples.md) | Facturas NO electrónicas (sin e-CF) |
 | [api/cotizaciones.md](api/cotizaciones.md) | Cotizaciones: endpoints y los dos formatos (Gratex, Ferretería): cuerpos, totales, numeración y errores 200/404/409/422 |
+| [api/conduces.md](api/conduces.md) | Conduces de mercancía (solo Ferretería): endpoints, la fila, número `CON-` que nunca se reusa, eliminar sin borrar, PDF sin precios y errores 401/403/404/422/500 |
 | [api/recepcion-aprobacion.md](api/recepcion-aprobacion.md) | e-CF recibidos + aprobación comercial (saliente/entrante); `ecf_recibidos` vs `aprobaciones_comerciales` |
 | [api/ncf.md](api/ncf.md) | Endpoint NCF y secuencia legacy `B01` |
 | [api/reportes-606-607.md](api/reportes-606-607.md) | Formatos 606 (compras) y 607 (ventas) DGII |
@@ -47,7 +48,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 |---|---|
 | [modules/gastos.md](modules/gastos.md) | Módulo de gastos (menores + facturas de proveedores), auto-emisión |
 | [modules/branding-plantillas.md](modules/branding-plantillas.md) | Plantillas de Representación Impresa por tenant, branding, logo, diseños a la medida |
-| [modules/cotizaciones-formatos.md](modules/cotizaciones-formatos.md) | Formato de cotización por tenant (`tenants.cotizacion_formato`): cómo se elige, contrato, Ferretería (totales, numeración, PDF) y cómo agregar un formato para un tenant nuevo |
+| [modules/cotizaciones-formatos.md](modules/cotizaciones-formatos.md) | Formato de cotización por tenant (`tenants.cotizacion_formato`): cómo se elige, contrato, Ferretería (totales, numeración, PDF, conduces) y cómo agregar un formato para un tenant nuevo |
 | [modules/representacion-impresa-pos.md](modules/representacion-impresa-pos.md) | Tirilla POS de 80, 76 o 72 mm: `?formato=pos` / `pos76` / `pos72`, alto variable, contenido compartido con la hoja carta |
 | [modules/reporte-ventas.md](modules/reporte-ventas.md) | Reporte de ventas de gestión: `/api/reportes/ventas`, detalle y agrupaciones por cliente, forma de pago y usuario |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |

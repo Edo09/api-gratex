@@ -393,6 +393,7 @@
                 <li><a href="#users">Users</a></li>
                 <li><a href="#clients">Clients</a></li>
                 <li><a href="#cotizaciones">Cotizaciones</a></li>
+                <li><a href="#conduces">Conduces</a></li>
                 <li><a href="#facturas">Facturas</a></li>
                 <li><a href="#ncf">NCF</a></li>
                 <li><a href="#emisor">Emisor</a></li>
@@ -864,6 +865,167 @@ Header: Authorization: Bearer your-token</code></pre>
                 </div>
                 <div class="endpoint-body">
                     <p>Same body as creating a cotizacion. Returns base64 PDF content.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Conduces Section -->
+        <section id="conduces">
+            <h2>🚚 Conduces (Delivery Notes)</h2>
+            <p>Delivery notes (<em>conduces de mercancía</em>) for companies on the <code>ferreteria</code> quotation format. A conduce is created from a Ferretería quotation, prints like it but without prices or totals, and gets its own number (<code>CON-000001</code>). Numbers are never reused and nothing is physically deleted: deleting sets <code>activo = 0</code>. Full reference: <code>docs/api/conduces.md</code>.</p>
+
+            <div class="info-box">
+                <strong>Checks, in this order:</strong> a valid session token (<code>401</code>), the <code>cotizaciones</code> module in the user's role (<code>403</code>), and the company's quotation format: for any format other than <code>ferreteria</code>, every route answers <code>422</code> <code>"Los conduces no están disponibles para tu empresa."</code> Errors always carry their HTTP code, with <code>{"status": false, "error": "..."}</code>.
+            </div>
+
+            <!-- Get Conduces -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-get">GET</span>
+                    <span class="endpoint-path">/api/conduces</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">List active delivery notes, or get one</span>
+                </div>
+                <div class="endpoint-body">
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>id</code></td><td>integer</td><td>Optional - one conduce: <code>data</code> is <code>[row]</code>, or <code>[]</code> if it does not exist or was deleted</td></tr>
+                        <tr><td><code>page</code></td><td>integer</td><td>Page number (default: 1)</td></tr>
+                        <tr><td><code>pageSize</code></td><td>integer</td><td>Items per page (default: 10)</td></tr>
+                        <tr><td><code>query</code></td><td>string</td><td>Search by code, stored client name, client name, company name or RNC</td></tr>
+                    </table>
+                    <p>Active rows only, ordered by <code>date DESC, id DESC</code>. <code>items</code> holds the active lines; <code>amount</code> is the internal price (without ITBIS) used to invoice, never printed.</p>
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: [
+    {
+      <span class="json-key">"id"</span>: <span class="json-number">41</span>,
+      <span class="json-key">"numero"</span>: <span class="json-number">7</span>,
+      <span class="json-key">"code"</span>: <span class="json-string">"CON-000007"</span>,
+      <span class="json-key">"date"</span>: <span class="json-string">"2026-10-05 09:30:00"</span>,
+      <span class="json-key">"cotizacion_id"</span>: <span class="json-number">513</span>,
+      <span class="json-key">"cotizacion_code"</span>: <span class="json-string">"COT-000001"</span>,
+      <span class="json-key">"client_id"</span>: <span class="json-number">123</span>,
+      <span class="json-key">"client_name"</span>: <span class="json-string">"Hospital Moscoso Puello"</span>,
+      <span class="json-key">"client_name_guardado"</span>: <span class="json-string">"HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO"</span>,
+      <span class="json-key">"activo"</span>: <span class="json-number">1</span>,
+      <span class="json-key">"items"</span>: [...]
+    }
+  ],
+  <span class="json-key">"pagination"</span>: {
+    <span class="json-key">"page"</span>: <span class="json-number">1</span>,
+    <span class="json-key">"pageSize"</span>: <span class="json-number">10</span>,
+    <span class="json-key">"total"</span>: <span class="json-number">1</span>,
+    <span class="json-key">"totalPages"</span>: <span class="json-number">1</span>
+  }
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- Create Conduce -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-post">POST</span>
+                    <span class="endpoint-path">/api/conduces</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">Create a delivery note from a quotation</span>
+                </div>
+                <div class="endpoint-body">
+                    <span class="code-label">Request Body</span>
+                    <pre><code>{
+  <span class="json-key">"cotizacion_id"</span>: <span class="json-number">513</span>,
+  <span class="json-key">"client_id"</span>: <span class="json-number">123</span>,
+  <span class="json-key">"date"</span>: <span class="json-string">"2026-10-05 09:30:00"</span>,
+  <span class="json-key">"items"</span>: [
+    {
+      <span class="json-key">"product_id"</span>: <span class="json-number">55</span>,
+      <span class="json-key">"description"</span>: <span class="json-string">"FUNDAS CEMENTO GRIS"</span>,
+      <span class="json-key">"quantity"</span>: <span class="json-number">2</span>,
+      <span class="json-key">"unidad_medida"</span>: <span class="json-string">"43"</span>,
+      <span class="json-key">"amount"</span>: <span class="json-number">935</span>,
+      <span class="json-key">"indicador_facturacion"</span>: <span class="json-number">1</span>,
+      <span class="json-key">"indicador_bien_servicio"</span>: <span class="json-number">1</span>
+    }
+  ]
+}</code></pre>
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>cotizacion_id</code> <span class="required">*</span></td><td>integer</td><td>Source quotation; it must exist and be on the <code>ferreteria</code> format</td></tr>
+                        <tr><td><code>client_id</code> <span class="required">*</span></td><td>integer</td><td>Client ID; it must exist</td></tr>
+                        <tr><td><code>date</code></td><td>string</td><td><code>YYYY-MM-DD HH:MM:SS</code> or <code>YYYY-MM-DD</code> (current Santo Domingo time added). Missing = now</td></tr>
+                        <tr><td><code>items</code> <span class="required">*</span></td><td>array</td><td>At least one line, with the quotation's line rules; <code>amount</code> may be 0, never negative</td></tr>
+                    </table>
+                    <p>An <code>ajustes</code> key answers <code>422</code> <code>"Los conduces no llevan cargos ni abonos."</code> <code>formato</code>, <code>tipo</code>, <code>total</code> and <code>user_id</code> are ignored (the user comes from the token).</p>
+                    <span class="code-label">Success Response (200)</span>
+                    <pre><code>{
+  <span class="json-key">"status"</span>: <span class="json-boolean">true</span>,
+  <span class="json-key">"data"</span>: {
+    <span class="json-key">"id"</span>: <span class="json-number">41</span>,
+    <span class="json-key">"code"</span>: <span class="json-string">"CON-000007"</span>,
+    <span class="json-key">"numero"</span>: <span class="json-number">7</span>
+  }
+}</code></pre>
+                </div>
+            </div>
+
+            <!-- Update Conduce -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-put">PUT</span>
+                    <span class="endpoint-path">/api/conduces</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">Update a delivery note</span>
+                </div>
+                <div class="endpoint-body">
+                    <p>Same body as creating, plus <code>id</code>. <code>cotizacion_id</code> is ignored, and <code>numero</code> and <code>code</code> never change. Without <code>date</code> the stored date and time are kept. The previous lines stay in the database with <code>activo = 0</code> and the new ones are inserted. Answers like the POST; <code>404</code> <code>"Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."</code> if it does not exist or was deleted.</p>
+                </div>
+            </div>
+
+            <!-- Delete Conduce -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-delete">DELETE</span>
+                    <span class="endpoint-path">/api/conduces</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">Delete a delivery note (sets activo = 0)</span>
+                </div>
+                <div class="endpoint-body">
+                    <span class="code-label">Request Body</span>
+                    <pre><code>{
+  <span class="json-key">"id"</span>: <span class="json-number">41</span>
+}</code></pre>
+                    <p>Nothing is deleted: the row gets <code>activo = 0</code>, leaves the list and its number is never used again. Answers <code>"Conduce eliminado"</code>, or <code>404</code> if it does not exist or was already deleted.</p>
+                </div>
+            </div>
+
+            <!-- Get Conduce PDF -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-get">GET</span>
+                    <span class="endpoint-path">/api/conduces/{id}/pdf</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">Download a delivery note as PDF</span>
+                </div>
+                <div class="endpoint-body">
+                    <table>
+                        <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
+                        <tr><td><code>format</code></td><td>string</td><td>"download" (default) or "base64"</td></tr>
+                    </table>
+                    <p>Returns <code>Conduce_CON-000007.pdf</code>: titled CONDUCE DE MERCANCÍA, columns Cantidad | Unidad | Descripción mercancías, no prices and no totals. <code>404</code> if it does not exist or was deleted.</p>
+                </div>
+            </div>
+
+            <!-- Preview Conduce PDF -->
+            <div class="endpoint">
+                <div class="endpoint-header" onclick="toggleEndpoint(this)">
+                    <span class="method method-post">POST</span>
+                    <span class="endpoint-path">/api/conduces/preview</span>
+                    <span class="auth-badge">🔒 Auth Required</span>
+                    <span class="endpoint-desc">Preview the PDF without saving</span>
+                </div>
+                <div class="endpoint-body">
+                    <p>Same body as creating (prints VISTA PREVIA), or as updating, with <code>id</code> (prints that conduce's code). Same checks; nothing is saved. Returns base64 <code>Conduce_Preview.pdf</code>.</p>
                 </div>
             </div>
         </section>
