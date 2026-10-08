@@ -178,6 +178,8 @@ es la red de seguridad.
 Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
 `unidad_medida` (código DGII), `indicador_facturacion` (1=ITBIS18, 4=Exento, 2=16%,
 3=Tasa cero, 0=No facturable), `indicador_bien_servicio`, `activo`, timestamps.
+`precio` .. `precio_4` van **sin ITBIS** y con **4 decimales** desde la migración 029
+(`DECIMAL(18,4)`): con 2, el precio de góndola no se recuperaba exacto (RD$10 → 8.47 → 9.99).
 
 ### `proveedores` (migración 013)
 Directorio para autocompletar/gestionar proveedores: `id`, `rnc`, `nombre`, contacto…

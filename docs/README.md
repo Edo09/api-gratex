@@ -60,6 +60,11 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 |---|---|
 | [business-rules/representacion-impresa.md](business-rules/representacion-impresa.md) | Norma DGII de Representación Impresa (qué debe contener el documento) |
 
+### `specs/` — especificaciones de lo que se está construyendo
+| Doc | Para qué |
+|---|---|
+| [specs/pos.md](specs/pos.md) | POS en `pos.fiscalpoint.com.do`: requisitos con criterios de aceptación, registro de decisiones, diseño técnico, fase 0 y plan hasta el piloto (2026-11-05) |
+
 ### `integrations/`
 | Doc | Para qué |
 |---|---|

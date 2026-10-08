@@ -401,7 +401,7 @@ final class EcfDocumento
         // uno y 84.7458 en otro. El modo decide el orden y los decimales de una
         // cantidad derivada (ver resolverLinea).
         $montos = self::resolverLineas(
-            $items,
+            $this->preciosIncluyenItbis() ? array_map([self::class, 'conItbisEnValor'], $items) : $items,
             $this->itemsDesdeXml(),
             $this->noElectronica ? self::MODO_SIMPLE : self::MODO_ECF
         );
@@ -710,9 +710,46 @@ final class EcfDocumento
         $guardado = $item['itbis_amount'] ?? null;
         if ($guardado === null || ((float) $guardado == 0.0 && in_array($ind, [1, 2], true))) {
             $tasa = $ind === 1 ? 0.18 : ($ind === 2 ? 0.16 : 0.0);
-            return round($valor * $tasa, 2);
+            // Con precios con ITBIS el Valor ya lo trae: se saca, no se suma.
+            return $this->preciosIncluyenItbis()
+                ? round($valor - round($valor / (1 + $tasa), 2), 2)
+                : round($valor * $tasa, 2);
         }
         return (float) $guardado;
+    }
+
+    /**
+     * IndicadorMontoGravado = 1: los precios y el Valor de cada linea traen el
+     * ITBIS adentro (ventas del POS). Lo dice el XML firmado; sin el (vista
+     * previa) lo trae la factura armada por el controller.
+     *
+     * factura_items guarda en `subtotal` la base SIN ITBIS (lo que suman el
+     * reporte de ventas y el 607), asi que para imprimir la linea hay que volver
+     * a juntarla con su ITBIS: ver conItbisEnValor.
+     */
+    public function preciosIncluyenItbis(): bool
+    {
+        if (array_key_exists('indicador_monto_gravado', $this->factura)) {
+            return (string) $this->factura['indicador_monto_gravado'] === '1';
+        }
+        return $this->campoXml('IndicadorMontoGravado') === '1';
+    }
+
+    /**
+     * Fila de factura_items de un e-CF con precios con ITBIS: su Valor impreso
+     * es el MontoItem firmado = subtotal (base) + itbis_amount. Sin esto la linea
+     * no empareja con su Item del XML (resolverLinea paso 1) y se imprimiria un
+     * precio sin ITBIS derivado que no esta en el e-CF. Los items armados por
+     * EcfItemMapper (vista previa) no traen `subtotal`: su monto_item ya es el
+     * MontoItem y quedan igual.
+     */
+    private static function conItbisEnValor($item): array
+    {
+        $item = (array) $item;
+        if (isset($item['subtotal']) && $item['subtotal'] !== '') {
+            $item['subtotal'] = round(self::aNumero($item['subtotal']) + self::aNumero($item['itbis_amount'] ?? 0), 2);
+        }
+        return $item;
     }
 
     // ------------------------------------------------------------------
@@ -737,6 +774,16 @@ final class EcfDocumento
         foreach ($this->lineas() as $l) {
             $subtotal += $l['valor'];
             $itbis += $l['itbis'];
+        }
+        if ($this->preciosIncluyenItbis()) {
+            // El Valor de cada linea ya trae su ITBIS: el total es la suma de
+            // las lineas y el subtotal gravado, lo que queda sin el impuesto.
+            return [
+                'subtotal' => round($subtotal - $itbis, 2),
+                'exento'   => 0.0,
+                'itbis'    => round($itbis, 2),
+                'total'    => round($subtotal, 2),
+            ];
         }
         return [
             'subtotal' => $subtotal,
