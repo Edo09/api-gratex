@@ -284,7 +284,10 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
   en `config/permissions.php`); no hay módulo RBAC nuevo.
 - **Las mismas reglas de línea.** `FerreteriaConduce` revisa cada línea con
   `FerreteriaFormato::normalizarLinea(…, true)` y `aplicarCatalogoLineas()`, con los mismos
-  textos; la única diferencia es que el precio puede ser 0. Bien/servicio sale del producto,
+  textos; las únicas diferencias son que el precio puede ser 0 y que la cantidad (menos de
+  10^9) y el precio (menos de 10^14) tienen que caber en `conduce_items`: pasados del tope,
+  `Línea N: la cantidad es demasiado grande.` o `Línea N: el precio es demasiado grande.` en
+  vez de un `500` genérico. Bien/servicio sale del producto,
   como en la cotización. La cotización no cambia: sus mensajes y su PDF son los de antes (lo
   prueba `tools/test_cotizacion_ferreteria.php`).
 - **Precios internos.** Cada línea guarda su precio sin ITBIS y sus indicadores para

@@ -192,13 +192,15 @@ origen, el cliente y las líneas ya editadas.
 | `formato`, `tipo`, `total`, `sent_email`, `user_id` y cualquier otra | — | **Se ignoran**. `user_id` sale del token |
 
 **Línea (`items[]`)**: las reglas y los textos de las líneas de la cotización de Ferretería
-(`FerreteriaFormato::normalizarLinea`), con **una** diferencia: el precio puede ser 0.
+(`FerreteriaFormato::normalizarLinea`), con **dos** diferencias: el precio puede ser 0, y la
+cantidad y el precio no pueden pasar de lo que cabe en `conduce_items` (la cotización no tiene
+ese tope).
 
 | Campo | Req. | Reglas y default |
 |-------|------|------------------|
 | `description` | ✅ | No vacía, ≤ 1000 caracteres. Se recorta, y cada corrida de saltos de línea, tabuladores u otros caracteres de control pasa a un solo espacio |
-| `quantity` | ✅ | > 0, hasta 2 decimales, y entera si la unidad no admite fracciones |
-| `amount` | ✅ | Precio unitario **sin ITBIS**, **≥ 0** (0 = sin precio, como una línea libre), hasta 4 decimales. Negativo → `422`. Nunca se imprime: se guarda para Facturar |
+| `quantity` | ✅ | > 0, hasta 2 decimales, y entera si la unidad no admite fracciones. **Menor que 1.000.000.000** (la columna es `DECIMAL(12,3)`: la mayor es `999999999.99`) |
+| `amount` | ✅ | Precio unitario **sin ITBIS**, **≥ 0** (0 = sin precio, como una línea libre), hasta 4 decimales. Negativo → `422`. **Menor que 10^14** (la columna es `DECIMAL(18,4)`; como número, `99999999999999.9999` ya es 10^14, así que el mayor que entra es `99999999999999.98`). Nunca se imprime: se guarda para Facturar |
 | `product_id` | ❌ | `null` = línea libre. Si viene, el producto tiene que existir (no importa si está inactivo) |
 | `unidad_medida` | ❌ | Código DGII (`"43"` = Unidad). Ausente o `""` = `"43"`. Se normaliza (`43`, `"043"` → `"43"`) y se valida contra el catálogo de master |
 | `indicador_facturacion` | ❌ | 1 = ITBIS 18%, 2 = 16%, 3 = 0%, 4 = exento. Ausente = 1 |
@@ -370,15 +372,18 @@ Todos con `status: false`. `N` es el número de la línea como la ve el usuario 
 | 422 | `Línea N: la cantidad debe ser mayor que 0.` | |
 | 422 | `Línea N: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad.` | Con la master 010 aplicada |
 | 422 | `Línea N: la cantidad admite hasta 2 decimales.` | |
+| 422 | `Línea N: la cantidad es demasiado grande.` | `quantity` ≥ 1.000.000.000. Se revisa antes que los decimales y las fracciones; cero y negativos siguen diciendo `debe ser mayor que 0` |
 | 422 | `El precio de la línea N no es válido. Revísalo.` | `amount` ausente o no numérico |
 | 422 | `Línea N: el precio no puede ser negativo.` | `amount` < 0 (0 sí vale) |
 | 422 | `Línea N: el precio admite hasta 4 decimales.` | |
+| 422 | `Línea N: el precio es demasiado grande.` | `amount` ≥ 10^14. Es lo último que se revisa de la línea (después del ITBIS, el bien/servicio y el producto); la cantidad de la misma línea va antes. Un precio negativo sigue siendo `no puede ser negativo` |
 | 422 | `Línea N: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento.` | |
 | 422 | `Línea N: elige si es un bien o un servicio.` | |
 | 422 | `Línea N: el producto no es válido. Búscalo de nuevo o déjala como línea libre.` | `product_id` no es entero > 0 |
 | 422 | `Línea N: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.` | |
 | 422 | `Un producto del conduce ya no existe en el catálogo (lo eliminaron mientras lo editabas). Búscalo de nuevo o quita la línea.` | Lo borraron entre la revisión y el guardado (`1452`) |
 | 422 | `La cotización de origen ya no existe; vuelve a Cotizaciones.` | POST: la borraron entre la revisión y el guardado (`1452`) |
+| 422 | `Una cantidad o un precio del conduce es demasiado grande. Revisa las líneas e inténtalo de nuevo.` | Respaldo, sin número de línea: MySQL rechazó la cantidad o el precio al guardar (`1264`) y lo de antes no lo atrapó. Pasa con un precio de `99999999999999.5` en adelante: PHP lo manda como `1.0E+14`. No se guarda nada |
 | 422 | `No se pudo identificar el conduce que quieres modificar. Ábrelo de nuevo desde el listado.` | PUT sin `id` válido |
 | 422 | `No se pudo identificar el conduce que quieres eliminar. Actualiza el listado e inténtalo de nuevo.` | DELETE sin `id` válido |
 | 404 | `Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado.` | PUT, DELETE, PDF o vista previa con el `id` de uno que no existe o está eliminado |
@@ -475,3 +480,10 @@ SQL de phpMyAdmin con la base del tenant seleccionada, y se puede correr dos vec
 Si un motor no es `InnoDB` o un tipo sale `NULL`, no se creó ninguna tabla y `todo_ok` dice
 `NO`. Después, `tools/verificar_migraciones_tenant.sql` tiene que decir `APLICADA` en la fila
 `031`.
+
+Como la 029, la 030 y la `master_migrations/012`, su segunda sentencia es una **guardia**: si no hay una
+base de empresa seleccionada (sin base, o `information_schema` u otra de sistema, donde deja
+parado a phpMyAdmin una migración anterior) falla con `#1049 Unknown database
+'ALTO_elige_la_base_de_la_empresa_en_el_panel'`, y si la base no tiene `cotizaciones`, con
+`#1146 Table '<base>.cotizaciones' doesn't exist`. En los dos casos **no se creó nada**: se
+elige la base de la empresa en el panel izquierdo y se pega de nuevo.

@@ -21,9 +21,10 @@ require_once __DIR__ . '/../../Models/conduceModel.php';
  * que llama conduceController.php.
  *
  * Cada línea se revisa con las reglas y los textos de la cotización
- * (FerreteriaFormato::normalizarLinea), con una sola diferencia: el precio
- * puede ir en 0. El conduce no lo imprime; lo guarda para facturar, y la
- * factura no deja emitir una línea sin precio.
+ * (FerreteriaFormato::normalizarLinea), con dos diferencias: el precio
+ * puede ir en 0 (el conduce no lo imprime; lo guarda para facturar, y la
+ * factura no deja emitir una línea sin precio) y la cantidad y el precio no
+ * pueden pasar de lo que cabe en conduce_items (LIMITE_CANTIDAD y LIMITE_PRECIO).
  */
 final class FerreteriaConduce
 {
@@ -38,6 +39,27 @@ final class FerreteriaConduce
     public const MSG_CHOQUE = 'Otro conduce se guardó al mismo tiempo. Vuelve a guardar.';
     public const MSG_PRODUCTO_FK = 'Un producto del conduce ya no existe en el catálogo (lo eliminaron mientras lo editabas). Búscalo de nuevo o quita la línea.';
     public const MSG_COTIZACION_FK = 'La cotización de origen ya no existe; vuelve a Cotizaciones.';
+    /** 422 de respaldo de conduceModel: una cantidad o un precio que MySQL no aceptó (1264). validarForma lo dice antes, con la línea. */
+    public const MSG_FUERA_DE_RANGO = 'Una cantidad o un precio del conduce es demasiado grande. Revisa las líneas e inténtalo de nuevo.';
+
+    /**
+     * Lo que cabe en conduce_items (031): quantity DECIMAL(12,3) guarda 9 cifras
+     * enteras y amount DECIMAL(18,4) guarda 14, así que un valor igual o mayor
+     * a estos topes (10^9 y 10^14, exclusivos) no entra: MySQL lo rechaza (1264)
+     * y el usuario veía un error genérico. Con los decimales que admite
+     * normalizarLinea (2 en la cantidad), lo más grande que entra de cantidad
+     * es 999999999.99. Un float no distingue 99999999999999.9999 de 10^14:
+     * ese ya cuenta como el tope y se rechaza; el precio más alto que
+     * entra es 99999999999999.98. PDO manda el float a MySQL con 14 cifras
+     * (ini precision), y un precio de 99999999999999.5 en adelante llega
+     * como "1.0E+14": pasa este tope y MySQL lo rechaza; ese caso lo atrapa
+     * conduceModel::errorAlGuardar con MSG_FUERA_DE_RANGO.
+     */
+    public const LIMITE_CANTIDAD = 1e9;
+    public const LIMITE_PRECIO = 1e14;
+    /** Va como el resto de los problemas de cantidad: normalizarLinea le pone "Línea N: " y baja la primera letra. */
+    private const PROBLEMA_CANTIDAD_GRANDE = 'La cantidad es demasiado grande.';
+    private const PRECIO_GRANDE = 'el precio es demasiado grande.';
 
     /** 500 al revisar: la DB no contestó por la cotización, el cliente o los productos. */
     private const MSG_REVISAR = 'No se pudo revisar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.';
@@ -117,13 +139,25 @@ final class FerreteriaConduce
         if (!is_array($items) || $items === []) {
             return ['ok' => false, 'error' => self::MSG_SIN_LINEAS];
         }
+        // El tope de la cantidad va delante de las reglas de unidades, en el
+        // mismo lugar donde normalizarLinea las aplica y con su mismo formato
+        // ("Línea N: la cantidad ..."): normalizarLinea no cambia, la cotización
+        // no tiene este tope.
+        $cantidadConTope = static fn(float $cantidad, string $unidad, int $maxDec): ?string
+            => $cantidad >= self::LIMITE_CANTIDAD ? self::PROBLEMA_CANTIDAD_GRANDE : $problemaCantidad($cantidad, $unidad, $maxDec);
         $lineas = [];
         foreach (array_values($items) as $i => $item) {
             // Las líneas se numeran desde 1, como las ve el usuario. true: el
             // precio puede ir en 0 (nunca negativo).
-            $linea = FerreteriaFormato::normalizarLinea($item, $i + 1, $problemaCantidad, $unidadValida, true);
+            $linea = FerreteriaFormato::normalizarLinea($item, $i + 1, $cantidadConTope, $unidadValida, true);
             if (is_string($linea)) {
                 return ['ok' => false, 'error' => $linea];
+            }
+            // El precio sale del cuerpo (el catálogo solo pone bien/servicio):
+            // ya es un número finito, no negativo y con hasta 4 decimales; falta
+            // que quepa en conduce_items.amount.
+            if ($linea['amount'] >= self::LIMITE_PRECIO) {
+                return ['ok' => false, 'error' => 'Línea ' . ($i + 1) . ': ' . self::PRECIO_GRANDE];
             }
             $lineas[] = $linea;
         }

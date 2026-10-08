@@ -65,10 +65,15 @@ foreach ([
     'MSG_CHOQUE' => 'Otro conduce se guardó al mismo tiempo. Vuelve a guardar.',
     'MSG_PRODUCTO_FK' => 'Un producto del conduce ya no existe en el catálogo (lo eliminaron mientras lo editabas). Búscalo de nuevo o quita la línea.',
     'MSG_COTIZACION_FK' => 'La cotización de origen ya no existe; vuelve a Cotizaciones.',
+    'MSG_FUERA_DE_RANGO' => 'Una cantidad o un precio del conduce es demasiado grande. Revisa las líneas e inténtalo de nuevo.',
 ] as $constante => $texto) {
     $nombreConst = 'FerreteriaConduce::' . $constante;
     $chk("{$constante} = \"{$texto}\"", defined($nombreConst) && constant($nombreConst) === $texto);
 }
+// Los topes salen de conduce_items (031): quantity DECIMAL(12,3) = 9 cifras enteras, amount DECIMAL(18,4) = 14.
+$chk('LIMITE_CANTIDAD = 1e9 (DECIMAL(12,3): 9 cifras enteras) y LIMITE_PRECIO = 1e14 (DECIMAL(18,4): 14)',
+    defined('FerreteriaConduce::LIMITE_CANTIDAD') && FerreteriaConduce::LIMITE_CANTIDAD === 1e9
+    && defined('FerreteriaConduce::LIMITE_PRECIO') && FerreteriaConduce::LIMITE_PRECIO === 1e14);
 
 echo "\n== FerreteriaConduce::codigo ==\n";
 $chk('firma: public static codigo(int $numero): string', $firmaConduce('codigo') === 'public static codigo(int $numero): string');
@@ -273,6 +278,117 @@ $rechazaConduce('precio -1 + ITBIS 5: gana el precio (el orden de la cotización
     $b->items[0]->amount = -1;
     $b->items[0]->indicador_facturacion = 5;
 }), 'Línea 1: el precio no puede ser negativo.');
+
+// --- topes de conduce_items (031): la cantidad y el precio tienen que caber en su columna ---
+// quantity DECIMAL(12,3) guarda 9 cifras enteras (con 2 decimales, hasta 999999999.99) y amount
+// DECIMAL(18,4) guarda 14 (menos de 1e14). Un valor mayor pasaba la validación y MySQL lo rechazaba
+// (1264): el usuario veía un 500 genérico. normalizarLinea no cambia: la cotización no tiene este tope.
+$msgCantidadGrande = static fn(int $n): string => "Línea {$n}: la cantidad es demasiado grande.";
+$msgPrecioGrande = static fn(int $n): string => "Línea {$n}: el precio es demasiado grande.";
+$conCantidad = static fn($q, string $unidad = '43'): object => $cuerpoConduce(function (object $b) use ($q, $unidad) {
+    $b->items[0]->quantity = $q;
+    $b->items[0]->unidad_medida = $unidad;
+});
+$conPrecio = static fn($p): object => $cuerpoConduce(function (object $b) use ($p) { $b->items[0]->amount = $p; });
+
+$r = $validarConduce($conCantidad(999999999));
+$chk('cantidad 999999999 (Unidad): pasa', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['quantity'] === 999999999.0);
+$r = $validarConduce($conCantidad('999999999'));
+$chk('cantidad "999999999" (texto): pasa', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['quantity'] === 999999999.0);
+$r = $validarConduce($conCantidad(999999999.99, '26'), false);
+$chk('cantidad 999999999.99 (Metro, 2 decimales): la mayor que cabe en quantity, pasa (POST y PUT)',
+    ($r['ok'] ?? null) === true && $r['cot']['items'][0]['quantity'] === 999999999.99
+    && ($validarConduce($conCantidad(999999999.99, '26'))['ok'] ?? null) === true);
+$rechazaConduce('cantidad 1000000000 (justo sobre el tope)', $conCantidad(1000000000), $msgCantidadGrande(1));
+$rechazaConduce('cantidad 1000000000 (justo sobre el tope)', $conCantidad(1000000000), $msgCantidadGrande(1), false);
+foreach ([1e9, '1000000000', ' 2000000000 ', '1e9', 5000000000, 1e12, 1e300, PHP_INT_MAX] as $grande) {
+    $rechazaConduce('cantidad ' . var_export($grande, true), $conCantidad($grande), $msgCantidadGrande(1));
+}
+$rechazaConduce('cantidad 1000000000.01 en Metro', $conCantidad(1000000000.01, '26'), $msgCantidadGrande(1));
+$rechazaConduce('cantidad 1000000000.5 en Unidad: el tope va antes que las fracciones', $conCantidad(1000000000.5), $msgCantidadGrande(1));
+$rechazaConduce('cantidad 1000000000 en la línea 2', $cuerpoConduce(function (object $b) { $b->items[1]->quantity = 1000000000; }), $msgCantidadGrande(2));
+$llamadasCantidad = [];
+$validarConduce($conCantidad(1000000000));
+$chk('sobre el tope, problemaCantidad ni se llama (el tope va primero)', $llamadasCantidad === []);
+$llamadasCantidad = [];
+$validarConduce($conCantidad(999999999.99, '26'));
+$chk('en el tope, problemaCantidad sí se llama, con la unidad normalizada y 2 decimales', $llamadasCantidad === [[999999999.99, '26', 2], [1.0, '43', 2]]);
+// Bajo el tope, nada cambia: los decimales y las fracciones dan los textos de siempre.
+$rechazaConduce('cantidad 999999999.995 en Metro (3 decimales, bajo el tope): los decimales, como siempre', $conCantidad(999999999.995, '26'),
+    'Línea 1: la cantidad admite hasta 2 decimales.');
+$rechazaConduce('cantidad 999999999.5 en Unidad (bajo el tope): las fracciones, como siempre', $conCantidad(999999999.5),
+    'Línea 1: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad.');
+// Cero y negativos siguen igual: "debe ser mayor que 0", aunque el valor sea enorme.
+foreach ([0, '0', -1, '-5', -1000000000, -1e300] as $noPositiva) {
+    $rechazaConduce('cantidad ' . var_export($noPositiva, true) . ' (cero o negativa: no es "demasiado grande")', $conCantidad($noPositiva),
+        'Línea 1: la cantidad debe ser mayor que 0.');
+}
+
+$r = $validarConduce($conPrecio(99999999999999.98));
+$chk('precio 99999999999999.98: el mayor que cabe en amount como número, pasa', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 99999999999999.98);
+$r = $validarConduce($conPrecio('99999999999999'), false);
+$chk('precio "99999999999999" (14 cifras, texto): pasa (PUT)', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 99999999999999.0);
+$rechazaConduce('precio 100000000000000 (1e14, justo sobre el tope)', $conPrecio(100000000000000), $msgPrecioGrande(1));
+$rechazaConduce('precio 100000000000000 (1e14, justo sobre el tope)', $conPrecio(100000000000000), $msgPrecioGrande(1), false);
+// 99999999999999.9999 cabe en la columna, pero como número es 1e14: no se distingue y se rechaza.
+foreach ([1e14, '100000000000000', 99999999999999.9999, 1e15, 1e300, PHP_INT_MAX] as $grande) {
+    $rechazaConduce('precio ' . var_export($grande, true), $conPrecio($grande), $msgPrecioGrande(1));
+}
+$rechazaConduce('precio 100000000000000 en la línea 2', $cuerpoConduce(function (object $b) { $b->items[1]->amount = 1e14; }), $msgPrecioGrande(2));
+// Precio: el cero, el negativo y los decimales siguen igual.
+$r = $validarConduce($conPrecio(0));
+$chk('precio 0 sigue pasando', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 0.0);
+$rechazaConduce('precio -1e14 (negativo: no es "demasiado grande")', $conPrecio(-1e14), 'Línea 1: el precio no puede ser negativo.');
+$rechazaConduce('precio -1', $conPrecio(-1), 'Línea 1: el precio no puede ser negativo.');
+$rechazaConduce('precio 1.00001 (5 decimales, bajo el tope)', $conPrecio(1.00001), 'Línea 1: el precio admite hasta 4 decimales.');
+
+// Varias líneas malas: sale la primera, por línea y dentro de ella en el orden de las reglas.
+$tresLineas = static fn(?callable $cambiar = null): object => $cuerpoConduce(function (object $b) use ($cambiar) {
+    $b->items[2] = clone $b->items[0];
+    $b->items[2]->description = 'CLAVOS';
+    if ($cambiar !== null) {
+        $cambiar($b);
+    }
+});
+$r = $validarConduce($tresLineas());
+$chk('tres líneas bien pasan, en su orden', ($r['ok'] ?? null) === true
+    && array_column($r['cot']['items'] ?? [], 'description') === ['FUNDAS CEMENTO GRIS', 'CORTE DE TUBO', 'CLAVOS']);
+$rechazaConduce('línea 2 con cantidad enorme y línea 3 con precio enorme: la 2 primero', $tresLineas(function (object $b) {
+    $b->items[1]->quantity = 1e9;
+    $b->items[2]->amount = 1e14;
+}), $msgCantidadGrande(2));
+$rechazaConduce('línea 2 con precio enorme y línea 3 con cantidad enorme: la 2 primero (el orden es el de las líneas, no el del campo)', $tresLineas(function (object $b) {
+    $b->items[1]->amount = 1e14;
+    $b->items[2]->quantity = 1e9;
+}), $msgPrecioGrande(2));
+$rechazaConduce('al arreglar la línea 2 sale la 3', $tresLineas(function (object $b) {
+    $b->items[2]->quantity = 1e9;
+    $b->items[2]->amount = 1e14;
+}), $msgCantidadGrande(3));
+$rechazaConduce('línea 1 con precio enorme y línea 2 con cantidad enorme: la 1 primero', $tresLineas(function (object $b) {
+    $b->items[0]->amount = 1e14;
+    $b->items[1]->quantity = 1e9;
+}), $msgPrecioGrande(1), false);
+$rechazaConduce('en una misma línea, cantidad y precio enormes: la cantidad primero (su lugar en las reglas)', $tresLineas(function (object $b) {
+    $b->items[1]->quantity = 1e9;
+    $b->items[1]->amount = 1e14;
+}), $msgCantidadGrande(2));
+$rechazaConduce('línea 1 sin descripción y línea 2 con cantidad enorme: la descripción de la 1', $tresLineas(function (object $b) {
+    $b->items[0]->description = '  ';
+    $b->items[1]->quantity = 1e9;
+}), 'La línea 1 no tiene descripción. Escríbela o quita esa línea.');
+$rechazaConduce('unidad inválida + cantidad enorme en la misma línea: la unidad primero (va antes que la cantidad)', $tresLineas(function (object $b) {
+    $b->items[1]->unidad_medida = '999';
+    $b->items[1]->quantity = 1e9;
+}), 'La unidad de medida de la línea 2 no es válida. Elige otra unidad en esa línea.');
+$rechazaConduce('cantidad enorme + precio negativo en la misma línea: la cantidad primero (va antes que el precio)', $tresLineas(function (object $b) {
+    $b->items[1]->quantity = 1e9;
+    $b->items[1]->amount = -1;
+}), $msgCantidadGrande(2));
+$rechazaConduce('precio enorme + ITBIS inválido en la misma línea: el ITBIS (el tope del precio es lo último que se mira de la línea)', $tresLineas(function (object $b) {
+    $b->items[1]->amount = 1e14;
+    $b->items[1]->indicador_facturacion = 5;
+}), 'Línea 2: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento.');
 
 // --- el resto de las reglas de línea son las de la cotización, con sus textos ---
 $rechazaConduce('una línea que no es objeto', $cuerpoConduce(function (object $b) { $b->items[0] = 'FUNDAS'; }),
@@ -1108,6 +1224,28 @@ $chk('errorAlGuardar: otro error (1205) => el generico con 500',
     $privadoT5('errorAlGuardar', ConexionFalsaT5::error(1205, 'Lock wait timeout exceeded'), 'GENERICO') === ['error', 'GENERICO', 500]);
 $chk('errorAlGuardar: 1452 de otra clave foranea => el generico', $privadoT5('errorAlGuardar',
     ConexionFalsaT5::error(1452, 'a foreign key constraint fails (CONSTRAINT `conduce_items_conduce_fk`)'), 'GENERICO') === ['error', 'GENERICO', 500]);
+
+// Respaldo de validarForma: una cantidad o un precio que MySQL rechaza (1264) es un 422 con su texto, no un 500 generico.
+// El mensaje es el real de MySQL 8.0 (tools/test_conduces_mysql.php lo comprueba contra el servidor).
+$fueraDeRangoT5 = static fn(string $columna): PDOException => ConexionFalsaT5::error(1264, "Out of range value for column '{$columna}' at row 1");
+foreach (['quantity', 'amount'] as $columnaT5) {
+    $c = new ConexionFalsaT5();
+    $c->fallar['INSERT INTO conduce_items'] = $fueraDeRangoT5($columnaT5);
+    $r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+    $chk("crear, {$columnaT5} fuera de rango (1264) => 422 MSG_FUERA_DE_RANGO, sin reintento: el rollback deshace la cabecera y la secuencia",
+        $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422] && count($c->paramsDe('INSERT INTO conduces ')) === 1
+        && $c->commits === 0 && $c->rollbacks === 1 && $c->conduces === [] && $c->ultimo === 0);
+}
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$c->fallar['INSERT INTO conduce_items'] = $fueraDeRangoT5('amount');
+$r = $modeloT5($c)->actualizar(7, $cotT5(), 9, 'X');
+$chk('actualizar, precio fuera de rango (1264) => 422 MSG_FUERA_DE_RANGO y rollback (las lineas viejas siguen activas)',
+    $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422] && $c->rollbacks === 1 && $c->commits === 0);
+$chk('errorAlGuardar: 1264 de otra columna => el generico (solo quantity y amount tienen su mensaje)',
+    $privadoT5('errorAlGuardar', $fueraDeRangoT5('client_id'), 'GENERICO') === ['error', 'GENERICO', 500]);
+$chk('errorAlGuardar: 1265 (datos truncados) de quantity => el generico: solo el 1264 es "fuera de rango"',
+    $privadoT5('errorAlGuardar', ConexionFalsaT5::error(1265, "Data truncated for column 'quantity' at row 1"), 'GENERICO') === ['error', 'GENERICO', 500]);
 
 echo "\n== T5: conduceModel::actualizar ==\n";
 $c = new ConexionFalsaT5();

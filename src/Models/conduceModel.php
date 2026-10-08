@@ -376,6 +376,14 @@ class conduceModel
             // (cotizacionDeOrigen) y el INSERT.
             return ['error', FerreteriaConduce::MSG_COTIZACION_FK, 422];
         }
+        if ($codigo === 1264 && preg_match("/column '(?:quantity|amount)'/i", $detalle) === 1) {
+            // Una cantidad o un precio que no cabe en conduce_items
+            // (DECIMAL(12,3) y DECIMAL(18,4)). validarForma lo rechaza antes,
+            // con el número de línea; esto solo atrapa lo que le pase por
+            // debajo (ver FerreteriaConduce::LIMITE_PRECIO). El rollback ya
+            // dejó todo como estaba.
+            return ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422];
+        }
         if (self::esNumeroRepetido($e)) {
             // Segundo choque seguido con el número: dos guardados a la vez.
             return ['error', FerreteriaConduce::MSG_CHOQUE, 500];

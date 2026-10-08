@@ -51,7 +51,7 @@ X-API-KEY: {{tokenFerreteria}}
 ### ============================================================================
 ### Comprobaciones de servidor que no son peticiones (anotar el resultado de cada una)
 ### M0 Antes de las M de servidor, en local y contra MySQL de verdad (Git Bash, desde api-gratex):
-###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 73/73 OK, exit 0 (unos 20-30 s)
+###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 82/82 OK, exit 0 (unos 20-30 s)
 ###    Usa SOLO la base de pruebas smhynzte_conduces_scratch (el mismo servidor que produccion, MySQL 8.0
 ###    estricto) con el usuario de pruebas; credenciales en tools/.env (ignorado por git: WA_DB_HOST,
 ###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
@@ -62,7 +62,11 @@ X-API-KEY: {{tokenFerreteria}}
 ###    miran en la base, a nivel de modelo (crear, eliminar sin reusar el numero, editar con las lineas viejas
 ###    en activo = 0 y la fecha conservada); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
 ###    de uk_conduces_numero reintentado una vez; cinco creaciones en paralelo con numeros distintos y
-###    seguidos, sin deadlock (M10 a nivel de modelo); y las reglas ON DELETE (M15).
+###    seguidos, sin deadlock (M10 a nivel de modelo); los topes de cantidad y precio de conduce_items (en el
+###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP); la
+###    guardia de la 031 (sin base seleccionada, con information_schema o sin cotizaciones: la 031 falla y no
+###    crea nada; el usuario de pruebas recibe #1142 y no #1049, porque MySQL revisa permisos antes de
+###    buscar la base: lo de M2 sigue siendo de servidor); y las reglas ON DELETE (M15).
 ###    Siguen siendo de servidor: M1 sobre los volcados de smhynzte_002 y smhynzte_new_gratexdb, M2, M5, M6,
 ###    M10 por HTTP (prueba ademas el controller), M11-M14, M16, M17 y todas las peticiones de abajo.
 ### M1 Migracion 031, DOS veces, sobre un volcado (dump) de CADA DB de tenant (smhynzte_002 de Ferreteria y
@@ -83,8 +87,13 @@ X-API-KEY: {{tokenFerreteria}}
 ###    2a corrida (sin tocar nada entre las dos): la MISMA fila, y nada cambia: cada paso ejecuta DO 0,
 ###    SHOW CREATE TABLE conduces / conduce_items / conduce_secuencia queda igual que despues de la 1a, y
 ###    SELECT * FROM conduce_secuencia sigue (1, 0).
-### M2 La 031 sin base seleccionada (o con information_schema seleccionada): base = NULL (o information_schema),
-###    todo_ok = NO y no se creo nada. Seleccionar la base del tenant y volver a correrla da la fila de M1.
+### M2 La 031 sin base seleccionada (o con information_schema seleccionada, donde la deja phpMyAdmin despues
+###    de otra migracion): la guardia de su segunda sentencia falla con "#1049 Unknown database
+###    'ALTO_elige_la_base_de_la_empresa_en_el_panel'" y no se creo nada (ninguna tabla nueva, ninguna fila).
+###    En la base master o cualquiera sin cotizaciones: "#1146 Table '<base>.cotizaciones' doesn't exist", y
+###    tampoco se crea nada. Seleccionar la base del tenant y volver a correrla da la fila de M1.
+###    (La proteccion propia de la 031, base = NULL / information_schema y todo_ok = NO, sigue ahi como
+###    segunda red, pero la guardia se detiene antes.)
 ### M3 La 031 otra vez al final de este archivo (ya con conduces creados): la misma fila, salvo
 ###    fila_secuencia = (1, N) con N = el ultimo numero dado; la corrida no la vuelve a (1, 0) ni toca filas.
 ### M4 Snapshot nuevo: db/tenant_schema.sql sobre una DB vacia (o php tools/create_tenant.php contra un master de
@@ -156,7 +165,7 @@ X-API-KEY: {{tokenFerreteria}}
 ###    cotizaciones -> GET /api/conduces responde 403 "No tienes permiso para hacer esto. Pídeselo a un
 ###    administrador." y audit_logs tiene un ACCESS_DENIED del modulo cotizaciones. Con PERMISSIONS_ENFORCE=false
 ###    responde 200, y el error_log dice "[PermissionGate][SHADOW] denegaria conduces GET (req=cotizaciones, rol sin permiso)".
-### M15 La base no deja borrar: la cubre M0 (tools/test_conduces_mysql.php, seccion e, reglas ON DELETE: 1451 por
+### M15 La base no deja borrar: la cubre M0 (tools/test_conduces_mysql.php, seccion f, reglas ON DELETE: 1451 por
 ###    RESTRICT al borrar un conduce con lineas, y SET NULL al borrar un producto o una cotizacion). No se corre
 ###    en un servidor: no hay nada que ejecutar aqui.
 ### M16 PDF largo: un conduce de 30+ lineas (desde el front, Conduce sobre una cotizacion larga; o C1 con 30+
@@ -616,6 +625,34 @@ Content-Type: application/json
   "client_id": {{clienteFerreteria}},
   "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
   "ajustes": { "mano_obra": 500 }
+}
+
+### E26 Cantidad que no cabe (1.000.000.000 o mas; conduce_items.quantity guarda hasta 999999999.99 con 2 decimales)
+###     -> 422 "Línea 2: la cantidad es demasiado grande." (antes: 500 generico por el 1264 de MySQL; no se guarda nada)
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 },
+    { "product_id": null, "description": "ARENA", "quantity": 1000000000, "amount": 0 }
+  ]
+}
+
+### E27 Precio que no cabe (100.000.000.000.000 o mas, 1e14; conduce_items.amount guarda menos de 1e14)
+###     -> 422 "Línea 1: el precio es demasiado grande." (la cantidad se revisa antes que el precio: una linea con las dos
+###     cosas dice "la cantidad"; y las lineas van en orden: sale el error de la primera linea mala)
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 100000000000000 } ]
 }
 
 ### ============================================================================

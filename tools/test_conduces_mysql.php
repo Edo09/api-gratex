@@ -16,7 +16,10 @@
  *      (las líneas de antes a activo = 0), los 1452 reales y las lecturas;
  *   d) guardados a la vez: un 1062 de verdad que se reintenta, y cinco procesos
  *      que crean un conduce cada uno al mismo tiempo;
- *   e) las reglas ON DELETE de las FK, la 031 otra vez con conduces guardados,
+ *   e) los topes de cantidad y precio de conduce_items: los de validarForma son los
+ *      de las columnas, en el tope se guarda tal cual y lo que pasa de ahí es un
+ *      1264 real que conduceModel vuelve un 422;
+ *   f) las reglas ON DELETE de las FK, la 031 otra vez con conduces guardados,
  *      y la base queda vacía.
  *
  * SEGURIDAD. Solo usa la base de CONDUCES_DB_NAME, y se niega si el nombre no
@@ -709,9 +712,51 @@ try {
         (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces') === (int) valorDe($pdo, 'SELECT COUNT(DISTINCT numero) FROM conduces'));
 
     // -----------------------------------------------------------------------
-    // e) Las reglas ON DELETE y la 031 con conduces guardados
+    // e) Topes de cantidad y precio (conduce_items.quantity y .amount)
     // -----------------------------------------------------------------------
-    echo "\n== e) Reglas ON DELETE y la 031 otra vez ==\n";
+    echo "\n== e) Topes de cantidad y precio ==\n";
+    // FerreteriaConduce::validarForma rechaza lo que no cabe en estas columnas con un
+    // "Línea N: ... demasiado grande" (tools/test_conduces.php); aquí se comprueba contra el
+    // servidor que sus topes son los de las columnas, que en el tope se guarda tal cual y que
+    // lo que se salta validarForma llega al 1264 real, que conduceModel vuelve un 422.
+    $logPrevioTopes = ini_set('error_log', $logModelo);
+    $topeDeColumna = static fn(string $columna): float => (float) (10 ** (int) valorDe($pdo,
+        'SELECT NUMERIC_PRECISION - NUMERIC_SCALE FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?', [$db, 'conduce_items', $columna]));
+    $chk('los topes de validarForma son los de las columnas: quantity ' . $tipo('conduce_items', 'quantity') . ' (1e9) y amount '
+        . $tipo('conduce_items', 'amount') . ' (1e14)',
+        FerreteriaConduce::LIMITE_CANTIDAD === $topeDeColumna('quantity') && FerreteriaConduce::LIMITE_PRECIO === $topeDeColumna('amount'));
+    $r = $m->crear(cotScratch($clienteId, $cotId, null, null, [
+        lineaScratch(null, 'TOPE DE CANTIDAD', 999999999.99, 0.0),
+        lineaScratch(null, 'TOPE DE PRECIO', 1.0, 99999999999999.0),
+    ]), 5, 'HOSPITAL DOCENTE');
+    $idTope = (int) ($r[1]['id'] ?? 0);
+    $chk('en el tope se guarda tal cual: cantidad 999999999.99 y precio 99999999999999 (los DECIMAL vuelven como texto)',
+        ($r[0] ?? null) === 'success' && array_column($lineasDe($idTope), 'quantity') === ['999999999.990', '1.000']
+        && array_column($lineasDe($idTope), 'amount') === ['0.0000', '99999999999999.0000']);
+    $antesTopes = $cuentas();
+    foreach ([['cantidad 1e9', lineaScratch(null, 'X', 1e9, 1.0)], ['precio 1e14', lineaScratch(null, 'X', 1.0, 1e14)]] as [$que, $linea]) {
+        $r = $m->crear(cotScratch($clienteId, $cotId, null, null, [$linea]), 5, 'X');
+        $chk("crear con {$que} (sin pasar por validarForma): el 1264 real => 422 MSG_FUERA_DE_RANGO, y el rollback no deja nada",
+            $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422] && $cuentas() === $antesTopes);
+    }
+    $activasTope = filasDe($pdo, 'SELECT id FROM conduce_items WHERE conduce_id = ? AND activo = 1 ORDER BY id', [$idTope]);
+    $r = $m->actualizar($idTope, cotScratch($clienteId, $cotId, null, '2026-10-01 07:00:00', [lineaScratch(null, 'X', 1e9, 1.0)]), 9, 'OTRO');
+    $chk('actualizar con una cantidad fuera de rango => 422 MSG_FUERA_DE_RANGO; el rollback deja las líneas activas y el nombre como estaban',
+        $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422]
+        && filasDe($pdo, 'SELECT id FROM conduce_items WHERE conduce_id = ? AND activo = 1 ORDER BY id', [$idTope]) === $activasTope
+        && valorDe($pdo, 'SELECT client_name FROM conduces WHERE id = ?', [$idTope]) === 'HOSPITAL DOCENTE');
+    clearstatcache();
+    $logTopes = (string) file_get_contents($logModelo);
+    $chk("el error_log trae el detalle de MySQL: el 1264 de 'quantity' (dos veces) y el de 'amount' (una)",
+        substr_count($logTopes, " 1264 Out of range value for column 'quantity'") === 2
+        && substr_count($logTopes, " 1264 Out of range value for column 'amount'") === 1);
+    ini_set('error_log', $logPrevioTopes === false ? '' : $logPrevioTopes);
+
+    // -----------------------------------------------------------------------
+    // f) Las reglas ON DELETE y la 031 con conduces guardados
+    // -----------------------------------------------------------------------
+    echo "\n== f) Reglas ON DELETE y la 031 otra vez ==\n";
     $codigoBorrar = null;
     $detalleBorrar = '';
     try {
