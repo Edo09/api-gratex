@@ -7,7 +7,9 @@
  * mismo servidor que producción (MySQL 8.0, modo estricto, InnoDB):
  *   a) un tenant "viejo" (el snapshot de antes de la 031, con la 029 de precios y la
  *      030 del POS) recibe la 031 dos veces: la primera crea las tres tablas y su
- *      resultado dice todo_ok = SI; la segunda no cambia nada;
+ *      resultado dice todo_ok = SI; la segunda no cambia nada. Antes, la guardia de
+ *      su segunda sentencia: sin base de empresa seleccionada (sin base, o
+ *      information_schema) o sin cotizaciones, la 031 falla y no crea nada;
  *   b) un tenant nuevo (db/tenant_schema.sql de hoy) nace con las mismas tres
  *      tablas que deja la 031;
  *   c) conduceModel de punta a punta: numeración, eliminar (activo = 0), editar
@@ -86,6 +88,27 @@ function conectarScratch(array $env, string $db): PDO
     // Segunda guarda: la conexión quedó en la base que pasó la primera.
     if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $db) {
         throw new RuntimeException('La conexión no quedó en la base scratch; no se toca nada.');
+    }
+    return $pdo;
+}
+
+/**
+ * Conexión al mismo servidor SIN base por defecto (DATABASE() = NULL) o con una base
+ * de sistema (information_schema): lo que ve la 031 cuando phpMyAdmin no tiene
+ * seleccionada la base de la empresa. Solo sirve para probar la guardia de la 031,
+ * que tiene que detenerse antes de tocar nada.
+ */
+function conectarSinBaseDeEmpresa(array $env, ?string $baseDeSistema = null): PDO
+{
+    $pdo = new PDO(
+        sprintf('mysql:host=%s;port=%s;%scharset=utf8mb4', $env['WA_DB_HOST'] ?? '', $env['WA_DB_PORT'] ?? '3306',
+            $baseDeSistema === null ? '' : 'dbname=' . $baseDeSistema . ';'),
+        $env['WA_DB_USER'] ?? '',
+        $env['WA_DB_PASS'] ?? '',
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_PERSISTENT => false]
+    );
+    if ($pdo->query('SELECT DATABASE()')->fetchColumn() !== $baseDeSistema) {
+        throw new RuntimeException('La conexión sin base de empresa quedó en otra base; no se toca nada.');
     }
     return $pdo;
 }
@@ -188,6 +211,35 @@ function correrSql(PDO $pdo, string $sql): array
         }
     } while ($stmt->nextRowset());
     return $filas;
+}
+
+/**
+ * Corre un archivo SQL que tiene que FALLAR y devuelve el error de MySQL que lo
+ * detuvo, [código, mensaje]; null si terminó sin error (la guardia no se activó).
+ * @return ?array{0:int,1:string}
+ */
+function errorDeSql(PDO $pdo, string $sql): ?array
+{
+    try {
+        correrSql($pdo, $sql);
+        return null;
+    } catch (PDOException $e) {
+        return [(int) ($e->errorInfo[1] ?? 0), (string) ($e->errorInfo[2] ?? $e->getMessage())];
+    }
+}
+
+/**
+ * ¿Es el error de la guardia de la 031? Sin base de empresa, la guardia consulta
+ * `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x`: MySQL contesta #1049 (la base
+ * no existe) a quien tiene permisos globales, como el usuario de phpMyAdmin, y #1142
+ * (SELECT denegado en la tabla 'x') al usuario de pruebas, que solo llega a sus bases
+ * scratch: revisa permisos antes que existencia. Los dos nombran lo que puso la guardia.
+ */
+function esErrorDeGuardia(?array $error): bool
+{
+    return $error !== null
+        && (($error[0] === 1049 && str_contains($error[1], 'ALTO_elige_la_base_de_la_empresa_en_el_panel'))
+            || ($error[0] === 1142 && str_contains($error[1], "'x'")));
 }
 
 function filasDe(PDO $pdo, string $sql, array $params = []): array
@@ -327,6 +379,14 @@ try {
     vaciarBase($pdo, $db);
     $chk("{$db}: sin tablas al empezar (borradas las que hubiera)", objetosEn($pdo, $db) === 0);
 
+    // La guardia de la 031 (segunda sentencia). En una base sin cotizaciones, como esta
+    // vacía, falla con #1146 y no crea nada: antes la 031 seguía y decía todo_ok = NO.
+    $mig031 = (string) file_get_contents($raiz . '/db/migrations/031_conduces.sql');
+    $errorVacia = errorDeSql($pdo, $mig031);
+    $chk('031 en una base sin cotizaciones (esta, vacía): la guardia falla con #1146 y la base sigue sin nada',
+        $errorVacia !== null && $errorVacia[0] === 1146 && str_contains($errorVacia[1], "{$db}.cotizaciones")
+        && objetosEn($pdo, $db) === 0);
+
     // -----------------------------------------------------------------------
     // a) Tenant viejo + la 031 dos veces
     // -----------------------------------------------------------------------
@@ -362,7 +422,18 @@ try {
         && array_intersect(TABLAS_CONDUCES, $tablasViejo) === []);
     $ddlViejo = ddlsDe($pdo, $tablasViejo);
 
-    $mig031 = (string) file_get_contents($raiz . '/db/migrations/031_conduces.sql');
+    // La guardia con el tenant viejo ya cargado: sin base de empresa seleccionada (NULL, o
+    // information_schema, donde deja phpMyAdmin después de otra migración) la 031 se
+    // detiene en su segunda sentencia, antes de crear nada: las mismas tablas, el mismo
+    // SHOW CREATE TABLE y sin las de conduces. Sin la guardia llegaba al final con todo_ok = NO.
+    foreach ([[null, 'sin base seleccionada (DATABASE() = NULL)'], ['information_schema', 'con information_schema seleccionada']] as [$sistema, $cual]) {
+        $sinBase = conectarSinBaseDeEmpresa($env, $sistema);
+        $errorGuardia = errorDeSql($sinBase, $mig031);
+        $sinBase = null;
+        $chk("031 {$cual}: la guardia falla (#" . ($errorGuardia[0] ?? '?') . ') y el tenant viejo queda igual, sin tablas de conduces',
+            esErrorDeGuardia($errorGuardia) && tablasDe($pdo, $db) === $tablasViejo && ddlsDe($pdo, $tablasViejo) === $ddlViejo);
+    }
+
     $r1 = correrSql($pdo, $mig031);
     $f1 = $r1[0] ?? [];
     echo '         resultado: ' . json_encode($f1, JSON_UNESCAPED_UNICODE) . "\n";

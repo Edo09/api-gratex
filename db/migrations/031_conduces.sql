@@ -59,7 +59,18 @@
 --   NULL, no se creo ninguna tabla y todo_ok = NO: para y avisa. Si base no
 --   es la del tenant (por ejemplo information_schema, o NULL si no habia una
 --   base seleccionada), no se creo nada: selecciona la base correcta y vuelve
---   a correrla.
+--   a correrla. (Desde la guardia de la segunda sentencia, esos dos casos ya
+--   se detienen antes con el #1049 de abajo; este resultado queda como la
+--   segunda red.)
+--
+-- SI SALE "#1049 Unknown database 'ALTO_elige_la_base_...'" (o "#1109 Unknown table
+-- '...' in information_schema"): phpMyAdmin estaba parado en otra base (pasa
+-- despues de correr otra migracion: cualquier consulta a information_schema lo
+-- deja ahi). NO se cambio nada. Haz clic en el nombre de la base correcta en el
+-- panel IZQUIERDO, abre la pestana SQL de nuevo, pega todo y ejecuta.
+-- "#1146 Table '...cotizaciones' doesn't exist": la base seleccionada no es la
+-- de una empresa (no tiene cotizaciones). Tampoco se cambio nada; elige la
+-- correcta.
 --
 -- ANTES DE CORRER:
 --   - Toma un respaldo de la base.
@@ -89,6 +100,16 @@
 -- 0) La base del tenant: la que esta seleccionada en phpMyAdmin.
 -- ----------------------------------------------------------------------------
 SET @db := DATABASE();
+
+-- Guardia: la base seleccionada tiene que ser la correcta. Si no lo es, esta
+-- sentencia falla con un nombre de tabla que dice que hacer, ANTES de tocar
+-- nada. No consulta information_schema: phpMyAdmin no cambia de base aqui.
+SET @guardia := IF(@db IS NULL OR @db IN ('information_schema', 'mysql', 'performance_schema', 'sys'),
+  'DO (SELECT 1 FROM `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x` LIMIT 1)',
+  CONCAT('DO (SELECT 1 FROM `', @db, '`.cotizaciones LIMIT 1)'));
+PREPARE s_guardia FROM @guardia;
+EXECUTE s_guardia;
+DEALLOCATE PREPARE s_guardia;
 
 -- ----------------------------------------------------------------------------
 -- 1) Lo que hay hoy (solo lectura).

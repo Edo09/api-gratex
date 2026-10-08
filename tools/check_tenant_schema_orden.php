@@ -20,7 +20,8 @@
  *     ejemplo, es un ALTER/CREATE (o la fila de la secuencia) con parentesis y
  *     comillas balanceados.
  *   - La 031 sigue la regla de phpMyAdmin (db/migrations/README.md, ver 028):
- *     la primera sentencia es SET @db := DATABASE(), toda consulta a
+ *     la primera sentencia es SET @db := DATABASE(), la segunda es la guardia
+ *     (#1049 sin base de empresa seleccionada), toda consulta a
  *     information_schema filtra por @db, el unico SELECT de nivel superior es
  *     el ultimo, y sus tres tablas armadas son las del snapshot elemento por
  *     elemento. El verificador de migraciones tiene su fila (y las de la 029 de
@@ -425,6 +426,16 @@ foreach (['uk_conduces_numero', 'idx_conduces_cotizacion', 'idx_conduces_date', 
 // TABLE_SCHEMA: ahi el filtro es CONSTRAINT_SCHEMA = @db.
 $sent031 = sentencias($mig031);
 $chk('031: la primera sentencia fija la base en @db', ($sent031[0] ?? '') === 'SET @db := DATABASE()');
+// Desde la 029/030 (y la master 012) la segunda sentencia es la guardia: falla
+// con #1049 si no hay base de empresa seleccionada (NULL o una de sistema) y con
+// #1146 si la base no tiene cotizaciones, ANTES de crear nada. Aqui se fija con
+// su PREPARE/EXECUTE/DEALLOCATE, que son las sentencias 3, 4 y 5.
+$guardia031 = "SET @guardia := IF(@db IS NULL OR @db IN ('information_schema', 'mysql', 'performance_schema', 'sys'), "
+    . "'DO (SELECT 1 FROM `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x` LIMIT 1)', "
+    . "CONCAT('DO (SELECT 1 FROM `', @db, '`.cotizaciones LIMIT 1)'))";
+$chk('031: la segunda sentencia es la guardia (#1049 sin base de empresa, #1146 sin cotizaciones) y su PREPARE/EXECUTE/DEALLOCATE van enseguida',
+    preg_replace('/\s+/', ' ', $sent031[1] ?? '') === $guardia031
+    && array_slice($sent031, 2, 3) === ['PREPARE s_guardia FROM @guardia', 'EXECUTE s_guardia', 'DEALLOCATE PREPARE s_guardia']);
 $chk('031: DATABASE() aparece una sola vez', substr_count($mig031, 'DATABASE()') === 1);
 $usosIs = preg_match_all('/\binformation_schema\./i', $mig031);
 $filtrosDb = preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $mig031);
@@ -478,8 +489,9 @@ $permitidos031 = [
     '/^' . preg_quote("SELECT CONCAT('(', id, ', ', ultimo, ')') INTO @fila_secuencia FROM `tenant`.conduce_secuencia WHERE id = 1", '/') . '$/',
 ];
 $dinamicos031 = armarDinamicos($mig031, $ejemplo031);
-$chk('031: cada @sql_* se prepara una vez (' . count($dinamicos031) . ' sentencias dinamicas)',
-    $dinamicos031 !== [] && array_column($dinamicos031, 'variable') === $prep031[2]);
+// La guardia (@guardia) tambien se prepara, pero no es un @sql_*: va aparte.
+$chk('031: cada @sql_* se prepara una vez (' . count($dinamicos031) . ' sentencias dinamicas, mas la guardia)',
+    $dinamicos031 !== [] && array_column($dinamicos031, 'variable') === array_values(array_diff($prep031[2], ['@guardia'])));
 $tablas031 = [];
 foreach ($dinamicos031 as $d) {
     $permitido = false;
