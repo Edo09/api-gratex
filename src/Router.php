@@ -25,7 +25,7 @@ $_REQUEST = InputSanitizer::clean($_REQUEST);
 
 // Handle CORS at the router level FIRST, before any other logic
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
+header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, X-POS-EQUIPO, X-POS-SESION, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
 header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
 header('Content-Type: application/json; charset=utf-8');
@@ -298,6 +298,17 @@ switch ($route) {
         // Bitacora de auditoria (solo lectura, admin del tenant: modulo 'audit')
         //   GET /api/audit-logs?user_id=&module=&action=&from=&to=&page=&pageSize=
         require_once 'src/Controllers/auditLogController.php';
+        break;
+
+    case 'pos':
+        // POS desde el equipo de caja (X-POS-EQUIPO + X-POS-SESION), nunca con la
+        // sesion de app.*: /api/pos/estado, /api/pos/sesion. Ver docs/specs/pos.md.
+        require_once 'src/Controllers/posController.php';
+        break;
+
+    case 'pos-admin':
+        // Administracion del POS (modulo RBAC 'pos'): cajas, empleados, equipos.
+        require_once 'src/Controllers/posAdminController.php';
         break;
 
     default:

@@ -36,6 +36,12 @@
 --   "Table '...products' doesn't exist" = no era la base del tenant: no se
 --   cambio nada; selecciona la correcta y vuelve a correrla.
 --
+-- SI SALE "#1049 Unknown database 'ALTO_elige_la_base_...'" (o "#1109 Unknown table
+-- '...' in information_schema"): phpMyAdmin estaba parado en otra base (pasa
+-- despues de correr otra migracion: cualquier consulta a information_schema lo
+-- deja ahi). NO se cambio nada. Haz clic en el nombre de la base correcta en el
+-- panel IZQUIERDO, abre la pestana SQL de nuevo, pega todo y ejecuta.
+--
 -- ANTES DE CORRER:
 --   Cambiar la escala de un DECIMAL copia la tabla; products es chica, pero
 --   mejor fuera de horario.
@@ -51,6 +57,16 @@
 -- 0) La base del tenant: la que esta seleccionada en phpMyAdmin.
 -- ----------------------------------------------------------------------------
 SET @db := DATABASE();
+
+-- Guardia: la base seleccionada tiene que ser la correcta. Si no lo es, esta
+-- sentencia falla con un nombre de tabla que dice que hacer, ANTES de tocar
+-- nada. No consulta information_schema: phpMyAdmin no cambia de base aqui.
+SET @guardia := IF(@db IS NULL OR @db IN ('information_schema', 'mysql', 'performance_schema', 'sys'),
+  'DO (SELECT 1 FROM `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x` LIMIT 1)',
+  CONCAT('DO (SELECT 1 FROM `', @db, '`.products LIMIT 1)'));
+PREPARE s_guardia FROM @guardia;
+EXECUTE s_guardia;
+DEALLOCATE PREPARE s_guardia;
 
 -- ----------------------------------------------------------------------------
 -- 1) Precios que no caben en 14 digitos enteros. Si @db no es la base del

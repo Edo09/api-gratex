@@ -141,14 +141,15 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **A5 · Empleados POS** — `Piloto`
 - [ ] El admin los crea en app.\* (M1) con nombre y rol (`cajero` | `supervisor`).
-- [ ] Al crearlo, el sistema **genera un PIN aleatorio de 6 dígitos, único en el tenant**, y lo muestra **una sola vez**. El admin puede regenerarlo; el anterior deja de servir.
+- [x] Al crearlo, el sistema **genera un PIN aleatorio de 4 dígitos, único en el tenant**, y lo muestra **una sola vez**. El admin puede regenerarlo; el anterior deja de servir y el nuevo nunca es igual al anterior.
 - [ ] El admin nunca elige el PIN, así que el sistema nunca dice "ese PIN ya existe" y no revela el de nadie.
 - [ ] Un empleado desactivado no entra ni autoriza. Sus turnos e históricos se conservan.
 
 **A6 · Entrada con PIN** — `Piloto`
 - [ ] Pantalla con teclado numérico grande. Solo PIN, sin elegir nombre.
 - [ ] PIN correcto → sesión de empleado en ese equipo.
-- [ ] **5 intentos fallidos seguidos en un equipo → equipo bloqueado 5 minutos.** Cuentan también los fallos de PIN de supervisor (S1). Cada bloqueo queda auditado.
+- [x] **5 intentos fallidos seguidos en un equipo → equipo bloqueado, y cada bloqueo seguido dura el doble: 5, 10, 20, 40… minutos, hasta un día.** Entrar con un PIN válido devuelve la cuenta a cero. Cuentan también los fallos de PIN de supervisor (S1). Cada bloqueo queda auditado.
+- Por qué progresivo: con PIN de 4 dígitos (10⁴ combinaciones) y "solo PIN", un bloqueo fijo de 5 minutos deja ~1,440 intentos al día por equipo y con 10 empleados alguien atina en menos de un día. Progresivo, son ~40 al día.
 
 **A7 · Bloqueo de pantalla** — `Piloto`
 - [ ] Manual (botón) y automático tras **10 min** sin actividad.
@@ -394,6 +395,11 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] Venta en efectivo → el dinero sale del turno **actual** y cuenta en el esperado.
 - [ ] Tarjeta o transferencia → solo se registra, con el aviso "Reversar en el datafono / banco". No toca el efectivo.
 
+**D6 · Centavo residual al devolver por partes** — `v1` (comportamiento conocido, no se corrige)
+- [x] Con precios con ITBIS, cada E34 calcula su propia base: `round(total / 1.18, 2)`. Devolver una venta por partes puede dejar **±0.01 entre base e ITBIS**, aunque el total quede en cero.
+- Caso real del 2026-10-08: E320000000001 (175.00 → 148.31 + 26.69), devuelta con E340000000007 (50.00 → 42.37 + 7.63) y E340000000008 (125.00 → 105.93 + 19.07). Neto en el 607: base +0.01, ITBIS −0.01, total 0.00.
+- No se fuerza que la última nota "cierre" la base de la original, porque la DGII valida cada documento con su propia regla (`round(suma / 1.18, 2)`) y una base distinta arriesga un rechazo.
+
 ### 6.9 Administración en app.\*
 
 **M1 · Sección POS (módulo `pos`)** — `Piloto`
@@ -469,7 +475,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 | 30 | Entrada | Equipo habilitado + PIN |
 | 31 | Cajeros | Empleados POS, sin cuenta de app.\* |
 | 32 | Identificación | Solo PIN, único en el tenant |
-| 33 | PIN | Lo genera el sistema (6 dígitos) |
+| 33 | PIN | Lo genera el sistema, de **4 dígitos** (cambiado de 6 el 2026-10-08, por rapidez en mostrador), con bloqueo progresivo por equipo |
 | 34 | Retiros | No en v1 |
 | 35 | Imágenes | No en v1 (iniciales + color) |
 | 36 | Precio en la ficha | Hoy se escribe sin ITBIS. Se agrega una casilla y se guarda el neto a 4 decimales |
@@ -482,7 +488,7 @@ Se tomaron sin preguntar. Cambiarlas ahora es barato; después del piloto no tan
 1. **Eliminar líneas y cancelar ventas no pide PIN.** Quedan registradas y salen en el cierre. (Es la vía clásica de fraude: escanear, quitar, guardarse el efectivo. Si preocupa, pasa a PIN.)
 2. **Formas de pago:** solo Efectivo, Tarjeta y Transferencia. Sin "Otro" (código 8).
 3. **Fondo inicial:** un monto, sin contarlo por denominación.
-4. **PIN de 6 dígitos.** 5 fallos → equipo bloqueado 5 min.
+4. ~~PIN de 6 dígitos~~ → **decidido: 4 dígitos** (decisión 33). 5 fallos → bloqueo progresivo: 5, 10, 20… min, tope 1 día.
 5. **Bloqueo automático** tras 10 min sin actividad.
 6. **Un empleado, un turno abierto** a la vez, aunque haya varias cajas.
 7. **Un equipo habilitado por caja.**
@@ -528,8 +534,8 @@ Ventas: Authorization: Bearer <token equipo>  +  X-POS-Sesion: <token sesión>
   - `'pos' => 'pos-caja'`
   - `'pos-admin' => 'pos'`
   - `'pos'` se agrega al `catalog` como módulo de administración.
-- **PIN:** se guarda `pin_hmac = HMAC-SHA256(pin, POS_PIN_PEPPER ‖ tenant_id)` con índice `UNIQUE`. Así se busca al empleado por PIN en una sola consulta y la unicidad la garantiza la BD. Un volcado de la BD sin el pepper no permite probar los 10⁶ PINs. `POS_PIN_PEPPER` es un secreto **nuevo** en `.env`: no reutilizar ninguno de los que estuvieron expuestos.
-- **Bloqueo:** el contador de fallos va por equipo, en el servidor (no en el navegador).
+- **PIN:** se guarda `pin_hmac = HMAC-SHA256(pin, POS_PIN_PEPPER ‖ tenant_id)` con índice `UNIQUE`. Así se busca al empleado por PIN en una sola consulta y la unicidad la garantiza la BD. Un volcado de la BD sin el pepper no permite probar los 10⁴ PINs. `POS_PIN_PEPPER` es un secreto **nuevo** en `.env`: no reutilizar ninguno de los que estuvieron expuestos.
+- **Bloqueo:** el contador de fallos va por equipo, en el servidor (no en el navegador): `pos_equipos.intentos_fallidos`, `bloqueado_hasta` y `bloqueos_seguidos` (progresivo).
 
 ### 9.3 Modelo de datos
 
@@ -644,18 +650,25 @@ Antes de construir la pantalla de venta. Fecha límite: **lunes 2026-10-12** par
 
 | # | Estado | Qué salió |
 |---|---|---|
-| V-1 | **E31 y E34: pasa** · E32: bloqueado | Probado en producción el 2026-10-08. La DGII aceptó **E310000000058** (E31, gravado + exento, RD$60) y **E340000000006** (E34 que lo anula) con `IndicadorMontoGravado = 1`, **sin objetar ningún monto**. Los dos quedaron *Aceptado Condicional* solo por el RNC del comprador (131880681 es el de los sets de certificación, código 1385). El **E32 no se pudo emitir: Gratex no tiene rango E32 vigente en `ecf`**. Falta el E32 por RFCE en cuanto haya rango. Regla confirmada antes contra el set de la DGII (por tasa, ITBIS como diferencia); `tools/test_precios_itbis_incluido.php`: 45 verificaciones |
-| V-2 | **RI: pasa** · 607 pendiente | La tirilla de E340000000006 imprime lo firmado: 3 × 10.00 = 30.00 (ITBIS 4.58), 2 × 15.00 = 30.00 exento; pie 25.42 / 30.00 / 4.58 / RD$60.00, igual que el XML; timbre con código y QR. **Falta:** el 607 de octubre con estas dos |
+| V-1 | **PASA** | Probado en producción el 2026-10-08, todo con `IndicadorMontoGravado = 1` y sin un solo reparo de montos. **E320000000001** (E32 por RFCE, 7 × 25.00 = **175.00** exacto): *Aceptado*, sin mensajes. **E340000000007** (devolución 2 × 25.00 = 50.00): *Aceptado*. **E310000000058** (E31 gravado + exento, 60.00) y **E340000000006** (su anulación): *Aceptado Condicional* solo por el RNC del comprador de prueba (131880681, código 1385). El rango E32 (autorización 6005547018, 1–100) se registró ese día con vencimiento 2099-12-31 porque la DGII lo da sin vencimiento (N/A). **Plan B descartado**: el POS emite con precios con ITBIS incluido |
+| V-2 | **PASA** | Recibos de E32 y E34 en tirilla: "Consumidor Final", 7 × 25.00 = 175.00 con ITBIS 26.69 y pie 148.31 / 26.69 / 175.00; la devolución 2 × 25.00 = 50.00 con 42.37 / 7.63. Timbre con código y QR. El 607 de octubre trae E310000000058 y E340000000006 con 55.42 / 4.58 / 60.00, compensándose |
 | V-3 | **Hecho** | Ver §9.5. Se corrigió `EcfDocumento` y el detalle del front (`InvoiceDetailView`); los reportes no cambian |
-| V-4 | Pendiente | Hay que medirlo en producción |
+| V-4 | Primeros datos | Emisiones reales del 2026-10-08, medidas desde el cliente (incluye la red): E32 por RFCE 1.45 s, E34 1.68 s y 2.31 s, E31 1.49 s. Todas por debajo de la meta (p95 ≤ 5 s). Falta una muestra mayor durante el piloto |
 | V-5 | Pendiente | Se prueba con la impresora física |
 | V-6 | **Hecho** | Sí, es obligatorio (norma de la RI). Destapó un error que ya existía: un E32 ≥ RD$250k sin cliente salía sin `<Comprador>` y la DGII lo rechazaba. Ahora responde 422 antes de reservar el e-NCF |
-| V-7 | Hecho en código · falta probar | **No se podía:** la E34 exigía `client_id` y el builder escribía `<RazonSocialComprador>` vacío. Ahora la E34 va sin cliente cuando la original es un E32 sin cliente. Se prueba con el paso 3 del kit **cuando haya rango E32**. La E34 con cliente y código 1 ya pasó (E340000000006). Código de modificación de la devolución parcial: Q3 |
-| Incidente | Resuelto en código · falta el SQL | La prueba del E31 no mandaba `user_id`; en producción `facturas.user_id` es `NOT NULL` (el snapshot dice `NULL`), así que el INSERT falló **después** de que la DGII recibió E310000000058. Se consultó con `consultar_ecf_dgii`, se anuló con E340000000006 y queda registrarlo con `tools/rescate_E310000000058.sql`. Arreglo: la emisión toma el usuario del token si el body no trae `user_id`, y si no hay ninguno responde 422 **antes** de reservar el e-NCF |
+| V-7 | **PASA** | E340000000007 sobre E320000000001, **sin cliente y sin `<Comprador>`**: *Aceptado*. Antes era imposible (la E34 exigía `client_id` y el builder escribía `<RazonSocialComprador>` vacío). Código de modificación usado en la parcial: 3 (Q3 sigue abierta para la total) |
+| Incidente | **Resuelto** | La prueba del E31 no mandaba `user_id`; en producción `facturas.user_id` es `NOT NULL`, así que el INSERT falló **después** de que la DGII recibió E310000000058. Se consultó con `consultar_ecf_dgii`, se anuló con E340000000006 y se registró con `tools/rescate_E310000000058.sql` (factura 1385). Arreglo desplegado: la emisión toma el usuario del token si el body no trae `user_id`, y responde 422 antes de reservar el e-NCF |
 | V-8 | **Hecho** | Las tres tablas de líneas ya guardan 4 decimales. Migración `029_precios_4_decimales.sql` escrita (idempotente, para phpMyAdmin) |
 | F8 | **Hecho** | Aviso de "carga manual" corregido en el código y en `docs/api/facturas.md` y `docs/integrations/dgii-ecf.md` |
 
 ## 12. Plan: 4 semanas hasta el piloto
+
+**Avance al 2026-10-08:** fase 0 cerrada (§11). Del backend de la semana 1 está
+hecho y probado: migraciones `master 012`, `029` y `030` (en MySQL 8, dos corridas
+cada una e idénticas al snapshot), traspaso de sesión (A2), administración de cajas,
+empleados y equipos (K1, A5, A4), PIN con bloqueo y sesiones (A6, A7), `pos_enabled`
+(A8) y el principal `pos-caja` en el gate. Contrato en [../api/pos.md](../api/pos.md);
+`tools/test_pos_backend.php` da 89/89 con el gate en enforce y en sombra (PIN de 4 dígitos con bloqueo progresivo, cambiado el mismo día).
 
 | Semana | Fechas | Qué |
 |---|---|---|

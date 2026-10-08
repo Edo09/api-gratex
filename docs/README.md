@@ -31,6 +31,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [api/ncf.md](api/ncf.md) | Endpoint NCF y secuencia legacy `B01` |
 | [api/reportes-606-607.md](api/reportes-606-607.md) | Formatos 606 (compras) y 607 (ventas) DGII |
 | [api/inventario.md](api/inventario.md) | Inventario (categorías, almacenes) + campos `category_id`/`warehouse_id` de producto — guía frontend |
+| [api/pos.md](api/pos.md) | POS: botón de app.\*, equipos de caja, empleados con PIN y sesiones; encabezados `X-POS-EQUIPO`/`X-POS-SESION` y códigos de error |
 
 ### `frontend/` — guías para quien consume la API
 | Doc | Para qué |

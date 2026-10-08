@@ -4,7 +4,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
   `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
-  migraciones ya incluidas, hasta la 029). Las migraciones sueltas activas (012–029)
+  migraciones ya incluidas, hasta la 030). Las migraciones sueltas activas (012–030)
   son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
@@ -25,6 +25,14 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
   `SET @db := DATABASE();`, nombra todo con `@db` (`TABLE_SCHEMA = @db`,
   `` `', @db, '`.tabla `` en el SQL dinámico) y deja el `SELECT` de resultado
   para el final. Ver 028.
+- Desde la 029/030 (y la master 012) la segunda sentencia es una **guardia**: si
+  `@db` es `information_schema` u otra base de sistema, o no tiene la tabla que
+  la migracion espera, falla con `#1049 Unknown database 'ALTO_elige_la_base_...'`
+  o `#1146 Table '<base>.<tabla>' doesn't exist` ANTES de tocar nada. Paso el
+  2026-10-08 con la 029: phpMyAdmin seguia parado en information_schema despues
+  de la migracion anterior. Los CREATE TABLE van antes de cualquier consulta a
+  information_schema y todo lo posterior nombra la base con `@db` (probado
+  inyectando un `USE information_schema` a mitad del lote).
 - Cambios al **master** (`gratex_master`): `db/master_migrations/` (+ reflejar
   en `db/master_schema.sql` para instalaciones nuevas).
 

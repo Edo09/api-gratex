@@ -190,7 +190,14 @@ $repetidas = array_keys(array_filter($conteo, fn($n) => $n > 1));
 $chk('ninguna tabla se crea dos veces' . ($repetidas ? ' (repetidas: ' . implode(', ', $repetidas) . ')' : ''), $repetidas === []);
 
 echo "\n== Cotizaciones: estado final de la migracion 026 ==\n";
-$chk('cabecera: rango de migraciones 012..028', (bool) preg_match('/012\.\.028/', $crudo));
+// La cabecera dice hasta que migracion incluye el snapshot: la ultima de
+// db/migrations/ (antes estaba fija en 028 y fallaba con cada migracion nueva).
+$ultimaMigracion = max(array_map(
+    static fn($f) => (int) basename($f),
+    glob(__DIR__ . '/../db/migrations/[0-9][0-9][0-9]_*.sql') ?: ['0']
+));
+$rangoEsperado = sprintf('012..%03d', $ultimaMigracion);
+$chk("cabecera: rango de migraciones $rangoEsperado", str_contains($crudo, $rangoEsperado));
 
 $porNombre = [];
 foreach ($lista as $t) {

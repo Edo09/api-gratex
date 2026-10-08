@@ -315,7 +315,7 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 |---|---|
 | `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–028). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–029 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–030 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 
