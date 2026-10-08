@@ -163,9 +163,17 @@ $chk('verificador: tiene la fila 028',
 $chk('verificador: la fila 028 mira las dos columnas con CHARACTER_MAXIMUM_LENGTH >= ' . $anchoF,
     substr_count($verificador, "COLUMN_NAME = 'estado_dgii' AND CHARACTER_MAXIMUM_LENGTH >= {$anchoF}") === 2);
 $chk('verificador: muestra en que base se evaluo', str_contains($verificador, 'DATABASE() AS base'));
-$chk('README: el rango de migraciones activas llega a la 028', str_contains($readme, '012–028'));
+// El rango llega a la migracion mas alta de db/migrations/, no a una fija: cada
+// migracion nueva actualiza el README y la cabecera del snapshot.
+$numeros = array_map(
+    fn(string $ruta): string => substr(basename($ruta), 0, 3),
+    glob($raiz . '/db/migrations/[0-9][0-9][0-9]_*.sql') ?: []
+);
+sort($numeros);
+$ultima = $numeros !== [] ? end($numeros) : '???';
+$chk("README: el rango de migraciones activas llega a la {$ultima}", str_contains($readme, "012–{$ultima}"));
 $chk('README: advierte el cambio de base de phpMyAdmin', str_contains($readme, 'SET @db := DATABASE();'));
-$chk('snapshot: el encabezado dice 012..028', str_contains($snapshot, '012..028'));
+$chk("snapshot: el encabezado dice 012..{$ultima}", str_contains($snapshot, "012..{$ultima}"));
 
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);

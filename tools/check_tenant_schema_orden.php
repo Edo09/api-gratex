@@ -10,23 +10,35 @@
  *
  *   - Cada REFERENCES apunta a una tabla creada ANTES (o a la misma tabla).
  *   - Ninguna tabla se crea dos veces.
- *   - El bloque de cotizaciones trae el estado final de la migracion 026
- *     (columnas, nulabilidad, indices y FKs con los mismos nombres).
- *   - La 026 nombra esos mismos indices y FKs, cada PREPARE tiene su EXECUTE y
- *     su DEALLOCATE PREPARE, y su SQL dinamico, armado con tipos de ejemplo, es
- *     un ALTER/CREATE con parentesis y comillas balanceados.
+ *   - La cabecera dice el rango 012..NNN, con NNN la migracion mas alta de
+ *     db/migrations/ (una migracion nueva sin reflejar en el snapshot falla).
+ *   - El bloque de cotizaciones trae el estado final de la migracion 026 y el
+ *     de conduces el de la 029 (columnas, nulabilidad, indices y FKs con los
+ *     mismos nombres, y la fila de conduce_secuencia).
+ *   - La 026 y la 029 nombran esos mismos indices y FKs, cada PREPARE tiene su
+ *     EXECUTE y su DEALLOCATE PREPARE, y su SQL dinamico, armado con tipos de
+ *     ejemplo, es un ALTER/CREATE (o la fila de la secuencia) con parentesis y
+ *     comillas balanceados.
+ *   - La 029 sigue la regla de phpMyAdmin (db/migrations/README.md, ver 028):
+ *     la primera sentencia es SET @db := DATABASE(), toda consulta a
+ *     information_schema filtra por @db, el unico SELECT de nivel superior es
+ *     el ultimo, y sus tres tablas armadas son las del snapshot elemento por
+ *     elemento. El verificador de migraciones tiene su fila.
  *
- * No reemplaza aplicar el snapshot y la 026 a una DB de verdad; solo atrapa en
- * local lo que mas facil se rompe al mover bloques o al escribir SQL dinamico.
+ * No reemplaza aplicar el snapshot, la 026 y la 029 a una DB de verdad; solo
+ * atrapa en local lo que mas facil se rompe al mover bloques o al escribir SQL
+ * dinamico.
  *
  * Uso:
  *   php tools/check_tenant_schema_orden.php            (sale con 1 si algo falla)
- *   php tools/check_tenant_schema_orden.php --mostrar  (ademas imprime el SQL dinamico de la 026)
+ *   php tools/check_tenant_schema_orden.php --mostrar  (ademas imprime el SQL dinamico de la 026 y la 029)
  */
 
 $raiz = dirname(__DIR__);
 $rutaSnapshot = $raiz . '/db/tenant_schema.sql';
 $rutaMigracion = $raiz . '/db/migrations/026_cotizaciones_formatos.sql';
+$rutaMigracion029 = $raiz . '/db/migrations/029_conduces.sql';
+$rutaVerificador = $raiz . '/tools/verificar_migraciones_tenant.sql';
 
 $fallos = 0;
 $total = 0;
@@ -144,6 +156,55 @@ function tieneElemento(array $elementos, string $esperado): bool
     return false;
 }
 
+/**
+ * El SQL dinamico de una migracion, armado con valores de ejemplo: cada
+ * SET @sql_x := IF(@guarda = N, <expresion>, 'DO 0'); se expande juntando los
+ * literales '...' ('' = comilla escapada) y las @variables de $ejemplo. Sin
+ * MySQL no se puede preparar, pero si leer lo que se prepararia.
+ * @return array<int,array{variable:string, guarda:string, valor:string, sql:string, desconocida:?string}>
+ */
+function armarDinamicos(string $mig, array $ejemplo): array
+{
+    preg_match_all("/SET\s+(@sql_\w+)\s*:=\s*IF\((@\w+)\s*=\s*([01]),(.*?),\s*'DO 0'\);/s", $mig, $dinamicos, PREG_SET_ORDER);
+    $out = [];
+    foreach ($dinamicos as [, $variable, $guarda, $valor, $expresion]) {
+        preg_match_all("/'((?:[^']|'')*)'|(@\w+)/", $expresion, $tokens, PREG_SET_ORDER);
+        $sql = '';
+        $desconocida = null;
+        foreach ($tokens as $tok) {
+            if (isset($tok[2]) && $tok[2] !== '') {
+                $desconocida = isset($ejemplo[$tok[2]]) ? $desconocida : $tok[2];
+                $sql .= $ejemplo[$tok[2]] ?? '';
+            } else {
+                $sql .= str_replace("''", "'", $tok[1]);
+            }
+        }
+        $out[] = ['variable' => $variable, 'guarda' => $guarda, 'valor' => $valor, 'sql' => $sql, 'desconocida' => $desconocida];
+    }
+    return $out;
+}
+
+/** Comillas pares y parentesis balanceados (los de dentro de un literal no cuentan). */
+function balanceado(string $sql): bool
+{
+    $sinLiterales = (string) preg_replace("/'(?:[^']|'')*'/", "''", $sql);
+    return substr_count($sql, "'") % 2 === 0
+        && substr_count($sinLiterales, '(') === substr_count($sinLiterales, ')');
+}
+
+/**
+ * Sentencias de nivel superior de un SQL ya sin comentarios: corta en cada ';'
+ * de fin de linea (un ';' dentro de un COMMENT no termina la linea).
+ * @return string[]
+ */
+function sentencias(string $sql): array
+{
+    return array_values(array_filter(
+        array_map('trim', preg_split('/;\s*\n/', $sql)),
+        fn($s) => $s !== ''
+    ));
+}
+
 if (!is_file($rutaSnapshot)) {
     fwrite(STDERR, "No existe {$rutaSnapshot}\n");
     exit(1);
@@ -189,8 +250,16 @@ $conteo = array_count_values(array_column($lista, 'nombre'));
 $repetidas = array_keys(array_filter($conteo, fn($n) => $n > 1));
 $chk('ninguna tabla se crea dos veces' . ($repetidas ? ' (repetidas: ' . implode(', ', $repetidas) . ')' : ''), $repetidas === []);
 
-echo "\n== Cotizaciones: estado final de la migracion 026 ==\n";
-$chk('cabecera: rango de migraciones 012..028', (bool) preg_match('/012\.\.028/', $crudo));
+echo "\n== Cotizaciones y conduces: estado final de las migraciones 026 y 029 ==\n";
+// La cabecera llega a la migracion mas alta de db/migrations/, no a una fija:
+// una migracion nueva que no se refleja en el snapshot falla aqui.
+$numeros = array_map(
+    fn(string $ruta): string => substr(basename($ruta), 0, 3),
+    glob($raiz . '/db/migrations/[0-9][0-9][0-9]_*.sql') ?: []
+);
+sort($numeros);
+$ultima = $numeros !== [] ? end($numeros) : '???';
+$chk("cabecera: rango de migraciones 012..{$ultima}", str_contains($crudo, "012..{$ultima}"));
 
 $porNombre = [];
 foreach ($lista as $t) {
@@ -220,6 +289,31 @@ $columnas = [
         'concepto'      => '/^VARCHAR\(30\) NOT NULL\b/i',
         'monto'         => '/^DECIMAL\(18,2\) NOT NULL DEFAULT 0\.00\b/i',
     ],
+    // 029: conduces de mercancia. Nada se borra (activo = 0); cotizacion_id y
+    // product_id llevan el tipo de una DB del repo (la 029 lo copia del id).
+    'conduces' => [
+        'numero'        => '/^INT UNSIGNED NOT NULL\b/i',
+        'code'          => '/^VARCHAR\(20\) NOT NULL\b/i',
+        'date'          => '/^DATETIME NOT NULL\b/i',
+        'cotizacion_id' => '/^INT\(11\) NULL\b/i',
+        'client_id'     => '/^INT\(11\) NULL\b/i',
+        'user_id'       => '/^INT\(11\) NULL\b/i',
+        'client_name'   => '/^VARCHAR\(100\) NULL\b/i',
+        'activo'        => '/^TINYINT\(1\) NOT NULL DEFAULT 1\b/i',
+    ],
+    'conduce_items' => [
+        'conduce_id'    => '/^INT\(11\) NOT NULL\b/i',
+        'product_id'    => '/^INT\(11\) NULL\b/i',
+        'description'   => '/^TEXT NOT NULL\b/i',
+        'quantity'      => '/^DECIMAL\(12,3\) NOT NULL DEFAULT 1\.000\b/i',
+        'unidad_medida' => "/^VARCHAR\(10\) NOT NULL DEFAULT '43'/i",
+        'amount'        => '/^DECIMAL\(18,4\) NOT NULL DEFAULT 0\.0000\b/i',
+        'activo'        => '/^TINYINT\(1\) NOT NULL DEFAULT 1\b/i',
+    ],
+    'conduce_secuencia' => [
+        'id'     => '/^TINYINT NOT NULL\b/i',
+        'ultimo' => '/^INT UNSIGNED NOT NULL DEFAULT 0\b/i',
+    ],
 ];
 foreach ($columnas as $tabla => $cols) {
     $chk("tabla {$tabla} existe", isset($porNombre[$tabla]));
@@ -241,12 +335,33 @@ $indices = [
         'UNIQUE KEY uk_cotizacion_ajuste (cotizacion_id, concepto)',
         'CONSTRAINT cotizacion_ajustes_cot_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE',
     ],
+    'conduces' => [
+        'UNIQUE KEY uk_conduces_numero (numero)',
+        'KEY idx_conduces_cotizacion (cotizacion_id)',
+        'KEY idx_conduces_date (date)',
+        'KEY idx_conduces_activo (activo)',
+        'CONSTRAINT conduces_cotizacion_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE SET NULL',
+    ],
+    'conduce_items' => [
+        'KEY idx_conduce_items_conduce (conduce_id, activo)',
+        'KEY idx_conduce_items_product (product_id)',
+        'CONSTRAINT conduce_items_conduce_fk FOREIGN KEY (conduce_id) REFERENCES conduces (id) ON DELETE RESTRICT',
+        'CONSTRAINT conduce_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL',
+    ],
+    // Una sola fila (id = 1): el INSERT IGNORE de la siembra depende de esta PK.
+    'conduce_secuencia' => [
+        'PRIMARY KEY (id)',
+    ],
 ];
 foreach ($indices as $tabla => $lst) {
     foreach ($lst as $esperado) {
         $chk("{$tabla}: {$esperado}", tieneElemento($porNombre[$tabla] ?? [], $esperado));
     }
 }
+// La fila de la secuencia, como la siembra la 029 (conduceModel tambien la
+// asegura con INSERT IGNORE, pero un tenant nuevo debe nacer igual a uno migrado).
+$chk('conduce_secuencia: el snapshot siembra la fila (1, 0) con INSERT IGNORE',
+    preg_match('/^INSERT IGNORE INTO conduce_secuencia \(id, ultimo\) VALUES \(1, 0\);$/m', $sql) === 1);
 
 echo "\n== Migracion 026 ==\n";
 $hayMigracion = is_file($rutaMigracion);
@@ -270,37 +385,144 @@ $chk('026: ningun nombre de sentencia preparada se repite', count($prep[1]) === 
 // que daria una DB creada desde el repo) y se revisa que sea un ALTER/CREATE
 // de las tablas de cotizaciones con parentesis y comillas balanceados. Para
 // leerlo entero: php tools/check_tenant_schema_orden.php --mostrar
+$mostrar = in_array('--mostrar', $argv, true);
 $ejemplo = [
     '@tipo_product_id' => 'int(11)',
     '@tipo_cot_id'     => 'int(11)',
     '@cn_definicion'   => 'varchar(100) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NULL DEFAULT NULL',
 ];
-preg_match_all("/SET\s+(@sql_\w+)\s*:=\s*IF\(@\w+\s*=\s*[01],(.*?),\s*'DO 0'\);/s", $mig, $dinamicos, PREG_SET_ORDER);
+$dinamicos = armarDinamicos($mig, $ejemplo);
 $chk('026: cada @sql_* se prepara una vez (' . count($dinamicos) . ' sentencias dinamicas)',
-    $dinamicos !== [] && array_column($dinamicos, 1) === $prep[2]);
-foreach ($dinamicos as [, $variable, $expresion]) {
-    // Tokens de la expresion: literales '...' ('' = comilla escapada) o @variables.
-    preg_match_all("/'((?:[^']|'')*)'|(@\w+)/", $expresion, $tokens, PREG_SET_ORDER);
-    $ddl = '';
-    $desconocida = null;
-    foreach ($tokens as $tok) {
-        if (isset($tok[2]) && $tok[2] !== '') {
-            $desconocida = isset($ejemplo[$tok[2]]) ? $desconocida : $tok[2];
-            $ddl .= $ejemplo[$tok[2]] ?? '';
-        } else {
-            $ddl .= str_replace("''", "'", $tok[1]);
-        }
-    }
-    $sinLiterales = (string) preg_replace("/'(?:[^']|'')*'/", "''", $ddl);
-    $ok = $desconocida === null
-        && preg_match('/^(ALTER TABLE (cotizaciones|cotizacion_items) |CREATE TABLE IF NOT EXISTS cotizacion_ajustes \()/', $ddl) === 1
-        && substr_count($ddl, "'") % 2 === 0
-        && substr_count($sinLiterales, '(') === substr_count($sinLiterales, ')');
-    $chk("026: {$variable} arma un DDL valido" . ($desconocida !== null ? " (variable sin ejemplo: {$desconocida})" : ''), $ok);
-    if (in_array('--mostrar', $argv, true)) {
-        echo "         {$ddl}\n";
+    $dinamicos !== [] && array_column($dinamicos, 'variable') === $prep[2]);
+foreach ($dinamicos as $d) {
+    $ok = $d['desconocida'] === null
+        && preg_match('/^(ALTER TABLE (cotizaciones|cotizacion_items) |CREATE TABLE IF NOT EXISTS cotizacion_ajustes \()/', $d['sql']) === 1
+        && balanceado($d['sql']);
+    $chk("026: {$d['variable']} arma un DDL valido" . ($d['desconocida'] !== null ? " (variable sin ejemplo: {$d['desconocida']})" : ''), $ok);
+    if ($mostrar) {
+        echo "         {$d['sql']}\n";
     }
 }
+
+echo "\n== Migracion 029 ==\n";
+$hay029 = is_file($rutaMigracion029);
+$chk('existe db/migrations/029_conduces.sql', $hay029);
+$mig029 = $hay029 ? sinComentarios((string) file_get_contents($rutaMigracion029)) : '';
+// La misma migracion en una sola linea, para buscar sentencias sin depender del sangrado.
+$plano029 = (string) preg_replace('/\s+/', ' ', $mig029);
+foreach (['uk_conduces_numero', 'idx_conduces_cotizacion', 'idx_conduces_date', 'idx_conduces_activo',
+          'conduces_cotizacion_fk', 'idx_conduce_items_conduce', 'idx_conduce_items_product',
+          'conduce_items_conduce_fk', 'conduce_items_product_fk', 'conduce_secuencia'] as $nombre) {
+    $chk("029 nombra {$nombre}", $mig029 !== '' && preg_match('/\b' . $nombre . '\b/', $mig029) === 1);
+}
+
+// Regla de phpMyAdmin (db/migrations/README.md; la 028 la revisa en
+// check_estado_dgii_ancho.php): despues de un SELECT sobre information_schema,
+// phpMyAdmin cambia la base actual, asi que la base se fija en @db en la
+// PRIMERA sentencia, todo se nombra con ella y el unico SELECT de nivel
+// superior es el resultado final. REFERENTIAL_CONSTRAINTS no tiene
+// TABLE_SCHEMA: ahi el filtro es CONSTRAINT_SCHEMA = @db.
+$sent029 = sentencias($mig029);
+$chk('029: la primera sentencia fija la base en @db', ($sent029[0] ?? '') === 'SET @db := DATABASE()');
+$chk('029: DATABASE() aparece una sola vez', substr_count($mig029, 'DATABASE()') === 1);
+$usosIs = preg_match_all('/\binformation_schema\./i', $mig029);
+$filtrosDb = preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $mig029);
+$chk("029: cada consulta a information_schema filtra por @db ({$usosIs} consultas, {$filtrosDb} filtros)",
+    $usosIs > 0 && $usosIs === $filtrosDb);
+$selects029 = array_keys(array_filter($sent029, fn($s) => stripos($s, 'SELECT') === 0));
+$chk('029: el unico SELECT de nivel superior es la ultima sentencia',
+    $sent029 !== [] && $selects029 === [count($sent029) - 1]);
+$final029 = $sent029 !== [] ? $sent029[count($sent029) - 1] : '';
+$chk('029: el resultado muestra la base, la regla ON DELETE de cada FK y todo_ok',
+    str_contains($final029, '@db AS base')
+    && substr_count($final029, 'SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS') === 3
+    && str_contains($final029, 'AS todo_ok'));
+
+// Lo que la 029 averigua antes de crear: el tipo de los dos id (se copia a las
+// FK) y que cotizaciones y products sean InnoDB. O se crean las tres tablas o
+// ninguna: cada guarda pide que falte la tabla, los dos motores y los dos tipos.
+$chk('029: copia el tipo de cotizaciones.id y de products.id',
+    str_contains($plano029, "SET @tipo_cot_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'cotizaciones' AND COLUMN_NAME = 'id' );")
+    && str_contains($plano029, "SET @tipo_product_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'products' AND COLUMN_NAME = 'id' );"));
+$chk('029: cuenta cotizaciones y products con ENGINE = InnoDB',
+    str_contains($plano029, "SET @motores_innodb := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME IN ('cotizaciones', 'products') AND ENGINE = 'InnoDB' );"));
+foreach (['conduces', 'conduce_items', 'conduce_secuencia'] as $tabla) {
+    $chk("029: @crear_{$tabla} exige que falte la tabla, los dos motores InnoDB y los dos tipos de id",
+        str_contains($plano029, "SET @has_{$tabla} := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = '{$tabla}' );")
+        && str_contains($plano029, "SET @crear_{$tabla} := (@has_{$tabla} = 0 AND @motores_innodb = 2 AND @tipo_cot_id IS NOT NULL AND @tipo_product_id IS NOT NULL);"));
+}
+
+preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $mig029, $prep029);
+preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $mig029, $exec029);
+preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $mig029, $deal029);
+$chk('029: cada PREPARE tiene su EXECUTE y su DEALLOCATE (' . count($prep029[1]) . ' sentencias)',
+    $prep029[1] !== [] && $prep029[1] === $exec029[1] && $prep029[1] === $deal029[1]);
+$chk('029: ningun nombre de sentencia preparada se repite', count($prep029[1]) === count(array_unique($prep029[1])));
+
+// El SQL armado de la 029 (con la base 'tenant', tipos de una DB del repo y
+// cada guarda booleana en 1) solo puede crear las tres tablas, sembrar la fila
+// de la secuencia o leerla para el resultado; toda REFERENCES nombra la base.
+$ejemplo029 = [
+    '@db'                      => 'tenant',
+    '@tipo_cot_id'             => 'int(11)',
+    '@tipo_product_id'         => 'int(11)',
+    '@crear_conduces'          => '1',
+    '@crear_conduce_items'     => '1',
+    '@crear_conduce_secuencia' => '1',
+    '@hay_secuencia'           => '1',
+];
+$permitidos029 = [
+    '/^CREATE TABLE IF NOT EXISTS `tenant`\.(conduces|conduce_items|conduce_secuencia) \(/',
+    '/^' . preg_quote('INSERT IGNORE INTO `tenant`.conduce_secuencia (id, ultimo) VALUES (1, 0)', '/') . '$/',
+    '/^' . preg_quote("SELECT CONCAT('(', id, ', ', ultimo, ')') INTO @fila_secuencia FROM `tenant`.conduce_secuencia WHERE id = 1", '/') . '$/',
+];
+$dinamicos029 = armarDinamicos($mig029, $ejemplo029);
+$chk('029: cada @sql_* se prepara una vez (' . count($dinamicos029) . ' sentencias dinamicas)',
+    $dinamicos029 !== [] && array_column($dinamicos029, 'variable') === $prep029[2]);
+$tablas029 = [];
+foreach ($dinamicos029 as $d) {
+    $permitido = false;
+    foreach ($permitidos029 as $patron) {
+        $permitido = $permitido || preg_match($patron, $d['sql']) === 1;
+    }
+    $ok = $d['desconocida'] === null
+        && ($ejemplo029[$d['guarda']] ?? null) === $d['valor']
+        && $permitido
+        && preg_match('/REFERENCES (?!`tenant`\.)/', $d['sql']) === 0
+        && balanceado($d['sql']);
+    $chk("029: {$d['variable']} arma un SQL valido (guarda {$d['guarda']} = {$d['valor']})"
+        . ($d['desconocida'] !== null ? " (variable sin ejemplo: {$d['desconocida']})" : ''), $ok);
+    if ($mostrar) {
+        echo "         {$d['sql']}\n";
+    }
+    // tablas() lee CREATE TABLE sin base: se quita `tenant`. para compararla con el snapshot.
+    foreach (tablas(str_replace('`tenant`.', '', $d['sql'])) as $t) {
+        $tablas029[$t['nombre']] = $t['elementos'];
+    }
+}
+// Lo que crea la 029 y lo que crea el snapshot deben ser la misma tabla: mismas
+// columnas en el mismo orden, tipos, defaults, COMMENT, indices y FKs. Si no, un
+// tenant nuevo y uno migrado quedan distintos.
+foreach (['conduces', 'conduce_items', 'conduce_secuencia'] as $tabla) {
+    $de029 = array_map('strtoupper', $tablas029[$tabla] ?? []);
+    $deSnapshot = array_map('strtoupper', $porNombre[$tabla] ?? []);
+    $distinto = '';
+    foreach (array_keys($de029 + $deSnapshot) as $i) {
+        if (($de029[$i] ?? '') !== ($deSnapshot[$i] ?? '')) {
+            $distinto = ' (029: ' . ($de029[$i] ?? 'nada') . ' | snapshot: ' . ($deSnapshot[$i] ?? 'nada') . ')';
+            break;
+        }
+    }
+    $chk("029: {$tabla} queda igual que en el snapshot{$distinto}", $de029 !== [] && $distinto === '');
+}
+
+// El verificador de migraciones (tools/verificar_migraciones_tenant.sql) dice
+// APLICADA a la 029 solo con las tres tablas.
+$verificador = is_file($rutaVerificador) ? str_replace("\r\n", "\n", (string) file_get_contents($rutaVerificador)) : '';
+$chk('verificador: la fila 029 pide las tres tablas',
+    preg_match("/SELECT '029', '029_conduces\.sql',\s*'tablas conduces, conduce_items y conduce_secuencia',\s*"
+        . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+"
+        . "AND TABLE_NAME IN \('conduces', 'conduce_items', 'conduce_secuencia'\)\) = 3/", $verificador) === 1);
 
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);
