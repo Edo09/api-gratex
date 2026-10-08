@@ -181,6 +181,18 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
 
     $strictInput = !empty($input['strict_input']);
 
+    // Quien emite: el user_id del body (lo manda el front) o, si no viene, el
+    // usuario del token. Se resuelve ANTES de emitir: facturas.user_id es NOT
+    // NULL en produccion y, si el INSERT falla, la DGII ya recibio el e-CF y
+    // queda fuera de la base. Paso con E310000000058 el 2026-10-08 (un request
+    // de prueba sin user_id): hubo que rescatarlo a mano.
+    $userId = $input['user_id'] ?? RequestContext::userId();
+    if ($userId === null || $userId === '' || (int) $userId <= 0) {
+        respond(false, 'No se pudo identificar quién emite la factura. Cierra sesión y vuelve a entrar.', 422);
+        return;
+    }
+    $userId = (int) $userId;
+
     // Precios con ITBIS incluido (IndicadorMontoGravado = 1): el precio de cada
     // linea es el que paga el cliente y el total sale exacto (ver
     // EcfItemMapper::desglosarIncluido). Lo usa el POS. Va en su propio campo y
@@ -423,7 +435,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'client_name' => $client['client_name'] ?? 'Consumidor Final',
         'total' => $totales['monto_total'],
         'tipo_pago' => (int) ($input['tipo_pago'] ?? 1),
-        'user_id' => $input['user_id'] ?? null,
+        'user_id' => $userId,
         // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
         // en la Representacion Impresa (norma DGII).
         'informacion_referencia' => $payload['informacion_referencia'],
@@ -489,7 +501,7 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
             (int) ($saved[1]['factura_id'] ?? 0),
             $facturaInput['items'],
             $tipoEcf,
-            $input['user_id'] ?? null
+            $userId
         );
     } catch (Throwable $e) {
         error_log('[inventario] no se pudo descontar la factura: ' . $e->getMessage());
