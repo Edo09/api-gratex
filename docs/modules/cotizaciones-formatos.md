@@ -18,6 +18,8 @@ Formatos de hoy:
 | `ferreteria` | Ferretería | Hoja "COTIZACION MERCANCIAS": líneas del catálogo, ITBIS por línea, cargos, retención 5%, abono, `COT-000001` |
 
 Referencia de la API (cuerpos, respuestas, errores): [../api/cotizaciones.md](../api/cotizaciones.md).
+Ferretería tiene además **conduces de mercancía** ([abajo](#conduces-de-mercancía-ferretería)), con
+su propia referencia: [../api/conduces.md](../api/conduces.md).
 
 ---
 
@@ -31,13 +33,19 @@ Referencia de la API (cuerpos, respuestas, errores): [../api/cotizaciones.md](..
 | `src/Utils/Cotizacion/CotizacionFormato.php` | Clase abstracta: el contrato de un formato |
 | `src/Utils/Cotizacion/CotizacionFormatos.php` | Registro `FORMATOS` (clave → clase), `para()`, `delTenant()`, `delCuerpo()`, `deLaFila()` |
 | `src/Utils/Cotizacion/GratexFormato.php` | Las ramas de siempre del controller, movidas tal cual |
-| `src/Utils/Cotizacion/FerreteriaFormato.php` | Reglas puras (totales, validación, número, RNC, fecha) + crear/editar/vista previa/PDF |
-| `src/Utils/Cotizacion/FerreteriaCotizacionPdf.php` | Renderizador FPDF puro de la hoja de Ferretería |
+| `src/Utils/Cotizacion/FerreteriaFormato.php` | Reglas puras (totales, validación, número, RNC, fecha) + crear/editar/vista previa/PDF. Sus reglas de línea (`normalizarLinea`, `aplicarCatalogoLineas`) también revisan las del conduce |
+| `src/Utils/Cotizacion/FerreteriaCotizacionPdf.php` | Renderizador FPDF puro de la hoja de Ferretería: la cotización y, con `documento => 'conduce'`, el conduce |
 | `src/Utils/Cotizacion/Redondeo.php` | Redondeo igual en PHP 8.3 y 8.5 (copia de `montosLinea.redondear` del front) |
 | `src/Models/cotizacionModel.php` | Lecturas comunes + `crearConFormato` / `actualizarConFormato` (numeración, cabecera, líneas y ajustes en una transacción) |
 | `tools/test_cotizacion_ferreteria.php` | Pruebas por CLI, sin DB (`--pdf [--grid]` escribe los PDF de muestra) |
 | `tools/fixtures/cotizacion_ferreteria.json` | Las 3 hojas del Excel línea por línea, casos de borde y totales esperados |
 | `tests/test_cotizaciones_ferreteria.http` | Pruebas a mano contra un servidor |
+| `src/Controllers/conduceController.php` | `/api/conduces`: el token, el formato `ferreteria` (`422` si no), la ruta, la auditoría y la respuesta |
+| `src/Utils/Cotizacion/FerreteriaConduce.php` | El conduce: sus reglas (las de línea de `FerreteriaFormato`, con precio 0 permitido), la disponibilidad, el número `CON-` y crear/editar/eliminar/vista previa/PDF |
+| `src/Models/conduceModel.php` | Las tablas de la 031: lecturas de los activos, numeración con `conduce_secuencia`, y editar y eliminar sin borrar (`activo = 0`) |
+| `tools/test_conduces.php` | Pruebas del conduce por CLI, sin DB (`--pdf` escribe los PDF de muestra) |
+| `tools/test_conduces_mysql.php` | Pruebas del conduce contra MySQL de verdad, solo en la base `smhynzte_conduces_scratch` (credenciales en `tools/.env`, ignorado por git) |
+| `tests/test_conduces.http` | Pruebas a mano de los conduces contra un servidor, y las comprobaciones de servidor de la 031 |
 
 No hay autoloader: cada archivo hace `require_once` de lo que usa, y
 `CotizacionFormatos::para()` carga la clase del formato solo cuando se usa (una
@@ -50,8 +58,9 @@ petición de Gratex no carga el código ni el PDF de Ferretería).
 | `src/features/cotizaciones/formatos/index.ts` | Registro `FORMATOS`, `esFormato`, `formatoDeFila`, `useCotizacionFormato()` (lee `cotizacion_formato` de `GET /api/branding`) |
 | `src/features/cotizaciones/formatos/CotizacionEditor.tsx` | Elige el formulario: el de la empresa para una nueva, el de la fila para una existente |
 | `src/features/cotizaciones/CotizacionFormView.tsx` | El formulario de Gratex (sin cambios) |
-| `src/features/cotizaciones/formatos/ferreteria/` | `FerreteriaCotizacionForm.tsx`, `totales.ts` (misma cuenta que el PHP), `schema.ts` (Zod), `conversion.ts` (Facturar) |
+| `src/features/cotizaciones/formatos/ferreteria/` | `FerreteriaCotizacionForm.tsx`, `totales.ts` (misma cuenta que el PHP), `schema.ts` (Zod), `conversion.ts` (Facturar), y lo que comparte con el conduce: `lineas.ts`, `DescripcionLinea.tsx`, `BloqueCliente.tsx` |
 | `scripts/parity-cotizacion-ferreteria.ts` | Corre `totalesFerreteria()` sobre la copia del fixture del backend |
+| `src/features/conduces/` | Los conduces: `ConducesView.tsx` (la lista), `ConduceEditor.tsx` + `ConduceForm.tsx` (el formulario), `schema.ts` (Zod) y `conversion.ts` (Facturar). El menú los muestra solo con el formato `ferreteria` (`NavItem.formato`, `useFormatoTenant()`) |
 
 ### Datos
 
@@ -69,6 +78,9 @@ petición de Gratex no carga el código ni el PDF de Ferretería).
   - `cotizacion_ajustes` (`cotizacion_id`, `concepto`, `monto`; `UNIQUE (cotizacion_id,
     concepto)`; `ON DELETE CASCADE`): los montos fuera de las líneas. **Cada formato
     declara qué conceptos acepta**; solo se guardan los distintos de cero.
+- **Tenant migration 031** (`db/migrations/031_conduces.sql`): `conduces`, `conduce_items` y
+  `conduce_secuencia`, solo para los conduces de Ferretería. No toca las tablas de
+  cotizaciones.
 
 Esquema completo: [../database/schema.md](../database/schema.md).
 
@@ -255,6 +267,81 @@ del cliente se aplica como siempre, con un aviso. Los cargos no se copian como l
 (sale un aviso) y la retención y el abono tampoco (el pago se registra en la factura).
 En factura simple, cada precio lleva su ITBIS dentro.
 
+### Conduces de mercancía (Ferretería)
+
+El conduce es la nota de entrega que va con la mercancía y que el cliente firma. Sale de una
+cotización de Ferretería (botón "Conduce" en la lista de cotizaciones), se puede editar antes
+y después de guardarlo, lleva su propio número `CON-000001` y se imprime con la hoja de la
+cotización, pero sin precios ni totales. Una cotización puede dar varios conduces (uno por
+entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
+
+- **Solo `ferreteria`.** No es parte del contrato `CotizacionFormato`: es código propio de
+  Ferretería (`FerreteriaConduce`). `/api/conduces` responde `422` "Los conduces no están
+  disponibles para tu empresa." a cualquier otro formato, y el front muestra el menú
+  Conduces y el botón solo cuando `GET /api/branding` dice `ferreteria`. Un formato nuevo
+  no tiene conduces.
+- **El mismo permiso.** La ruta usa el módulo `cotizaciones` (`'conduces' => 'cotizaciones'`
+  en `config/permissions.php`); no hay módulo RBAC nuevo.
+- **Las mismas reglas de línea.** `FerreteriaConduce` revisa cada línea con
+  `FerreteriaFormato::normalizarLinea(…, true)` y `aplicarCatalogoLineas()`, con los mismos
+  textos; la única diferencia es que el precio puede ser 0. Bien/servicio sale del producto,
+  como en la cotización. La cotización no cambia: sus mensajes y su PDF son los de antes (lo
+  prueba `tools/test_cotizacion_ferreteria.php`).
+- **Precios internos.** Cada línea guarda su precio sin ITBIS y sus indicadores para
+  Facturar; ni la pantalla ni el PDF del conduce los muestran. Los cargos de la cotización no
+  pasan al conduce (el formulario lo avisa), y un cuerpo con `ajustes` recibe `422`.
+- **Numeración que no se reusa.** `conduce_secuencia` guarda el último número: `SELECT … FOR
+  UPDATE` y `GREATEST(ultimo, MAX(numero)) + 1` en la transacción de crear, con el `UNIQUE`
+  de `numero` como red de seguridad.
+- **Nada se borra.** Eliminar pone `activo = 0`; editar pone `activo = 0` a las líneas de
+  antes e inserta las nuevas. Si se borra la cotización de origen, el conduce se queda con
+  `cotizacion_id` `NULL` ("cotización eliminada"). Restaurar uno eliminado es un
+  `UPDATE conduces SET activo = 1` de soporte.
+- **El PDF** es `FerreteriaCotizacionPdf` con `documento => 'conduce'`: título
+  `CONDUCE DE MERCANCÍA`, la línea `Cotización: COT-…`, las columnas `Cantidad | Unidad |
+  Descripción mercancías` con el nombre de cada unidad, sin valores ni totales, y el mismo
+  "Recibido por:" y pie. El renderizador sigue puro: `FerreteriaConduce` le pasa los nombres
+  de las unidades ya resueltos.
+- **Facturar** desde un conduce prellena la factura e-CF o simple con sus líneas (precio,
+  ITBIS, producto y unidad). Una línea sin precio no se puede emitir ni guardar hasta que se
+  le escriba uno.
+- **Auditoría:** módulo `conduces`, entidad `conduce` (CREATE, UPDATE y DELETE).
+
+### Despliegue de los conduces
+
+1. **Respaldo** de las dos DBs de tenant (`smhynzte_002`, Ferretería, y
+   `smhynzte_new_gratexdb`, Gratex).
+2. **`tools/verificar_migraciones_tenant.sql`** (solo lectura) en las dos: ver qué dice de la
+   027, de la 028, de la 029 (precios) y de la 030 (POS).
+3. **Correr la 027, después la 028, la 029 (`029_precios_4_decimales.sql`) y la 030
+   (`030_pos.sql`)** en la base donde digan `FALTA`, según el ORDEN de la cabecera de cada
+   una. Este despliegue también lleva el código que las necesita. La 030 es la del POS:
+   va junto con `master_migrations/012_pos.sql`, su cabecera la pide en las empresas que
+   vayan a usar el POS y dice que no estorba en las demás; aquí se corre en las dos
+   para que el verificador termine entero en `APLICADA`.
+4. **Correr la 031 (`031_conduces.sql`)**, fuera de horario y después de la 030, en las dos
+   DBs: pegar el archivo completo en la pestaña SQL con la base seleccionada y leer la fila
+   final (`base` = esa base, las tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok`
+   = `SI`).
+5. **El verificador otra vez** en las dos: de la 027 a la 031 tienen que decir `APLICADA`
+   antes de desplegar.
+6. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
+   `cotizacion_formato = 'ferreteria'`.
+7. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
+   - como Ferretería: un conduce desde una cotización, su PDF, una edición y Eliminar (deja de
+     salir en la lista); Facturar sin emitir, comprobando que una línea sin precio no deja
+     emitir;
+   - como Gratex: nada cambió y no hay menú Conduces.
+
+   El conduce de prueba gasta su número: el primer conduce real de Ferretería ya no será
+   `CON-000001`. Si eso importa, probar solo la vista previa, que no gasta número. Con solo la
+   vista previa no hay ningún conduce sobre el que pulsar Facturar, así que ni el bloqueo de la
+   línea sin precio (el riesgo de `MontoItem` 0 ante la DGII) ni crear, editar y eliminar se
+   ejercitan: hay que elegir entre gastar `CON-000001` en la prueba (el número no se reusa
+   nunca) o apoyarse en las comprobaciones de antes de producción (el navegador contra el mock
+   y los bloques C y D de `tests/test_conduces.http` en un stack de prueba), y lo decide el
+   dueño.
+
 ### Redondeo
 
 `Redondeo::r($x, $dec)` copia `montosLinea.redondear`: pre-redondeo a 15 cifras
@@ -273,9 +360,12 @@ formatos de `src/Utils/Cotizacion/`; Gratex y la facturación siguen con su `rou
 |-----|------|
 | Reglas, totales contra las hojas, validación, número, PDF, modelo con una conexión falsa, registro | `php tools/test_cotizacion_ferreteria.php` (desde `api-gratex`, sin DB; termina en `N/N OK` y sale con 1 si algo falla) |
 | PDF para comparar con el Excel | `php tools/test_cotizacion_ferreteria.php --pdf` (o `--grid`, con la rejilla de 10 mm) → `tools/out/` |
-| Orden de las FK del snapshot y SQL dinámico de la 026, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
+| Orden de las FK del snapshot y SQL dinámico de la 026 y la 031, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
 | Paridad del front | `node scripts/parity-cotizacion-ferreteria.ts` (desde `fiscalo`) |
 | API real (crear, editar, vista previa, PDF, borrar, cada `422`, el `409`, la regresión de Gratex) y las comprobaciones M1-M12 de servidor: la 026 dos veces sobre un volcado de cada DB de tenant, la numeración con cinco creaciones simultáneas (`GET_LOCK`) y el estado que queda en la base | `tests/test_cotizaciones_ferreteria.http` contra un servidor con las migraciones |
+| Conduces: reglas, número, PDF en modo conduce, el modelo con una conexión falsa y las piezas del controller | `php tools/test_conduces.php` (sin DB; `--pdf` → `tools/out/`) |
+| Conduces contra MySQL de verdad (la base scratch): la 031 dos veces, el snapshot nuevo, conduceModel de punta a punta, un 1062 real, cinco creaciones en paralelo y las reglas ON DELETE | `php -d extension=pdo_mysql tools/test_conduces_mysql.php` (credenciales en `tools/.env`, ignorado por git; solo `smhynzte_conduces_scratch`) |
+| API real de los conduces (crear, listar, editar, PDF, vista previa, eliminar sin borrar ni reusar el número, el `401` antes del `422`, cada `422`, Gratex sin cambios) y las comprobaciones M1-M17 de servidor: la 031 dos veces y su fila final, cinco creaciones simultáneas y el estado que queda en la base | `tests/test_conduces.http` contra un servidor con la 031 |
 
 El CLI nunca abre una base: el modelo se crea sin constructor y con una conexión
 falsa. `crear()`, `actualizar()`, `preview()` y `pdf()` de un formato sí leen la base
@@ -383,3 +473,6 @@ Volver atrás: ver la sección siguiente (volver a `gratex` y bajar el código).
 - La vista previa de cotización en `/api/branding/preview` y `plantillas.php`.
 - `custom:ferreventura` falla los chequeos `custom:tenant<id>` de `PUT /api/branding`.
 - Las consultas N+1 del listado de cotizaciones.
+- Conduces: lo entregado contra lo pendiente, varios conduces en una factura, un conduce desde
+  cero o hacia una cotización, marcarlo "facturado", un permiso propio, restaurar uno
+  eliminado desde la pantalla y conduces para otros formatos.

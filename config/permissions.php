@@ -54,6 +54,10 @@ $ADMIN_MODULES = [
     'users',
     'roles',
     'audit',
+    // POS (docs/specs/pos.md): cajas, empleados con PIN y equipos de caja, y el
+    // boton POS de app.*. Los empleados del POS NO son usuarios: entran con
+    // PIN en un equipo habilitado (ruta 'pos', principal 'pos-caja').
+    'pos',
 ];
 
 return [
@@ -87,6 +91,12 @@ return [
         // conecta al fallback del .env en vez de a la DB del tenant.
         'inventario'               => 'products',
         'cotizaciones'             => 'cotizaciones',
+        // Conduces de mercancia (Ferreteria): salen de una cotizacion y viven
+        // bajo su permiso, sin modulo/seed RBAC nuevos (spec conduces 4.1). Sin
+        // esta entrada la ruta quedaria sin RBAC: PermissionGate solo anotaria
+        // "ruta sin mapeo RBAC" en el error_log y cualquier rol con un token
+        // valido podria usar los conduces, tuviera o no el modulo cotizaciones.
+        'conduces'                 => 'cotizaciones',
         'facturas'                 => 'facturas',
         'facturas-simples'         => 'facturas-simples',
         'gastos'                   => 'gastos',
@@ -118,6 +128,13 @@ return [
         'ecf'                      => ['GET' => 'aprobaciones', '*' => 'dgii'],
         // Solo principal integracion (X-API-SECRET); el controller filtra por tenant.
         'integracion'              => 'integration',
+
+        // POS. 'pos' lo llama el equipo de caja con su token (X-POS-EQUIPO), no un
+        // usuario: el gate resuelve el tenant del equipo y el controller valida
+        // equipo y sesion del empleado (PosAuth). 'pos-admin' es de usuario-app
+        // con el modulo 'pos' (el controller lo exige aunque el gate este en sombra).
+        'pos'                      => 'pos-caja',
+        'pos-admin'                => 'pos',
     ],
 
     // Roles de sistema sembrados por tenant (migracion 003 + create_tenant.php).

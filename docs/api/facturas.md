@@ -507,7 +507,8 @@ Todo lo demás (`fecha_emision`, `tipo_pago`, `tipo_ingresos`, `totales`, `compr
 | `tipo_pago` | no | int | `1` | `1`=Contado, `2`=Crédito, `3`=Gratuito, `4`=Permuta, `5`=Otros. **`2` solo si el cliente tiene `permitir_credito=1`**, si no responde 422 |
 | `descuento` | no | number | el del cliente | % de descuento de la factura (0-100). Si se omite se usa `clients.descuento`; mandar `0` lo anula. Se reparte por línea como `DescuentoMonto` y baja la base del ITBIS. Una línea con su propio `descuento_monto` no se toca |
 | `tipo_ingresos` | no | string | `"01"` | `"01"` Operaciones (no aplica a E43/E47) |
-| `indicador_monto_gravado` | no | string | `"0"` | Se ignora: esta ruta siempre manda `"0"` al XML (XSD: `"0"` = los montos de las líneas **no** incluyen ITBIS, `"1"` = sí), porque `precio_unitario` se toma **sin ITBIS** y el ITBIS se suma encima. Si tus precios traen ITBIS, desglósalos antes (precio ÷ 1.18, hasta 4 decimales). Solo `strict_input` respeta el valor enviado (E31/32/33/34/41/45) |
+| `indicador_monto_gravado` | no | string | `"0"` | Se ignora: el XML lleva `"0"` (XSD: `"0"` = los montos de las líneas **no** incluyen ITBIS, `"1"` = sí), porque `precio_unitario` se toma **sin ITBIS** y el ITBIS se suma encima. Para precios con ITBIS usa `precios_incluyen_itbis`. Solo `strict_input` respeta el valor enviado (E31/32/33/34/41/45) |
+| `precios_incluyen_itbis` | no | bool | `false` | `true` = cada `precio_unitario` ya trae el ITBIS (precio de góndola) y el XML sale con `IndicadorMontoGravado = 1`. Solo E31, E32, E33 y E34 (otro tipo → 422). El total es la suma exacta de las líneas (7 × 25.00 = 175.00); los montos gravados se sacan **por tasa**, como la DGII (`round(suma / 1.18, 2)`), y el ITBIS es la diferencia. `factura_items.subtotal` guarda igual la base **sin** ITBIS. Lo usa el POS ([specs/pos.md](../specs/pos.md), F4). También en `POST /api/facturas/preview`. No se lee de `indicador_monto_gravado` a propósito: un front viejo mandaba ese en `"1"` con precios sin ITBIS |
 | `comprador` | no | object | del cliente | Sobrescribe datos del comprador (ver abajo) |
 | `totales` | no | object | calculado | Sobrescribe tasas/totales (ver abajo) |
 | `e_ncf` | no | string | autodispensado | Forzar un e-NCF específico (normalmente NO enviar) |
@@ -643,7 +644,7 @@ B2B. Requiere RNC del comprador.
 
 B2C. Sin comprador identificado. Dos flujos según monto total:
 - **≥ RD$250,000**: envío directo a DGII certecf, retorna `track_id`
-- **< RD$250,000**: flujo RFCE vía `fc.dgii.gov.do`, retorna `rfce_track_id`. El XML firmado se descarga en `GET /api/facturas/{id}/xml` y se sube manualmente al portal DGII.
+- **< RD$250,000**: flujo RFCE vía `fc.dgii.gov.do`, retorna `rfce_track_id`. En producción la DGII solo recibe ese resumen; el XML íntegro queda firmado en la factura (`GET /api/facturas/{id}/xml`). Subirlo al portal fue un paso de la certificación, no de la operación.
 
 ```json
 {
@@ -1053,7 +1054,7 @@ el `error_log` y en el audit log (`error_message`). Los integradores
 1. `POST /api/facturas` con el payload mínimo → recibe `factura_id`, `e_ncf`, `estado_dgii`.
 2. (Opcional) Polling a `GET /api/facturas/{factura_id}/estado` hasta `ACEPTADO`/`RECHAZADO`.
 3. Mostrar/descargar PDF: `GET /api/facturas/{factura_id}/pdf` (o `?format=base64` para incrustar).
-4. E32 RFCE: descargar XML firmado en `GET /api/facturas/{factura_id}/xml` y subirlo al portal DGII.
+4. E32 RFCE: nada más. El XML firmado queda disponible en `GET /api/facturas/{factura_id}/xml` por si la DGII lo pide.
 
 > Para previsualizar el PDF **antes** de emitir (sin consumir secuencia NCF), usa `POST /api/facturas/preview` con `client_id` + `items` (+ `tipo_ecf`, `ncf` opcionales). Devuelve el PDF en base64.
 

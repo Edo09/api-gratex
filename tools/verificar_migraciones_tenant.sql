@@ -1,7 +1,7 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 028) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 031) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
 -- creado: una columna, una tabla, un indice o el tipo o ancho nuevo de una columna.
@@ -12,7 +12,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025, la 026, la 027 y la 028 si se pueden repetir sin dano.
+-- La 025, la 026, la 027, la 028, la 029, la 030 y la 031 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -144,5 +144,28 @@ FROM (
          AND EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'gastos'
                    AND COLUMN_NAME = 'estado_dgii' AND CHARACTER_MAXIMUM_LENGTH >= 40)
+  UNION ALL
+  SELECT '029', '029_precios_4_decimales.sql',
+         'products.precio, precio_2, precio_3 y precio_4 son decimal(18,4)',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products'
+            AND COLUMN_NAME IN ('precio', 'precio_2', 'precio_3', 'precio_4')
+            AND COLUMN_TYPE LIKE 'decimal(18,4)%') = 4
+  UNION ALL
+  SELECT '030', '030_pos.sql',
+         'tablas pos_cajas, pos_empleados, pos_sesiones, pos_turnos, pos_caja_movimientos y product_barcodes + 4 columnas POS de facturas',
+         (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME IN ('pos_cajas', 'pos_empleados', 'pos_sesiones', 'pos_turnos',
+                               'pos_caja_movimientos', 'product_barcodes')) = 6
+         AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas'
+            AND COLUMN_NAME IN ('turno_id', 'pos_empleado_id', 'pos_idempotency_key', 'envio_pendiente')) = 4
+  UNION ALL
+  SELECT '031', '031_conduces.sql',
+         'tablas conduces, conduce_items y conduce_secuencia',
+         (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME IN ('conduces', 'conduce_items', 'conduce_secuencia')) = 3
 ) m
 ORDER BY m.migracion;
