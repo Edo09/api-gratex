@@ -6,7 +6,7 @@ require_once(__DIR__ . '/../Utils/Cotizacion/FerreteriaConduce.php');
 
 /**
  * Conduces de mercancía de Ferretería: las tablas conduces, conduce_items y
- * conduce_secuencia de la migración 029 (spec 2026-10-05-conduces-design, 3 y 4).
+ * conduce_secuencia de la migración 030 (spec 2026-10-05-conduces-design, 3 y 4).
  *
  * Nada se borra de la base de datos. Eliminar pone conduces.activo = 0, y
  * editar pone activo = 0 a las líneas de antes e inserta las nuevas. Como las
@@ -247,7 +247,7 @@ class conduceModel
     }
 
     /**
-     * La fila de conduce_secuencia, por si la semilla de la 029 no se corrió.
+     * La fila de conduce_secuencia, por si la semilla de la 030 no se corrió.
      * IGNORE no toca una fila que ya está.
      *
      * Va fuera de la transacción a propósito: con la fila ya presente, InnoDB

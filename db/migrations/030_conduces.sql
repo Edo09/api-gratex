@@ -1,5 +1,5 @@
 -- ============================================================================
--- 029_conduces.sql — Conduces de mercancia (formato ferreteria): tablas
+-- 030_conduces.sql — Conduces de mercancia (formato ferreteria): tablas
 -- conduces, conduce_items y conduce_secuencia.
 -- ============================================================================
 -- Para DBs de tenant YA desplegados: correr en la base de CADA empresa (la de
@@ -68,10 +68,13 @@
 --     y es cuestion de segundos, pero una consulta larga sobre cotizaciones o
 --     products la haria esperar (y las escrituras que lleguen detras, tambien).
 --
--- ORDEN: correr DESPUES de la 028 y ANTES de desplegar el codigo de conduces
--- (api-gratex y despues fiscalo). No depende de la 027 ni de la 028: 029 es
--- solo el siguiente numero libre. Solo crea tablas, asi que es segura con el
--- codigo que corre hoy en produccion.
+-- ORDEN: el verificador (tools/verificar_migraciones_tenant.sql) primero; la
+-- 027, la 028 y la 029 (precios_4_decimales) donde digan FALTA; DESPUES esta
+-- 030, y ANTES de desplegar el codigo de conduces (api-gratex y despues
+-- fiscalo), con el verificador otra vez y la 027 a la 030 en APLICADA. No
+-- depende de la 027, la 028 ni la 029: 030 es solo el siguiente numero libre.
+-- Solo crea tablas, asi que es segura con el codigo que corre hoy en
+-- produccion.
 --
 -- Se puede correr dos veces: si las tablas ya estan, cada paso ejecuta DO 0 y
 -- la fila de conduce_secuencia no cambia.
@@ -160,9 +163,9 @@ SET @sql_conduces := IF(@crear_conduces = 1,
         'REFERENCES `', @db, '`.cotizaciones (id) ON DELETE SET NULL',
     ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'),
   'DO 0');
-PREPARE s_029_conduces FROM @sql_conduces;
-EXECUTE s_029_conduces;
-DEALLOCATE PREPARE s_029_conduces;
+PREPARE s_030_conduces FROM @sql_conduces;
+EXECUTE s_030_conduces;
+DEALLOCATE PREPARE s_030_conduces;
 
 -- 2b) conduce_items: las lineas. amount y los dos indicadores son internos
 --     (para Facturar; el conduce nunca los imprime). activo = 0: linea
@@ -193,9 +196,9 @@ SET @sql_conduce_items := IF(@crear_conduce_items = 1,
         'REFERENCES `', @db, '`.products (id) ON DELETE SET NULL',
     ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'),
   'DO 0');
-PREPARE s_029_items FROM @sql_conduce_items;
-EXECUTE s_029_items;
-DEALLOCATE PREPARE s_029_items;
+PREPARE s_030_items FROM @sql_conduce_items;
+EXECUTE s_030_items;
+DEALLOCATE PREPARE s_030_items;
 
 -- 2c) conduce_secuencia: una sola fila (id = 1) con el ultimo numero dado. Al
 --     crear un conduce, conduceModel la bloquea (SELECT ... FOR UPDATE): dos
@@ -210,9 +213,9 @@ SET @sql_conduce_secuencia := IF(@crear_conduce_secuencia = 1,
       'PRIMARY KEY (id)',
     ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'),
   'DO 0');
-PREPARE s_029_secuencia FROM @sql_conduce_secuencia;
-EXECUTE s_029_secuencia;
-DEALLOCATE PREPARE s_029_secuencia;
+PREPARE s_030_secuencia FROM @sql_conduce_secuencia;
+EXECUTE s_030_secuencia;
+DEALLOCATE PREPARE s_030_secuencia;
 
 -- ----------------------------------------------------------------------------
 -- 3) La fila de la secuencia, solo si la tabla existe ahora. INSERT IGNORE: si
@@ -226,9 +229,9 @@ SET @hay_secuencia := (
 SET @sql_semilla := IF(@hay_secuencia = 1,
   CONCAT('INSERT IGNORE INTO `', @db, '`.conduce_secuencia (id, ultimo) VALUES (1, 0)'),
   'DO 0');
-PREPARE s_029_semilla FROM @sql_semilla;
-EXECUTE s_029_semilla;
-DEALLOCATE PREPARE s_029_semilla;
+PREPARE s_030_semilla FROM @sql_semilla;
+EXECUTE s_030_semilla;
+DEALLOCATE PREPARE s_030_semilla;
 
 -- ----------------------------------------------------------------------------
 -- 4) La fila de la secuencia para el resultado. Se lee con SQL armado porque la
@@ -238,9 +241,9 @@ SET @fila_secuencia := NULL;
 SET @sql_fila_secuencia := IF(@hay_secuencia = 1,
   CONCAT('SELECT CONCAT(''('', id, '', '', ultimo, '')'') INTO @fila_secuencia FROM `', @db, '`.conduce_secuencia WHERE id = 1'),
   'DO 0');
-PREPARE s_029_fila FROM @sql_fila_secuencia;
-EXECUTE s_029_fila;
-DEALLOCATE PREPARE s_029_fila;
+PREPARE s_030_fila FROM @sql_fila_secuencia;
+EXECUTE s_030_fila;
+DEALLOCATE PREPARE s_030_fila;
 
 -- ----------------------------------------------------------------------------
 -- Resultado (la ultima consulta, la que muestra phpMyAdmin): una sola fila.

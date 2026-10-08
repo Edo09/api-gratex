@@ -22,7 +22,7 @@ Controlador: `src/Controllers/conduceController.php` (revisa la petición, elige
 escribe la auditoría y envuelve la respuesta) · reglas, disponibilidad y armado del PDF:
 `src/Utils/Cotizacion/FerreteriaConduce.php` · modelo: `src/Models/conduceModel.php` · PDF:
 `src/Utils/Cotizacion/FerreteriaCotizacionPdf.php` (modo conduce) · tablas: migración de
-tenant 029 ([../database/schema.md](../database/schema.md)). El formato Ferretería y cómo
+tenant 030 ([../database/schema.md](../database/schema.md)). El formato Ferretería y cómo
 encaja el conduce: [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#conduces-de-mercancía-ferretería).
 Base URL (local): `http://localhost:8000`
 
@@ -226,7 +226,7 @@ Lo que hace el servidor, en orden:
 número dado. `conduceModel::crear()`:
 
 1. `INSERT IGNORE INTO conduce_secuencia (id, ultimo) VALUES (1, 0)` justo **antes** de la
-   transacción: la fila existe aunque la semilla de la 029 no se haya corrido. Va fuera a
+   transacción: la fila existe aunque la semilla de la 030 no se haya corrido. Va fuera a
    propósito: dentro de la transacción, el candado compartido de ese `INSERT` duraría hasta
    el commit, y dos guardados a la vez se esperarían entre sí (deadlock `1213`).
 2. En la transacción, `SELECT ultimo FROM conduce_secuencia WHERE id = 1 FOR UPDATE`: el
@@ -390,7 +390,7 @@ Todos con `status: false`. `N` es el número de la línea como la ve el usuario 
 | 500 | `No se pudo generar el PDF del conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.` | |
 | 500 | `No se pudo completar la operación con los conduces. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.` | Cualquier otro fallo, por ejemplo una lectura del listado o del conduce |
 
-Sin la migración 029 en la DB del tenant, las rutas de Ferretería responden `500` y el log
+Sin la migración 030 en la DB del tenant, las rutas de Ferretería responden `500` y el log
 dice `[conduces] … Table '….conduces' doesn't exist`. Gratex no lo nota: su `422` de
 disponibilidad sale antes de tocar la base.
 
@@ -445,16 +445,16 @@ la fila del conduce (`GET ?id=`) y lo emite con los endpoints de siempre (`/api/
 - Contra MySQL de verdad, sin servidor HTTP:
   `php -d extension=pdo_mysql tools/test_conduces_mysql.php`. Usa solo la base de pruebas
   `smhynzte_conduces_scratch` (credenciales en `tools/.env`, ignorado por git), la vacía al
-  empezar y al terminar, y prueba la 029 dos veces, el snapshot nuevo, `conduceModel` de
+  empezar y al terminar, y prueba la 030 dos veces, el snapshot nuevo, `conduceModel` de
   punta a punta, un `1062` real con su reintento, cinco creaciones a la vez y las reglas
   `ON DELETE`. Nunca apunta a producción.
-- A mano contra un servidor, con las comprobaciones de la 029 y de la base:
+- A mano contra un servidor, con las comprobaciones de la 030 y de la base:
   [../../tests/test_conduces.http](../../tests/test_conduces.http).
 - **En producción**, cada conduce de prueba **gasta su número** (queda con `activo = 0` y
   no se reusa): el primer conduce real ya no sería `CON-000001`. La vista previa no gasta
   número.
 
-### Migración 029 (datos)
+### Migración 030 (datos)
 
 `conduces`, `conduce_items` y `conduce_secuencia` (esquema en
 [../database/schema.md](../database/schema.md)). La migración se pega completa en la pestaña
@@ -474,4 +474,4 @@ SQL de phpMyAdmin con la base del tenant seleccionada, y se puede correr dos vec
 
 Si un motor no es `InnoDB` o un tipo sale `NULL`, no se creó ninguna tabla y `todo_ok` dice
 `NO`. Después, `tools/verificar_migraciones_tenant.sql` tiene que decir `APLICADA` en la fila
-`029`.
+`030`.

@@ -13,31 +13,32 @@
  *   - La cabecera dice el rango 012..NNN, con NNN la migracion mas alta de
  *     db/migrations/ (una migracion nueva sin reflejar en el snapshot falla).
  *   - El bloque de cotizaciones trae el estado final de la migracion 026 y el
- *     de conduces el de la 029 (columnas, nulabilidad, indices y FKs con los
+ *     de conduces el de la 030 (columnas, nulabilidad, indices y FKs con los
  *     mismos nombres, y la fila de conduce_secuencia).
- *   - La 026 y la 029 nombran esos mismos indices y FKs, cada PREPARE tiene su
+ *   - La 026 y la 030 nombran esos mismos indices y FKs, cada PREPARE tiene su
  *     EXECUTE y su DEALLOCATE PREPARE, y su SQL dinamico, armado con tipos de
  *     ejemplo, es un ALTER/CREATE (o la fila de la secuencia) con parentesis y
  *     comillas balanceados.
- *   - La 029 sigue la regla de phpMyAdmin (db/migrations/README.md, ver 028):
+ *   - La 030 sigue la regla de phpMyAdmin (db/migrations/README.md, ver 028):
  *     la primera sentencia es SET @db := DATABASE(), toda consulta a
  *     information_schema filtra por @db, el unico SELECT de nivel superior es
  *     el ultimo, y sus tres tablas armadas son las del snapshot elemento por
- *     elemento. El verificador de migraciones tiene su fila.
+ *     elemento. El verificador de migraciones tiene su fila (y la de la 029 de
+ *     precios, que deja products.precio .. precio_4 en DECIMAL(18,4)).
  *
- * No reemplaza aplicar el snapshot, la 026 y la 029 a una DB de verdad; solo
+ * No reemplaza aplicar el snapshot, la 026 y la 030 a una DB de verdad; solo
  * atrapa en local lo que mas facil se rompe al mover bloques o al escribir SQL
  * dinamico.
  *
  * Uso:
  *   php tools/check_tenant_schema_orden.php            (sale con 1 si algo falla)
- *   php tools/check_tenant_schema_orden.php --mostrar  (ademas imprime el SQL dinamico de la 026 y la 029)
+ *   php tools/check_tenant_schema_orden.php --mostrar  (ademas imprime el SQL dinamico de la 026 y la 030)
  */
 
 $raiz = dirname(__DIR__);
 $rutaSnapshot = $raiz . '/db/tenant_schema.sql';
 $rutaMigracion = $raiz . '/db/migrations/026_cotizaciones_formatos.sql';
-$rutaMigracion029 = $raiz . '/db/migrations/029_conduces.sql';
+$rutaMigracion030 = $raiz . '/db/migrations/030_conduces.sql';
 $rutaVerificador = $raiz . '/tools/verificar_migraciones_tenant.sql';
 
 $fallos = 0;
@@ -250,7 +251,7 @@ $conteo = array_count_values(array_column($lista, 'nombre'));
 $repetidas = array_keys(array_filter($conteo, fn($n) => $n > 1));
 $chk('ninguna tabla se crea dos veces' . ($repetidas ? ' (repetidas: ' . implode(', ', $repetidas) . ')' : ''), $repetidas === []);
 
-echo "\n== Cotizaciones y conduces: estado final de las migraciones 026 y 029 ==\n";
+echo "\n== Cotizaciones y conduces: estado final de las migraciones 026 y 030 ==\n";
 // La cabecera llega a la migracion mas alta de db/migrations/, no a una fija:
 // una migracion nueva que no se refleja en el snapshot falla aqui.
 $numeros = array_map(
@@ -289,8 +290,8 @@ $columnas = [
         'concepto'      => '/^VARCHAR\(30\) NOT NULL\b/i',
         'monto'         => '/^DECIMAL\(18,2\) NOT NULL DEFAULT 0\.00\b/i',
     ],
-    // 029: conduces de mercancia. Nada se borra (activo = 0); cotizacion_id y
-    // product_id llevan el tipo de una DB del repo (la 029 lo copia del id).
+    // 030: conduces de mercancia. Nada se borra (activo = 0); cotizacion_id y
+    // product_id llevan el tipo de una DB del repo (la 030 lo copia del id).
     'conduces' => [
         'numero'        => '/^INT UNSIGNED NOT NULL\b/i',
         'code'          => '/^VARCHAR\(20\) NOT NULL\b/i',
@@ -358,7 +359,7 @@ foreach ($indices as $tabla => $lst) {
         $chk("{$tabla}: {$esperado}", tieneElemento($porNombre[$tabla] ?? [], $esperado));
     }
 }
-// La fila de la secuencia, como la siembra la 029 (conduceModel tambien la
+// La fila de la secuencia, como la siembra la 030 (conduceModel tambien la
 // asegura con INSERT IGNORE, pero un tenant nuevo debe nacer igual a uno migrado).
 $chk('conduce_secuencia: el snapshot siembra la fila (1, 0) con INSERT IGNORE',
     preg_match('/^INSERT IGNORE INTO conduce_secuencia \(id, ultimo\) VALUES \(1, 0\);$/m', $sql) === 1);
@@ -404,16 +405,16 @@ foreach ($dinamicos as $d) {
     }
 }
 
-echo "\n== Migracion 029 ==\n";
-$hay029 = is_file($rutaMigracion029);
-$chk('existe db/migrations/029_conduces.sql', $hay029);
-$mig029 = $hay029 ? sinComentarios((string) file_get_contents($rutaMigracion029)) : '';
+echo "\n== Migracion 030 ==\n";
+$hay030 = is_file($rutaMigracion030);
+$chk('existe db/migrations/030_conduces.sql', $hay030);
+$mig030 = $hay030 ? sinComentarios((string) file_get_contents($rutaMigracion030)) : '';
 // La misma migracion en una sola linea, para buscar sentencias sin depender del sangrado.
-$plano029 = (string) preg_replace('/\s+/', ' ', $mig029);
+$plano030 = (string) preg_replace('/\s+/', ' ', $mig030);
 foreach (['uk_conduces_numero', 'idx_conduces_cotizacion', 'idx_conduces_date', 'idx_conduces_activo',
           'conduces_cotizacion_fk', 'idx_conduce_items_conduce', 'idx_conduce_items_product',
           'conduce_items_conduce_fk', 'conduce_items_product_fk', 'conduce_secuencia'] as $nombre) {
-    $chk("029 nombra {$nombre}", $mig029 !== '' && preg_match('/\b' . $nombre . '\b/', $mig029) === 1);
+    $chk("030 nombra {$nombre}", $mig030 !== '' && preg_match('/\b' . $nombre . '\b/', $mig030) === 1);
 }
 
 // Regla de phpMyAdmin (db/migrations/README.md; la 028 la revisa en
@@ -422,47 +423,47 @@ foreach (['uk_conduces_numero', 'idx_conduces_cotizacion', 'idx_conduces_date', 
 // PRIMERA sentencia, todo se nombra con ella y el unico SELECT de nivel
 // superior es el resultado final. REFERENTIAL_CONSTRAINTS no tiene
 // TABLE_SCHEMA: ahi el filtro es CONSTRAINT_SCHEMA = @db.
-$sent029 = sentencias($mig029);
-$chk('029: la primera sentencia fija la base en @db', ($sent029[0] ?? '') === 'SET @db := DATABASE()');
-$chk('029: DATABASE() aparece una sola vez', substr_count($mig029, 'DATABASE()') === 1);
-$usosIs = preg_match_all('/\binformation_schema\./i', $mig029);
-$filtrosDb = preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $mig029);
-$chk("029: cada consulta a information_schema filtra por @db ({$usosIs} consultas, {$filtrosDb} filtros)",
+$sent030 = sentencias($mig030);
+$chk('030: la primera sentencia fija la base en @db', ($sent030[0] ?? '') === 'SET @db := DATABASE()');
+$chk('030: DATABASE() aparece una sola vez', substr_count($mig030, 'DATABASE()') === 1);
+$usosIs = preg_match_all('/\binformation_schema\./i', $mig030);
+$filtrosDb = preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $mig030);
+$chk("030: cada consulta a information_schema filtra por @db ({$usosIs} consultas, {$filtrosDb} filtros)",
     $usosIs > 0 && $usosIs === $filtrosDb);
-$selects029 = array_keys(array_filter($sent029, fn($s) => stripos($s, 'SELECT') === 0));
-$chk('029: el unico SELECT de nivel superior es la ultima sentencia',
-    $sent029 !== [] && $selects029 === [count($sent029) - 1]);
-$final029 = $sent029 !== [] ? $sent029[count($sent029) - 1] : '';
-$chk('029: el resultado muestra la base, la regla ON DELETE de cada FK y todo_ok',
-    str_contains($final029, '@db AS base')
-    && substr_count($final029, 'SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS') === 3
-    && str_contains($final029, 'AS todo_ok'));
+$selects030 = array_keys(array_filter($sent030, fn($s) => stripos($s, 'SELECT') === 0));
+$chk('030: el unico SELECT de nivel superior es la ultima sentencia',
+    $sent030 !== [] && $selects030 === [count($sent030) - 1]);
+$final030 = $sent030 !== [] ? $sent030[count($sent030) - 1] : '';
+$chk('030: el resultado muestra la base, la regla ON DELETE de cada FK y todo_ok',
+    str_contains($final030, '@db AS base')
+    && substr_count($final030, 'SELECT DELETE_RULE FROM information_schema.REFERENTIAL_CONSTRAINTS') === 3
+    && str_contains($final030, 'AS todo_ok'));
 
-// Lo que la 029 averigua antes de crear: el tipo de los dos id (se copia a las
+// Lo que la 030 averigua antes de crear: el tipo de los dos id (se copia a las
 // FK) y que cotizaciones y products sean InnoDB. O se crean las tres tablas o
 // ninguna: cada guarda pide que falte la tabla, los dos motores y los dos tipos.
-$chk('029: copia el tipo de cotizaciones.id y de products.id',
-    str_contains($plano029, "SET @tipo_cot_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'cotizaciones' AND COLUMN_NAME = 'id' );")
-    && str_contains($plano029, "SET @tipo_product_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'products' AND COLUMN_NAME = 'id' );"));
-$chk('029: cuenta cotizaciones y products con ENGINE = InnoDB',
-    str_contains($plano029, "SET @motores_innodb := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME IN ('cotizaciones', 'products') AND ENGINE = 'InnoDB' );"));
+$chk('030: copia el tipo de cotizaciones.id y de products.id',
+    str_contains($plano030, "SET @tipo_cot_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'cotizaciones' AND COLUMN_NAME = 'id' );")
+    && str_contains($plano030, "SET @tipo_product_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'products' AND COLUMN_NAME = 'id' );"));
+$chk('030: cuenta cotizaciones y products con ENGINE = InnoDB',
+    str_contains($plano030, "SET @motores_innodb := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME IN ('cotizaciones', 'products') AND ENGINE = 'InnoDB' );"));
 foreach (['conduces', 'conduce_items', 'conduce_secuencia'] as $tabla) {
-    $chk("029: @crear_{$tabla} exige que falte la tabla, los dos motores InnoDB y los dos tipos de id",
-        str_contains($plano029, "SET @has_{$tabla} := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = '{$tabla}' );")
-        && str_contains($plano029, "SET @crear_{$tabla} := (@has_{$tabla} = 0 AND @motores_innodb = 2 AND @tipo_cot_id IS NOT NULL AND @tipo_product_id IS NOT NULL);"));
+    $chk("030: @crear_{$tabla} exige que falte la tabla, los dos motores InnoDB y los dos tipos de id",
+        str_contains($plano030, "SET @has_{$tabla} := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = '{$tabla}' );")
+        && str_contains($plano030, "SET @crear_{$tabla} := (@has_{$tabla} = 0 AND @motores_innodb = 2 AND @tipo_cot_id IS NOT NULL AND @tipo_product_id IS NOT NULL);"));
 }
 
-preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $mig029, $prep029);
-preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $mig029, $exec029);
-preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $mig029, $deal029);
-$chk('029: cada PREPARE tiene su EXECUTE y su DEALLOCATE (' . count($prep029[1]) . ' sentencias)',
-    $prep029[1] !== [] && $prep029[1] === $exec029[1] && $prep029[1] === $deal029[1]);
-$chk('029: ningun nombre de sentencia preparada se repite', count($prep029[1]) === count(array_unique($prep029[1])));
+preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $mig030, $prep030);
+preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $mig030, $exec030);
+preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $mig030, $deal030);
+$chk('030: cada PREPARE tiene su EXECUTE y su DEALLOCATE (' . count($prep030[1]) . ' sentencias)',
+    $prep030[1] !== [] && $prep030[1] === $exec030[1] && $prep030[1] === $deal030[1]);
+$chk('030: ningun nombre de sentencia preparada se repite', count($prep030[1]) === count(array_unique($prep030[1])));
 
-// El SQL armado de la 029 (con la base 'tenant', tipos de una DB del repo y
+// El SQL armado de la 030 (con la base 'tenant', tipos de una DB del repo y
 // cada guarda booleana en 1) solo puede crear las tres tablas, sembrar la fila
 // de la secuencia o leerla para el resultado; toda REFERENCES nombra la base.
-$ejemplo029 = [
+$ejemplo030 = [
     '@db'                      => 'tenant',
     '@tipo_cot_id'             => 'int(11)',
     '@tipo_product_id'         => 'int(11)',
@@ -471,58 +472,65 @@ $ejemplo029 = [
     '@crear_conduce_secuencia' => '1',
     '@hay_secuencia'           => '1',
 ];
-$permitidos029 = [
+$permitidos030 = [
     '/^CREATE TABLE IF NOT EXISTS `tenant`\.(conduces|conduce_items|conduce_secuencia) \(/',
     '/^' . preg_quote('INSERT IGNORE INTO `tenant`.conduce_secuencia (id, ultimo) VALUES (1, 0)', '/') . '$/',
     '/^' . preg_quote("SELECT CONCAT('(', id, ', ', ultimo, ')') INTO @fila_secuencia FROM `tenant`.conduce_secuencia WHERE id = 1", '/') . '$/',
 ];
-$dinamicos029 = armarDinamicos($mig029, $ejemplo029);
-$chk('029: cada @sql_* se prepara una vez (' . count($dinamicos029) . ' sentencias dinamicas)',
-    $dinamicos029 !== [] && array_column($dinamicos029, 'variable') === $prep029[2]);
-$tablas029 = [];
-foreach ($dinamicos029 as $d) {
+$dinamicos030 = armarDinamicos($mig030, $ejemplo030);
+$chk('030: cada @sql_* se prepara una vez (' . count($dinamicos030) . ' sentencias dinamicas)',
+    $dinamicos030 !== [] && array_column($dinamicos030, 'variable') === $prep030[2]);
+$tablas030 = [];
+foreach ($dinamicos030 as $d) {
     $permitido = false;
-    foreach ($permitidos029 as $patron) {
+    foreach ($permitidos030 as $patron) {
         $permitido = $permitido || preg_match($patron, $d['sql']) === 1;
     }
     $ok = $d['desconocida'] === null
-        && ($ejemplo029[$d['guarda']] ?? null) === $d['valor']
+        && ($ejemplo030[$d['guarda']] ?? null) === $d['valor']
         && $permitido
         && preg_match('/REFERENCES (?!`tenant`\.)/', $d['sql']) === 0
         && balanceado($d['sql']);
-    $chk("029: {$d['variable']} arma un SQL valido (guarda {$d['guarda']} = {$d['valor']})"
+    $chk("030: {$d['variable']} arma un SQL valido (guarda {$d['guarda']} = {$d['valor']})"
         . ($d['desconocida'] !== null ? " (variable sin ejemplo: {$d['desconocida']})" : ''), $ok);
     if ($mostrar) {
         echo "         {$d['sql']}\n";
     }
     // tablas() lee CREATE TABLE sin base: se quita `tenant`. para compararla con el snapshot.
     foreach (tablas(str_replace('`tenant`.', '', $d['sql'])) as $t) {
-        $tablas029[$t['nombre']] = $t['elementos'];
+        $tablas030[$t['nombre']] = $t['elementos'];
     }
 }
-// Lo que crea la 029 y lo que crea el snapshot deben ser la misma tabla: mismas
+// Lo que crea la 030 y lo que crea el snapshot deben ser la misma tabla: mismas
 // columnas en el mismo orden, tipos, defaults, COMMENT, indices y FKs. Si no, un
 // tenant nuevo y uno migrado quedan distintos.
 foreach (['conduces', 'conduce_items', 'conduce_secuencia'] as $tabla) {
-    $de029 = array_map('strtoupper', $tablas029[$tabla] ?? []);
+    $de030 = array_map('strtoupper', $tablas030[$tabla] ?? []);
     $deSnapshot = array_map('strtoupper', $porNombre[$tabla] ?? []);
     $distinto = '';
-    foreach (array_keys($de029 + $deSnapshot) as $i) {
-        if (($de029[$i] ?? '') !== ($deSnapshot[$i] ?? '')) {
-            $distinto = ' (029: ' . ($de029[$i] ?? 'nada') . ' | snapshot: ' . ($deSnapshot[$i] ?? 'nada') . ')';
+    foreach (array_keys($de030 + $deSnapshot) as $i) {
+        if (($de030[$i] ?? '') !== ($deSnapshot[$i] ?? '')) {
+            $distinto = ' (030: ' . ($de030[$i] ?? 'nada') . ' | snapshot: ' . ($deSnapshot[$i] ?? 'nada') . ')';
             break;
         }
     }
-    $chk("029: {$tabla} queda igual que en el snapshot{$distinto}", $de029 !== [] && $distinto === '');
+    $chk("030: {$tabla} queda igual que en el snapshot{$distinto}", $de030 !== [] && $distinto === '');
 }
 
 // El verificador de migraciones (tools/verificar_migraciones_tenant.sql) dice
-// APLICADA a la 029 solo con las tres tablas.
+// APLICADA a la 030 solo con las tres tablas.
 $verificador = is_file($rutaVerificador) ? str_replace("\r\n", "\n", (string) file_get_contents($rutaVerificador)) : '';
-$chk('verificador: la fila 029 pide las tres tablas',
-    preg_match("/SELECT '029', '029_conduces\.sql',\s*'tablas conduces, conduce_items y conduce_secuencia',\s*"
+$chk('verificador: la fila 030 pide las tres tablas',
+    preg_match("/SELECT '030', '030_conduces\.sql',\s*'tablas conduces, conduce_items y conduce_secuencia',\s*"
         . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+"
         . "AND TABLE_NAME IN \('conduces', 'conduce_items', 'conduce_secuencia'\)\) = 3/", $verificador) === 1);
+// La 029 de master (029_precios_4_decimales.sql) deja products.precio .. precio_4
+// en DECIMAL(18,4): su fila del verificador cuenta las cuatro columnas.
+$chk('verificador: la fila 029 (precios) pide las cuatro columnas de products en decimal(18,4)',
+    preg_match("/SELECT '029', '029_precios_4_decimales\.sql',\s*'[^']*',\s*"
+        . "\(SELECT COUNT\(\*\) FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'products'\s+"
+        . "AND COLUMN_NAME IN \('precio', 'precio_2', 'precio_3', 'precio_4'\)\s+"
+        . "AND COLUMN_TYPE LIKE 'decimal\(18,4\)%'\) = 4/", $verificador) === 1);
 
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);
