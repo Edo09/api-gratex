@@ -33,7 +33,7 @@ las metas de [§10](#10-métricas-de-éxito) son hipótesis y se ajustan tras el
 ## 2. Objetivos
 
 1. **Cobrar rápido.** Mediana de **15 s o menos** desde el primer artículo hasta la
-   respuesta de emisión, en ventas de hasta 3 artículos con escáner.
+   respuesta de emisión, en ventas de hasta 3 artículos (por toque; ver decisión 6).
 2. **Cero errores fiscales.** 0 ventas rechazadas por la DGII. El total impreso, el
    total del e-CF y el precio de góndola × cantidad coinciden **al centavo**.
 3. **Caja controlada.** El 100 % de los turnos cierran con conteo y diferencia
@@ -55,7 +55,8 @@ las metas de [§10](#10-métricas-de-éxito) son hipótesis y se ajustan tras el
 | Imágenes de producto | Iniciales + color de categoría | Fase 2 |
 | Integración con datafono (Azul, CardNet) | Requiere acuerdos con el adquirente | Posterior |
 | Vender sin internet (cola local) | La firma vive en el servidor: sin internet no hay e-CF | Posterior, tras validar la norma |
-| Tablet / Android, gaveta, báscula | Caja = PC Windows táctil + lector USB | Posterior |
+| Lector de código de barras (C5, C6) | Decisión del 2026-10-08: el piloto vende **por toque** | Después del piloto |
+| Tablet / Android, gaveta, báscula | Caja = PC Windows táctil | Posterior |
 | Impresora de 58 mm | No soportada hoy (solo 72/76/80). El piloto usa 80 mm | Cuando un cliente la tenga |
 | Varias sucursales con stock separado | `products.stock` es único por producto | Posterior |
 | Restaurante (mesas, comandas, propina) | Es otro producto | — |
@@ -152,9 +153,9 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - Por qué progresivo: con PIN de 4 dígitos (10⁴ combinaciones) y "solo PIN", un bloqueo fijo de 5 minutos deja ~1,440 intentos al día por equipo y con 10 empleados alguien atina en menos de un día. Progresivo, son ~40 al día.
 
 **A7 · Bloqueo de pantalla** — `Piloto`
-- [ ] Manual (botón) y automático tras **10 min** sin actividad.
+- [x] Manual (botón) y automático tras **10 min** sin actividad.
 - [ ] Desbloquea el mismo empleado con su PIN. Si entra otro PIN, se aplican las reglas de turno (K4).
-- [ ] El carrito en curso se conserva al bloquear.
+- [x] El carrito en curso se conserva al bloquear.
 
 **A8 · Activación por tenant** — `Piloto`
 - [ ] `tenants.pos_enabled` (master), por defecto 0. Se activa por SQL, como `cotizacion_formato`.
@@ -164,38 +165,38 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 ### 6.2 Catálogo
 
 **C1 · Carga del catálogo** — `Piloto`
-- [ ] Productos con `activo = 1` e `indicador_facturacion ≠ 0` (no facturable queda fuera), con sus códigos de barras y las categorías activas.
+- [x] Productos con `activo = 1` e `indicador_facturacion ≠ 0` (no facturable queda fuera), con las categorías activas. (Los códigos de barras, con C5.)
 - [ ] Se carga al entrar. Se refresca cada 5 min y después de cada venta (por la existencia).
-- [ ] Búsqueda y escaneo **en memoria**, sin ir al servidor (el piloto tiene menos de 500 productos).
+- [x] Búsqueda **en memoria**, sin ir al servidor (el piloto tiene menos de 500 productos).
 
 **C2 · Precio final** — `Piloto`
-- [ ] Precio mostrado = `round(precio × (1 + tasa), 2)`, con tasa según `indicador_facturacion`: 1 → 18 %, 2 → 16 %, 3 y 4 → 0 %. Lo calcula **el servidor**, no el navegador.
-- [ ] Siempre precio 1 (`products.precio`). Sin listas 2–4 en v1.
+- [x] Precio mostrado = `round(precio × (1 + tasa), 2)`, con tasa según `indicador_facturacion`: 1 → 18 %, 2 → 16 %, 3 y 4 → 0 %. Lo calcula **el servidor**, no el navegador.
+- [x] Siempre precio 1 (`products.precio`). Sin listas 2–4 en v1.
 - [ ] Con el neto a 4 decimales (C7), el precio final es exactamente el que escribió el dueño.
 
 **C3 · Grilla táctil** — `Piloto`
-- [ ] Tarjetas de al menos 48 px de alto en cada zona tocable, sin depender del hover. Cada tarjeta muestra iniciales con el color de su categoría, nombre, `sku`, precio final y existencia.
-- [ ] Chips de categoría con su conteo, más "Todos".
-- [ ] Buscar por nombre o `sku`: busca "contiene", sin distinguir acentos ni mayúsculas.
+- [x] Tarjetas de al menos 48 px de alto en cada zona tocable, sin depender del hover. Cada tarjeta muestra iniciales con el color de su categoría, nombre, `sku`, precio final y existencia.
+- [x] Chips de categoría con su conteo, más "Todos".
+- [x] Buscar por nombre o `sku`: busca "contiene", sin distinguir acentos ni mayúsculas.
 
 **C4 · Semáforo de existencia** — `Piloto`
-- [ ] **Agotado** si `stock ≤ 0` · **Bajo** si `stock ≤ stock_minimo` · **Disponible** en otro caso. Sin `stock_minimo`, no hay "Bajo".
-- [ ] Servicios (`stock` NULL): etiqueta "Servicio", sin semáforo.
-- [ ] Se usa el `stock_minimo` de cada producto, no umbrales fijos.
+- [x] **Agotado** si `stock ≤ 0` · **Bajo** si `stock ≤ stock_minimo` · **Disponible** en otro caso. Sin `stock_minimo`, no hay "Bajo".
+- [x] Servicios (`stock` NULL): etiqueta "Servicio", sin semáforo.
+- [x] Se usa el `stock_minimo` de cada producto, no umbrales fijos.
 
-**C5 · Lector de código de barras** — `Piloto`
+**C5 · Lector de código de barras** — `Posterior` (baja prioridad desde el 2026-10-08: el piloto vende por toque)
 - [ ] Detecta la lectura (teclas rápidas terminadas en Enter) aunque el foco no esté en el buscador. No interfiere cuando se escribe en un campo numérico (cantidad, efectivo recibido).
 - [ ] Busca primero en `product_barcodes` y después un `sku` exacto. Si encuentra → agrega 1 unidad.
 - [ ] Si no encuentra → aviso visual y sonoro "Código 7501234567890 no encontrado". **No agrega nada ni ofrece asignarlo.**
 
-**C6 · Códigos de barras en la ficha del producto (app.\*)** — `Piloto`
+**C6 · Códigos de barras en la ficha del producto (app.\*)** — `Posterior` (va con C5; la tabla `product_barcodes` ya existe)
 - [ ] Agregar y quitar **varios** códigos por producto.
 - [ ] Un código es único en el tenant. Si ya pertenece a otro producto: "Ese código ya está en «Agua Planeta Azul»".
 
 **C7 · Precio con ITBIS incluido en la ficha** — `Piloto`
 - [ ] Casilla **"Este precio incluye ITBIS"** junto a "Precio (RD$)" (y a las listas 2–4).
 - [ ] Marcada: se escribe 25.00 y se guarda el neto con 4 decimales (21.1864).
-- [ ] `products.precio`, `precio_2`, `precio_3` y `precio_4` pasan a `DECIMAL(18,4)`.
+- [x] `products.precio`, `precio_2`, `precio_3` y `precio_4` pasan a `DECIMAL(18,4)`.
 - [ ] Hoy los dueños escriben el precio **sin** ITBIS, así que la casilla arranca desmarcada y no cambia nada de lo existente.
 
 **C8 · Reporte "Precios a revisar"** — `Piloto`
@@ -206,21 +207,21 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 ### 6.3 Venta
 
 **V1 · Carrito** — `Piloto`
-- [ ] Agregar por toque o escaneo. Repetir un producto suma cantidad.
-- [ ] `+` / `−` y cantidad editable con teclado en pantalla. Se admiten decimales solo si la unidad tiene `permite_decimales`, con máximo 2 (`CantidadItem` del XSD). Si no, cantidades enteras.
+- [x] Agregar por toque (el escaneo llega con C5). Repetir un producto suma cantidad.
+- [x] `+` / `−` y cantidad editable con teclado en pantalla. Se admiten decimales solo si la unidad tiene `permite_decimales`, con máximo 2 (`CantidadItem` del XSD). Si no, cantidades enteras.
 - [ ] Eliminar línea. Las líneas eliminadas quedan registradas (V4).
 - [ ] Importe de la línea = precio final × cantidad − descuento.
 
 **V2 · Totales** — `Piloto`
 - [ ] Subtotal, Descuentos, "ITBIS (incluido)" informativo y **Total**.
-- [ ] Total = suma de las líneas **al centavo**. Es el mismo total que dice el e-CF (F4).
+- [x] Total = suma de las líneas **al centavo**. Es el mismo total que dice el e-CF (F4).
 
 **V3 · Existencia** — `Piloto`
-- [ ] Agregar un producto con existencia ≤ 0 está permitido. La línea muestra "Sin existencia".
+- [x] Agregar un producto con existencia ≤ 0 está permitido. La línea muestra "Sin existencia".
 - [ ] Al emitir, la existencia baja aunque quede negativa (ya pasa así).
 
 **V4 · Cancelar venta** — `Piloto`
-- [ ] ESC o botón, con confirmación si hay artículos. Sin PIN.
+- [x] ESC o botón, con confirmación si hay artículos. Sin PIN.
 - [ ] Ventas canceladas y líneas eliminadas quedan en la auditoría y salen en el reporte de cierre (cantidad y monto).
 
 **V5 · Cliente** — `Piloto`
@@ -300,17 +301,18 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **P4 · Impresión automática** — `Piloto`
 - [ ] Al emitir, el recibo se imprime **siempre**, en tirilla, con el modo página web que ya existe (`imprimirRecibo` → `reciboHtml` → `printHtml`).
-- [ ] Con Chrome abierto con `--kiosk-printing`, sale sin diálogo.
+- [ ] Sale con el **diálogo de impresión normal** del navegador, con la térmica POS 80 como impresora predeterminada (el cajero solo confirma). Decisión del 2026-10-08.
+- [ ] `--kiosk-printing` (sin diálogo) queda como opción del montaje: no cambia el código.
 
 **P5 · Reimpresión** — `Piloto`
 - [ ] Desde "Ventas del turno" (K9).
 
 **P6 · Impresora del equipo** — `Piloto`
-- [ ] El POS tiene su propia configuración de impresora (ancho 72/76/80 y hoja de prueba), porque la de app.\* vive en el `localStorage` de otro dominio.
+- [ ] El POS tiene su propia configuración de impresora (ancho 72/76/80, **80 por defecto**, y hoja de prueba), porque la de app.\* vive en el `localStorage` de otro dominio.
 - [ ] Se pide la primera vez que se habilita el equipo.
 
 **P7 · Guía para montar la caja** — `Piloto`
-- [ ] Documento: acceso directo `chrome.exe --kiosk --kiosk-printing https://pos.fiscalpoint.com.do`, térmica como impresora predeterminada, ajustes del driver (sin papel en blanco al final) y prueba del QR con el celular.
+- [ ] Documento: acceso directo a `https://pos.fiscalpoint.com.do` (opcional: `chrome.exe --kiosk --kiosk-printing …` para imprimir sin diálogo), térmica POS 80 como impresora predeterminada, ajustes del driver (sin papel en blanco al final) y prueba del QR con el celular.
 
 ### 6.6 Caja y turnos
 
@@ -451,8 +453,8 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 2 | Comprobante | E32 por defecto; E31 si dan RNC |
 | 3 | Caja | Apertura con fondo, cierre con conteo y cuadre |
 | 4 | Acceso | El botón de app.\* pasa la sesión; pos.\* tiene login de admin propio |
-| 5 | Impresión | Silenciosa con Chrome `--kiosk-printing`; se imprime **siempre** |
-| 6 | Hardware | PC Windows táctil + lector de código de barras USB. Sin gaveta ni báscula |
+| 5 | Impresión | Se imprime **siempre**, con el diálogo normal del navegador en la térmica POS 80. `--kiosk-printing` es opcional (cambiado el 2026-10-08; antes: silenciosa) |
+| 6 | Hardware | PC Windows táctil; se vende **por toque**. El lector de barras queda para después del piloto (cambiado el 2026-10-08). Sin gaveta ni báscula |
 | 7 | Existencia en 0 | Se vende y se avisa |
 | 8 | Sin internet | Aviso + contingencia. Sin cola local |
 | 9 | Precio en pantalla | Final, con ITBIS |
@@ -514,6 +516,11 @@ Se tomaron sin preguntar. Cambiarlas ahora es barato; después del piloto no tan
   { "source": "/(.*)", "has": [{ "type": "host", "value": "pos.fiscalpoint.com.do" }], "destination": "/pos.html" }
   ```
   La regla `/api/:path*` → `gratex.net` sirve igual para los dos. DNS: `CNAME pos` → Vercel.
+- **Ojo: Vercel sirve primero el archivo que exista y después aplica los `rewrites`.** Con un
+  `index.html` en la raíz, `pos.fiscalpoint.com.do/` entregaba la app (pedía login) y la
+  regla de host solo funcionaba en otras rutas (`/caja`). Por eso el build saca la app como
+  **`app.html`** (plugin `appHtmlSinIndex` en `vite.config.ts`) y la regla que atrapa todo
+  apunta a `/app.html`. En desarrollo Vite sigue sirviendo `index.html` en `/`.
 - **Almacenamiento en pos.\*:** `fiscalpoint.pos.equipo` (token de equipo + caja) y `fiscalo.impresora` (propio de este dominio). La sesión del empleado vive **solo en memoria**: recargar la página vuelve a pedir PIN.
 - **Botón POS en app.\*:** `src/components/layout/Navbar.tsx`, junto al dropdown "Nueva".
 
@@ -645,7 +652,7 @@ Antes de construir la pantalla de venta. Fecha límite: **lunes 2026-10-12** par
 | V-2 | RI y 607 con `= 1` | Imprimir carta y tirilla de V-1 y generar el 607 del día | Líneas, ITBIS y totales correctos | Ajustar `EcfDocumento` / `Reporte607Model` |
 | V-3 | Lectores de `factura_items` | Revisar los 6 archivos de §9.5 | Ninguno asume neto sin mirar el indicador | Ajustarlos antes del piloto |
 | V-4 | Latencia | Medir 20 emisiones E32 reales | p95 ≤ 5 s | Revisar el token DGII (caché) y el orden firma → envío |
-| V-5 | Impresión | Chrome `--kiosk-printing` + la térmica de 80 mm del piloto | Imprime sin diálogo, corta al final y el QR escanea | Ajustar el driver; si no se puede, usar el diálogo en el piloto |
+| V-5 | Impresión | Diálogo normal del navegador + la térmica POS 80 del piloto | Imprime a 80 mm, corta al final y el QR escanea | Ajustar el driver (márgenes, papel en blanco al final) |
 | V-6 | Comprador en E32 ≥ RD$250k | Formato e-CF / XSD | Regla confirmada | Ajustar F3 |
 | V-7 | E34 sobre un E32 de consumidor final | Emitirla con el flujo actual | ACEPTADA, con el código de modificación correcto | Ajustar D3 |
 | V-8 | Lectores de `products.precio` | Revisar el front y el back antes de la migración 029 | Inventario completo | No correr la 029 hasta tenerlo |
@@ -692,10 +699,24 @@ confirmación, guía para habilitar una PC). `scripts/test-nav-formato.ts` 75/75
 nuevos de la puerta del POS). Probado en el navegador contra el API local. **Falta:**
 pestaña Turnos (con la semana 3) y M2/M3.
 
+**Catálogo táctil y carrito (2026-10-08):** `GET /api/pos/catalogo` (C1–C4) con el precio
+final calculado en enteros (`src/Pos/PosPrecio.php`, mitad hacia arriba; la venta tiene
+que usar la misma función) y `tools/test_pos_backend.php` en 100/100. En el POS:
+buscador "contiene" sin acentos (Enter con un solo resultado lo agrega), chips por
+categoría, grilla con iniciales de color y semáforo de existencia; carrito con − / + /
+teclado de cantidad (decimales solo si la unidad los admite), aviso "Sin existencia" /
+"Solo hay N", total al centavo e ITBIS incluido con la regla de la DGII (por tasa, sobre
+la suma). El carrito sobrevive al bloqueo. Cuentas en `src/pos/montos.ts`
+(`scripts/test-pos-montos.ts` 37/37, con los montos reales de la fase 0). De paso: el PIN
+se mandaba dos veces (el efecto dependía de un callback que cambiaba en cada render) y
+la segunda sesión cerraba la primera; ahora se envía una vez por PIN tecleado.
+**Falta para cobrar:** `POST /api/pos/ventas`, cobro y devuelta, impresión, turnos, y
+registrar en la bitácora las ventas canceladas y las líneas quitadas (V4).
+
 | Semana | Fechas | Qué |
 |---|---|---|
 | **1** | jue 8 – mié 14 oct | **Fase 0** (§11) · F8 (aviso) · migraciones: master 012, tenant 029 (precios, lista) y 030 (POS) · empleados, PIN y equipos en el backend · contador (Q1) · cron (Q4) |
-| **2** | 15 – 21 oct | Subdominio y Vercel · `pos.html` · paso de sesión y habilitar equipo · pantalla de PIN y bloqueo · catálogo, grilla, búsqueda y escáner · carrito |
+| **2** | 15 – 21 oct | Subdominio y Vercel · `pos.html` · paso de sesión y habilitar equipo · pantalla de PIN y bloqueo · catálogo táctil, grilla y búsqueda · carrito (el escáner pasó a después del piloto) |
 | **3** | 22 – 28 oct | `POST /api/pos/ventas` (precio con ITBIS, idempotencia, timeout de 5 s, pendientes) · cobro y devuelta · impresión · E31 con RNC · turnos (apertura, cierre a ciegas, denominaciones, reporte) · app.\*: cajas, empleados, equipos, ficha del producto · C8 sobre el catálogo de Gratex |
 | **4** | 29 oct – 4 nov | Turno ajeno con supervisor · auditoría · banner sin conexión · reintentos · guía de la caja · pruebas de punta a punta · montar la caja del piloto |
 | **Piloto** | **jue 5 nov** | Gratex vendiendo |

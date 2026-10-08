@@ -112,6 +112,33 @@ abierto_at, fondo_inicial, de_dia_anterior}`) o `null`. Sirve para las reglas K4
 **`DELETE /api/pos/sesion`** (con `X-POS-SESION`) — cierra la sesión: bloqueo de
 pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 
+**`GET /api/pos/catalogo`** (con `X-POS-SESION`) — el catálogo completo de la caja
+(C1–C4). El POS lo guarda en memoria y busca ahí; lo vuelve a pedir cada 5 minutos.
+
+```json
+{
+  "productos": [
+    { "id": 12, "nombre": "Agua 500 ml", "sku": "AG-500", "category_id": 3,
+      "precio_centavos": 2500, "tasa": 18, "indicador_facturacion": 1,
+      "stock": 10, "stock_minimo": 3, "unidad_medida": "43", "decimales": false }
+  ],
+  "categorias": [ { "id": 3, "nombre": "Bebidas", "productos": 1 } ],
+  "generado_at": "2026-10-08T21:30:00-04:00"
+}
+```
+
+- Solo productos con `activo = 1` e `indicador_facturacion` distinto de 0 (no facturable).
+- `precio_centavos`: **precio final con ITBIS**, `round(precio × (1 + tasa), 2)` en
+  centavos, calculado en el servidor con aritmética entera (`src/Pos/PosPrecio.php`).
+  Siempre la lista 1. El precio sin ITBIS no se manda.
+- `tasa`: 18, 16 o 0 (tasa cero y exento).
+- `stock: null` = servicio (sin semáforo). `decimales`: si la unidad admite cantidades
+  con decimales (`unidades_medida.permite_decimales`).
+- `categorias`: solo las activas que tienen algún producto. El producto de una
+  categoría inactiva llega con `category_id: null` (sale solo en "Todos").
+- Un producto con un precio que no se puede leer se omite (queda en el log) y la caja
+  sigue funcionando.
+
 ## Bitácora
 
 Todo va a `audit_logs` con módulo `pos`: `POS_TRASPASO_CREADO`, `POS_CAJA_CREADA` /
@@ -123,7 +150,7 @@ valores. **Nunca se registra un PIN ni un token.**
 
 ## Pruebas
 
-`tools/test_pos_backend.php`: 89 verificaciones contra un API local con dos tenants de
-prueba (traspaso, administración, bloqueo por PIN, sesiones, aislamiento entre
-empresas, bitácora sin PIN). Pasa con el gate en `enforce` y en sombra. Ver su cabecera
+`tools/test_pos_backend.php`: 100 verificaciones contra un API local con dos tenants de
+prueba (traspaso, administración, bloqueo por PIN, sesiones, catálogo y precio final,
+aislamiento entre empresas, bitácora sin PIN). Pasa con el gate en `enforce` y en sombra. Ver su cabecera
 para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.

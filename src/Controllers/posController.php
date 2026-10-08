@@ -8,6 +8,7 @@
 //                               la caja. Es lo primero que pide pos.* al cargar.
 //   POST   /api/pos/sesion   -> {pin} -> {token, empleado, caja, turno_caja}
 //   DELETE /api/pos/sesion   -> cierra la sesion (bloqueo de pantalla o salir)
+//   GET    /api/pos/catalogo -> productos con su precio final, categorias (C1-C4)
 //
 // Errores: {status:false, error, codigo}. Codigos que cambian de pantalla:
 //   EQUIPO_NO_HABILITADO -> habilitar el equipo     SESION_REQUERIDA -> PIN
@@ -19,6 +20,8 @@ require_once __DIR__ . '/../Pos/PosPin.php';
 require_once __DIR__ . '/../Pos/PosAuth.php';
 require_once __DIR__ . '/../Models/posModel.php';
 require_once __DIR__ . '/../Models/posMasterModel.php';
+require_once __DIR__ . '/../Models/unidadMedidaModel.php';
+require_once __DIR__ . '/../Pos/PosPrecio.php';
 
 /** Una linea de auditoria del POS. Nunca con el PIN ni tokens. */
 function posAudit(string $action, $entityId, ?array $new, string $descripcion, bool $ok = true): void
@@ -44,6 +47,58 @@ function posCajaDelEquipo(posModel $pos, array $equipo): array
         throw new PosError('La caja de este equipo está desactivada. Pide a un administrador que la active o que habilite el equipo en otra caja.', 403, 'CAJA_INACTIVA');
     }
     return $caja;
+}
+
+/**
+ * Catalogo de la caja (docs/specs/pos.md C1-C4). El piloto tiene menos de 500
+ * productos: va completo y el POS busca en memoria.
+ *
+ * - precio_centavos: precio final con ITBIS (PosPrecio, C2). Siempre precio 1.
+ * - Una categoria inactiva no sale como chip; sus productos quedan en "Todos"
+ *   (category_id null). Solo salen las categorias con algun producto.
+ * - stock null = servicio (sin semaforo, C4).
+ * - decimales: si la unidad admite cantidades con decimales (unidades_medida).
+ */
+function posCatalogo(posModel $pos): array
+{
+    $categorias = $pos->catalogoCategorias();
+    $unidades = new unidadMedidaModel();
+    $productos = [];
+    $porCategoria = [];
+    foreach ($pos->catalogoProductos() as $p) {
+        $indicador = (int) $p['indicador_facturacion'];
+        try {
+            $centavos = PosPrecio::finalCentavos((string) $p['precio'], $indicador);
+        } catch (InvalidArgumentException $e) {
+            // Un producto mal cargado no tumba la caja: se omite y queda en el log.
+            error_log('[pos] catalogo: producto ' . $p['id'] . ' omitido: ' . $e->getMessage());
+            continue;
+        }
+        $categoria = $p['category_id'] !== null && isset($categorias[(int) $p['category_id']]) ? (int) $p['category_id'] : null;
+        if ($categoria !== null) {
+            $porCategoria[$categoria] = ($porCategoria[$categoria] ?? 0) + 1;
+        }
+        $productos[] = [
+            'id' => (int) $p['id'],
+            'nombre' => $p['nombre'],
+            'sku' => $p['sku'],
+            'category_id' => $categoria,
+            'precio_centavos' => $centavos,
+            'tasa' => PosPrecio::tasa($indicador),
+            'indicador_facturacion' => $indicador,
+            'stock' => $p['stock'] !== null ? (float) $p['stock'] : null,
+            'stock_minimo' => $p['stock_minimo'] !== null ? (float) $p['stock_minimo'] : null,
+            'unidad_medida' => (string) $p['unidad_medida'],
+            'decimales' => $unidades->permiteDecimales($p['unidad_medida']),
+        ];
+    }
+    $chips = [];
+    foreach ($categorias as $id => $nombre) {
+        if (isset($porCategoria[$id])) {
+            $chips[] = ['id' => $id, 'nombre' => $nombre, 'productos' => $porCategoria[$id]];
+        }
+    }
+    return ['productos' => $productos, 'categorias' => $chips, 'generado_at' => date('c')];
 }
 
 try {
@@ -130,6 +185,13 @@ try {
             posAudit('POS_SESION_CERRADA', $equipo['id'], ['empleado_id' => $sesion['empleado']['id'], 'empleado' => $sesion['empleado']['nombre']],
                 'Sesión del POS cerrada (bloqueo de pantalla o salida).');
             posResponder(200, ['cerrada' => true]);
+            break;
+
+        case 'GET catalogo':
+            // Lo pide el empleado con su sesion; la caja tiene que estar activa.
+            PosAuth::requerirSesion($pos, $equipo);
+            posCajaDelEquipo($pos, $equipo);
+            posResponder(200, posCatalogo($pos));
             break;
 
         default:

@@ -309,6 +309,34 @@ class posModel
     }
 
     // ------------------------------------------------------------------
+    // Catalogo de la caja (docs/specs/pos.md C1)
+    // ------------------------------------------------------------------
+
+    /**
+     * Productos que se venden en el POS: activos y facturables. Filas crudas
+     * (precio DECIMAL como texto); el precio final lo calcula PosPrecio.
+     */
+    public function catalogoProductos(): array
+    {
+        return $this->conexion->query(
+            'SELECT id, sku, nombre, category_id, indicador_facturacion, precio, unidad_medida, stock, stock_minimo
+             FROM products
+             WHERE activo = 1 AND indicador_facturacion <> 0
+             ORDER BY nombre, id'
+        )->fetchAll();
+    }
+
+    /** Categorias activas: [id => nombre]. */
+    public function catalogoCategorias(): array
+    {
+        $out = [];
+        foreach ($this->conexion->query('SELECT id, nombre FROM categories WHERE estado = 1 ORDER BY nombre')->fetchAll() as $f) {
+            $out[(int) $f['id']] = $f['nombre'];
+        }
+        return $out;
+    }
+
+    // ------------------------------------------------------------------
 
     private static function nombreValido(string $nombre, int $max, string $que): string
     {

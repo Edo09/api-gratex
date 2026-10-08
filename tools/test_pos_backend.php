@@ -94,6 +94,8 @@ foreach ([$dbA, $dbB] as $db) {
     $pdo->exec("DELETE FROM `{$db}`.pos_empleados");
     $pdo->exec("DELETE FROM `{$db}`.pos_cajas");
 }
+$pdo->exec("DELETE FROM `{$dbA}`.products WHERE sku LIKE 'POSTEST-%'");
+$pdo->exec("DELETE FROM `{$dbA}`.categories WHERE nombre LIKE 'POS Test %'");
 $pdo->exec("DELETE FROM `{$master}`.pos_equipos WHERE tenant_id IN ({$tenantA}, {$tenantB})");
 $pdo->exec("DELETE FROM `{$master}`.pos_handoff_codes WHERE tenant_id IN ({$tenantA}, {$tenantB})");
 $inicioAudit = $pdo->query("SELECT COALESCE(MAX(id), 0) FROM `{$master}`.audit_logs")->fetchColumn();
@@ -376,6 +378,75 @@ $posActivo($tenantA, 1);
 
 [, $r] = $api('POST', '/pos/sesion', ['pin' => $pinLuis], $eq);
 $sesLuis = (string) $r['data']['token'];
+
+// ---------------------------------------------------------------------------
+echo "
+6b. Catalogo de la caja (C1-C4)
+";
+require_once __DIR__ . '/../src/Pos/PosPrecio.php';
+$chk('precio final: 21.1864 al 18% = 25.00 (el de gondola)', PosPrecio::finalCentavos('21.1864', 1) === 2500);
+$chk('precio final: 8.4746 al 18% = 10.00 y 100 al 16% = 116.00',
+    PosPrecio::finalCentavos('8.4746', 1) === 1000 && PosPrecio::finalCentavos('100.0000', 2) === 11600);
+$chk('tasa cero y exento: sin ITBIS', PosPrecio::finalCentavos('10.5', 3) === 1050 && PosPrecio::finalCentavos('10.0000', 4) === 1000);
+$chk('justo en la mitad redondea hacia arriba: 1.25 al 18% = 1.475 -> 1.48', PosPrecio::finalCentavos('1.2500', 1) === 148);
+$noCalcula = function (string $precio, int $ind): bool {
+    try {
+        PosPrecio::finalCentavos($precio, $ind);
+        return false;
+    } catch (InvalidArgumentException $e) {
+        return true;
+    }
+};
+$chk('no facturable, indicador raro, precio negativo o con texto: no se calcula',
+    $noCalcula('10', 0) && $noCalcula('10', 9) && $noCalcula('-1.0000', 1) && $noCalcula('abc', 1));
+
+// Datos de prueba. La master local no siempre trae el catalogo de unidades.
+$pdo->exec("INSERT IGNORE INTO `{$master}`.unidades_medida (id, codigo, descripcion, permite_decimales)
+            VALUES (43, 'UND', 'Unidad', 0), (21, 'KG', 'Kilogramo', 1)");
+$almacen = (int) $pdo->query("SELECT id FROM `{$dbA}`.warehouses ORDER BY id LIMIT 1")->fetchColumn();
+$pdo->exec("INSERT INTO `{$dbA}`.categories (nombre, estado) VALUES ('POS Test Bebidas', 1), ('POS Test Viejos', 0)");
+$catBebidas = (int) $pdo->query("SELECT id FROM `{$dbA}`.categories WHERE nombre = 'POS Test Bebidas'")->fetchColumn();
+$catViejos = (int) $pdo->query("SELECT id FROM `{$dbA}`.categories WHERE nombre = 'POS Test Viejos'")->fetchColumn();
+$producto = function (string $sku, string $nombre, ?int $cat, int $ind, string $precio, string $unidad, ?string $stock, ?string $min, int $activo = 1)
+    use ($pdo, $dbA, $almacen): void {
+    $st = $pdo->prepare("INSERT INTO `{$dbA}`.products (sku, nombre, category_id, warehouse_id, indicador_facturacion, precio, unidad_medida, stock, stock_minimo, activo)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    $st->execute([$sku, $nombre, $cat, $almacen, $ind, $precio, $unidad, $stock, $min, $activo]);
+};
+$producto('POSTEST-1', 'Agua 500 ml', $catBebidas, 1, '21.1864', '43', '10', '3');
+$producto('POSTEST-2', 'Queso de freir', null, 4, '150.0000', '21', '0', null);
+$producto('POSTEST-3', 'Recarga', $catViejos, 1, '8.4746', '43', null, null);
+$producto('POSTEST-4', 'Bolsa (no facturable)', $catBebidas, 0, '5.0000', '43', '100', null);
+$producto('POSTEST-5', 'Refresco descontinuado', $catBebidas, 1, '50.0000', '43', '4', null, 0);
+$producto('POSTEST-6', 'Precio mal cargado', $catBebidas, 1, '-1.0000', '43', '1', null);
+
+$eqLuis = $eq + ['X-POS-SESION' => $sesLuis];
+[$h, $r] = $api('GET', '/pos/catalogo', null, $eq);
+$chk('catalogo sin sesion de empleado: 401 SESION_REQUERIDA', $h === 401 && ($r['codigo'] ?? '') === 'SESION_REQUERIDA', [$h, $r]);
+[$h, $r] = $api('GET', '/pos/catalogo', null, $eqLuis);
+$dePrueba = [];
+foreach ($r['data']['productos'] ?? [] as $p) {
+    if (str_starts_with((string) $p['sku'], 'POSTEST-')) {
+        $dePrueba[$p['sku']] = $p;
+    }
+}
+$chk('catalogo: solo activos y facturables; el de precio mal cargado se omite sin tumbar la caja',
+    $h === 200 && array_keys($dePrueba) === ['POSTEST-1', 'POSTEST-2', 'POSTEST-3'], [$h, array_keys($dePrueba)]);
+// JSON manda 10.0 como 10: se compara el numero, no el tipo (null sigue siendo null).
+$num = fn($v) => is_int($v) || is_float($v) ? (float) $v : $v;
+$agua = $dePrueba['POSTEST-1'] ?? [];
+$chk('agua: 25.00 con ITBIS 18%, existencia y minimo, en su categoria, cantidades enteras',
+    ($agua['precio_centavos'] ?? 0) === 2500 && $agua['tasa'] === 18 && $num($agua['stock']) === 10.0 && $num($agua['stock_minimo']) === 3.0
+    && $agua['category_id'] === $catBebidas && $agua['decimales'] === false && !isset($agua['precio']), $agua);
+$queso = $dePrueba['POSTEST-2'] ?? [];
+$chk('queso: exento (150.00), por kilo admite decimales, agotado',
+    ($queso['precio_centavos'] ?? 0) === 15000 && $queso['tasa'] === 0 && $queso['decimales'] === true && $num($queso['stock']) === 0.0, $queso);
+$recarga = $dePrueba['POSTEST-3'] ?? [];
+$chk('recarga: 10.00, servicio (stock null) y su categoria inactiva queda en "Todos"',
+    ($recarga['precio_centavos'] ?? 0) === 1000 && $recarga['stock'] === null && $recarga['category_id'] === null, $recarga);
+$chips = array_column($r['data']['categorias'] ?? [], 'productos', 'nombre');
+$chk('categorias: solo las activas con productos, con su conteo', ($chips['POS Test Bebidas'] ?? 0) === 1
+    && !isset($chips['POS Test Viejos']), $chips);
 [$h, $r] = $api('DELETE', '/pos-admin/equipos/' . $equipo2Id, null, $bearer($adminA));
 $chk('revocar el equipo', $h === 200, [$h, $r]);
 [$h, $r] = $api('GET', '/pos/estado', null, $eq + ['X-POS-SESION' => $sesLuis]);
