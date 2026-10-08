@@ -59,8 +59,11 @@ php tools/create_tenant.php --tipo=integracion `
 ```
 
 Cliente con varias empresas: `--grupo=self` la primera (su `tenant_id` pasa a ser el
-`grupo_id`), `--grupo=<id>` las demás. Cada una con **su** `.p12` y su propia certificación
-DGII; comparten credencial.
+`grupo_id`), `--grupo=<id>` las demás (en `onboard.html`, el campo "Grupo de empresas"). Cada
+una con **su** `.p12` y su propia certificación DGII; comparten credencial. Para certificarlas
+con la credencial del grupo, `public/integracion.html` muestra arriba un selector **Empresa**:
+las consultas (pasos 3, 4, 8), la aprobación (paso 5) y el emisor precargado (pasos 2 y 6) van
+a nombre de la elegida. Las fases 2 y 3 toman la empresa del xlsx y la 4 del "RNC emisor".
 
 Del resumen guardar: **`tenant_id`**, **`api_key`** y **`api_secret`**. El secret se
 imprime **una sola vez** (el master guarda solo su sha256) — entregarlo por canal seguro.
@@ -130,8 +133,11 @@ php tools/check_fase2_status.php --api=https://gratex.net/api `
 
 - Todos los XML firmados quedan en `tools/xml_integracion/<e_ncf>.xml`. **Sin DB no hay de
   dónde volver a bajarlos.**
-- Los **E32 <250k** van por RFCE: el XML íntegro de esa carpeta es el que se sube a mano al
-  portal.
+- Los **E32 <250k** van por RFCE: el XML íntegro (el e-CF firmado completo, raíz `<ECF>`) se
+  sube a mano al portal. Desde `public/integracion.html`, **paso 8** → "XML íntegros de las
+  facturas de consumo < 250k": toma los RFCE de la última corrida, baja cada XML del respaldo
+  del server y lo verifica contra la DGII con su código de seguridad. Tiene que ser el de la
+  corrida cuyo RFCE se aceptó: uno de una corrida anterior sale "no coincide".
 - Si DGII rechaza **cualquier** comprobante, reinicia el set completo: hay que pasarlo
   limpio en una corrida.
 - **Notas (E33/E34):** el runner las manda al final y, antes de la primera, consulta en la

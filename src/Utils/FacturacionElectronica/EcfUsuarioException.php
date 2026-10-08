@@ -27,4 +27,26 @@ class EcfUsuarioException extends RuntimeException
     {
         return $this->mensajeUsuario;
     }
+
+    /**
+     * Mensaje de un fallo apto para quien llama desde FUERA (integradores, y las
+     * URLs publicas de la DGII). Conserva lo que le sirve a un desarrollador (el
+     * campo que fallo, la respuesta de la DGII) y tapa lo que es nuestro: rutas
+     * del servidor (p.ej. la del .p12 en "No se puede leer el certificado: ...")
+     * y nombres de variables de configuracion (DGII_ECF_CERT_PATH...). El detalle
+     * completo sigue yendo al error_log y a la bitacora.
+     */
+    public static function mensajePublico(Throwable $e): string
+    {
+        $m = $e->getMessage();
+        // Rutas absolutas: Windows (C:\...) o Unix con al menos un directorio. El
+        // lookbehind deja pasar URLs (https://...) y textos como "E31/E32".
+        $m = (string) preg_replace('#(?<![\w:/.])(?:[A-Za-z]:\\\\[^\s\'"]+|/(?:[\w.\-]+/)+[\w.\-]*)#', '[ruta del servidor]', $m);
+        $m = (string) preg_replace(
+            '/\b(?:DGII_ECF|DB|MASTER|OPENSSL|SMTP|MAIL|ONBOARD|CERT_RUN|READLOG|ENCRYPT|MULTI_TENANT|PERMISSIONS)_[A-Z0-9_]+\b/',
+            '[configuración]',
+            $m
+        );
+        return trim($m) !== '' ? $m : 'Error interno.';
+    }
 }

@@ -66,9 +66,14 @@ class PermissionGate
 
         $userId = $v['user_id'] ?? null;
         if ($userId === null) {
-            // Principal maquina (integracion) sobre una ruta de app: prohibido.
+            // Principal maquina (integracion) sobre una ruta de app: prohibido, y
+            // SIEMPRE, tambien en modo sombra. La sombra es para ensayar roles de
+            // usuarios; aqui no hay usuario, y un tenant de integracion no tiene DB
+            // propia: el controller caeria en la DB por defecto del .env.
+            // (AuthMiddleware ya rechaza esta credencial fuera de /api/integracion/*;
+            // esto es la segunda barrera.)
             self::deny($route, $method, $required, 'principal no-usuario en ruta de app', 403,
-                'Para hacer esto necesitas iniciar sesión con tu usuario.');
+                'Para hacer esto necesitas iniciar sesión con tu usuario.', true);
             return;
         }
 
@@ -162,7 +167,8 @@ class PermissionGate
      * Deniega: en modo enforce responde y corta; en sombra solo registra y deja
      * continuar (para descubrir gaps con trafico real sin romper nada).
      */
-    private static function deny(string $route, string $method, string $required, string $reason, int $code, string $msg): void
+    /** $siempre: bloquea aunque PERMISSIONS_ENFORCE este apagado (modo sombra). */
+    private static function deny(string $route, string $method, string $required, string $reason, int $code, string $msg, bool $siempre = false): void
     {
         // Bitacora: solo los 403 (sesion valida sin permiso), ver
         // AuditMiddleware::logAccessDenied. Tambien en modo sombra, rotulado:
@@ -180,7 +186,7 @@ class PermissionGate
             );
         }
 
-        if (!self::enforcing()) {
+        if (!$siempre && !self::enforcing()) {
             error_log("[PermissionGate][SHADOW] denegaria {$route} {$method} (req={$required}, {$reason})");
             return;
         }

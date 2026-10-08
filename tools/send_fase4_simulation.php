@@ -191,7 +191,8 @@ function main(array $argv): int
                 sleep($notaDelay);
             }
             if ($notaWaitAccepted > 0 && !$dryRun) {
-                $notaPrereqOk = waitForAcceptedReferences($apiBase, $apiKey, $eNcfsByType['31'] ?? [], $notaWaitAccepted, $notaPoll, $apiSecret);
+                $notaPrereqOk = waitForAcceptedReferences($apiBase, $apiKey, $eNcfsByType['31'] ?? [], $notaWaitAccepted, $notaPoll, $apiSecret,
+                    trim((string) ($opts['emisor-rnc'] ?? '')));
                 if (!$notaPrereqOk) {
                     fwrite(STDOUT, "==> Se omiten las notas para no consumir secuencias mientras los E31 no esten aceptados.\n");
                 }
@@ -810,7 +811,12 @@ function normalizeReferenceDate(string $date): string
     return $ts === false ? $date : date('d-m-Y', $ts);
 }
 
-function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds, string $apiSecret = ''): bool
+/**
+ * $rncEmisor (integracion): empresa que emitio. Con credencial de grupo la
+ * consulta de estado va con ?rnc= para que el server use el RNC y el
+ * certificado de esa empresa y no los de la duena de la credencial.
+ */
+function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs, int $timeoutSeconds, int $pollSeconds, string $apiSecret = '', string $rncEmisor = ''): bool
 {
     $integracion = $apiSecret !== '';
     // App: la consulta cuelga del factura_id. Integracion: no hay factura, se
@@ -837,7 +843,7 @@ function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs,
         $nextPending = [];
         foreach ($pending as $id => $ref) {
             $resp = $integracion
-                ? consultarEstadoIntegracion($apiBase, $apiKey, $apiSecret, (string) $ref['e_ncf'], $ref['track_id'] ?? null)
+                ? consultarEstadoIntegracion($apiBase, $apiKey, $apiSecret, (string) $ref['e_ncf'], $ref['track_id'] ?? null, $rncEmisor)
                 : consultarEstadoFactura($apiBase, $apiKey, (int) $id);
             $estado = extractEstadoDgii($resp);
             $detalle = extractEstadoDetalle($resp);
@@ -878,11 +884,14 @@ function waitForAcceptedReferences(string $apiBase, string $apiKey, array $refs,
  * Estado en DGII para tenants de integracion: no hay factura persistida, se
  * consulta por e-NCF (+ track_id si se tiene) en /api/integracion/estado.
  */
-function consultarEstadoIntegracion(string $apiBase, string $apiKey, string $apiSecret, string $eNcf, ?string $trackId): array
+function consultarEstadoIntegracion(string $apiBase, string $apiKey, string $apiSecret, string $eNcf, ?string $trackId, string $rnc = ''): array
 {
     $query = ['e_ncf' => $eNcf];
     if ($trackId !== null && $trackId !== '') {
         $query['track_id'] = $trackId;
+    }
+    if ($rnc !== '') {
+        $query['rnc'] = $rnc;
     }
     $ch = curl_init($apiBase . '/integracion/estado?' . http_build_query($query));
     $opts = [

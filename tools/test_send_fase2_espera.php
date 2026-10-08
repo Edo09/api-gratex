@@ -45,7 +45,7 @@ $guion = static function (array $porEncf) use (&$llamadas): callable {
     $llamadas = [];
     $ronda = [];
     return static function ($api, $key, $secret, string $encf, array $s) use ($porEncf, &$llamadas, &$ronda) {
-        $llamadas[] = ['e_ncf' => $encf, 'track_id' => $s['track_id'] ?? null, 'codigo_seguridad' => $s['codigo_seguridad'] ?? null];
+        $llamadas[] = ['e_ncf' => $encf, 'track_id' => $s['track_id'] ?? null, 'codigo_seguridad' => $s['codigo_seguridad'] ?? null, 'rnc' => $s['rnc'] ?? null];
         $n = $ronda[$encf] = ($ronda[$encf] ?? -1) + 1;
         $pasos = $porEncf[$encf] ?? [['http_status' => 404, 'body' => ['status' => false, 'error' => 'No hay respaldo']]];
         return $pasos[min($n, count($pasos) - 1)];
@@ -234,6 +234,25 @@ $consulta = $guion(['E320000000012' => [$estadoIntegracion('RFCE_RECHAZADO', [['
 $r = esperarDgiiAntesDeNotas('https://x/api', 'k', 's', $results, [$notasSet[1]], 300, 10, $consulta, $dormir);
 $chk('una sola consulta, por codigo_seguridad', count($llamadas) === 1 && $llamadas[0]['codigo_seguridad'] === 'r67uSx', $llamadas);
 $chk('el motivo queda en el resultado', str_contains((string) ($results[0]['dgii_mensajes'] ?? ''), 'MontoTotal no coincide'), $results[0]);
+
+echo "\nCredencial de grupo: cada consulta va con el RNC de la empresa que emitio\n";
+$results = [$enviado('E310000000034') + ['rnc_emisor' => '131111112']];
+$consulta = $guion(['E310000000034' => [$estadoIntegracion('ACEPTADO')], 'E440000000013' => [$estadoIntegracion('ACEPTADO')]]);
+$notaHermana = [['ENCF' => 'E340000000013', 'TipoeCF' => '34', 'NCFModificado' => 'E440000000013', 'RNCEmisor' => '131111112']];
+$r = esperarDgiiAntesDeNotas('https://x/api', 'k', 's', $results, $notaHermana, 300, 10, $consulta, $dormir);
+$chk('lo enviado se consulta con su rnc_emisor', ($llamadas[0]['rnc'] ?? null) === '131111112', $llamadas);
+$chk('el original de otra corrida usa el RNCEmisor del set', ($llamadas[1]['rnc'] ?? null) === '131111112', $llamadas);
+$llamadas = [];
+$q = null;
+$capturar = static function ($api, $key, $secret, string $encf, array $s) use (&$q) {
+    // Lo que f2ConsultarEstado mandaria: se reconstruye con su misma regla.
+    $q = ['e_ncf' => $encf] + (!empty($s['track_id']) ? ['track_id' => $s['track_id']] : []) + (!empty($s['rnc']) ? ['rnc' => $s['rnc']] : []);
+    return ['http_status' => 200, 'body' => ['status' => true, 'estado' => 'ACEPTADO']];
+};
+$res2 = [$enviado('E310000000034') + ['rnc_emisor' => '131111112']];
+esperarDgiiAntesDeNotas('https://x/api', 'k', 's', $res2, [$notasSet[1]], 300, 10, $capturar, $dormir);
+$chk('f2ConsultarEstado arma ?rnc= (codigo real)', str_contains((string) (new ReflectionFunction('f2ConsultarEstado'))->getFileName(), 'send_fase2.php')
+    && preg_match("/query\\['rnc'\\] = \\\$s\\['rnc'\\]/", (string) file_get_contents(__DIR__ . '/send_fase2.php')) === 1);
 
 echo "\nCodigo de salida y resumen: mismo criterio\n";
 $chk('fila con ok=false falla', f2FilaFallo(['ok' => false]));

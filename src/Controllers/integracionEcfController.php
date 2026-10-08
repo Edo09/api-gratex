@@ -105,7 +105,8 @@ function handleEmitirIntegracion(): void
             'success' => false, 'error_message' => $e->getMessage(),
             'description' => 'Fallo emitiendo e-CF por integracion.',
         ]);
-        respondIntegracionEcf(false, 'Fallo emitiendo e-CF: ' . $e->getMessage(), 502);
+        // Sin rutas del server ni nombres de configuracion (el detalle va al log).
+        respondIntegracionEcf(false, 'Fallo emitiendo e-CF: ' . EcfUsuarioException::mensajePublico($e), 502);
         return;
     }
 

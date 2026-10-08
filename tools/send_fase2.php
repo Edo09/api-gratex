@@ -229,6 +229,9 @@ function main(array $argv): int
             'caso' => $caso,
             'tipo_ecf' => $tipo,
             'e_ncf' => $encf,
+            // Con credencial de grupo, la consulta de estado tiene que ir con el RNC
+            // de la empresa que emitio (?rnc=), no con el de la duena de la credencial.
+            'rnc_emisor' => (string) ($payload['emisor']['rnc'] ?? ''),
             'http_status' => $response['http_status'],
             'ok' => $response['http_status'] >= 200 && $response['http_status'] < 300 && (($response['body']['status'] ?? false) === true),
             'response' => $response['body'],
@@ -771,6 +774,25 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
         }
     }
 
+    // Empresa de la corrida, para lo que no se envio ahora (originales de otra
+    // corrida, resto del set): el RNCEmisor del set. Con credencial de grupo sin
+    // esto la consulta saldria a nombre de la duena de la credencial.
+    $rncCorrida = '';
+    foreach ($results as $r) {
+        if (($r['rnc_emisor'] ?? '') !== '') {
+            $rncCorrida = (string) $r['rnc_emisor'];
+            break;
+        }
+    }
+    if ($rncCorrida === '') {
+        foreach ($notas as $n) {
+            if (trim((string) ($n['RNCEmisor'] ?? '')) !== '') {
+                $rncCorrida = trim((string) $n['RNCEmisor']);
+                break;
+            }
+        }
+    }
+
     $seguir = [];
     $rechazadosEnvio = [];
     $sinConfirmar = [];
@@ -807,6 +829,7 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
                 // pregunta una vez a la DGII para tener el motivo.
                 $motivo = f2MensajesDeRespuesta($consultar($apiBase, $apiKey, $apiSecret, (string) $encf, [
                     'track_id' => null, 'codigo_seguridad' => $r['codigo_seguridad'], 'factura_id' => $r['factura_id'] ?? null,
+                    'rnc' => ($r['rnc_emisor'] ?? '') !== '' ? (string) $r['rnc_emisor'] : $rncCorrida,
                 ]));
             }
             $rechazadosEnvio[$encf] = $motivo;
@@ -832,6 +855,7 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
         }
         $seguir[$encf] = [
             'i' => $i,
+            'rnc' => ($r['rnc_emisor'] ?? '') !== '' ? (string) $r['rnc_emisor'] : $rncCorrida,
             'track_id' => $r['track_id'] ?? null,
             'codigo_seguridad' => $r['codigo_seguridad'] ?? null,
             'factura_id' => $r['factura_id'] ?? null,
@@ -856,7 +880,7 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
             continue;
         }
         if ($integracion) {
-            $seguir[$ref] = ['i' => null, 'track_id' => null, 'codigo_seguridad' => null, 'factura_id' => null,
+            $seguir[$ref] = ['i' => null, 'rnc' => $rncCorrida, 'track_id' => null, 'codigo_seguridad' => null, 'factura_id' => null,
                 'estado' => '', 'clase' => 'pendiente', 'mensajes' => ''];
         } else {
             fwrite(STDOUT, "    ! El original $ref no esta en esta corrida: no se verifica su estado.\n");
@@ -873,7 +897,7 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
             fwrite(STDOUT, "    Corrida parcial: se consulta tambien el ultimo envio de " . count($fuera)
                 . " comprobantes del set que no van en esta corrida (un rechazo previo pudo reiniciarlo).\n");
             foreach ($fuera as $e) {
-                $seguir[$e] = ['i' => null, 'track_id' => null, 'codigo_seguridad' => null, 'factura_id' => null,
+                $seguir[$e] = ['i' => null, 'rnc' => $rncCorrida, 'track_id' => null, 'codigo_seguridad' => null, 'factura_id' => null,
                     'estado' => '', 'clase' => 'pendiente', 'mensajes' => ''];
             }
         } else {
@@ -1035,6 +1059,11 @@ function f2ConsultarEstado(string $apiBase, string $apiKey, string $apiSecret, s
             $query['track_id'] = $s['track_id'];
         } elseif (!empty($s['codigo_seguridad'])) {
             $query['codigo_seguridad'] = $s['codigo_seguridad'];
+        }
+        // Empresa que emitio: con credencial de grupo el server consulta a la
+        // DGII con el RNC y el certificado de ESA empresa (switchToSibling).
+        if (!empty($s['rnc'])) {
+            $query['rnc'] = $s['rnc'];
         }
         $url = $apiBase . '/integracion/estado?' . http_build_query($query);
         $headers[] = 'X-API-SECRET: ' . $apiSecret;
