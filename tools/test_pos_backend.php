@@ -399,5 +399,10 @@ $chk('ningun PIN ni token en la bitacora',
 $chk('cada evento queda en su empresa', !array_filter($filas, fn($f) => !in_array((int) $f['tenant_id'], [$tenantA, $tenantB], true)),
     array_column($filas, 'tenant_id'));
 
+// Las sesiones de login de esta corrida no quedan abiertas en la base de prueba.
+foreach ([$adminA, $adminB, $userA] as $t) {
+    $api('POST', '/auth/signout', [], $bearer($t));
+}
+
 echo "\n" . ($fallos === 0 ? "TODO OK ({$total} verificaciones)" : "{$fallos} de {$total} FALLARON") . "\n";
 exit($fallos === 0 ? 0 : 1);

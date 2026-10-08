@@ -670,6 +670,15 @@ empleados y equipos (K1, A5, A4), PIN con bloqueo y sesiones (A6, A7), `pos_enab
 (A8) y el principal `pos-caja` en el gate. Contrato en [../api/pos.md](../api/pos.md);
 `tools/test_pos_backend.php` da 89/89 con el gate en enforce y en sombra (PIN de 4 dígitos con bloqueo progresivo, cambiado el mismo día).
 
+**Semana 2, front (2026-10-08):** `pos.html` + `src/pos/` en fiscalo-react (bundle propio:
+19 KB + el bloque compartido), regla de host en `vercel.json` y botón **POS** en el navbar
+de app.\* (A1). Pantallas: habilitar el equipo (login de admin o código del botón; elegir o
+crear la caja; reemplazar con confirmación), PIN de 4 dígitos (teclado en pantalla y
+físico, intentos restantes, cuenta regresiva del bloqueo que sobrevive a la recarga),
+pantalla del cajero con bloqueo manual y a los 10 min, aviso sin conexión. Probado de
+punta a punta en el navegador contra el API local (Docker). **Falta:** configuración de
+impresora del equipo (P6) y, en la semana 3, la venta.
+
 | Semana | Fechas | Qué |
 |---|---|---|
 | **1** | jue 8 – mié 14 oct | **Fase 0** (§11) · F8 (aviso) · migraciones: master 012, tenant 029 (precios, lista) y 030 (POS) · empleados, PIN y equipos en el backend · contador (Q1) · cron (Q4) |

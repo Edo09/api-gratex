@@ -1,0 +1,15 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "pos-local",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix", "C:/Users/omare/Documents/facturacion/fiscalo-react",
+        "run", "dev", "--",
+        "--mode", "poslocal", "--port", "5175", "--strictPort", "--no-open"
+      ],
+      "port": 5175
+    }
+  ]
+}
