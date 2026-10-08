@@ -17,7 +17,7 @@ require_once(__DIR__ . '/../Utils/InputSanitizer.php');
  *   GET    /api/conduces?page&pageSize&query    listado de activos
  *   GET    /api/conduces?id=N                   uno ([] si no está o está eliminado)
  *   GET    /api/conduces/{id}/pdf[?format=base64]
- *   POST   /api/conduces                        crear desde una cotización
+ *   POST   /api/conduces                        crear, con cotizacion_id o sin él
  *   POST   /api/conduces/preview                vista previa, sin guardar
  *   PUT    /api/conduces                        editar
  *   DELETE /api/conduces                        eliminar (activo = 0; no se borra nada)

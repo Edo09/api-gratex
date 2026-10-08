@@ -132,8 +132,8 @@ function lineaScratch(?int $productoId, string $descripcion, float $cantidad, fl
         'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1];
 }
 
-/** 'cot' de un conduce: por defecto, una línea del producto y una libre sin precio. */
-function cotScratch(int $clienteId, int $cotizacionId, ?int $productoId, ?string $fecha, ?array $items = null): array
+/** 'cot' de un conduce: por defecto, una línea del producto y una libre sin precio. $cotizacionId null = un conduce sin cotización. */
+function cotScratch(int $clienteId, ?int $cotizacionId, ?int $productoId, ?string $fecha, ?array $items = null): array
 {
     return ['date' => $fecha, 'client_id' => $clienteId, 'cotizacion_id' => $cotizacionId, 'items' => $items ?? [
         lineaScratch($productoId, 'FUNDAS CEMENTO GRIS', 2.0, 935.0),
@@ -154,7 +154,7 @@ require_once __DIR__ . '/../src/Models/conduceModel.php';
 // ---------------------------------------------------------------------------
 // Modo trabajador: un proceso aparte que crea UN conduce y dice qué le contestó
 // conduceModel. Uso interno:
-//   --worker <hora de salida (0 = ya)> <client_id> <cotizacion_id> <product_id> <archivo de log>
+//   --worker <hora de salida (0 = ya)> <client_id> <cotizacion_id (0 = sin cotización)> <product_id> <archivo de log>
 // ---------------------------------------------------------------------------
 if (($argv[1] ?? '') === '--worker') {
     [$salida, $clienteId, $cotizacionId, $productoId, $log] = array_slice($argv, 2, 5) + ['0', '0', '0', '0', ''];
@@ -166,7 +166,7 @@ if (($argv[1] ?? '') === '--worker') {
         time_sleep_until($salida);
     }
     $t0 = microtime(true);
-    $r = modeloScratch($pdo)->crear(cotScratch((int) $clienteId, (int) $cotizacionId, (int) $productoId, null), null, 'TRABAJADOR');
+    $r = modeloScratch($pdo)->crear(cotScratch((int) $clienteId, (int) $cotizacionId > 0 ? (int) $cotizacionId : null, (int) $productoId, null), null, 'TRABAJADOR');
     echo json_encode(['r' => $r, 't0' => $t0, 't1' => microtime(true), 'tarde' => $tarde]), "\n";
     exit(0);
 }
@@ -653,6 +653,83 @@ try {
         && $codigos($m->listar(0, 2, 'COT-0000')) === ['CON-000002', 'CON-000051'] && $codigos($m->listar(2, 2, 'COT-0000')) === ['CON-000052']);
     $chk('buscar un código de cotización que no existe (COT-999999): nada, y contar 0',
         $m->listar(0, 10, 'COT-999999') === [] && $m->contar('COT-999999') === 0);
+
+    // Sin cotización (2026-10-08): cotizacion_id queda NULL. Un cliente propio (nombre, empresa y RNC que
+    // ningún otro conduce comparte) para que la búsqueda por cliente sea inequívoca. Se alternan con y sin
+    // cotización para ver que la numeración sigue seguida, y las fechas ponen a los cuatro delante de los
+    // de antes en el listado (más nuevo primero).
+    $pdo->prepare('INSERT INTO clients (email, client_name, company_name, rnc, phone_number) VALUES (?, ?, ?, ?, ?)')
+        ->execute(['sincotizacion@example.invalid', 'LUCIA MEDINA', 'FERRETERIA EL PROGRESO', '131000000', '']);
+    $clienteSinCotId = (int) $pdo->lastInsertId();
+    $ultimoAntesSinCot = $ultimo();
+    $activosAntesSinCot = $m->contar(null);
+    $siguienteSinCot = $ultimoAntesSinCot + 1;
+    $rA = $m->crear(cotScratch($clienteSinCotId, null, $productoId, '2026-10-08 09:00:00'), 5, 'FERRETERIA EL PROGRESO');
+    $rB = $m->crear(cotScratch($clienteId, $cotId, $productoId, '2026-10-08 08:00:00'), 5, 'HOSPITAL DOCENTE');
+    $rC = $m->crear(cotScratch($clienteSinCotId, null, $productoId, '2026-10-08 07:00:00', [lineaScratch(null, 'FLETE', 1.0, 0.0)]), 5, 'FERRETERIA EL PROGRESO');
+    $rD = $m->crear(cotScratch($clienteId, $cotId2, $productoId, '2026-10-08 06:00:00'), 5, 'HOSPITAL DOCENTE');
+    $idA = (int) ($rA[1]['id'] ?? 0);
+    $idB = (int) ($rB[1]['id'] ?? 0);
+    $idC = (int) ($rC[1]['id'] ?? 0);
+    $idD = (int) ($rD[1]['id'] ?? 0);
+    $chk("crear sin cotización: toma el siguiente número (CON-" . sprintf('%06d', $siguienteSinCot) . ') y mueve la secuencia', esCreado($rA, $siguienteSinCot)
+        && $ultimo() === $siguienteSinCot + 3);
+    $chk('crear sin cotización: la cabecera guardada con cotizacion_id NULL (la columna lo admite), el cliente, el nombre guardado, user_id y activo = 1',
+        filasDe($pdo, 'SELECT numero, code, date, cotizacion_id, client_id, client_name, user_id, activo FROM conduces WHERE id = ?', [$idA])
+        === [['numero' => $siguienteSinCot, 'code' => FerreteriaConduce::codigo($siguienteSinCot), 'date' => '2026-10-08 09:00:00',
+            'cotizacion_id' => null, 'client_id' => $clienteSinCotId, 'client_name' => 'FERRETERIA EL PROGRESO', 'user_id' => 5, 'activo' => 1]]
+        && (int) valorDe($pdo, 'SELECT cotizacion_id IS NULL FROM conduces WHERE id = ?', [$idA]) === 1);
+    $chk('crear sin cotización: sus dos líneas guardadas, activas y con los mismos DECIMAL de siempre', $lineasDe($idA) === [
+        ['product_id' => $productoId, 'description' => 'FUNDAS CEMENTO GRIS', 'quantity' => '2.000', 'unidad_medida' => '43',
+            'amount' => '935.0000', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1, 'activo' => 1],
+        ['product_id' => null, 'description' => 'CORTE DE TUBO', 'quantity' => '1.500', 'unidad_medida' => '43',
+            'amount' => '0.0000', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1, 'activo' => 1],
+    ] && array_column($lineasDe($idC), 'description') === ['FLETE']);
+    $chk('con y sin cotización alternados: cuatro números seguidos (' . $siguienteSinCot . '..' . ($siguienteSinCot + 3) . '), ninguno repetido',
+        esCreado($rA, $siguienteSinCot) && esCreado($rB, $siguienteSinCot + 1) && esCreado($rC, $siguienteSinCot + 2) && esCreado($rD, $siguienteSinCot + 3)
+        && (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces') === (int) valorDe($pdo, 'SELECT COUNT(DISTINCT numero) FROM conduces')
+        && (int) valorDe($pdo, 'SELECT MAX(numero) FROM conduces') === $siguienteSinCot + 3);
+    $chk('cotizacion_id de los cuatro: NULL, la COT-000012, NULL y la COT-000013',
+        array_column(filasDe($pdo, 'SELECT cotizacion_id FROM conduces WHERE id IN (?, ?, ?, ?) ORDER BY numero', [$idA, $idB, $idC, $idD]), 'cotizacion_id')
+        === [null, $cotId, null, $cotId2]);
+    $filaA = $m->obtener($idA) ?? [];
+    $filaB = $m->obtener($idB) ?? [];
+    $chk('obtener: el conduce sin cotización trae cotizacion_id y cotizacion_code null, con el cliente del JOIN y sus 2 líneas; el de la cotización, su código',
+        array_keys($filaA) === $columnasFila && $filaA['cotizacion_id'] === null && $filaA['cotizacion_code'] === null
+        && $filaA['client_name'] === 'LUCIA MEDINA' && $filaA['company_name'] === 'FERRETERIA EL PROGRESO' && $filaA['rnc'] === '131000000'
+        && count($filaA['items']) === 2 && ($filaB['cotizacion_code'] ?? null) === 'COT-000012');
+    $chk('listar y contar: los activos de antes más los 4 nuevos, el más nuevo primero, con sus líneas',
+        $m->contar(null) === $activosAntesSinCot + 4
+        && $codigos($m->listar(0, 10, null)) === ['CON-000053', 'CON-000054', 'CON-000055', 'CON-000056', 'CON-000002', 'CON-000051', 'CON-000052']
+        && array_map(static fn(array $f): int => count($f['items']), $m->listar(0, 4, null)) === [2, 2, 1, 2]);
+    $chk('listar de a tres: la página 1 y la 2 (OFFSET) suman los siete activos',
+        $codigos($m->listar(0, 3, null)) === ['CON-000053', 'CON-000054', 'CON-000055']
+        && $codigos($m->listar(3, 3, null)) === ['CON-000056', 'CON-000002', 'CON-000051']);
+    $chk('buscar por el cliente del conduce sin cotización (empresa, nombre y RNC): lo encuentra, sin los de otro cliente; contar da lo mismo',
+        $codigos($m->listar(0, 10, 'PROGRESO')) === ['CON-000053', 'CON-000055'] && $m->contar('PROGRESO') === 2
+        && $codigos($m->listar(0, 10, 'lucia')) === ['CON-000053', 'CON-000055'] && $m->contar('lucia') === 2
+        && $codigos($m->listar(0, 10, '1310000')) === ['CON-000053', 'CON-000055'] && $m->contar('1310000') === 2);
+    $chk('buscar por su número: CON-000053 lo encuentra, solo a él',
+        $codigos($m->listar(0, 10, 'CON-000053')) === ['CON-000053'] && $m->contar('CON-000053') === 1);
+    $chk('buscar por el código de una cotización (COT-000012) no encuentra al conduce sin cotización: sí al nuevo de esa cotización y a los de antes; contar da lo mismo',
+        $codigos($m->listar(0, 10, 'COT-000012')) === ['CON-000054', 'CON-000002', 'CON-000051'] && $m->contar('COT-000012') === 3);
+    $chk('buscar solo "COT-": los 5 conduces con cotización y ninguno de los 2 sin ella',
+        $codigos($m->listar(0, 10, 'COT-')) === ['CON-000054', 'CON-000056', 'CON-000002', 'CON-000051', 'CON-000052']
+        && $m->contar('COT-') === 5);
+    $chk('eliminar un conduce sin cotización: activo = 0 y deja de listarse y de contarse; su número no se reutiliza',
+        $m->desactivar($idC) === ['success', 'Conduce eliminado'] && $m->obtener($idC) === null
+        && $m->contar(null) === $activosAntesSinCot + 3 && !in_array('CON-000055', $codigos($m->listar(0, 10, null)), true)
+        && $m->contar('PROGRESO') === 1 && $ultimo() === $siguienteSinCot + 3);
+    $rE = $m->crear(cotScratch($clienteSinCotId, null, null, null, [lineaScratch(null, 'CORTE DE TUBO', 1.0, 0.0)]), null, 'FERRETERIA EL PROGRESO');
+    $chk('crear sin cotización después de eliminar: CON-000057 (el 55 no se vuelve a usar), sin usuario y sin producto',
+        esCreado($rE, $siguienteSinCot + 4) && $ultimo() === $siguienteSinCot + 4
+        && valorDe($pdo, 'SELECT user_id FROM conduces WHERE id = ?', [(int) ($rE[1]['id'] ?? 0)]) === null
+        && valorDe($pdo, 'SELECT cotizacion_id FROM conduces WHERE id = ?', [(int) ($rE[1]['id'] ?? 0)]) === null);
+    $rF = $m->actualizar($idA, cotScratch($clienteSinCotId, null, $productoId, '2026-10-08 09:30:00', [lineaScratch(null, 'ARENA', 4.0, 0.0)]), 9, 'FERRETERIA EL PROGRESO');
+    $chk('actualizar un conduce sin cotización: mismo número, cotizacion_id sigue NULL, las líneas de antes inactivas y la nueva activa',
+        $rF === ['success', ['id' => $idA, 'code' => FerreteriaConduce::codigo($siguienteSinCot), 'numero' => $siguienteSinCot]]
+        && valorDe($pdo, 'SELECT cotizacion_id FROM conduces WHERE id = ?', [$idA]) === null
+        && array_column($lineasDe($idA), 'activo') === [0, 0, 1] && array_column($m->obtener($idA)['items'] ?? [], 'description') === ['ARENA']);
     ini_set('error_log', $logPrevio === false ? '' : $logPrevio);
 
     // -----------------------------------------------------------------------
@@ -703,7 +780,8 @@ try {
     $salida = sprintf('%.6F', microtime(true) + 4.0);
     $trabajadores = [];
     for ($i = 0; $i < 5; $i++) {
-        $trabajadores[] = lanzarTrabajador($php, [$salida, (string) $clienteId, (string) $cotId, (string) $productoId, $nuevoLog()]);
+        // El 2.º y el 4.º crean sin cotización (cotizacion_id 0 = NULL): la secuencia es la misma para los dos tipos.
+        $trabajadores[] = lanzarTrabajador($php, [$salida, (string) $clienteId, $i % 2 === 1 ? '0' : (string) $cotId, (string) $productoId, $nuevoLog()]);
     }
     $resultados = array_map('esperarTrabajador', $trabajadores);
     $respuestas = array_map(static fn(array $x) => $x['json']['r'] ?? null, $resultados);
@@ -725,6 +803,9 @@ try {
     $chk('cinco procesos: cinco números distintos y seguidos (' . ($maxAntes + 1) . '..' . ($maxAntes + 5) . ')',
         $numeros === range($maxAntes + 1, $maxAntes + 5));
     $nuevos = array_map(static fn($r) => (int) ($r[1]['id'] ?? 0), $respuestas);
+    $chk('cinco procesos, tres con cotización y dos sin ella: cada uno guardó la suya (cotizacion_id NULL en 2 de los 5)',
+        (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces WHERE numero > ? AND cotizacion_id IS NULL', [$maxAntes]) === 2
+        && (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces WHERE numero > ? AND cotizacion_id = ?', [$maxAntes, $cotId]) === 3);
     $chk('cinco procesos: la secuencia queda en el mayor, 5 filas nuevas y 2 líneas activas en cada una',
         $ultimo() === $maxAntes + 5 && (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces') === $filasAntes + 5
         && array_map(static fn(int $id): int => (int) valorDe($pdo,

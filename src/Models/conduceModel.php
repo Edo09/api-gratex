@@ -40,9 +40,10 @@ class conduceModel
     /**
      * Búsqueda del listado: número del conduce, código de su cotización de
      * origen (q.code, por el LEFT JOIN de DESDE), nombre guardado, nombre y
-     * empresa del cliente, y RNC. Si borraron la cotización, cotizacion_id
-     * quedó en NULL (ON DELETE SET NULL) y el conduce ya no se encuentra por su
-     * código: conduces no guarda una copia del código de la cotización.
+     * empresa del cliente, y RNC. Un conduce sin cotización (cotizacion_id
+     * NULL: nació sin ella, o borraron la cotización y quedó en NULL por ON
+     * DELETE SET NULL) no se encuentra por un código COT: conduces no guarda
+     * una copia del código de la cotización.
      */
     private const BUSQUEDA = '(c.code LIKE :query OR q.code LIKE :query OR c.client_name LIKE :query
                 OR cl.client_name LIKE :query OR cl.company_name LIKE :query OR cl.rnc LIKE :query)';
@@ -136,7 +137,9 @@ class conduceModel
      * la secuencia y el MAX. Cualquier otro error no se reintenta.
      *
      * @param array $cot 'cot' de FerreteriaConduce::validarForma, ya con el catálogo
-     *                   aplicado. date null = ahora.
+     *                   aplicado. date null = ahora. cotizacion_id null = un
+     *                   conduce sin cotización: se guarda NULL (un (int) daría 0
+     *                   y la FK a cotizaciones lo rechazaría).
      * @return array ['success', ['id'=>int,'code'=>string,'numero'=>int]] | ['error', string, int $http]
      */
     public function crear(array $cot, ?int $userId, string $clientName): array
@@ -159,7 +162,7 @@ class conduceModel
                     ':numero' => $numero,
                     ':code' => $code,
                     ':date' => $fecha,
-                    ':cotizacion_id' => (int) $cot['cotizacion_id'],
+                    ':cotizacion_id' => ($cot['cotizacion_id'] ?? null) !== null ? (int) $cot['cotizacion_id'] : null,
                     ':client_id' => (int) $cot['client_id'],
                     ':client_name' => $clientName,
                     ':user_id' => $userId,
