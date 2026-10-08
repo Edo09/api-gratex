@@ -177,6 +177,13 @@ switch ($route) {
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';
         break;
+
+    case 'conduces':
+        // Conduces de mercancia de Ferreteria - token required (modulo 'cotizaciones')
+        //   /conduces · /conduces/{id}/pdf · /conduces/preview
+        require_once 'src/Controllers/conduceController.php';
+        break;
+
     case 'facturas':
         // Factura CRUD endpoints - token required
         require_once 'src/Controllers/facturaController.php';

@@ -1274,6 +1274,384 @@ $chk('las lecturas con la DB fallando lanzan (el controller responde 500, nunca 
     $lanzaT5(fn() => $modeloT5($c)->listar(0, 10, null)) && $lanzaT5(fn() => $modeloT5($c)->contar(null))
     && $lanzaT5(fn() => $modeloT5($c)->obtener(7)) && $lanzaT5(fn() => $modeloT5($c)->cotizacionDeOrigen(12)));
 
+// ===========================================================================
+// T6 — FerreteriaConduce: reglas contra la DB y piezas del controller (Task 6)
+// ===========================================================================
+// Lo que depende de lo que contesta la DB (la cotizacion de origen, el
+// cliente, los productos), ya con la respuesta en la mano, y lo que
+// conduceController lee de la peticion (la ruta, el id, la pagina). Puro: sin DB.
+
+echo "\n== T6: FerreteriaConduce::aplicarCatalogo ==\n";
+$chk('firma: public static aplicarCatalogo(array $cot, bool $esCreacion, ?array $origen, ?array $cliente, array $productos): array',
+    $firmaConduce('aplicarCatalogo') === 'public static aplicarCatalogo(array $cot, bool $esCreacion, ?array $origen, ?array $cliente, array $productos): array');
+$cotT6 = $validarConduce($cuerpoConduce())['cot'];
+$origenT6 = ['id' => 12, 'code' => 'COT-000012', 'formato' => 'ferreteria'];
+// Lo que devuelve cotizacionModel::getCliente (las 5 claves).
+$clienteT6 = ['client_name' => 'Juan Perez', 'company_name' => 'HOSPITAL DOCENTE',
+    'razon_social' => 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO', 'rnc' => '401515131', 'email' => 'a@b.do'];
+$productosT6 = [55 => ['indicador_bien_servicio' => 2]];
+$r = FerreteriaConduce::aplicarCatalogo($cotT6, true, $origenT6, $clienteT6, $productosT6);
+$chk('ok: bien/servicio del catalogo (2) en la linea de producto; la libre conserva el del cuerpo (1)', ($r[0] ?? '') === 'ok'
+    && ($r[1]['items'][0]['indicador_bien_servicio'] ?? null) === 2 && ($r[1]['items'][1]['indicador_bien_servicio'] ?? null) === 1);
+// Lo esperado se arma sobre una copia: === compara tambien el orden de las claves.
+$esperadoT6 = $cotT6;
+$esperadoT6['items'][0]['indicador_bien_servicio'] = 2;
+$chk('ok: el resto de cot queda igual', ($r[1] ?? null) === $esperadoT6);
+$chk('crear sin cotizacion de origen (no existe) => 422 MSG_COTIZACION',
+    FerreteriaConduce::aplicarCatalogo($cotT6, true, null, $clienteT6, $productosT6) === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+foreach ([null, 'gratex', 'Ferreteria', ''] as $formatoT6) {
+    $chk('crear desde una cotizacion con formato ' . var_export($formatoT6, true) . ' => 422 MSG_COTIZACION',
+        FerreteriaConduce::aplicarCatalogo($cotT6, true, ['formato' => $formatoT6] + $origenT6, $clienteT6, $productosT6)
+            === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+}
+$chk('editar: la cotizacion de origen no se mira (null pasa)',
+    (FerreteriaConduce::aplicarCatalogo($cotT6, false, null, $clienteT6, $productosT6)[0] ?? '') === 'ok');
+$chk('cliente que no existe => 422 MSG_SIN_CLIENTE, al crear y al editar (el guardado lo borraron)',
+    FerreteriaConduce::aplicarCatalogo($cotT6, true, $origenT6, null, $productosT6) === ['error', FerreteriaConduce::MSG_SIN_CLIENTE, 422]
+    && FerreteriaConduce::aplicarCatalogo($cotT6, false, null, null, $productosT6) === ['error', FerreteriaConduce::MSG_SIN_CLIENTE, 422]);
+$chk('cotizacion mala y cliente que no existe: la cotizacion primero (el orden de validarForma)',
+    FerreteriaConduce::aplicarCatalogo($cotT6, true, null, null, []) === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+$chk('producto que ya no esta en el catalogo => el texto de la cotizacion, con su linea',
+    FerreteriaConduce::aplicarCatalogo($cotT6, true, $origenT6, $clienteT6, []) === [
+        'error', 'Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.', 422,
+    ]);
+
+echo "\n== T6: FerreteriaConduce::filaPreview / filaPdf ==\n";
+$chk('firma: public static filaPreview(array $cot, array $cliente, ?array $row, ?array $origen): array',
+    $firmaConduce('filaPreview') === 'public static filaPreview(array $cot, array $cliente, ?array $row, ?array $origen): array');
+$chk('firma: public static filaPdf(array $row, ?array $cliente): array', $firmaConduce('filaPdf') === 'public static filaPdf(array $row, ?array $cliente): array');
+$chk('filaPreview sin fila: la fecha del cuerpo, la cotizacion de origen, el cliente elegido y su nombre como el guardado',
+    FerreteriaConduce::filaPreview($cotT6, $clienteT6, null, $origenT6) === [
+        'date' => '2026-10-05 09:30:00', 'cotizacion_code' => 'COT-000012',
+        'razon_social' => 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO', 'company_name' => 'HOSPITAL DOCENTE',
+        'client_name' => 'Juan Perez', 'rnc' => '401515131',
+        'client_name_guardado' => 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO', 'items' => $cotT6['items'],
+    ]);
+$sinFechaT6 = ['date' => null] + $cotT6;
+$previaFilaT6 = FerreteriaConduce::filaPreview($sinFechaT6, $clienteT6, $filaConduceFx, ['code' => 'COT-000099'] + $origenT6);
+$chk('filaPreview con fila y sin fecha: la fecha y la cotizacion de la fila (no las del cuerpo)',
+    $previaFilaT6['date'] === '2026-10-05 09:30:00' && $previaFilaT6['cotizacion_code'] === 'COT-000012');
+$chk('filaPreview con fila y con fecha: gana la del cuerpo',
+    FerreteriaConduce::filaPreview($cotT6, $clienteT6, ['date' => '2026-01-01 08:00:00'] + $filaConduceFx, null)['date'] === '2026-10-05 09:30:00');
+$chk('filaPreview sin fila ni fecha: date null (datosPdf pone la de ahora)',
+    FerreteriaConduce::filaPreview($sinFechaT6, $clienteT6, null, $origenT6)['date'] === null);
+$chk('filaPreview de un conduce cuya cotizacion se elimino: cotizacion_code null',
+    FerreteriaConduce::filaPreview($cotT6, $clienteT6, ['cotizacion_code' => null] + $filaConduceFx, $origenT6)['cotizacion_code'] === null);
+$datosPreviaT6 = FerreteriaConduce::datosPdf(FerreteriaConduce::filaPreview($cotT6, $clienteT6, null, $origenT6), $nombresUnidadFx, null);
+$chk('filaPreview -> datosPdf: las lineas sin precio y el cliente con razon_social', $datosPreviaT6['conduce']['items'] === [
+    ['description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2.0, 'unidad' => 'Unidad'],
+    ['description' => 'CORTE DE TUBO', 'quantity' => 1.0, 'unidad' => 'Unidad'],
+] && $datosPreviaT6['cliente']['razon_social'] === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+$conClienteT6 = FerreteriaConduce::filaPdf($filaConduceFx, $clienteT6);
+$chk('filaPdf con el cliente de hoy: razon_social, company_name, client_name y rnc de getCliente; lo demas igual',
+    $conClienteT6 === array_merge($filaConduceFx, [
+        'razon_social' => 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO', 'company_name' => 'HOSPITAL DOCENTE',
+        'client_name' => 'Juan Perez', 'rnc' => '401515131',
+    ]));
+$chk('filaPdf sin cliente (lo borraron o no se pudo leer): la fila tal cual', FerreteriaConduce::filaPdf($filaConduceFx, null) === $filaConduceFx);
+$chk('filaPdf -> datosPdf: el PDF lleva el nombre con razon_social, como la cotizacion',
+    FerreteriaConduce::datosPdf($conClienteT6, [], 'CON-000001')['cliente']['razon_social'] === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+
+echo "\n== T6: FerreteriaConduce::ruta / idDe / paginacion (conduceController) ==\n";
+$chk('firma: public static ruta(string $metodo, string $path): array', $firmaConduce('ruta') === 'public static ruta(string $metodo, string $path): array');
+foreach ([
+    ['GET', '/api/conduces', 'leer', null],
+    ['GET', '/api/conduces/', 'leer', null],
+    ['GET', '/api/conduces/7/pdf', 'pdf', 7],
+    ['GET', '/carpeta/api/conduces/15/pdf/', 'pdf', 15],
+    ['GET', '/api/conduces/0/pdf', 'pdf', null],
+    ['POST', '/api/conduces', 'crear', null],
+    ['POST', '/api/conduces/preview', 'preview', null],
+    ['PUT', '/api/conduces', 'actualizar', null],
+    ['DELETE', '/api/conduces', 'eliminar', null],
+    ['POST', '/api/conduces/7/pdf', 'no_existe', null],
+    ['GET', '/api/conduces/preview', 'no_existe', null],
+    ['PUT', '/api/conduces/preview', 'no_existe', null],
+    ['DELETE', '/api/conduces/7', 'no_existe', null],
+    ['GET', '/api/conduces/abc/pdf', 'no_existe', null],
+    ['PATCH', '/api/conduces', 'no_existe', null],
+] as [$metodoT6, $pathT6, $accionT6, $idT6]) {
+    $chk("ruta({$metodoT6} {$pathT6}) = {$accionT6}" . ($idT6 !== null ? " ({$idT6})" : ''),
+        FerreteriaConduce::ruta($metodoT6, $pathT6) === ['accion' => $accionT6, 'id' => $idT6]);
+}
+$chk('firma: public static idDe(mixed $v): ?int', $firmaConduce('idDe') === 'public static idDe(mixed $v): ?int');
+$chk('idDe: 7, "7", 7.0 y " 7 " = 7', FerreteriaConduce::idDe(7) === 7 && FerreteriaConduce::idDe('7') === 7
+    && FerreteriaConduce::idDe(7.0) === 7 && FerreteriaConduce::idDe(' 7 ') === 7);
+$chk('idDe: 0, -3, 7.5, "abc", "", null, true y [] = null', array_map([FerreteriaConduce::class, 'idDe'], [0, -3, 7.5, 'abc', '', null, true, []])
+    === [null, null, null, null, null, null, null, null]);
+$chk('firma: public static paginacion(array $get): array', $firmaConduce('paginacion') === 'public static paginacion(array $get): array');
+$chk('paginacion sin parametros: pagina 1 de 10, sin busqueda', FerreteriaConduce::paginacion([]) === ['page' => 1, 'pageSize' => 10, 'query' => null, 'offset' => 0]);
+$chk('paginacion page 3, pageSize 20 y query: offset 40', FerreteriaConduce::paginacion(['page' => '3', 'pageSize' => '20', 'query' => 'juan'])
+    === ['page' => 3, 'pageSize' => 20, 'query' => 'juan', 'offset' => 40]);
+$chk('paginacion: 0, negativos, "x" y fracciones menores que 1 caen en 1 y 10 (nunca OFFSET negativo ni division por 0)',
+    FerreteriaConduce::paginacion(['page' => '0', 'pageSize' => '-5']) === ['page' => 1, 'pageSize' => 10, 'query' => null, 'offset' => 0]
+    && FerreteriaConduce::paginacion(['page' => 'x', 'pageSize' => '0.5']) === ['page' => 1, 'pageSize' => 10, 'query' => null, 'offset' => 0]);
+$chk('paginacion: una query que no es texto (query[]=a) = sin busqueda', FerreteriaConduce::paginacion(['query' => ['a']])['query'] === null);
+
+// --- T6, ronda B: la parte de instancia, de punta a punta sin MySQL ---
+// conduceModel y cotizacionModel sobre la misma conexion falsa de T5 (en
+// produccion comparten la del tenant); la Database de EmisorConfigModel
+// apuntando a esa conexion; y la master del catalogo de unidades
+// (MasterDatabase) con un PDO falso que no tiene driver. Asi nada de esta
+// seccion puede abrir una base de datos de verdad, aunque haya un .env.
+
+require_once __DIR__ . '/../src/MasterDatabase.php';
+
+/** PDO de master sin driver (nunca conecta) que contesta el catalogo unidades_medida. */
+final class PdoMasterFalsoT6 extends PDO
+{
+    /** @var array<int,array{0:string,1:int}> [id DGII => [descripcion, permite_decimales]] */
+    public array $unidades = [43 => ['Unidad', 0], 26 => ['Metro', 1], 21 => ['Kilogramo', 1]];
+    /** true = toda consulta lanza (master caida). */
+    public bool $fallar = false;
+
+    public function __construct()
+    {
+    }
+
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): PDOStatement|false
+    {
+        if ($this->fallar) {
+            throw new PDOException('master caida (prueba)');
+        }
+        return new SentenciaMasterFalsaT6($this->unidades);
+    }
+}
+
+final class SentenciaMasterFalsaT6 extends PDOStatement
+{
+    public function __construct(private array $unidades)
+    {
+    }
+
+    /** Lo que piden all(), isValid() y permiteDecimales() de unidadMedidaModel, segun el modo. */
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        if ($mode === PDO::FETCH_COLUMN) {
+            return array_keys($this->unidades);
+        }
+        if ($mode === PDO::FETCH_KEY_PAIR) {
+            return array_map(static fn(array $u): int => $u[1], $this->unidades);
+        }
+        $filas = [];
+        foreach ($this->unidades as $id => [$descripcion, $decimales]) {
+            $filas[] = ['id' => $id, 'codigo' => 'U' . $id, 'descripcion' => $descripcion, 'permite_decimales' => $decimales];
+        }
+        return $filas;
+    }
+}
+
+$masterT6 = new PdoMasterFalsoT6();
+$masterInstanciaT6 = new ReflectionProperty('MasterDatabase', 'instance');
+$masterAnteriorT6 = $masterInstanciaT6->getValue();
+$masterFalsaT6 = (new ReflectionClass('MasterDatabase'))->newInstanceWithoutConstructor();
+(new ReflectionProperty('MasterDatabase', 'conexion'))->setValue($masterFalsaT6, $masterT6);
+$masterInstanciaT6->setValue(null, $masterFalsaT6);
+$dbInstanciaT6 = new ReflectionProperty('Database', 'instance');
+$dbAnteriorT6 = $dbInstanciaT6->getValue();
+$dbT6 = (new ReflectionClass('Database'))->newInstanceWithoutConstructor();
+$dbConexionT6 = new ReflectionProperty('Database', 'conexion');
+$dbInstanciaT6->setValue(null, $dbT6);
+// user_id sale del token: RequestContext::userId(), que aqui se pone a mano.
+$usuarioT6 = new ReflectionProperty('RequestContext', 'userId');
+$usuarioT6->setValue(null, 5);
+$logPrevioT6 = ini_set('error_log', sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'test_conduces_t6.log');
+
+$emisorT6 = json_decode((string) file_get_contents(__DIR__ . '/fixtures/cotizacion_ferreteria.json'), true)['emisor'] ?? [];
+/** La DB de Ferreteria en el caso feliz: cotizacion 12, cliente 123 y el producto 55 (servicio). */
+$conexionT6 = static function () use ($emisorT6, $clienteT6): ConexionFalsaT5 {
+    $c = new ConexionFalsaT5();
+    $c->respuestas = [
+        'FROM cotizaciones WHERE id = :id' => [['id' => 12, 'code' => 'COT-000012', 'formato' => 'ferreteria']],
+        'FROM clients WHERE id = :id' => [['id' => 123] + $clienteT6],
+        'FROM products WHERE id IN' => [['id' => 55, 'indicador_bien_servicio' => 2]],
+        'FROM emisor_config WHERE id = 1' => [$emisorT6],
+    ];
+    return $c;
+};
+/** FerreteriaConduce con los dos modelos, y la Database de EmisorConfigModel, sobre la conexion falsa $c. */
+$conducesT6 = static function (ConexionFalsaT5 $c) use ($modeloT5, $dbT6, $dbConexionT6): FerreteriaConduce {
+    $dbConexionT6->setValue($dbT6, $c);
+    $cotizaciones = (new ReflectionClass('cotizacionModel'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('cotizacionModel', 'conexion'))->setValue($cotizaciones, $c);
+    return new FerreteriaConduce($modeloT5($c), $cotizaciones);
+};
+/** El texto de las paginas de un PDF de FPDF (streams FlateDecode inflados). */
+$textoPdfT6 = static function (array $r): string {
+    if (($r[0] ?? '') !== 'success' || !str_starts_with((string) $r[1], '%PDF')) {
+        return '';
+    }
+    preg_match_all('/stream\n(.*?)\nendstream/s', $r[1], $m);
+    $txt = '';
+    foreach ($m[1] as $s) {
+        $plano = @gzuncompress($s);
+        $txt .= ($plano === false ? '' : $plano) . "\n";
+    }
+    return $txt;
+};
+$isoT6 = static fn(string $s): string => mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
+$noExisteT6 = ['error', FerreteriaConduce::MSG_NO_EXISTE, 404];
+
+echo "\n== T6: FerreteriaConduce, parte de instancia (crear / actualizar / eliminar) ==\n";
+$chk('firmas de la parte de instancia como el contrato', array_map($firmaConduce, ['__construct', 'crear', 'actualizar', 'eliminar', 'preview', 'pdf']) === [
+    'public __construct(conduceModel $modelo, cotizacionModel $cotizaciones): ',
+    'public crear(object $body): array',
+    'public actualizar(array $row, object $body): array',
+    'public eliminar(int $id): array',
+    'public preview(object $body, ?array $row): array',
+    'public pdf(array $row): array',
+]);
+$c = $conexionT6();
+$r = $conducesT6($c)->crear($cuerpoConduce());
+$chk('crear: success con el id, el code y el numero del modelo', $r === ['success', ['id' => 77, 'code' => 'CON-000001', 'numero' => 1]]);
+$cab = $c->paramsDe('INSERT INTO conduces ')[0] ?? [];
+$chk('crear: client_name = razon_social (el orden de la cotizacion), user_id del token, cotizacion 12 y la fecha del cuerpo',
+    ($cab[':client_name'] ?? null) === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO' && ($cab[':user_id'] ?? null) === 5
+    && ($cab[':cotizacion_id'] ?? null) === 12 && ($cab[':client_id'] ?? null) === 123 && ($cab[':date'] ?? null) === '2026-10-05 09:30:00');
+$lin = $c->paramsDe('INSERT INTO conduce_items');
+$chk('crear: bien/servicio del catalogo (2), no el del cuerpo (1); la linea libre con precio 0', count($lin) === 2
+    && ($lin[0][':indicador_bien_servicio'] ?? null) === 2 && ($lin[1][':amount'] ?? null) === 0.0);
+$chk('crear: revisa la cotizacion de origen, el cliente y los productos', ($c->paramsDe('SELECT id, code, formato FROM cotizaciones')[0] ?? null) === [':id' => 12]
+    && ($c->paramsDe('SELECT * FROM clients')[0] ?? null) === [':id' => 123]
+    && ($c->paramsDe('SELECT id, indicador_bien_servicio FROM products')[0] ?? null) === [55]);
+foreach ([
+    ['desde una cotizacion de Gratex (formato NULL)', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM cotizaciones WHERE id = :id'] = [['id' => 12, 'code' => 'ABC123', 'formato' => null]], FerreteriaConduce::MSG_COTIZACION],
+    ['desde una cotizacion que no existe', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM cotizaciones WHERE id = :id'] = [], FerreteriaConduce::MSG_COTIZACION],
+    ['con un cliente que no existe', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM clients WHERE id = :id'] = [], FerreteriaConduce::MSG_SIN_CLIENTE],
+    ['con un producto que ya no esta en el catalogo', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM products WHERE id IN'] = [],
+        'Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.'],
+] as [$descT6, $cambiarT6, $msgT6]) {
+    $c = $conexionT6();
+    $cambiarT6($c);
+    $r = $conducesT6($c)->crear($cuerpoConduce());
+    $chk("crear {$descT6} => 422 \"{$msgT6}\", sin guardar ni tocar la secuencia",
+        $r === ['error', $msgT6, 422] && $c->paramsDe('INSERT INTO conduces ') === [] && !$c->huboSql('conduce_secuencia'));
+}
+$c = $conexionT6();
+$r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { $b->ajustes = new stdClass(); }));
+$chk('crear con ajustes => 422 MSG_AJUSTES antes de leer la DB', $r === ['error', FerreteriaConduce::MSG_AJUSTES, 422] && $c->consultas === []);
+$c = $conexionT6();
+$c->fallar['FROM clients'] = ConexionFalsaT5::error(2006, 'MySQL server has gone away');
+$r = $conducesT6($c)->crear($cuerpoConduce());
+$chk('crear con la DB caida al revisar => 500 "No se pudo revisar el conduce…" (nunca "elige un cliente")',
+    $r === ['error', 'No se pudo revisar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.', 500]
+    && $c->paramsDe('INSERT INTO conduces ') === []);
+$c = $conexionT6();
+$c->choquesNumero = 2;
+$chk('crear: el error del modelo pasa tal cual (dos choques => 500 MSG_CHOQUE)',
+    $conducesT6($c)->crear($cuerpoConduce()) === ['error', FerreteriaConduce::MSG_CHOQUE, 500]);
+
+$c = $conexionT6();
+$chk('actualizar([]) (no esta o esta eliminado) => 404 MSG_NO_EXISTE sin leer la DB',
+    $conducesT6($c)->actualizar([], $cuerpoConduce()) === $noExisteT6 && $c->consultas === []);
+$c = $conexionT6();
+$c->conduces[7] = ['numero' => 1, 'code' => 'CON-000001', 'activo' => 1];
+$r = $conducesT6($c)->actualizar($filaConduceFx, $cuerpoConduce(function (object $b) { $b->cotizacion_id = 99; unset($b->date); }));
+$chk('actualizar: success con el code y el numero guardados', $r === ['success', ['id' => 7, 'code' => 'CON-000001', 'numero' => 1]]);
+$upd = $c->paramsDe('UPDATE conduces')[0] ?? [];
+$chk('actualizar: el cotizacion_id del cuerpo (99) se ignora: ni se lee la cotizacion ni se escribe',
+    !$c->huboSql('FROM cotizaciones') && !array_key_exists(':cotizacion_id', $upd) && ($upd[':client_name'] ?? null) === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+$chk('actualizar sin fecha: date null (se conserva la guardada); user_id del token', array_key_exists(':date', $upd) && $upd[':date'] === null
+    && ($upd[':user_id'] ?? null) === 5);
+$c = $conexionT6();
+$c->conduces[7] = ['numero' => 1, 'code' => 'CON-000001', 'activo' => 1];
+$c->respuestas['FROM clients WHERE id = :id'] = [];
+$chk('actualizar con el cliente guardado borrado => 422 MSG_SIN_CLIENTE',
+    $conducesT6($c)->actualizar($filaConduceFx, $cuerpoConduce()) === ['error', FerreteriaConduce::MSG_SIN_CLIENTE, 422]);
+$c = $conexionT6();
+$c->conduces[7] = ['numero' => 1, 'code' => 'CON-000001', 'activo' => 1];
+$fT6 = $conducesT6($c);
+$chk('eliminar: "Conduce eliminado" y despues 404 (ya estaba eliminado)', $fT6->eliminar(7) === ['success', 'Conduce eliminado']
+    && $fT6->eliminar(7) === $noExisteT6);
+
+echo "\n== T6: FerreteriaConduce::preview / pdf ==\n";
+$c = $conexionT6();
+$r = $conducesT6($c)->preview($cuerpoConduce(function (object $b) { $b->items[0]->unidad_medida = '26'; }), null);
+$txt = $textoPdfT6($r);
+$chk('preview sin id: un PDF de CONDUCE DE MERCANCÍA con VISTA PREVIA', $txt !== '' && str_contains($txt, $isoT6('(CONDUCE DE MERCANCÍA)'))
+    && str_contains($txt, '(VISTA PREVIA)'));
+$chk('preview sin id: la cotizacion del cuerpo, la fecha del cuerpo y el cliente elegido', str_contains($txt, $isoT6('(Cotización: COT-000012)'))
+    && str_contains($txt, '(OCTUBRE 5/2026.-)') && str_contains($txt, '(HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO)'));
+$chk('preview: el nombre de la unidad sale del catalogo de master (Metro)', str_contains($txt, '(Metro) Tj'));
+$chk('preview: no guarda nada ni imprime precios', $c->paramsDe('INSERT') === [] && !str_contains($txt, '935.00'));
+$c = $conexionT6();
+$r = $conducesT6($c)->preview($cuerpoConduce(function (object $b) { $b->id = 7; $b->cotizacion_id = 99; unset($b->date); }), $filaConduceFx);
+$txt = $textoPdfT6($r);
+$chk('preview con id: el numero guardado, la cotizacion de la fila y la fecha guardada (sin VISTA PREVIA)', str_contains($txt, '(CON-000001)')
+    && str_contains($txt, $isoT6('(Cotización: COT-000012)')) && str_contains($txt, '(OCTUBRE 5/2026.-)') && !str_contains($txt, 'VISTA PREVIA'));
+$chk('preview con id: no lee la cotizacion del cuerpo (99)', $txt !== '' && !$c->huboSql('FROM cotizaciones'));
+$c = $conexionT6();
+$chk('preview con un id que no esta (o esta eliminado) => 404 MSG_NO_EXISTE sin leer la DB',
+    $conducesT6($c)->preview($cuerpoConduce(function (object $b) { $b->id = 999; }), null) === $noExisteT6 && $c->consultas === []);
+$c = $conexionT6();
+$c->respuestas['FROM cotizaciones WHERE id = :id'] = [['id' => 12, 'code' => 'ABC123', 'formato' => null]];
+$chk('preview sin id desde una cotizacion de Gratex => 422 MSG_COTIZACION, como el POST',
+    $conducesT6($c)->preview($cuerpoConduce(), null) === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+
+$c = $conexionT6();
+$txt = $textoPdfT6($conducesT6($c)->pdf($filaConduceFx));
+$chk('pdf: CONDUCE DE MERCANCÍA con su numero, su cotizacion y su fecha', str_contains($txt, $isoT6('(CONDUCE DE MERCANCÍA)'))
+    && str_contains($txt, '(CON-000001)') && str_contains($txt, $isoT6('(Cotización: COT-000012)')) && str_contains($txt, '(OCTUBRE 5/2026.-)'));
+$chk('pdf: el cliente de hoy con razon_social (getCliente), como la cotizacion', str_contains($txt, '(HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO)')
+    && ($c->paramsDe('SELECT * FROM clients')[0] ?? null) === [':id' => 123]);
+$chk('pdf: unidades por nombre (Metro), la que no esta en el catalogo con su codigo (999), sin precios',
+    str_contains($txt, '(Metro) Tj') && str_contains($txt, '(999) Tj') && !str_contains($txt, '935.00') && !str_contains($txt, '45.50'));
+$c = $conexionT6();
+$c->respuestas['FROM clients WHERE id = :id'] = [];
+$txt = $textoPdfT6($conducesT6($c)->pdf(['client_name' => null, 'company_name' => null, 'rnc' => null] + $filaConduceFx));
+$chk('pdf con el cliente borrado: el nombre guardado y sin RNC', str_contains($txt, '(HOSPITAL DOCENTE)') && !str_contains($txt, '401-51513-1'));
+$c = $conexionT6();
+$c->fallar['FROM clients'] = ConexionFalsaT5::error(2006, 'MySQL server has gone away');
+$txt = $textoPdfT6($conducesT6($c)->pdf($filaConduceFx));
+$chk('pdf con la lectura del cliente fallando: sale igual, con el cliente del JOIN', str_contains($txt, '(HOSPITAL DOCENTE)'));
+$masterT6->fallar = true;
+$c = $conexionT6();
+$txt = $textoPdfT6($conducesT6($c)->pdf($filaConduceFx));
+$masterT6->fallar = false;
+$chk('pdf con el catalogo de unidades ilegible: sale igual y cada linea imprime su codigo (26)',
+    str_contains($txt, '(26) Tj') && !str_contains($txt, '(Metro) Tj'));
+$c = $conexionT6();
+$c->fallar['FROM emisor_config'] = ConexionFalsaT5::error(1146, "Table 'tenant.emisor_config' doesn't exist");
+$chk('pdf sin poder leer el emisor => 500 "No se pudo generar el PDF del conduce…"', $conducesT6($c)->pdf($filaConduceFx)
+    === ['error', 'No se pudo generar el PDF del conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.', 500]);
+
+$usuarioT6->setValue(null, null);
+$dbInstanciaT6->setValue(null, $dbAnteriorT6);
+$masterInstanciaT6->setValue(null, $masterAnteriorT6);
+ini_set('error_log', (string) $logPrevioT6);
+
+// --- T6, ronda C: conduceController, Router y permisos (revision del codigo) ---
+// El controller no se puede incluir por CLI (lee $_SERVER, manda cabeceras y
+// corta con exit en el 401): aqui se revisa su codigo y el de la ruta. Lo que
+// hace de verdad se prueba en el servidor (tests/test_conduces.http).
+echo "\n== T6: conduceController, Router y permisos ==\n";
+$permisosT6 = require __DIR__ . '/../config/permissions.php';
+$chk("permissions.php: 'conduces' => 'cotizaciones', sin modulo RBAC nuevo",
+    ($permisosT6['routes']['conduces'] ?? null) === 'cotizaciones' && !in_array('conduces', $permisosT6['catalog'], true));
+$routerT6 = (string) file_get_contents(__DIR__ . '/../src/Router.php');
+$chk("Router.php: case 'conduces' incluye src/Controllers/conduceController.php",
+    preg_match("#case 'conduces':\s*(?://[^\n]*\s*)*require_once 'src/Controllers/conduceController.php';\s*break;#", $routerT6) === 1);
+$rutaControllerT6 = __DIR__ . '/../src/Controllers/conduceController.php';
+$controllerT6 = is_file($rutaControllerT6) ? (string) file_get_contents($rutaControllerT6) : '';
+$chk('conduceController.php existe', $controllerT6 !== '');
+$posT6 = static fn(string $aguja): int => ($p = strpos($controllerT6, $aguja)) === false ? PHP_INT_MAX : $p;
+$chk('conduceController: el token, despues el formato, despues el cuerpo y por ultimo la DB (spec 4.1)', $controllerT6 !== ''
+    && $posT6('$auth->validateRequest()') < $posT6('FerreteriaConduce::errorDisponibilidad()')
+    && $posT6('FerreteriaConduce::errorDisponibilidad()') < $posT6('InputSanitizer::jsonInput(false)')
+    && $posT6('InputSanitizer::jsonInput(false)') < $posT6('new conduceModel()'));
+$chk('conduceController: el 422 del formato responde y sale (return) antes de leer el cuerpo',
+    preg_match('#\$noDisponible = FerreteriaConduce::errorDisponibilidad\(\);\s*if \(\$noDisponible !== null\) \{\s*conduceResponderError\(\[\'error\', \$noDisponible, 422\]\);\s*return;#', $controllerT6) === 1);
+preg_match_all("#'module' => 'conduces', 'action' => '([A-Z]+)',\s*'entity_type' => 'conduce'#", $controllerT6, $auditT6);
+$chk("conduceController: auditoria CREATE, UPDATE y DELETE con module 'conduces' y entity_type 'conduce'", $auditT6[1] === ['CREATE', 'UPDATE', 'DELETE']);
+$chk('conduceController: CREATE con el id nuevo y new_values = el cuerpo',
+    preg_match("#'action' => 'CREATE',\s*'entity_type' => 'conduce', 'entity_id' => \\\$resultado\[1\]\['id'\],\s*'new_values' => \\\$body,#", $controllerT6) === 1);
+$chk('conduceController: UPDATE con old_values = la fila de antes y new_values = el cuerpo',
+    preg_match("#'action' => 'UPDATE',\s*'entity_type' => 'conduce', 'entity_id' => \\\$id,\s*'old_values' => \\\$anterior, 'new_values' => \\\$body,#", $controllerT6) === 1);
+$chk('conduceController: DELETE con old_values = la fila y sin new_values',
+    preg_match("#'action' => 'DELETE',\s*'entity_type' => 'conduce', 'entity_id' => \\\$id,\s*'old_values' => \\\$anterior,\s*'description'#", $controllerT6) === 1);
+$chk('conduceController: las sub-rutas con FerreteriaConduce::ruta y el PDF como Conduce_<code>.pdf',
+    str_contains($controllerT6, 'FerreteriaConduce::ruta($_SERVER[\'REQUEST_METHOD\'], ') && str_contains($controllerT6, "'Conduce_' . \$row['code'] . '.pdf'"));
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
