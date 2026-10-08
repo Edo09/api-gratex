@@ -696,6 +696,584 @@ if ($t4Escribir) {
     }
 }
 
+// ===========================================================================
+// T5 — conduceModel sin MySQL (Task 5)
+// ===========================================================================
+// El modelo se crea sin constructor (no conecta) y con una conexion falsa, como
+// la seccion T7 de tools/test_cotizacion_ferreteria.php: $conexion no tiene
+// tipo, asi que basta con los mismos metodos que PDO. Esta lleva estado (la
+// fila de conduce_secuencia y los conduces escritos, que rollBack deja como
+// estaban) para probar la numeracion de punta a punta. Lo que solo prueba MySQL
+// de verdad (los candados, cinco guardados en paralelo) va en
+// tests/test_conduces.http.
+
+require_once __DIR__ . '/../src/Models/conduceModel.php';
+
+/** Conexion falsa de la DB del tenant: registra SQL y parametros y contesta lo minimo que leen los modelos. */
+final class ConexionFalsaT5
+{
+    /** @var array<int,array{0:string,1:array,2:bool}> cada execute(): SQL, parametros y si iba dentro de una transaccion */
+    public array $ejecutados = [];
+    /** @var string[] cada SQL preparado, en orden */
+    public array $consultas = [];
+    /** @var array<int,array{0:string,1:mixed,2:mixed,3:mixed}> cada bindValue(): SQL, clave, valor y tipo */
+    public array $enlazados = [];
+    /** conduce_secuencia.ultimo; null = la fila no existe (la semilla de la 029 no corrio). */
+    public ?int $ultimo = 0;
+    /** Conduces escritos por esta conexion: id => ['numero' => int, 'code' => string, 'activo' => int]. */
+    public array $conduces = [];
+    /** Numeros que ya grabo otra caja: cuentan en MAX(numero) y rollBack no los quita. */
+    public array $ajenos = [];
+    /** Cuantos INSERT INTO conduces chocan con uk_conduces_numero antes de pasar. */
+    public int $choquesNumero = 0;
+    /** [fragmento de SQL => filas] para fetch()/fetchAll() de lo que no lleva estado; gana el primero que coincide. */
+    public array $respuestas = [];
+    /** [fragmento de SQL => PDOException]: el execute() de un SQL que lo contiene lanza esa excepcion. */
+    public array $fallar = [];
+    /** Lo que contesta el COUNT(*). */
+    public int $totalFilas = 0;
+    public int $commits = 0;
+    public int $rollbacks = 0;
+    private bool $enTransaccion = false;
+    private int $siguienteId = 77;
+    private string $ultimoId = '0';
+    /** ultimo y conduces al empezar la transaccion: rollBack los deja como estaban. */
+    private ?array $antes = null;
+
+    public static function error(int $codigo, string $detalle): PDOException
+    {
+        $e = new PDOException("SQLSTATE[23000]: {$codigo} {$detalle}");
+        $e->errorInfo = ['23000', $codigo, $detalle];
+        return $e;
+    }
+
+    public function prepare(string $sql): SentenciaFalsaT5
+    {
+        $this->consultas[] = $sql;
+        return new SentenciaFalsaT5($this, $sql);
+    }
+
+    public function beginTransaction(): bool
+    {
+        $this->enTransaccion = true;
+        $this->antes = [$this->ultimo, $this->conduces];
+        return true;
+    }
+
+    public function commit(): bool
+    {
+        $this->enTransaccion = false;
+        $this->antes = null;
+        $this->commits++;
+        return true;
+    }
+
+    public function rollBack(): bool
+    {
+        if ($this->antes !== null) {
+            [$this->ultimo, $this->conduces] = $this->antes;
+        }
+        $this->enTransaccion = false;
+        $this->antes = null;
+        $this->rollbacks++;
+        return true;
+    }
+
+    public function inTransaction(): bool { return $this->enTransaccion; }
+    public function lastInsertId(): string { return $this->ultimoId; }
+
+    /** Un execute(): lo registra y aplica lo que el modelo escribe. Devuelve las filas afectadas (rowCount). */
+    public function ejecutar(string $sql, array $params): int
+    {
+        $this->ejecutados[] = [$sql, $params, $this->enTransaccion];
+        foreach ($this->fallar as $fragmento => $e) {
+            if (str_contains($sql, $fragmento)) {
+                throw $e;
+            }
+        }
+        $s = ltrim($sql);
+        if (str_starts_with($s, 'INSERT IGNORE INTO conduce_secuencia')) {
+            if ($this->ultimo !== null) {
+                return 0;
+            }
+            $this->ultimo = 0;
+            return 1;
+        }
+        if (str_starts_with($s, 'UPDATE conduce_secuencia')) {
+            $this->ultimo = (int) $params[':numero'];
+            return 1;
+        }
+        if (str_starts_with($s, 'INSERT INTO conduces ')) {
+            if ($this->choquesNumero > 0) {
+                $this->choquesNumero--;
+                $this->ajenos[] = (int) $params[':numero'];   // otra caja grabo ese numero mientras tanto
+                throw self::error(1062, "Duplicate entry '" . $params[':numero'] . "' for key 'conduces.uk_conduces_numero'");
+            }
+            $id = $this->siguienteId++;
+            $this->conduces[$id] = ['numero' => (int) $params[':numero'], 'code' => (string) $params[':code'], 'activo' => 1];
+            $this->ultimoId = (string) $id;
+            return 1;
+        }
+        if (str_starts_with($s, 'UPDATE conduces SET activo = 0')) {
+            $id = (int) $params[':id'];
+            if (($this->conduces[$id]['activo'] ?? 0) !== 1) {
+                return 0;
+            }
+            $this->conduces[$id]['activo'] = 0;
+            return 1;
+        }
+        return 1;
+    }
+
+    /** fetchColumn(): la secuencia (FOR UPDATE), el MAX de todos los numeros o el COUNT(*). */
+    public function columna(string $sql): mixed
+    {
+        if (str_contains($sql, 'FROM conduce_secuencia') && str_contains($sql, 'FOR UPDATE')) {
+            return $this->ultimo ?? false;
+        }
+        if (str_contains($sql, 'MAX(numero)')) {
+            $numeros = array_merge(array_column($this->conduces, 'numero'), $this->ajenos);
+            return $numeros ? max($numeros) : 0;
+        }
+        if (str_contains($sql, 'COUNT(*)')) {
+            return $this->totalFilas;
+        }
+        return false;
+    }
+
+    /** fetch(): la fila que bloquea actualizar (si existe y esta activa) o la primera de $respuestas. */
+    public function fila(string $sql, array $params): mixed
+    {
+        if (str_contains($sql, 'FROM conduces WHERE id = :id AND activo = 1 FOR UPDATE')) {
+            $f = $this->conduces[(int) ($params[':id'] ?? 0)] ?? null;
+            return $f !== null && $f['activo'] === 1 ? ['code' => $f['code'], 'numero' => $f['numero']] : false;
+        }
+        return $this->filas($sql)[0] ?? false;
+    }
+
+    /** fetchAll(): las filas de $respuestas del primer fragmento que contiene el SQL. */
+    public function filas(string $sql): array
+    {
+        foreach ($this->respuestas as $fragmento => $filas) {
+            if (str_contains($sql, $fragmento)) {
+                return $filas;
+            }
+        }
+        return [];
+    }
+
+    /** Parametros de cada execute() cuyo SQL empieza con $inicio. */
+    public function paramsDe(string $inicio): array
+    {
+        $out = [];
+        foreach ($this->ejecutados as [$sql, $params]) {
+            if (str_starts_with(ltrim($sql), $inicio)) {
+                $out[] = $params;
+            }
+        }
+        return $out;
+    }
+
+    /** ¿Algun SQL preparado contiene $texto? */
+    public function huboSql(string $texto): bool
+    {
+        foreach ($this->consultas as $sql) {
+            if (str_contains($sql, $texto)) {
+                return true;
+            }
+        }
+        return false;
+    }
+}
+
+final class SentenciaFalsaT5
+{
+    private array $params = [];
+    private int $afectadas = 0;
+
+    public function __construct(private ConexionFalsaT5 $c, private string $sql) {}
+
+    public function bindValue($clave, $valor, $tipo = null): bool
+    {
+        $this->c->enlazados[] = [$this->sql, $clave, $valor, $tipo];
+        $this->params[$clave] = $valor;
+        return true;
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        if ($params !== null) {
+            $this->params = $params;
+        }
+        $this->afectadas = $this->c->ejecutar($this->sql, $this->params);
+        return true;
+    }
+
+    public function rowCount(): int { return $this->afectadas; }
+    public function fetchColumn(): mixed { return $this->c->columna($this->sql); }
+    public function fetch(): mixed { return $this->c->fila($this->sql, $this->params); }
+    public function fetchAll($modo = null): array { return $this->c->filas($this->sql); }
+}
+
+/** conduceModel sin constructor (no conecta) con la conexion falsa puesta. */
+$modeloT5 = static function (ConexionFalsaT5 $c): conduceModel {
+    $m = (new ReflectionClass('conduceModel'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('conduceModel', 'conexion'))->setValue($m, $c);
+    return $m;
+};
+/** Llama un metodo estatico privado del modelo (PHP >= 8.1 no pide setAccessible). */
+$privadoT5 = static fn(string $metodo, ...$args) => (new ReflectionMethod('conduceModel', $metodo))->invoke(null, ...$args);
+/** La firma de un metodo del modelo, para fijar el contrato. */
+$firmaModeloT5 = static function (string $metodo): string {
+    if (!method_exists('conduceModel', $metodo)) {
+        return $metodo . ' (no existe)';
+    }
+    $m = new ReflectionMethod('conduceModel', $metodo);
+    $params = array_map(static fn(ReflectionParameter $p): string => $p->getType() . ' $' . $p->getName(), $m->getParameters());
+    return ($m->isPublic() ? 'public ' : 'private ') . $metodo . '(' . implode(', ', $params) . '): ' . $m->getReturnType();
+};
+/** Un SQL en una sola linea, para buscar en el sin depender de los saltos ni de la sangria. */
+$planoT5 = static fn(string $sql): string => (string) preg_replace('/\s+/', ' ', trim($sql));
+/** El primer SQL preparado que contiene $texto, en una sola linea ('' si no hubo). */
+$sqlConT5 = static function (ConexionFalsaT5 $c, string $texto) use ($planoT5): string {
+    foreach ($c->consultas as $sql) {
+        if (str_contains($sql, $texto)) {
+            return $planoT5($sql);
+        }
+    }
+    return '';
+};
+/** Cada execute() como un paso con nombre, en orden; "(fuera)" = sin transaccion. */
+$pasosT5 = static function (ConexionFalsaT5 $c) use ($planoT5): array {
+    $nombres = [
+        'INSERT IGNORE INTO conduce_secuencia' => 'semilla',
+        'SELECT ultimo FROM conduce_secuencia WHERE id = 1 FOR UPDATE' => 'secuencia FOR UPDATE',
+        'SELECT COALESCE(MAX(numero), 0) FROM conduces' => 'MAX',
+        'UPDATE conduce_secuencia SET ultimo' => 'secuencia +1',
+        'INSERT INTO conduces ' => 'cabecera',
+        'INSERT INTO conduce_items' => 'linea',
+        'SELECT code, numero FROM conduces WHERE id = :id AND activo = 1 FOR UPDATE' => 'fila FOR UPDATE',
+        'UPDATE conduces SET client_id' => 'cabecera (editar)',
+        'UPDATE conduce_items SET activo = 0' => 'lineas viejas inactivas',
+    ];
+    $pasos = [];
+    foreach ($c->ejecutados as [$sql, , $enTransaccion]) {
+        $plano = $planoT5($sql);
+        $nombre = $plano;
+        foreach ($nombres as $inicio => $n) {
+            if (str_starts_with($plano, $inicio)) {
+                $nombre = $n;
+                break;
+            }
+        }
+        $pasos[] = $nombre . ($enTransaccion ? '' : ' (fuera)');
+    }
+    return $pasos;
+};
+/** 'cot' como lo dejan validarForma + aplicarCatalogo: una linea de producto (servicio segun el catalogo) y una libre sin precio. */
+$cotT5 = static fn(?string $fecha = '2026-10-05 09:30:00'): array => [
+    'date' => $fecha,
+    'client_id' => 123,
+    'cotizacion_id' => 12,
+    'items' => [
+        ['product_id' => 55, 'description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2.0, 'amount' => 935.0,
+            'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 2],
+        ['product_id' => null, 'description' => 'CORTE DE TUBO', 'quantity' => 1.0, 'amount' => 0.0,
+            'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1],
+    ],
+];
+$fkProductoT5 = ConexionFalsaT5::error(1452, 'Cannot add or update a child row: a foreign key constraint fails (`t`.`conduce_items`, CONSTRAINT `conduce_items_product_fk` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE SET NULL)');
+$fkCotizacionT5 = ConexionFalsaT5::error(1452, 'Cannot add or update a child row: a foreign key constraint fails (`t`.`conduces`, CONSTRAINT `conduces_cotizacion_fk` FOREIGN KEY (`cotizacion_id`) REFERENCES `cotizaciones` (`id`) ON DELETE SET NULL)');
+
+// Los error_log del modelo (esperados en estos casos) van a un archivo y no
+// ensucian la salida; se restaura al final de la seccion.
+$logPrevioT5 = ini_set('error_log', sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'test_conduces_t5.log');
+
+echo "\n== T5: conduceModel, numeracion (crear) ==\n";
+$chk('firmas: crear, actualizar y desactivar como el contrato', array_map($firmaModeloT5, ['crear', 'actualizar', 'desactivar']) === [
+    'public crear(array $cot, ?int $userId, string $clientName): array',
+    'public actualizar(int $id, array $cot, ?int $userId, string $clientName): array',
+    'public desactivar(int $id): array',
+]);
+$chk('mensajes genericos del modelo (500)',
+    conduceModel::MSG_GUARDAR === 'No se pudo guardar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'
+    && conduceModel::MSG_ACTUALIZAR === 'No se pudieron guardar los cambios del conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'
+    && conduceModel::MSG_ELIMINAR === 'No se pudo eliminar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.');
+
+$c = new ConexionFalsaT5();
+$c->ultimo = null;   // sin la semilla de la 029
+$r = $modeloT5($c)->crear($cotT5(), 5, 'HOSPITAL DOCENTE');
+$chk('primer conduce (aun sin la fila de la secuencia): CON-000001, numero 1 y el id del INSERT',
+    $r === ['success', ['id' => 77, 'code' => 'CON-000001', 'numero' => 1]]);
+$chk('pasos: la semilla fuera de la transaccion; FOR UPDATE, MAX, secuencia, cabecera y lineas dentro', $pasosT5($c) === [
+    'semilla (fuera)', 'secuencia FOR UPDATE', 'MAX', 'secuencia +1', 'cabecera', 'linea', 'linea',
+]);
+$chk('1 commit, 0 rollback y la secuencia queda en 1', $c->commits === 1 && $c->rollbacks === 0 && $c->ultimo === 1);
+$chk('sin GET_LOCK: lo serializa el FOR UPDATE de conduce_secuencia', !$c->huboSql('GET_LOCK'));
+$chk('el MAX cuenta todas las filas, activas o no (sin filtro por activo)',
+    in_array('SELECT COALESCE(MAX(numero), 0) FROM conduces', $c->consultas, true));
+$cab = $c->paramsDe('INSERT INTO conduces ')[0] ?? [];
+$chk('cabecera: numero, code, fecha, cotizacion, cliente, nombre guardado y user_id', $cab === [
+    ':numero' => 1, ':code' => 'CON-000001', ':date' => '2026-10-05 09:30:00', ':cotizacion_id' => 12,
+    ':client_id' => 123, ':client_name' => 'HOSPITAL DOCENTE', ':user_id' => 5,
+]);
+$lin = $c->paramsDe('INSERT INTO conduce_items');
+$chk('linea de producto: cantidad, unidad, precio interno e indicadores', ($lin[0] ?? null) === [
+    ':conduce_id' => 77, ':product_id' => 55, ':description' => 'FUNDAS CEMENTO GRIS', ':quantity' => 2.0,
+    ':unidad_medida' => '43', ':amount' => 935.0, ':indicador_facturacion' => 1, ':indicador_bien_servicio' => 2,
+]);
+$chk('linea libre: product_id null y precio 0', count($lin) === 2 && array_key_exists(':product_id', $lin[1])
+    && $lin[1][':product_id'] === null && $lin[1][':amount'] === 0.0);
+
+$c = new ConexionFalsaT5();
+$modeloT5($c)->crear($cotT5(null), null, 'X');
+$cab = $c->paramsDe('INSERT INTO conduces ')[0] ?? [];
+$chk('sin fecha => ahora (Y-m-d H:i:s); sin usuario => user_id null',
+    preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) ($cab[':date'] ?? '')) === 1
+    && array_key_exists(':user_id', $cab) && $cab[':user_id'] === null);
+
+// numero = GREATEST(ultimo, MAX(numero)) + 1, y la secuencia queda en ese numero.
+foreach ([[4, [2], 5], [0, [9], 10], [7, [7], 8], [3, [], 4]] as [$ultimoT5, $hechosT5, $esperadoT5]) {
+    $c = new ConexionFalsaT5();
+    $c->ultimo = $ultimoT5;
+    $c->ajenos = $hechosT5;
+    $r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+    $chk("secuencia {$ultimoT5} y MAX " . ($hechosT5 ? max($hechosT5) : 0) . " => {$esperadoT5} (" . FerreteriaConduce::codigo($esperadoT5) . ')',
+        ($r[1]['numero'] ?? null) === $esperadoT5 && ($r[1]['code'] ?? null) === FerreteriaConduce::codigo($esperadoT5)
+        && $c->ultimo === $esperadoT5);
+}
+
+echo "\n== T5: un numero no se vuelve a usar ==\n";
+$c = new ConexionFalsaT5();
+$mT5 = $modeloT5($c);
+$r1T5 = $mT5->crear($cotT5(), 5, 'X');
+$d1T5 = $mT5->desactivar(77);
+$r2T5 = $mT5->crear($cotT5(), 5, 'X');
+$chk('crear, eliminar y crear: CON-000001 y despues CON-000002 (el 1 no se reusa)', ($r1T5[1]['code'] ?? null) === 'CON-000001'
+    && $d1T5 === ['success', 'Conduce eliminado'] && ($r2T5[1]['code'] ?? null) === 'CON-000002');
+$chk('el eliminado sigue en la tabla, con activo = 0 (nada se borro)', ($c->conduces[77]['activo'] ?? null) === 0 && !$c->huboSql('DELETE'));
+$mT5->desactivar(78);
+$c->ultimo = 0;   // la fila de la secuencia se volvio a sembrar en 0
+$r3T5 = $mT5->crear($cotT5(), 5, 'X');
+$chk('secuencia en 0 y los dos eliminados: el MAX de las filas inactivas da CON-000003', ($r3T5[1]['code'] ?? null) === 'CON-000003');
+
+echo "\n== T5: choque con uk_conduces_numero (1062) ==\n";
+$c = new ConexionFalsaT5();
+$c->choquesNumero = 1;
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('1062 una vez: reintenta en otra transaccion y toma el siguiente numero (CON-000002)',
+    $r === ['success', ['id' => 77, 'code' => 'CON-000002', 'numero' => 2]]);
+$chk('1062 una vez: 1 rollback, 1 commit, 2 cabeceras intentadas y la secuencia en 2', $c->rollbacks === 1 && $c->commits === 1
+    && count($c->paramsDe('INSERT INTO conduces ')) === 2 && $c->ultimo === 2);
+$chk('1062 una vez: el reintento vuelve a sembrar, a bloquear la secuencia y a leer el MAX', $pasosT5($c) === [
+    'semilla (fuera)', 'secuencia FOR UPDATE', 'MAX', 'secuencia +1', 'cabecera',
+    'semilla (fuera)', 'secuencia FOR UPDATE', 'MAX', 'secuencia +1', 'cabecera', 'linea', 'linea',
+]);
+$c = new ConexionFalsaT5();
+$c->choquesNumero = 2;
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('1062 dos veces: 500 "Otro conduce se guardó al mismo tiempo. Vuelve a guardar."',
+    $r === ['error', 'Otro conduce se guardó al mismo tiempo. Vuelve a guardar.', 500]);
+$chk('1062 dos veces: no hay tercer intento; sin commit ni lineas, y la secuencia sin avanzar',
+    count($c->paramsDe('INSERT INTO conduces ')) === 2 && $c->commits === 0 && $c->rollbacks === 2
+    && $c->paramsDe('INSERT INTO conduce_items') === [] && $c->conduces === [] && $c->ultimo === 0);
+$c = new ConexionFalsaT5();
+$c->fallar['INSERT INTO conduces '] = ConexionFalsaT5::error(1062, "Duplicate entry '77' for key 'conduces.PRIMARY'");
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('1062 en otra clave: no se reintenta, mensaje generico 500',
+    $r === ['error', conduceModel::MSG_GUARDAR, 500] && count($c->paramsDe('INSERT INTO conduces ')) === 1);
+$chk('esNumeroRepetido: solo el 1062 de uk_conduces_numero',
+    $privadoT5('esNumeroRepetido', ConexionFalsaT5::error(1062, "Duplicate entry '7' for key 'conduces.uk_conduces_numero'"))
+    && !$privadoT5('esNumeroRepetido', ConexionFalsaT5::error(1062, "Duplicate entry '7' for key 'conduces.PRIMARY'"))
+    && !$privadoT5('esNumeroRepetido', ConexionFalsaT5::error(1452, 'uk_conduces_numero')));
+
+echo "\n== T5: claves foraneas (1452) y otros errores ==\n";
+$c = new ConexionFalsaT5();
+$c->fallar['INSERT INTO conduce_items'] = $fkProductoT5;
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('crear, producto borrado (1452 conduce_items_product_fk) => 422 MSG_PRODUCTO_FK', $r === ['error', FerreteriaConduce::MSG_PRODUCTO_FK, 422]);
+$chk('... sin reintento ni commit: el rollback deshace la cabecera y la secuencia', count($c->paramsDe('INSERT INTO conduces ')) === 1
+    && $c->commits === 0 && $c->rollbacks === 1 && $c->conduces === [] && $c->ultimo === 0);
+$c = new ConexionFalsaT5();
+$c->fallar['INSERT INTO conduces '] = $fkCotizacionT5;
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('crear, cotizacion de origen borrada (1452 conduces_cotizacion_fk) => 422 MSG_COTIZACION_FK, sin reintento',
+    $r === ['error', FerreteriaConduce::MSG_COTIZACION_FK, 422] && count($c->paramsDe('INSERT INTO conduces ')) === 1);
+$c = new ConexionFalsaT5();
+$c->fallar['INSERT IGNORE INTO conduce_secuencia'] = ConexionFalsaT5::error(1146, "Table 'tenant.conduce_secuencia' doesn't exist");
+$r = $modeloT5($c)->crear($cotT5(), 5, 'X');
+$chk('sin la 029 (tabla inexistente) => generico 500, sin rollBack de una transaccion que no empezo',
+    $r === ['error', conduceModel::MSG_GUARDAR, 500] && $c->rollbacks === 0 && $c->commits === 0);
+$chk('errorAlGuardar: otro error (1205) => el generico con 500',
+    $privadoT5('errorAlGuardar', ConexionFalsaT5::error(1205, 'Lock wait timeout exceeded'), 'GENERICO') === ['error', 'GENERICO', 500]);
+$chk('errorAlGuardar: 1452 de otra clave foranea => el generico', $privadoT5('errorAlGuardar',
+    ConexionFalsaT5::error(1452, 'a foreign key constraint fails (CONSTRAINT `conduce_items_conduce_fk`)'), 'GENERICO') === ['error', 'GENERICO', 500]);
+
+echo "\n== T5: conduceModel::actualizar ==\n";
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 0];
+$r = $modeloT5($c)->actualizar(7, $cotT5(), 5, 'X');
+$chk('actualizar un conduce eliminado (activo = 0) => 404 MSG_NO_EXISTE, rollback y nada escrito',
+    $r === ['error', FerreteriaConduce::MSG_NO_EXISTE, 404] && $c->rollbacks === 1 && $pasosT5($c) === ['fila FOR UPDATE']);
+$c = new ConexionFalsaT5();
+$chk('actualizar un id que no existe => 404 MSG_NO_EXISTE',
+    $modeloT5($c)->actualizar(99, $cotT5(), 5, 'X') === ['error', FerreteriaConduce::MSG_NO_EXISTE, 404]);
+
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$r = $modeloT5($c)->actualizar(7, $cotT5(null), 9, 'NUEVO NOMBRE');
+$chk('actualizar: numero y code de la fila, nunca nuevos', $r === ['success', ['id' => 7, 'code' => 'CON-000003', 'numero' => 3]]);
+$chk('actualizar: fila bloqueada, cabecera, lineas viejas a activo = 0 y DESPUES las nuevas, todo en la transaccion', $pasosT5($c) === [
+    'fila FOR UPDATE', 'cabecera (editar)', 'lineas viejas inactivas', 'linea', 'linea',
+]);
+$chk('actualizar: nada se borra (sin DELETE) y la secuencia no se toca',
+    !$c->huboSql('DELETE') && !$c->huboSql('conduce_secuencia') && !$c->huboSql('MAX(numero)'));
+$upd = $c->paramsDe('UPDATE conduces')[0] ?? [];
+$sqlUpdT5 = $sqlConT5($c, 'SET client_id');
+$chk('actualizar sin fecha: date null => conserva la guardada (COALESCE)', array_key_exists(':date', $upd) && $upd[':date'] === null
+    && str_contains($sqlUpdT5, 'date = COALESCE(:date, date)'));
+$chk('actualizar: cliente, nombre guardado, user_id y updated_at nuevos', ($upd[':client_id'] ?? null) === 123
+    && ($upd[':client_name'] ?? null) === 'NUEVO NOMBRE' && ($upd[':user_id'] ?? null) === 9
+    && preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) ($upd[':updated_at'] ?? '')) === 1);
+$chk('actualizar: no cambia numero, code ni cotizacion_id', $sqlUpdT5 !== '' && preg_match('/\b(numero|code|cotizacion_id)\s*=/', $sqlUpdT5) === 0);
+$chk('actualizar: las lineas viejas son las activas de ese conduce', ($c->paramsDe('UPDATE conduce_items SET activo = 0')[0] ?? null) === [':id' => 7]
+    && str_ends_with($sqlConT5($c, 'UPDATE conduce_items'), 'WHERE conduce_id = :id AND activo = 1'));
+$chk('actualizar: 1 commit, 0 rollback; las lineas nuevas van al mismo conduce', $c->commits === 1 && $c->rollbacks === 0
+    && array_column($c->paramsDe('INSERT INTO conduce_items'), ':conduce_id') === [7, 7]);
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$modeloT5($c)->actualizar(7, $cotT5('2026-10-06 08:00:00'), 9, 'X');
+$chk('actualizar con fecha: la del cuerpo', ($c->paramsDe('UPDATE conduces')[0][':date'] ?? null) === '2026-10-06 08:00:00');
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$c->fallar['INSERT INTO conduce_items'] = $fkProductoT5;
+$r = $modeloT5($c)->actualizar(7, $cotT5(), 9, 'X');
+$chk('actualizar, producto borrado => 422 MSG_PRODUCTO_FK y rollback (las lineas viejas siguen activas)',
+    $r === ['error', FerreteriaConduce::MSG_PRODUCTO_FK, 422] && $c->rollbacks === 1 && $c->commits === 0);
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$c->fallar['UPDATE conduces'] = ConexionFalsaT5::error(1205, 'Lock wait timeout exceeded');
+$chk('actualizar con la DB fallando => 500 MSG_ACTUALIZAR',
+    $modeloT5($c)->actualizar(7, $cotT5(), 9, 'X') === ['error', conduceModel::MSG_ACTUALIZAR, 500]);
+
+echo "\n== T5: conduceModel::desactivar ==\n";
+$c = new ConexionFalsaT5();
+$c->conduces[7] = ['numero' => 3, 'code' => 'CON-000003', 'activo' => 1];
+$mT5 = $modeloT5($c);
+$chk('desactivar: "Conduce eliminado" y la fila con activo = 0', $mT5->desactivar(7) === ['success', 'Conduce eliminado']
+    && $c->conduces[7]['activo'] === 0);
+$chk('desactivar: UPDATE ... SET activo = 0, updated_at ... WHERE id = :id AND activo = 1; sin DELETE ni tocar las lineas',
+    in_array('UPDATE conduces SET activo = 0, updated_at = :updated_at WHERE id = :id AND activo = 1', $c->consultas, true)
+    && !$c->huboSql('DELETE') && !$c->huboSql('conduce_items'));
+$chk('desactivar otra vez (0 filas afectadas) => 404 MSG_NO_EXISTE', $mT5->desactivar(7) === ['error', FerreteriaConduce::MSG_NO_EXISTE, 404]);
+$chk('desactivar un id que no existe => 404 MSG_NO_EXISTE', $mT5->desactivar(999) === ['error', FerreteriaConduce::MSG_NO_EXISTE, 404]);
+$c = new ConexionFalsaT5();
+$c->fallar['UPDATE conduces SET activo'] = ConexionFalsaT5::error(1205, 'Lock wait timeout exceeded');
+$chk('desactivar con la DB fallando => 500 MSG_ELIMINAR', $modeloT5($c)->desactivar(7) === ['error', conduceModel::MSG_ELIMINAR, 500]);
+
+ini_set('error_log', (string) $logPrevioT5);
+
+// --- T5, ronda B: lecturas (listar, contar, obtener, cotizacionDeOrigen) ---
+echo "\n== T5: lecturas de conduceModel ==\n";
+$chk('firmas: listar, contar, obtener y cotizacionDeOrigen como el contrato',
+    array_map($firmaModeloT5, ['listar', 'contar', 'obtener', 'cotizacionDeOrigen']) === [
+        'public listar(int $offset, int $limit, ?string $query): array',
+        'public contar(?string $query): int',
+        'public obtener(int $id): ?array',
+        'public cotizacionDeOrigen(int $cotizacionId): ?array',
+    ]);
+// Cabeceras como las devolveria el SELECT (las columnas de la spec 4.1).
+$cabT5 = static fn(int $id, string $code): array => [
+    'id' => $id, 'numero' => $id - 6, 'code' => $code, 'date' => '2026-10-05 09:30:00', 'cotizacion_id' => 12,
+    'cotizacion_code' => 'COT-000012', 'client_id' => 123, 'client_name' => 'Juan Perez', 'company_name' => 'HOSPITAL DOCENTE',
+    'rnc' => '401515131', 'client_name_guardado' => 'HOSPITAL DOCENTE', 'user_id' => 5, 'activo' => 1,
+    'created_at' => '2026-10-05 09:31:00', 'updated_at' => null,
+];
+$lineaOchoT5 = ['id' => 4, 'conduce_id' => 8, 'product_id' => null, 'description' => 'ARENA', 'quantity' => '3.000',
+    'unidad_medida' => '43', 'amount' => '0.0000', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1, 'activo' => 1];
+$columnasT5 = 'SELECT c.id, c.numero, c.code, c.date, c.cotizacion_id, q.code AS cotizacion_code, c.client_id, cl.client_name, '
+    . 'cl.company_name, cl.rnc, c.client_name AS client_name_guardado, c.user_id, c.activo, c.created_at, c.updated_at '
+    . 'FROM conduces c LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id LEFT JOIN clients cl ON cl.id = c.client_id';
+$busquedaT5 = 'AND (c.code LIKE :query OR c.client_name LIKE :query OR cl.client_name LIKE :query OR cl.company_name LIKE :query '
+    . 'OR cl.rnc LIKE :query)';
+$enlacesT5 = static fn(ConexionFalsaT5 $c): array => array_map(static fn(array $e): array => [$e[1], $e[2], $e[3]], $c->enlazados);
+
+$c = new ConexionFalsaT5();
+$c->respuestas = [
+    'FROM conduces c' => [$cabT5(8, 'CON-000002'), $cabT5(7, 'CON-000001')],
+    'FROM conduce_items' => [$filasItemsFx[0], $filasItemsFx[1], $lineaOchoT5],
+];
+$filasT5 = $modeloT5($c)->listar(0, 10, null);
+$sqlListaT5 = $planoT5($c->consultas[0] ?? '');
+$chk('listar: las columnas de la fila (spec 4.1), con el nombre guardado como client_name_guardado',
+    str_starts_with($sqlListaT5, $columnasT5));
+$chk('listar: solo activos, de la fecha mas nueva a la mas vieja (empate por id), con LIMIT y OFFSET',
+    str_ends_with($sqlListaT5, ' WHERE c.activo = 1 ORDER BY c.date DESC, c.id DESC LIMIT :limit OFFSET :offset'));
+$chk('listar sin busqueda: limit y offset como enteros, sin :query ni LIKE',
+    $enlacesT5($c) === [[':limit', 10, PDO::PARAM_INT], [':offset', 0, PDO::PARAM_INT]] && !str_contains($sqlListaT5, 'LIKE'));
+$chk('listar: cada conduce con sus lineas', count($filasT5) === 2 && ($filasT5[0]['items'] ?? null) === [$lineaOchoT5]
+    && ($filasT5[1]['items'] ?? null) === [$filasItemsFx[0], $filasItemsFx[1]]);
+$chk('lineas: una sola consulta para la pagina, solo las activas, en el orden en que se escribieron',
+    count(array_filter($c->consultas, static fn(string $s): bool => str_contains($s, 'FROM conduce_items'))) === 1
+    && str_ends_with($sqlConT5($c, 'FROM conduce_items'), 'FROM conduce_items WHERE conduce_id IN (?,?) AND activo = 1 ORDER BY id ASC')
+    && ($c->paramsDe('SELECT id, conduce_id')[0] ?? null) === [8, 7]);
+
+$c = new ConexionFalsaT5();
+$modeloT5($c)->listar(20, 10, '  CON-0001 ');
+$chk('listar con busqueda: numero, nombre guardado, nombre y empresa del cliente y RNC',
+    str_contains($planoT5($c->consultas[0] ?? ''), ' WHERE c.activo = 1 ' . $busquedaT5 . ' ORDER BY c.date DESC'));
+$chk('listar con busqueda: el texto recortado entre % y el offset de la pagina', $enlacesT5($c)
+    === [[':query', '%CON-0001%', PDO::PARAM_STR], [':limit', 10, PDO::PARAM_INT], [':offset', 20, PDO::PARAM_INT]]);
+$c = new ConexionFalsaT5();
+$chk('listar sin filas: [] sin consultar las lineas; una busqueda en blanco no filtra',
+    $modeloT5($c)->listar(0, 10, '   ') === [] && !$c->huboSql('conduce_items') && !$c->huboSql('LIKE'));
+
+$c = new ConexionFalsaT5();
+$c->totalFilas = 42;
+$chk('contar: COUNT(*) de los activos', $modeloT5($c)->contar(null) === 42
+    && $planoT5($c->consultas[0] ?? '') === 'SELECT COUNT(*) AS total FROM conduces c LEFT JOIN clients cl ON cl.id = c.client_id WHERE c.activo = 1'
+    && $c->paramsDe('SELECT COUNT(*)') === [[]]);
+$c = new ConexionFalsaT5();
+$modeloT5($c)->contar(' juan ');
+$chk('contar con busqueda: la misma condicion que listar', str_ends_with($planoT5($c->consultas[0] ?? ''), ' WHERE c.activo = 1 ' . $busquedaT5)
+    && $c->paramsDe('SELECT COUNT(*)') === [[':query' => '%juan%']]);
+
+$c = new ConexionFalsaT5();
+$c->respuestas = ['FROM conduces c' => [$cabT5(7, 'CON-000001')], 'FROM conduce_items' => $filasItemsFx];
+$filaT5 = $modeloT5($c)->obtener(7);
+$chk('obtener: la fila con sus lineas activas y el nombre guardado', ($filaT5['code'] ?? null) === 'CON-000001'
+    && ($filaT5['items'] ?? null) === $filasItemsFx && ($filaT5['client_name_guardado'] ?? null) === 'HOSPITAL DOCENTE');
+$chk('obtener: las columnas de la fila y solo si esta activo (WHERE c.id = :id AND c.activo = 1)',
+    $planoT5($c->consultas[0] ?? '') === $columnasT5 . ' WHERE c.id = :id AND c.activo = 1'
+    && ($c->paramsDe('SELECT c.id')[0] ?? null) === [':id' => 7]);
+$c = new ConexionFalsaT5();
+$chk('obtener: no existe o esta eliminado => null, sin consultar las lineas', $modeloT5($c)->obtener(99) === null && !$c->huboSql('conduce_items'));
+
+$c = new ConexionFalsaT5();
+$c->respuestas = ['FROM cotizaciones WHERE id = :id' => [['id' => 12, 'code' => 'COT-000012', 'formato' => 'ferreteria']]];
+$chk('cotizacionDeOrigen: id, code y formato', $modeloT5($c)->cotizacionDeOrigen(12) === ['id' => 12, 'code' => 'COT-000012', 'formato' => 'ferreteria']
+    && ($c->paramsDe('SELECT id, code, formato FROM cotizaciones')[0] ?? null) === [':id' => 12]);
+$c->respuestas = ['FROM cotizaciones WHERE id = :id' => [['id' => '3', 'code' => 'ABC123', 'formato' => null]]];
+$chk('cotizacionDeOrigen: una de Gratex (formato NULL) => formato null, id como entero',
+    $modeloT5($c)->cotizacionDeOrigen(3) === ['id' => 3, 'code' => 'ABC123', 'formato' => null]);
+$c->respuestas = [];
+$chk('cotizacionDeOrigen: no existe => null', $modeloT5($c)->cotizacionDeOrigen(404) === null);
+
+$lanzaT5 = static function (callable $f): bool {
+    try {
+        $f();
+        return false;
+    } catch (PDOException $e) {
+        return true;
+    }
+};
+$c = new ConexionFalsaT5();
+$c->fallar['FROM conduces c'] = ConexionFalsaT5::error(1146, "Table 'tenant.conduces' doesn't exist");
+$c->fallar['FROM cotizaciones'] = ConexionFalsaT5::error(2006, 'MySQL server has gone away');
+$chk('las lecturas con la DB fallando lanzan (el controller responde 500, nunca "no hay conduces" ni un 404)',
+    $lanzaT5(fn() => $modeloT5($c)->listar(0, 10, null)) && $lanzaT5(fn() => $modeloT5($c)->contar(null))
+    && $lanzaT5(fn() => $modeloT5($c)->obtener(7)) && $lanzaT5(fn() => $modeloT5($c)->cotizacionDeOrigen(12)));
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
