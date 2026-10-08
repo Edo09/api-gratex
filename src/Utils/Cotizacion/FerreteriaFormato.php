@@ -406,8 +406,9 @@ final class FerreteriaFormato extends CotizacionFormato
 
     /**
      * Reglas que dependen de la DB, ya con lo que la DB contesto: el cliente
-     * existe, cada producto existe y de el sale bien/servicio; luego los
-     * totales y el tope del abono. Pura: el CLI la prueba sin base de datos.
+     * existe, cada producto existe y de el sale bien/servicio
+     * (aplicarCatalogoLineas); luego los totales y el tope del abono. Pura: el
+     * CLI la prueba sin base de datos.
      *
      * @param array      $cot       'cot' de validarForma
      * @param array|null $cliente   getCliente() (null = no existe)
@@ -419,25 +420,45 @@ final class FerreteriaFormato extends CotizacionFormato
         if ($cliente === null) {
             return ['error', 'Elige un cliente para la cotización.', 422];
         }
-        $cot['items'] = array_values($cot['items']);
-        foreach ($cot['items'] as $i => $item) {
-            if (empty($item['product_id'])) {
-                continue;
-            }
-            $info = $productos[(int) $item['product_id']] ?? null;
-            if ($info === null) {
-                return ['error', 'Línea ' . ($i + 1) . ': el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.', 422];
-            }
-            // Bien o servicio lo dice el catalogo, no la pantalla: es lo que
-            // la factura copiara al convertir (y lo que decide si mueve inventario).
-            $cot['items'][$i]['indicador_bien_servicio'] = (int) $info['indicador_bien_servicio'];
+        $items = self::aplicarCatalogoLineas($cot['items'], $productos);
+        if (is_string($items)) {
+            return ['error', $items, 422];
         }
+        $cot['items'] = $items;
         $tot = self::totales(self::lineasDesdeFilas($cot['items']), $cot['ajustes']);
         $error = self::errorAbono($tot);
         if ($error !== null) {
             return ['error', $error, 422];
         }
         return ['ok', $cot, $tot];
+    }
+
+    /**
+     * La parte por linea de aplicarCatalogo. Aparte porque el conduce
+     * (FerreteriaConduce) aplica las mismas reglas a sus lineas, sin cliente
+     * de cotizacion ni totales: cada producto tiene que existir, y de el sale
+     * bien/servicio. Las lineas se numeran por posicion, como las ve el usuario.
+     *
+     * @param array $items     lineas ya normalizadas (normalizarLinea)
+     * @param array $productos getProductosInfo(): [product_id => ['indicador_bien_servicio' => int]]
+     * @return array|string las lineas (reindexadas) o el mensaje para el usuario
+     */
+    public static function aplicarCatalogoLineas(array $items, array $productos): array|string
+    {
+        $items = array_values($items);
+        foreach ($items as $i => $item) {
+            if (empty($item['product_id'])) {
+                continue;
+            }
+            $info = $productos[(int) $item['product_id']] ?? null;
+            if ($info === null) {
+                return 'Línea ' . ($i + 1) . ': el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.';
+            }
+            // Bien o servicio lo dice el catalogo, no la pantalla: es lo que
+            // la factura copiara al convertir (y lo que decide si mueve inventario).
+            $items[$i]['indicador_bien_servicio'] = (int) $info['indicador_bien_servicio'];
+        }
+        return $items;
     }
 
     /**
@@ -519,8 +540,11 @@ final class FerreteriaFormato extends CotizacionFormato
         return $out;
     }
 
-    /** Fecha y hora de ahora en Santo Domingo, como la guarda un DATETIME. */
-    private static function ahoraRd(): string
+    /**
+     * Fecha y hora de ahora en Santo Domingo, como la guarda un DATETIME.
+     * Pública: el PDF del conduce (FerreteriaConduce) usa la misma "ahora".
+     */
+    public static function ahoraRd(): string
     {
         return (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('Y-m-d H:i:s');
     }
@@ -528,8 +552,14 @@ final class FerreteriaFormato extends CotizacionFormato
     /**
      * Una línea del cuerpo revisada y con sus defaults, o el mensaje para el
      * usuario. $n es el número de la línea como la ve el usuario.
+     *
+     * Pública porque el conduce (FerreteriaConduce) revisa sus líneas con las
+     * mismas reglas y los mismos textos. Lo único que cambia para él es el
+     * precio, con $precioCeroValido: una línea del conduce puede ir en 0 (la
+     * línea libre no tiene precio; se escribe al facturar), pero nunca en
+     * negativo. La cotización la llama sin la bandera, con sus reglas de siempre.
      */
-    private static function normalizarLinea(mixed $item, int $n, callable $problemaCantidad, callable $unidadValida): array|string
+    public static function normalizarLinea(mixed $item, int $n, callable $problemaCantidad, callable $unidadValida, bool $precioCeroValido = false): array|string
     {
         if (is_array($item)) {
             $item = (object) $item;
@@ -574,7 +604,11 @@ final class FerreteriaFormato extends CotizacionFormato
         if ($precio === null) {
             return 'El precio de la línea ' . $n . ' no es válido. Revísalo.';
         }
-        if (!($precio > 0)) {
+        if ($precioCeroValido) {
+            if ($precio < 0) {
+                return 'Línea ' . $n . ': el precio no puede ser negativo.';
+            }
+        } elseif (!($precio > 0)) {
             return 'Línea ' . $n . ': el precio debe ser mayor que 0.';
         }
         if (unidadMedidaModel::decimalesDe($precio) > 4) {
@@ -667,8 +701,10 @@ final class FerreteriaFormato extends CotizacionFormato
      * 'Y-m-d H:i:s' tal cual; 'Y-m-d' con la hora de ahora en RD (la app no
      * fija zona horaria y la del servidor no es la de RD); null si no vino.
      * false si no es una fecha real (2026-02-30, 25:00:00, 02/09/2026).
+     * Pública, como leerNumero y leerEntero: el conduce (FerreteriaConduce)
+     * lee su cuerpo con las mismas reglas.
      */
-    private static function normalizarFecha(mixed $crudo): string|false|null
+    public static function normalizarFecha(mixed $crudo): string|false|null
     {
         if ($crudo === null || (is_string($crudo) && trim($crudo) === '')) {
             return null;
@@ -693,7 +729,7 @@ final class FerreteriaFormato extends CotizacionFormato
     }
 
     /** Un número finito del JSON (int, float o texto numérico); null si no lo es. */
-    private static function leerNumero(mixed $v): ?float
+    public static function leerNumero(mixed $v): ?float
     {
         if (is_string($v)) {
             $v = trim($v);
@@ -708,7 +744,7 @@ final class FerreteriaFormato extends CotizacionFormato
     }
 
     /** Un entero del JSON (5, 5.0 o "5"); null si no lo es (5.5, true, "x"). */
-    private static function leerEntero(mixed $v): ?int
+    public static function leerEntero(mixed $v): ?int
     {
         if (is_int($v)) {
             return $v;

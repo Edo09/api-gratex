@@ -53,6 +53,8 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'Color de acento hex #RRGGBB (NULL = colores por defecto de la plantilla)',
   cotizacion_formato  VARCHAR(40)    NOT NULL DEFAULT 'gratex'
                         COMMENT 'Formato de cotizacion: gratex | ferreteria (src/Utils/Cotizacion/). Se cambia solo por SQL. Ver master_migrations/011',
+  pos_enabled         TINYINT(1)     NOT NULL DEFAULT 0
+                        COMMENT '1 = el tenant tiene el POS (pos.fiscalpoint.com.do). Se activa solo por SQL. Ver master_migrations/012',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -345,6 +347,46 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   KEY idx_audit_tenant_user    (tenant_id, user_id),
   KEY idx_audit_entity         (entity_type, entity_id),
   KEY idx_audit_action         (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- POS (master_migrations/012, docs/specs/pos.md §9.2). En el master porque se
+-- resuelven ANTES de saber a que DB de tenant ir: el canje del codigo de
+-- traspaso es publico y el token de equipo dice su tenant y su caja.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pos_handoff_codes (
+  id          INT          NOT NULL AUTO_INCREMENT,
+  code_hash   CHAR(64)     NOT NULL COMMENT 'sha256 del codigo; el codigo en claro nunca se guarda',
+  user_id     INT          NOT NULL COMMENT 'Admin que pulso el boton POS',
+  tenant_id   INT          NOT NULL,
+  expira_at   DATETIME     NOT NULL COMMENT '60 s despues de creado',
+  usado_at    DATETIME     NULL     COMMENT 'Un solo uso: lleno = ya se canjeo',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_pos_handoff_code (code_hash),
+  KEY idx_pos_handoff_expira (expira_at),
+  CONSTRAINT fk_pos_handoff_user   FOREIGN KEY (user_id)   REFERENCES users (id) ON DELETE CASCADE,
+  CONSTRAINT fk_pos_handoff_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pos_equipos (
+  id                 INT          NOT NULL AUTO_INCREMENT,
+  tenant_id          INT          NOT NULL,
+  caja_id            INT          NOT NULL COMMENT 'pos_cajas.id en la DB del tenant (sin FK entre bases)',
+  token_hash         CHAR(64)     NOT NULL COMMENT 'sha256 del token de equipo',
+  nombre             VARCHAR(80)  NULL     COMMENT 'Etiqueta: navegador y sistema del equipo al habilitarlo',
+  habilitado_por     INT          NULL     COMMENT 'users.id del admin que lo habilito',
+  created_at         DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_used          DATETIME     NULL,
+  revocado_at        DATETIME     NULL     COMMENT 'Lleno = el token ya no abre nada',
+  intentos_fallidos  INT          NOT NULL DEFAULT 0 COMMENT 'PIN fallidos seguidos en este equipo',
+  bloqueado_hasta    DATETIME     NULL     COMMENT '5 fallos seguidos -> sin aceptar PIN hasta esta hora',
+  bloqueos_seguidos  INT          NOT NULL DEFAULT 0 COMMENT 'Bloqueos sin un PIN valido en medio: cada uno dura el doble (5, 10, 20... min, tope 1 dia)',
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_pos_equipo_token (token_hash),
+  KEY idx_pos_equipo_tenant_caja (tenant_id, caja_id),
+  CONSTRAINT fk_pos_equipo_tenant FOREIGN KEY (tenant_id)      REFERENCES tenants (id),
+  CONSTRAINT fk_pos_equipo_user   FOREIGN KEY (habilitado_por) REFERENCES users (id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ============================================================================

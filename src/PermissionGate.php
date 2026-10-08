@@ -12,6 +12,8 @@ require_once(__DIR__ . '/Models/RoleModel.php');
  *   'public'             -> sin auth.
  *   'dgii' | 'integration' -> principal externo; resuelve tenant best-effort, el
  *                            controller hace su propia validacion (firma/secret).
+ *   'pos-caja'           -> equipo de caja del POS (X-POS-EQUIPO); resuelve el
+ *                            tenant del equipo, el controller valida (PosAuth).
  *   '<permiso>'          -> ruta de usuario-app: 401 si no hay user valido, 403 si
  *                            el rol del user no tiene el permiso.
  *   'authenticated'      -> ruta de usuario-app sin modulo: 401 si no hay user
@@ -56,6 +58,15 @@ class PermissionGate
             return;
         }
 
+        // Equipo de caja del POS (X-POS-EQUIPO): el tenant sale del token del
+        // equipo, no de un usuario. El controller valida de verdad y responde
+        // con el codigo que lleva a la pantalla correcta (ver PosAuth).
+        if ($required === 'pos-caja') {
+            require_once __DIR__ . '/Pos/PosAuth.php';
+            PosAuth::resolverTenantSiSePuede();
+            return;
+        }
+
         // Ruta de usuario-app: required es un permiso concreto.
         $v = $auth->validateRequest();
 
@@ -66,9 +77,14 @@ class PermissionGate
 
         $userId = $v['user_id'] ?? null;
         if ($userId === null) {
-            // Principal maquina (integracion) sobre una ruta de app: prohibido.
+            // Principal maquina (integracion) sobre una ruta de app: prohibido, y
+            // SIEMPRE, tambien en modo sombra. La sombra es para ensayar roles de
+            // usuarios; aqui no hay usuario, y un tenant de integracion no tiene DB
+            // propia: el controller caeria en la DB por defecto del .env.
+            // (AuthMiddleware ya rechaza esta credencial fuera de /api/integracion/*;
+            // esto es la segunda barrera.)
             self::deny($route, $method, $required, 'principal no-usuario en ruta de app', 403,
-                'Para hacer esto necesitas iniciar sesión con tu usuario.');
+                'Para hacer esto necesitas iniciar sesión con tu usuario.', true);
             return;
         }
 
@@ -162,7 +178,8 @@ class PermissionGate
      * Deniega: en modo enforce responde y corta; en sombra solo registra y deja
      * continuar (para descubrir gaps con trafico real sin romper nada).
      */
-    private static function deny(string $route, string $method, string $required, string $reason, int $code, string $msg): void
+    /** $siempre: bloquea aunque PERMISSIONS_ENFORCE este apagado (modo sombra). */
+    private static function deny(string $route, string $method, string $required, string $reason, int $code, string $msg, bool $siempre = false): void
     {
         // Bitacora: solo los 403 (sesion valida sin permiso), ver
         // AuditMiddleware::logAccessDenied. Tambien en modo sombra, rotulado:
@@ -180,7 +197,7 @@ class PermissionGate
             );
         }
 
-        if (!self::enforcing()) {
+        if (!$siempre && !self::enforcing()) {
             error_log("[PermissionGate][SHADOW] denegaria {$route} {$method} (req={$required}, {$reason})");
             return;
         }

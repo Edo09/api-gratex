@@ -60,6 +60,8 @@
   <input id="apiSecret" type="password" placeholder="X-API-SECRET" style="width:230px">
   <input id="certToken" type="password" placeholder="CERT_RUN_TOKEN" style="width:160px"
          title="Solo para correr las fases del set de pruebas">
+  <select id="empresa" style="display:none;width:auto;max-width:340px"
+          title="Credencial de grupo: las consultas, la aprobación y el emisor de esta página van a nombre de esta empresa"></select>
 </header>
 
 <div class="layout">
@@ -77,7 +79,11 @@ const KEYS = ['apiKey', 'apiSecret', 'certToken'];
 KEYS.forEach(k => {
   const el = $(k);
   el.value = sessionStorage.getItem(k) || '';
-  el.addEventListener('change', () => sessionStorage.setItem(k, el.value.trim()));
+  el.addEventListener('change', () => {
+    sessionStorage.setItem(k, el.value.trim());
+    // Otra credencial puede cubrir otras empresas.
+    if (k !== 'certToken') cargarEmpresas().then(() => pintar());
+  });
 });
 
 const creds = () => ({
@@ -88,6 +94,47 @@ const creds = () => ({
 function faltanCreds() {
   const c = creds();
   return !c['X-API-KEY'] || !c['X-API-SECRET'];
+}
+
+// Multi-empresa: una credencial de grupo cubre varias empresas y el RNC de cada
+// llamada elige cual. La empresa del selector va como ?rnc= en las consultas
+// (estado, bandejas, xml), como rnc_comprador al aprobar y como emisor
+// precargado al emitir y en la fase 4. Sin grupo el selector no aparece y las
+// llamadas salen igual que antes.
+let empresas = [];
+const EMPRESA_KEY = 'empresaRnc';
+/** RNC elegido, solo si la credencial cubre mas de una empresa. */
+function rncGrupo() {
+  return empresas.length > 1 ? $('empresa').value : '';
+}
+function empresaSel() {
+  return empresas.find(e => e.rnc === $('empresa').value) || empresas[0] || null;
+}
+async function cargarEmpresas() {
+  const sel = $('empresa');
+  empresas = [];
+  if (!faltanCreds()) {
+    try {
+      const r = await call('GET', '/integracion/empresas');
+      empresas = (r.status === 200 && r.json && Array.isArray(r.json.data)) ? r.json.data : [];
+    } catch (e) { empresas = []; }
+  }
+  let guardada = '';
+  try { guardada = sessionStorage.getItem(EMPRESA_KEY) || ''; } catch (e) { /* sin storage */ }
+  sel.innerHTML = '';
+  for (const e of empresas) {
+    const o = document.createElement('option');
+    o.value = e.rnc;
+    o.textContent = 'Empresa: ' + e.nombre + ' — ' + e.rnc + (e.ambiente ? ' (' + e.ambiente + ')' : '');
+    sel.appendChild(o);
+  }
+  sel.value = empresas.some(e => e.rnc === guardada) ? guardada : (empresas[0] ? empresas[0].rnc : '');
+  sel.style.display = empresas.length > 1 ? '' : 'none';
+}
+/** La empresa con la que se trabaja: la del selector, o la unica de la credencial. */
+async function empresaActual() {
+  if (!empresas.length) await cargarEmpresas();
+  return empresaSel();
 }
 
 // La salida del runner es lo unico que queda de una corrida: cert_run.php borra
@@ -154,6 +201,17 @@ function encfsDe(texto) {
 
 async function call(method, path, body) {
   if (faltanCreds()) throw new Error('Pon X-API-KEY y X-API-SECRET arriba.');
+  // Credencial de grupo: la empresa elegida arriba. /empresas no la lleva (lista el
+  // grupo); /ecf no (el emisor del cuerpo ya elige la empresa).
+  const rnc = rncGrupo();
+  if (rnc && !path.startsWith('/integracion/empresas')) {
+    if (method === 'GET' && path.startsWith('/integracion/') && !/[?&]rnc=/.test(path)) {
+      path += (path.includes('?') ? '&' : '?') + 'rnc=' + encodeURIComponent(rnc);
+    }
+    if (method === 'POST' && path.startsWith('/integracion/aprobacion-comercial') && body && !body.rnc_comprador) {
+      body = { ...body, rnc_comprador: rnc };
+    }
+  }
   const opts = { method, headers: { ...creds(), 'Accept': 'application/json' } };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
@@ -395,6 +453,25 @@ const PASOS = [
       <pre id="urlsWs"></pre>
       <p><b>5. Representación Impresa.</b> No hay generador para tenants de integración: la produce
       el cliente con el <code>codigo_seguridad</code>, la <code>fecha_emision</code> y el QR.</p>
+    </div>
+
+    <div class="panel">
+      <h3 style="margin:0;font-size:15px">XML íntegros de las facturas de consumo &lt; 250k (RFCE)</h3>
+      <p class="muted">El resumen (RFCE) ya lo mandó la fase 2. El portal pide además subir a mano el
+      <b>e-CF firmado completo</b> de cada E32 &lt; 250k. Aquí se baja del respaldo del server (el último
+      envío de cada e-NCF) y se verifica contra la DGII con su código de seguridad: tiene que ser el mismo
+      e-CF cuyo resumen aceptó la DGII, no el de una corrida anterior.</p>
+      <label>e-NCF (uno por línea)</label>
+      <textarea id="xmlLista" placeholder="E320000000012&#10;E320000000013"></textarea>
+      <button class="act ghost" id="btnXmlTomar">Tomar los RFCE de la última corrida</button>
+      <label style="display:flex;gap:8px;align-items:center;color:var(--txt)">
+        <input type="checkbox" id="xmlConRnc" style="width:auto">
+        Anteponer el RNC al nombre del archivo (<code id="xmlEjemplo">RNCE320000000012.xml</code>)</label>
+      <button class="act" id="btnXmlBuscar">Buscar y verificar</button>
+      <button class="act ghost" id="btnXmlTodos" disabled>Descargar los verificados</button>
+      <div id="outXml" style="display:none;margin-top:12px"></div>
+      <p class="muted">Súbelos al portal tal cual se descargan: abrirlos y guardarlos con otro programa
+      puede cambiar el formato e invalidar la firma.</p>
     </div>` },
 ];
 
@@ -424,13 +501,14 @@ function wire(n) {
       try { render('outEmpresas', await call('GET', '/integracion/empresas')); }
       catch (err) { $('outEmpresas').style.display = 'block'; $('outEmpresas').textContent = err.message; }
       finally { e.target.disabled = false; }
+      // Refresca el selector de empresa (aparece arriba si la credencial cubre varias).
+      cargarEmpresas().catch(() => {});
     };
   }
 
   if (n === 2) {
-    // Prellenar emisor con la empresa dueña de la credencial.
-    call('GET', '/integracion/empresas').then(r => {
-      const emp = r.json && r.json.data && r.json.data[0];
+    // Prellenar emisor con la empresa elegida arriba (o la de la credencial).
+    empresaActual().then(emp => {
       if (emp) { $('emRnc').value = emp.rnc || ''; $('emRazon').value = emp.nombre || ''; }
     }).catch(() => {});
 
@@ -564,11 +642,10 @@ function wire(n) {
   }
 
   if (n === 6) {
-    // El emisor de la fase 4 es SIEMPRE el tenant de la credencial. Se rellena
-    // solo para no confundirlo con el RNC del comprador de prueba de DGII
-    // (131880681), que es el error facil de cometer aqui.
-    call('GET', '/integracion/empresas').then(r => {
-      const emp = r.json && r.json.data && r.json.data[0];
+    // El emisor de la fase 4 es la empresa que se certifica: la elegida arriba
+    // (credencial de grupo) o la de la credencial. Se rellena para no confundirlo
+    // con el RNC del comprador de prueba de DGII (131880681), el error facil aqui.
+    empresaActual().then(emp => {
       if (!emp) return;
       if (!$('f4rnc').value) $('f4rnc').value = emp.rnc || '';
       if (!$('f4razon').value) $('f4razon').value = emp.nombre || '';
@@ -590,6 +667,11 @@ function wire(n) {
   }
 
   if (n === 7) {
+    // Con credencial de grupo, el respaldo a validar es el de la empresa elegida.
+    if (rncGrupo()) {
+      const emp = empresaSel();
+      if (emp && emp.id && !$('vxTenant').value) $('vxTenant').value = String(emp.id);
+    }
     $('btnValidar').onclick = async (e) => {
       const out = $('outValidar');
       if (!$('certToken').value.trim()) {
@@ -626,7 +708,148 @@ function wire(n) {
       `Recepción e-CF:        ${location.origin}/api/ecf/recepcion\n` +
       `Aprobación Comercial:  ${location.origin}/api/ecf/aprobacion-comercial\n` +
       `Autenticación:         ${location.origin}/api/ecf/autenticacion`;
+    wireXmlIntegros();
   }
+}
+
+/**
+ * e-NCF que salieron por RFCE (E32 <250k) en una salida del runner: el bloque
+ * "[i/N] caso (E32, E32...)" seguido de una linea "OK  estado=RFCE_...".
+ */
+function rfceDe(texto) {
+  const vistos = new Set();
+  let actual = null;
+  for (const linea of texto.split('\n')) {
+    const cab = linea.match(/^\[\d+\/\d+\].*\((E\d{2}), (E\d{12})\)\s*$/);
+    if (cab) { actual = cab[2]; continue; }
+    if (actual && /^\s+OK\s+estado=RFCE_/.test(linea)) { vistos.add(actual); actual = null; }
+  }
+  return [...vistos];
+}
+
+function bajarArchivo(nombre, contenido) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([contenido], { type: 'application/xml' }));
+  a.download = nombre;
+  a.click();
+}
+
+// Paso 8: XML integros de los RFCE. Cada fila guarda lo bajado; "Descargar los
+// verificados" solo toma los que la DGII confirmo con su codigo de seguridad.
+let xmlFilas = [];
+function wireXmlIntegros() {
+  const rnc = () => (xmlFilas.find(f => f.rnc) || {}).rnc || '';
+  const nombre = f => ($('xmlConRnc').checked && f.rnc ? f.rnc : '') + f.encf + '.xml';
+  const ejemplo = () => {
+    $('xmlEjemplo').textContent = (rnc() || 'RNC') + 'E320000000012.xml';
+  };
+  ejemplo();
+  empresaActual().then(emp => {
+    if (emp && emp.rnc) $('xmlEjemplo').textContent = emp.rnc + 'E320000000012.xml';
+  }).catch(() => {});
+
+  $('btnXmlTomar').onclick = () => {
+    releerSalida();
+    const lista = salida ? rfceDe(salida.texto) : [];
+    $('xmlLista').value = lista.join('\n');
+    if (!lista.length) {
+      $('xmlLista').placeholder = 'No hay RFCE en la corrida guardada en este navegador: escribe los e-NCF (E32 < 250k).';
+    }
+  };
+
+  $('btnXmlTodos').onclick = async () => {
+    const ok = xmlFilas.filter(f => f.verificado);
+    for (const f of ok) {
+      bajarArchivo(nombre(f), f.xml);
+      // Una pausa corta: el navegador agrupa (y a veces bloquea) descargas seguidas.
+      await new Promise(res => setTimeout(res, 400));
+    }
+  };
+
+  $('btnXmlBuscar').onclick = async (e) => {
+    const out = $('outXml');
+    const lista = encfsDe($('xmlLista').value.toUpperCase());
+    out.style.display = 'block';
+    if (!lista.length) { out.textContent = 'Pon al menos un e-NCF (ej. E320000000012).'; return; }
+    if (faltanCreds()) { out.textContent = 'Pon X-API-KEY y X-API-SECRET arriba.'; return; }
+    e.target.disabled = true;
+    $('btnXmlTodos').disabled = true;
+    const filas = [];
+    xmlFilas = filas;
+    out.innerHTML = '';
+    const resumen = document.createElement('div');
+    out.appendChild(resumen);
+    const tabla = document.createElement('table');
+    tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Enviado</th><th>Código seg.</th><th>Verificación DGII</th><th></th></tr></thead>';
+    const cuerpo = document.createElement('tbody');
+    tabla.appendChild(cuerpo);
+    out.appendChild(tabla);
+
+    for (let i = 0; i < lista.length; i++) {
+      resumen.textContent = 'Buscando ' + (i + 1) + ' de ' + lista.length + '...';
+      const f = { encf: lista[i], xml: null, verificado: false, rnc: '' };
+      const fila = document.createElement('tr');
+      const celda = t => { const td = document.createElement('td'); td.textContent = t; fila.appendChild(td); return td; };
+      celda(f.encf);
+      const tdFecha = celda('');
+      const tdCodigo = celda('');
+      const tdEstado = celda('');
+      const tdAccion = celda('');
+      const pill = (clase, texto) => {
+        const s = document.createElement('span');
+        s.className = 'pill ' + clase;
+        s.style.marginLeft = '0';
+        s.textContent = texto;
+        tdEstado.textContent = '';
+        tdEstado.appendChild(s);
+      };
+      cuerpo.appendChild(fila);
+      try {
+        const r = await call('GET', '/integracion/xml?' + new URLSearchParams({ e_ncf: f.encf }));
+        const j = r.json || {};
+        if (r.status !== 200 || j.status !== true || !j.xml_firmado) {
+          pill('warn', 'HTTP ' + r.status);
+          tdAccion.textContent = (j && j.error) || r.txt.slice(0, 200);
+          filas.push(f);
+          continue;
+        }
+        f.xml = j.xml_firmado;
+        f.rnc = j.rnc || '';
+        tdFecha.textContent = j.fecha_emision || '';
+        tdCodigo.textContent = j.codigo_seguridad || '';
+        // RFCE: por codigo de seguridad (que es el de ESTE xml). e-CF normal: por track_id.
+        const q = new URLSearchParams({ e_ncf: f.encf });
+        if (j.flujo === 'RFCE' && j.codigo_seguridad) q.set('codigo_seguridad', j.codigo_seguridad);
+        else if (j.track_id) q.set('track_id', j.track_id);
+        const v = await call('GET', '/integracion/estado?' + q);
+        const vj = v.json || {};
+        const estado = (v.status === 200 && vj.status === true) ? (vj.estado || '?') : 'HTTP ' + v.status;
+        f.verificado = /^(RFCE_)?ACEPTADO(_CONDICIONAL)?$/i.test(estado);
+        pill(f.verificado ? 'ok' : (/RECHAZADO/i.test(estado) ? 'err' : 'warn'),
+          f.verificado ? estado : estado + (j.flujo === 'RFCE' && /NO_ENCONTRADO|RECHAZADO/i.test(estado) ? ' — este XML no coincide con un RFCE aceptado' : (vj && vj.error ? ' — ' + vj.error : '')));
+        tdAccion.textContent = '';
+        const b = document.createElement('button');
+        b.className = 'act ghost';
+        b.style.margin = '0';
+        b.style.padding = '4px 10px';
+        b.textContent = 'Descargar';
+        b.onclick = () => bajarArchivo(nombre(f), f.xml);
+        tdAccion.appendChild(b);
+      } catch (err) {
+        pill('warn', 'ERROR');
+        tdAccion.textContent = err.message;
+      }
+      filas.push(f);
+    }
+    if (xmlFilas !== filas) return; // otra busqueda la reemplazo
+    const verificados = filas.filter(x => x.verificado).length;
+    resumen.textContent = lista.length + ' buscados: ' + verificados + ' verificados contra la DGII.' +
+      (verificados < lista.length ? ' Revisa los demás antes de subirlos.' : ' Listos para el portal.');
+    ejemplo();
+    e.target.disabled = false;
+    $('btnXmlTodos').disabled = verificados === 0;
+  };
+  $('xmlConRnc').onchange = ejemplo;
 }
 
 async function correrFase(btn) {
@@ -706,7 +929,15 @@ async function correrFase(btn) {
   }
 }
 
+$('empresa').addEventListener('change', () => {
+  try { sessionStorage.setItem(EMPRESA_KEY, $('empresa').value); } catch (e) { /* sin storage */ }
+  pintar(); // los campos precargados (emisor, tenant_id) toman la empresa nueva
+});
+
 pintar();
+// Con credenciales guardadas en la sesion, el selector aparece solo si la
+// credencial cubre varias empresas; entonces se redibuja con la elegida.
+cargarEmpresas().then(() => { if (empresas.length > 1) pintar(); }).catch(() => {});
 </script>
 </body>
 </html>

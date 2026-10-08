@@ -89,6 +89,10 @@ function brCurrent(int $tenantId): array
         // ven el mismo valor. Solo lectura: se cambia por SQL y el PUT no lo
         // acepta. Sin la columna (011 sin correr) todo tenant es 'gratex'.
         'cotizacion_formato'  => (string) ($tenant['cotizacion_formato'] ?? 'gratex'),
+        // POS activo para la empresa (master.tenants.pos_enabled, migracion
+        // master 012): con esto el front decide si muestra el boton POS (A1).
+        // Solo lectura: se activa por SQL. Sin la columna, nadie tiene POS.
+        'pos_enabled'         => (int) ($tenant['pos_enabled'] ?? 0) === 1,
     ];
 }
 

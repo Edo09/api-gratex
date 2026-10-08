@@ -754,7 +754,10 @@ class ECFEmissionService
                 'rfce_estado' => $rfceEstado,
                 'rfce_response' => $rfceReception['data'],
                 'rfce_status_code' => $rfceReception['status_code'],
-                'aviso' => 'E32 con monto < 250,000: RFCE enviado a DGII. La factura integra debe cargarse manualmente al portal DGII.',
+                // En produccion basta el RFCE: el XML integro queda firmado en
+                // facturas.xml_firmado. La "carga manual al portal" era un paso de
+                // la certificacion, no de la operacion (confirmado 2026-10-08).
+                'aviso' => 'E32 con monto < 250,000: se envio el RFCE (resumen) a la DGII. El XML integro queda guardado y firmado en la factura.',
                 'factura_id' => $reserva['factura_id'] ?? null,
             ];
         }
@@ -1030,11 +1033,20 @@ class ECFEmissionService
 
     private function extractCodigoSeguridad(string $signedXml): string
     {
+        return self::codigoSeguridadDeXml($signedXml) ?? substr(sha1($signedXml), 0, 6);
+    }
+
+    /**
+     * CodigoSeguridad de un e-CF firmado: los 6 primeros caracteres de
+     * SignatureValue, sin espacios (nunca quitar + / =). null si no esta firmado.
+     * Publico para quien tenga solo el XML (GET /integracion/xml).
+     */
+    public static function codigoSeguridadDeXml(string $signedXml): ?string
+    {
         if (preg_match('/<SignatureValue>([^<]+)<\/SignatureValue>/i', $signedXml, $m)) {
-            $clean = preg_replace('/\s+/', '', $m[1]);
-            return substr($clean, 0, 6);
+            return substr(preg_replace('/\s+/', '', $m[1]), 0, 6);
         }
-        return substr(sha1($signedXml), 0, 6);
+        return null;
     }
 
     private function extractTrackId(array $reception): ?string

@@ -98,11 +98,15 @@ class IntegracionStoreModel
         if ($ambiente !== null && $ambiente !== '') {
             $where .= ' AND ambiente = :amb';
         }
+        // Lo lee un sistema EXTERNO (el del cliente): sin origen_ip (IP de un
+        // tercero), origen_auth ni mensaje_resultado ("recibido sin autenticacion
+        // previa..."), que describen como recibe nuestro servidor. Siguen en la
+        // tabla para soporte y auditoria.
         $stmt = $this->conexion->prepare(
             "SELECT id, track_id, tipo_ecf, e_ncf, rnc_emisor, razon_social_emisor,
                     rnc_comprador, monto_total, fecha_emision, fecha_recepcion, estado,
-                    codigo_resultado, mensaje_resultado, validacion_firma, ambiente,
-                    origen_ip, origen_auth, firma_rnc, firma_subject,
+                    codigo_resultado, validacion_firma, ambiente,
+                    firma_rnc, firma_subject,
                     aprobacion_comercial, aprobacion_comercial_estado_dgii
                FROM ecf_recibidos
               {$where}
@@ -244,6 +248,23 @@ class IntegracionStoreModel
     {
         $stmt = $this->conexion->prepare(
             'SELECT id, tenant_id, rnc_emisor, tipo_ecf, e_ncf, rnc_comprador, monto_total, track_id, created_at
+               FROM ecf_integracion_backup
+              WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e
+              ORDER BY id DESC LIMIT 1'
+        );
+        $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf]);
+        return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * Igual que getEmitidoByENCF pero CON el xml_firmado: el ultimo envio de ese
+     * e-NCF, para volver a bajar el comprobante (GET /integracion/xml). Lo usa
+     * la certificacion: el XML integro de cada E32 <250k se sube a mano al portal.
+     */
+    public function getXmlEmitidoByENCF(int $tenantId, string $rncEmisor, string $eNcf): ?array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT id, tipo_ecf, e_ncf, track_id, created_at, xml_firmado
                FROM ecf_integracion_backup
               WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e
               ORDER BY id DESC LIMIT 1'

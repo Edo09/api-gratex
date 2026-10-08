@@ -24,6 +24,14 @@ class EcfItemMapper
     public const DECIMALES_PRECIO = 4;
 
     /**
+     * Tipos que se pueden emitir con precios que ya traen ITBIS
+     * (IndicadorMontoGravado = 1). El XSD lo admite tambien en E41 y E45, pero
+     * el POS solo vende con E31/E32 y devuelve con E34: se abre a lo que se usa
+     * y se verifica con la DGII, no a todo lo que el XSD permite.
+     */
+    public const TIPOS_PRECIOS_CON_ITBIS = ['31', '32', '33', '34'];
+
+    /**
      * Deja cantidad y precio de cada linea con los decimales que admite el XML:
      * cantidad a 2 y precio a 4, con el round() del servidor (el front imita el
      * de PHP 8.3 en montosLinea.ts).
@@ -55,9 +63,17 @@ class EcfItemMapper
         return $items;
     }
 
-    public static function map(array $items, bool $strict = false): array
+    /**
+     * @param bool $preciosConItbis IndicadorMontoGravado = 1: el precio de cada
+     *   linea ya trae el ITBIS (ver desglosarIncluido). MontoItem se calcula
+     *   igual, pero el ITBIS de la linea sale de adentro del monto en vez de
+     *   sumarse encima, y `monto_neto` (lo que se guarda como subtotal) queda
+     *   sin ITBIS para que reportes y 607 sigan leyendo una base imponible.
+     */
+    public static function map(array $items, bool $strict = false, bool $preciosConItbis = false): array
     {
         $mapped = [];
+        $montosIncluidos = [];
         foreach ($items as $i => $raw) {
             $cantidad = (float) ($raw['cantidad'] ?? $raw['quantity'] ?? 1);
             $precio = (float) ($raw['precio_unitario'] ?? $raw['amount'] ?? 0);
@@ -70,13 +86,17 @@ class EcfItemMapper
             $monto = round(round($cantidad * $precio, 2) - $descuento, 2);
 
             $itbis = 0.0;
-            if ($indicador === 1) {
+            if ($preciosConItbis) {
+                // Se reparte despues del bucle: el ITBIS de cada linea depende de
+                // las demas lineas de su tasa (ver desglosarIncluido).
+                $montosIncluidos[$i] = ['indicador' => $indicador, 'monto' => $monto];
+            } elseif ($indicador === 1) {
                 $itbis = round($monto * 0.18, 2);
             } elseif ($indicador === 2) {
                 $itbis = round($monto * 0.16, 2);
             }
 
-            $mapped[] = [
+            $mapped[$i] = [
                 // No va al XML: viaja para que la factura sepa que producto del
                 // catalogo es cada linea y pueda descontar inventario al guardar.
                 'product_id' => !empty($raw['product_id']) ? (int) $raw['product_id'] : null,
@@ -112,9 +132,107 @@ class EcfItemMapper
                 'monto_item' => isset($raw['monto_item']) && $raw['monto_item'] !== '' ? (float) $raw['monto_item'] : $monto,
                 'monto_item_raw' => $raw['monto_item_raw'] ?? null,
                 'itbis_amount' => $itbis,
+                // Base sin ITBIS de la linea: es lo que se guarda como
+                // factura_items.subtotal. Con precios sin ITBIS es el MontoItem.
+                'monto_neto' => $monto,
             ];
         }
-        return $mapped;
+
+        if ($preciosConItbis) {
+            $desglose = self::desglosarIncluido($montosIncluidos);
+            foreach ($desglose['itbis'] as $i => $itbis) {
+                $mapped[$i]['itbis_amount'] = $itbis;
+                $mapped[$i]['monto_neto'] = round($mapped[$i]['monto_item'] - $itbis, 2);
+            }
+        }
+        return array_values($mapped);
+    }
+
+    /** Tasa de ITBIS en % segun indicador_facturacion: 1 = 18, 2 = 16, el resto 0. */
+    private static function tasaItbis(int $indicador): int
+    {
+        return $indicador === 1 ? 18 : ($indicador === 2 ? 16 : 0);
+    }
+
+    /**
+     * Desglose de montos que YA traen el ITBIS (IndicadorMontoGravado = 1), como
+     * lo calcula la DGII: por TASA, no por linea.
+     *
+     *   MontoGravadoIx = round(suma de MontoItem de la tasa / (1 + tasa), 2)
+     *   TotalITBISx    = suma de MontoItem de la tasa - MontoGravadoIx
+     *
+     * Verificado con el set de pruebas DGII del tenant 130968837 (2026-09-02):
+     * E450000000003 tiene 10 lineas al 18% que suman 477,750.00 y la DGII espera
+     * MontoGravadoI1 404,872.88 / TotalITBIS1 72,877.12; dividiendo linea por
+     * linea daria 404,872.90. Con el ITBIS como diferencia, MontoTotal es
+     * exactamente la suma de los MontoItem: 7 x RD$25 da 175.00, y no 174.99 o
+     * 175.01 como sumando el 18% encima de un precio neto.
+     *
+     * El ITBIS de cada linea (factura_items.itbis_amount, la RI) se reparte por
+     * mayor residuo para que las lineas de una tasa sumen exactamente su
+     * TotalITBISx: cada base queda a menos de un centavo de MontoItem / (1 + tasa).
+     * Todo se calcula en centavos enteros: el redondeo no depende de floats.
+     *
+     * @param array<int,array{indicador:int,monto:float}> $lineas
+     * @return array{itbis: array<int,float>, tasas: array<int,array{bruto:float,base:float,itbis:float}>}
+     *   `tasas` va por tasa en % (18, 16, 0) e incluye solo las gravadas.
+     */
+    private static function desglosarIncluido(array $lineas): array
+    {
+        $itbisLinea = [];
+        $porTasa = [];
+        foreach ($lineas as $i => $l) {
+            $itbisLinea[$i] = 0.0;
+            $tasa = self::tasaItbis((int) $l['indicador']);
+            // Indicador fuera de 1..4 se trata como 18%, igual que totales().
+            if (!in_array((int) $l['indicador'], [1, 2, 3, 4, 0], true)) {
+                $tasa = 18;
+            }
+            if ($tasa === 0) {
+                continue;
+            }
+            $porTasa[$tasa][$i] = (int) round((float) $l['monto'] * 100);
+        }
+
+        $tasas = [];
+        foreach ($porTasa as $tasa => $centavos) {
+            $divisor = 100 + $tasa;
+            $bruto = array_sum($centavos);
+            // round(bruto / (1 + tasa)) en enteros: la mitad hacia arriba. No hay
+            // empates reales: bruto x 100 / 118 (o / 116) nunca termina en .5.
+            $base = intdiv(2 * $bruto * 100 + $divisor, 2 * $divisor);
+
+            // Base de cada linea: el piso de su parte, y los centavos que faltan
+            // para llegar a la base de la tasa van a las de mayor residuo.
+            $pisos = [];
+            $residuos = [];
+            foreach ($centavos as $i => $c) {
+                $pisos[$i] = intdiv($c * 100, $divisor);
+                $residuos[$i] = ($c * 100) % $divisor;
+            }
+            $faltan = $base - array_sum($pisos);
+            // Mayor residuo primero; a igual residuo, la linea anterior.
+            uksort($residuos, static function ($a, $b) use ($residuos) {
+                return [$residuos[$b], $a] <=> [$residuos[$a], $b];
+            });
+            foreach (array_keys($residuos) as $i) {
+                if ($faltan <= 0) {
+                    break;
+                }
+                $pisos[$i]++;
+                $faltan--;
+            }
+            foreach ($centavos as $i => $c) {
+                $itbisLinea[$i] = ($c - $pisos[$i]) / 100;
+            }
+            $tasas[$tasa] = [
+                'bruto' => $bruto / 100,
+                'base' => $base / 100,
+                'itbis' => ($bruto - $base) / 100,
+            ];
+        }
+
+        return ['itbis' => $itbisLinea, 'tasas' => $tasas];
     }
 
     /**
@@ -173,9 +291,17 @@ class EcfItemMapper
      * la ruta de integracion mandaba solo lo que trajera el payload. Con las tasas
      * pero sin los montos, DGII rechaza con "El campo MontoGravadoI1 / MontoExento
      * del area Totales de la seccion Encabezado no es valido".
+     *
+     * Con $preciosConItbis (IndicadorMontoGravado = 1) los montos gravados son
+     * la parte sin ITBIS de cada tasa y MontoTotal la suma exacta de los
+     * MontoItem (ver desglosarIncluido).
      */
-    public static function totales(array $items): array
+    public static function totales(array $items, bool $preciosConItbis = false): array
     {
+        if ($preciosConItbis) {
+            return self::totalesIncluido($items);
+        }
+
         $i1 = 0.0;       // gravado al 18%
         $i2 = 0.0;       // gravado al 16%
         $i3 = 0.0;       // gravado al 0%
@@ -229,6 +355,53 @@ class EcfItemMapper
             'total_itbis2' => round($itbis2, 2),
             'total_itbis3' => round($itbis3, 2),
             'monto_total' => round($montoTotal, 2),
+        ];
+    }
+
+    /** totales() con IndicadorMontoGravado = 1: mismas claves, montos de desglosarIncluido. */
+    private static function totalesIncluido(array $items): array
+    {
+        $lineas = [];
+        $i3 = 0;        // gravado al 0%, en centavos: no lleva ITBIS que desglosar
+        $exento = 0;
+        $total = 0;
+        foreach (array_values($items) as $i => $item) {
+            $cantidad = (float) ($item['cantidad'] ?? $item['quantity'] ?? 1);
+            $precio = (float) ($item['precio_unitario'] ?? $item['amount'] ?? 0);
+            $bruto = round($cantidad * $precio, 2);
+            $monto = round($bruto - self::montoDescuento($item, $bruto), 2);
+            $indicador = (int) ($item['indicador_facturacion'] ?? 1);
+            $centavos = (int) round($monto * 100);
+            $total += $centavos;
+            if ($indicador === 3) {
+                $i3 += $centavos;
+            } elseif ($indicador === 4 || $indicador === 0) {
+                $exento += $centavos;
+            } else {
+                $lineas[$i] = ['indicador' => $indicador, 'monto' => $monto];
+            }
+        }
+
+        $tasas = self::desglosarIncluido($lineas)['tasas'];
+        $base18 = $tasas[18]['base'] ?? 0.0;
+        $base16 = $tasas[16]['base'] ?? 0.0;
+        $itbis18 = $tasas[18]['itbis'] ?? 0.0;
+        $itbis16 = $tasas[16]['itbis'] ?? 0.0;
+
+        return [
+            'monto_gravado_total' => round($base18 + $base16 + $i3 / 100, 2),
+            'monto_gravado_i1' => round($base18, 2),
+            'monto_gravado_i2' => round($base16, 2),
+            'monto_gravado_i3' => round($i3 / 100, 2),
+            'monto_exento' => round($exento / 100, 2),
+            'itbis1' => 18,
+            'itbis2' => 16,
+            'itbis3' => 0,
+            'total_itbis' => round($itbis18 + $itbis16, 2),
+            'total_itbis1' => round($itbis18, 2),
+            'total_itbis2' => round($itbis16, 2),
+            'total_itbis3' => 0.0,
+            'monto_total' => round($total / 100, 2),
         ];
     }
 }

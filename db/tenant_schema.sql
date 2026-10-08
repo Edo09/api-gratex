@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..028  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..031  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -101,13 +101,15 @@ CREATE TABLE IF NOT EXISTS products (
     COMMENT '1=Bien | 2=Servicio',
   indicador_facturacion TINYINT NOT NULL DEFAULT 1
     COMMENT '0=No facturable | 1=ITBIS 18% | 2=ITBIS 16% | 3=Tasa cero | 4=Exento (gravado=1, exento=4)',
-  precio DECIMAL(18,2) NOT NULL DEFAULT 0.00
-    COMMENT 'Lista de precio 1 (la que usan facturas y cotizaciones)',
-  precio_2 DECIMAL(18,2) NULL DEFAULT NULL
+  -- 4 decimales (migracion 029): el precio va SIN ITBIS y con 2 decimales el
+  -- precio de gondola no se recuperaba exacto (RD$10 -> 8.47 -> 9.99).
+  precio DECIMAL(18,4) NOT NULL DEFAULT 0.0000
+    COMMENT 'Lista de precio 1, SIN ITBIS (la que usan facturas y cotizaciones). 4 decimales: el precio con ITBIS se recupera exacto',
+  precio_2 DECIMAL(18,4) NULL DEFAULT NULL
     COMMENT 'Lista de precio 2 (NULL = no aplica)',
-  precio_3 DECIMAL(18,2) NULL DEFAULT NULL
+  precio_3 DECIMAL(18,4) NULL DEFAULT NULL
     COMMENT 'Lista de precio 3 (NULL = no aplica)',
-  precio_4 DECIMAL(18,2) NULL DEFAULT NULL
+  precio_4 DECIMAL(18,4) NULL DEFAULT NULL
     COMMENT 'Lista de precio 4 (NULL = no aplica)',
   costo DECIMAL(18,2) NOT NULL DEFAULT 0.00,
   unidad_medida VARCHAR(10) NOT NULL DEFAULT '43'
@@ -196,6 +198,65 @@ CREATE TABLE IF NOT EXISTS cotizacion_ajustes (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
+-- 2e) Conduces de mercancia (formato ferreteria). Van despues de cotizaciones
+--     y del catalogo: conduces.cotizacion_id es FK a cotizaciones y
+--     conduce_items.product_id es FK a products. Ninguna fila se borra:
+--     Eliminar pone conduces.activo = 0 y editar pone activo = 0 a las lineas
+--     anteriores (por eso conduce_items -> conduces es ON DELETE RESTRICT).
+--     conduce_secuencia guarda el ultimo numero dado (CON-000001): un numero
+--     nunca se vuelve a usar. Ver db/migrations/031_conduces.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS conduces (
+  id             INT(11)       NOT NULL AUTO_INCREMENT,
+  numero         INT UNSIGNED  NOT NULL,
+  code           VARCHAR(20)   NOT NULL COMMENT 'CON-000001',
+  date           DATETIME      NOT NULL,
+  cotizacion_id  INT(11)       NULL COMMENT 'Cotizacion de origen; NULL si se elimino la cotizacion',
+  client_id      INT(11)       NULL,
+  client_name    VARCHAR(100)  NULL COMMENT 'Nombre guardado (el cliente se puede borrar)',
+  user_id        INT(11)       NULL COMMENT 'master users.id (sin FK cross-DB)',
+  activo         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = eliminado (nunca se borra la fila)',
+  created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME      NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_conduces_numero (numero),
+  KEY idx_conduces_cotizacion (cotizacion_id),
+  KEY idx_conduces_date (date),
+  KEY idx_conduces_activo (activo),
+  CONSTRAINT conduces_cotizacion_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Lineas del conduce. amount y los dos indicadores son internos (para
+-- Facturar); el conduce nunca los imprime.
+CREATE TABLE IF NOT EXISTS conduce_items (
+  id                      INT(11)       NOT NULL AUTO_INCREMENT,
+  conduce_id              INT(11)       NOT NULL,
+  product_id              INT(11)       NULL COMMENT 'NULL = linea libre',
+  description             TEXT          NOT NULL,
+  quantity                DECIMAL(12,3) NOT NULL DEFAULT 1.000,
+  unidad_medida           VARCHAR(10)   NOT NULL DEFAULT '43',
+  amount                  DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT 'Precio interno (sin ITBIS) para facturar; nunca se imprime',
+  indicador_facturacion   TINYINT       NOT NULL DEFAULT 1,
+  indicador_bien_servicio TINYINT       NOT NULL DEFAULT 1,
+  activo                  TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = linea reemplazada por una edicion',
+  PRIMARY KEY (id),
+  KEY idx_conduce_items_conduce (conduce_id, activo),
+  KEY idx_conduce_items_product (product_id),
+  CONSTRAINT conduce_items_conduce_fk FOREIGN KEY (conduce_id) REFERENCES conduces (id) ON DELETE RESTRICT,
+  CONSTRAINT conduce_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Una sola fila (id = 1) con el ultimo numero dado; conduceModel la bloquea
+-- (SELECT ... FOR UPDATE) al crear un conduce.
+CREATE TABLE IF NOT EXISTS conduce_secuencia (
+  id      TINYINT       NOT NULL COMMENT 'Siempre 1: una sola fila',
+  ultimo  INT UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'Ultimo numero de conduce asignado',
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO conduce_secuencia (id, ultimo) VALUES (1, 0);
+
+-- ----------------------------------------------------------------------------
 -- 3) Facturas (con tracking e-CF, RFCE, secuencia y notas E33/E34).
 --    factura_items.product_id = vinculo opcional al catalogo (NULL = linea libre).
 --    Ver db/migrations/023_add_factura_items_product_id.sql.
@@ -240,12 +301,23 @@ CREATE TABLE IF NOT EXISTS facturas (
                  COMMENT 'Motivo/descripcion de la modificacion (se muestra en la RI)',
   user_id      INT(11)        DEFAULT NULL
                  COMMENT 'Referencia a gratex_master.users.id (sin FK cross-DB)',
+  -- POS (migracion 030). Sin FK: pos_turnos va al final del snapshot.
+  turno_id     INT(11)        NULL
+                 COMMENT 'pos_turnos.id: venta hecha en el POS',
+  pos_empleado_id INT(11)     NULL
+                 COMMENT 'pos_empleados.id que cobro (user_id es el usuario del master)',
+  pos_idempotency_key CHAR(36) NULL
+                 COMMENT 'Clave del intento de venta del POS: reintentar devuelve la misma factura',
+  envio_pendiente TINYINT(1)  NOT NULL DEFAULT 0
+                 COMMENT '1 = firmada e impresa, la DGII no respondio a tiempo: se reintenta sola',
   PRIMARY KEY (id),
   -- Por ambiente: certificacion y produccion numeran aparte (migracion 027).
   UNIQUE KEY uk_e_ncf_amb (e_ncf, ambiente_dgii),
+  UNIQUE KEY uk_facturas_pos_idem (pos_idempotency_key),
   KEY idx_track_id (track_id),
   KEY idx_estado_dgii (estado_dgii),
-  KEY idx_rfce_track_id (rfce_track_id)
+  KEY idx_rfce_track_id (rfce_track_id),
+  KEY idx_facturas_turno (turno_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS factura_items (
@@ -878,4 +950,101 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   KEY idx_audit_tenant_user    (tenant_id, user_id),
   KEY idx_audit_entity         (entity_type, entity_id),
   KEY idx_audit_action         (action)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 13) POS (migracion 030, docs/specs/pos.md §9.3): cajas, empleados con PIN,
+--     sesiones, turnos con cierre a ciegas, dinero del turno y codigos de
+--     barras. Al final: pos_caja_movimientos referencia facturas y
+--     product_barcodes referencia products.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS pos_cajas (
+  id          INT(11)      NOT NULL AUTO_INCREMENT,
+  nombre      VARCHAR(60)  NOT NULL,
+  activa      TINYINT(1)   NOT NULL DEFAULT 1,
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pos_caja_nombre (nombre)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pos_empleados (
+  id               INT(11)      NOT NULL AUTO_INCREMENT,
+  nombre           VARCHAR(80)  NOT NULL,
+  rol              VARCHAR(12)  NOT NULL DEFAULT 'cajero' COMMENT 'cajero | supervisor',
+  pin_hmac         CHAR(64)     NOT NULL COMMENT 'HMAC-SHA256(pin, POS_PIN_PEPPER + tenant). El PIN lo genera el sistema',
+  pin_generado_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  activo           TINYINT(1)   NOT NULL DEFAULT 1,
+  created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pos_empleado_pin (pin_hmac)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pos_sesiones (
+  id           INT(11)   NOT NULL AUTO_INCREMENT,
+  empleado_id  INT(11)   NOT NULL,
+  equipo_id    INT(11)   NOT NULL COMMENT 'pos_equipos.id del master (sin FK entre bases)',
+  token_hash   CHAR(64)  NOT NULL,
+  created_at   DATETIME  NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ultimo_uso   DATETIME  NULL,
+  cerrada_at   DATETIME  NULL COMMENT 'Bloqueo, salida, cambio de empleado o equipo revocado',
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pos_sesion_token (token_hash),
+  KEY idx_pos_sesion_empleado (empleado_id),
+  CONSTRAINT fk_pos_sesion_empleado FOREIGN KEY (empleado_id) REFERENCES pos_empleados (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pos_turnos (
+  id                 INT(11)        NOT NULL AUTO_INCREMENT,
+  caja_id            INT(11)        NOT NULL,
+  empleado_id        INT(11)        NOT NULL,
+  abierto_at         DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  fondo_inicial      DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
+  abierto            TINYINT(1)     NULL DEFAULT 1
+                       COMMENT '1 = abierto; NULL = cerrado. Con los UNIQUE: un abierto por caja y uno por empleado',
+  cerrado_at         DATETIME       NULL,
+  cerrado_por        INT(11)        NULL COMMENT 'Empleado que conto: el del turno o un supervisor (turno ajeno)',
+  conteo_json        TEXT           NULL COMMENT 'Conteo a ciegas por denominacion: {"2000":1,"1000":3,...,"otros":12.50}',
+  efectivo_contado   DECIMAL(18,2)  NULL,
+  efectivo_esperado  DECIMAL(18,2)  NULL COMMENT 'fondo + ventas en efectivo - devoluciones en efectivo',
+  diferencia         DECIMAL(18,2)  NULL COMMENT 'contado - esperado: + sobra, - falta',
+  totales_json       TEXT           NULL COMMENT 'Foto del reporte de cierre (por forma de pago, devoluciones, autorizaciones)',
+  nota               VARCHAR(255)   NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_pos_turno_caja_abierto (caja_id, abierto),
+  UNIQUE KEY uk_pos_turno_empleado_abierto (empleado_id, abierto),
+  KEY idx_pos_turno_abierto_at (abierto_at),
+  CONSTRAINT fk_pos_turno_caja     FOREIGN KEY (caja_id)     REFERENCES pos_cajas (id),
+  CONSTRAINT fk_pos_turno_empleado FOREIGN KEY (empleado_id) REFERENCES pos_empleados (id),
+  CONSTRAINT fk_pos_turno_cerro    FOREIGN KEY (cerrado_por) REFERENCES pos_empleados (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS pos_caja_movimientos (
+  id              INT(11)        NOT NULL AUTO_INCREMENT,
+  turno_id        INT(11)        NOT NULL,
+  factura_id      INT(11)        NULL,
+  tipo            VARCHAR(12)    NOT NULL COMMENT 'VENTA | DEVOLUCION (luego RETIRO | ENTRADA | ABONO)',
+  forma_pago      TINYINT        NOT NULL COMMENT 'Codigo DGII: 1 efectivo, 2 cheque/transferencia/deposito, 3 tarjeta',
+  monto           DECIMAL(18,2)  NOT NULL COMMENT 'Positivo; el tipo dice si entra o sale',
+  monto_recibido  DECIMAL(18,2)  NULL COMMENT 'Efectivo: con cuanto pago el cliente',
+  devuelta        DECIMAL(18,2)  NULL,
+  iniciada_at     DATETIME       NULL COMMENT 'Primer articulo de la venta: para medir el tiempo por venta',
+  created_at      DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_pos_mov_turno (turno_id),
+  KEY idx_pos_mov_factura (factura_id),
+  CONSTRAINT fk_pos_mov_turno   FOREIGN KEY (turno_id)   REFERENCES pos_turnos (id),
+  CONSTRAINT fk_pos_mov_factura FOREIGN KEY (factura_id) REFERENCES facturas (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS product_barcodes (
+  id          INT(11)      NOT NULL AUTO_INCREMENT,
+  product_id  INT(11)      NOT NULL,
+  codigo      VARCHAR(64)  NOT NULL,
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_product_barcode (codigo),
+  KEY idx_product_barcode_product (product_id),
+  CONSTRAINT fk_product_barcode_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

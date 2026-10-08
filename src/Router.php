@@ -25,7 +25,7 @@ $_REQUEST = InputSanitizer::clean($_REQUEST);
 
 // Handle CORS at the router level FIRST, before any other logic
 header('Access-Control-Allow-Origin: *');
-header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
+header('Access-Control-Allow-Headers: X-API-KEY, X-API-SECRET, X-POS-EQUIPO, X-POS-SESION, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method');
 header('Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE');
 header('Access-Control-Max-Age: 86400'); // Cache preflight for 24 hours
 header('Content-Type: application/json; charset=utf-8');
@@ -177,6 +177,13 @@ switch ($route) {
         // Cotization CRUD endpoints - token required
         require_once 'src/Controllers/cotizacionController.php';
         break;
+
+    case 'conduces':
+        // Conduces de mercancia de Ferreteria - token required (modulo 'cotizaciones')
+        //   /conduces · /conduces/{id}/pdf · /conduces/preview
+        require_once 'src/Controllers/conduceController.php';
+        break;
+
     case 'facturas':
         // Factura CRUD endpoints - token required
         require_once 'src/Controllers/facturaController.php';
@@ -237,18 +244,19 @@ switch ($route) {
         //   /api/integracion/aprobaciones         -> listar aprobaciones recibidas
         //   /api/integracion/empresas             -> empresas que cubre la credencial
         //   /api/integracion/estado               -> estado en DGII de un e-CF emitido
+        //   /api/integracion/xml                  -> XML firmado de un e-CF emitido (respaldo)
         $sub = strtolower($route_segments[1] ?? '');
         if ($sub === 'ecf') {
             require_once 'src/Controllers/integracionEcfController.php';
         } elseif ($sub === 'aprobacion-comercial' || $sub === 'aprobacioncomercial') {
             require_once 'src/Controllers/integracionAprobacionController.php';
-        } elseif ($sub === 'recibidos' || $sub === 'aprobaciones' || $sub === 'empresas' || $sub === 'estado') {
+        } elseif (in_array($sub, ['recibidos', 'aprobaciones', 'empresas', 'estado', 'xml'], true)) {
             require_once 'src/Controllers/integracionConsultaController.php';
         } else {
             http_response_code(404);
             echo json_encode([
                 'status' => false,
-                'error' => 'Sub-ruta no encontrada bajo /api/integracion. Use ecf, aprobacion-comercial, recibidos, aprobaciones, empresas o estado.',
+                'error' => 'Sub-ruta no encontrada bajo /api/integracion. Use ecf, aprobacion-comercial, recibidos, aprobaciones, empresas, estado o xml.',
             ]);
         }
         break;
@@ -298,6 +306,17 @@ switch ($route) {
         // Bitacora de auditoria (solo lectura, admin del tenant: modulo 'audit')
         //   GET /api/audit-logs?user_id=&module=&action=&from=&to=&page=&pageSize=
         require_once 'src/Controllers/auditLogController.php';
+        break;
+
+    case 'pos':
+        // POS desde el equipo de caja (X-POS-EQUIPO + X-POS-SESION), nunca con la
+        // sesion de app.*: /api/pos/estado, /api/pos/sesion. Ver docs/specs/pos.md.
+        require_once 'src/Controllers/posController.php';
+        break;
+
+    case 'pos-admin':
+        // Administracion del POS (modulo RBAC 'pos'): cajas, empleados, equipos.
+        require_once 'src/Controllers/posAdminController.php';
         break;
 
     default:

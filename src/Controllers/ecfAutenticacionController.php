@@ -76,7 +76,8 @@ function handleValidarSemilla(): void
         error_log('[ecfAutenticacion] ValidarSemilla fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
         autenticacionAuditar(false, 'Error interno validando la semilla.', [], $e->getMessage());
         http_response_code(500);
-        echo json_encode(['status' => false, 'error' => 'Error interno: ' . $e->getMessage()]);
+        // Endpoint publico (lo llama la DGII sin credenciales): el detalle va solo al log.
+        echo json_encode(['status' => false, 'error' => 'Error interno.']);
     }
 }
 

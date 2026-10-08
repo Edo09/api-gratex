@@ -35,6 +35,7 @@ El master guarda solo el sha256 del secret. Si se pierde, se regenera — no se 
 | `/api/integracion/aprobaciones` | GET | Aprobaciones recibidas sobre lo que emitió |
 | `/api/integracion/empresas` | GET | Empresas que cubre la credencial (grupo) |
 | `/api/integracion/estado` | GET | Estado en DGII de un e-CF que emitió |
+| `/api/integracion/xml` | GET | XML firmado de un e-CF que emitió (último envío, del respaldo) |
 
 Un tenant tipo `app` que llame estos endpoints recibe **403** (`Endpoint solo para tenants
 tipo integracion`), y viceversa.
@@ -266,6 +267,43 @@ seguridad), o `null` si DGII no devolvió estado reconocible — el detalle crud
 
 ---
 
+## GET `/api/integracion/xml` — Volver a bajar un XML firmado
+
+El XML firmado del **último envío** de ese e-NCF, tal cual se firmó, desde
+`master.ecf_integracion_backup`. Sirve para recuperar un comprobante y, en la certificación,
+para el XML íntegro de cada **E32 <250k** que se sube a mano al portal DGII (la página
+`public/integracion.html`, paso 8, lo baja y lo verifica).
+
+```
+GET /api/integracion/xml?e_ncf=E320000000012[&rnc=<empresa del grupo>]
+```
+
+```json
+{
+  "status": true, "recurso": "xml",
+  "rnc": "131599729", "empresa": "CAGLIARI GROUP SRL",
+  "e_ncf": "E320000000012", "tipo_ecf": "32",
+  "track_id": null, "flujo": "RFCE",
+  "codigo_seguridad": "r67uSx",
+  "fecha_emision": "2026-10-06 10:40:01",
+  "archivo": "E320000000012.xml",
+  "xml_firmado": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>..."
+}
+```
+
+`codigo_seguridad` sale del propio XML (6 primeros caracteres de `SignatureValue`), así que
+`GET /estado?e_ncf=…&codigo_seguridad=…` confirma que es el mismo e-CF cuyo RFCE aceptó la DGII
+(`flujo: RFCE`); para los demás, `track_id`. `fecha_emision` es cuándo se guardó el respaldo
+(hora del server): dice de qué corrida es. El respaldo no guarda el ambiente: tras promover a
+`ecf`, un e-NCF repetido devuelve el envío más reciente de cualquiera de los dos.
+
+| Código | Cuándo |
+|---|---|
+| `404` | No hay respaldo de ese e-NCF para ese RNC |
+| `422` | `e_ncf` ausente o mal formado (`E` + tipo + 10 dígitos) |
+
+---
+
 ## GET `/api/integracion/recibidos` — Bandeja de entrada
 
 e-CF que otros emisores le facturaron. Se llenan solos cuando DGII/el emisor entrega el
@@ -285,9 +323,9 @@ se ven documentos `certecf`; al promover a `ecf`, solo producción.
       "id": 1, "track_id": "...", "tipo_ecf": "31", "e_ncf": "E310000000001",
       "rnc_emisor": "...", "razon_social_emisor": "...", "rnc_comprador": "...",
       "monto_total": 6608.00, "fecha_emision": "...", "fecha_recepcion": "...",
-      "estado": "RECIBIDO", "codigo_resultado": null, "mensaje_resultado": null,
+      "estado": "ACEPTADO", "codigo_resultado": null,
       "validacion_firma": "OK", "ambiente": "ecf",
-      "origen_ip": "...", "origen_auth": "...", "firma_rnc": "...", "firma_subject": "...",
+      "firma_rnc": "...", "firma_subject": "...",
       "aprobacion_comercial": null, "aprobacion_comercial_estado_dgii": null
     }
   ],

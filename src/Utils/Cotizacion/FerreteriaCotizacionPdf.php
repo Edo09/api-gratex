@@ -139,6 +139,12 @@ final class FerreteriaCotizacionHoja extends FPDF
  * Los saltos de pagina los decide esta clase, no FPDF: una fila nunca se
  * parte, la marca "No hay mas productos" queda con la ultima fila, y totales +
  * "Recibido por" + pie pasan enteros a otra pagina si no caben.
+ *
+ * Con documento => 'conduce' dibuja el conduce de mercancia (spec conduces
+ * 4.4): la misma hoja, titulada CONDUCE DE MERCANCIA, con las columnas
+ * Cantidad | Unidad | Descripcion y sin precios ni totales (va con la
+ * mercancia y lo firma quien la recibe). Sin esa clave, o con 'cotizacion',
+ * la cotizacion sale exactamente como antes.
  */
 final class FerreteriaCotizacionPdf
 {
@@ -152,6 +158,9 @@ final class FerreteriaCotizacionPdf
     private const ANCHO_CANTIDAD = 24.0;
     private const ANCHO_UNITARIO = 29.0;
     private const ANCHO_TOTAL = 30.0;
+
+    /** Unidad, solo en el conduce: Cantidad | Unidad | Descripcion (el resto). */
+    private const ANCHO_UNIDAD = 30.0;
 
     /** Caja maxima del logo (mm); se respeta su proporcion. */
     private const LOGO_MAX_W = 75.0;
@@ -187,7 +196,11 @@ final class FerreteriaCotizacionPdf
     /**
      * @param array $cotizacion code (?string; null => 'VISTA PREVIA'), date, items
      *                          [{description, quantity, amount}] y totales (salida
-     *                          exacta de FerreteriaFormato::totales).
+     *                          exacta de FerreteriaFormato::totales). Conduce:
+     *                          documento 'conduce', code, date, cotizacion_code
+     *                          (?string; null => sin linea "Cotizacion:") e items
+     *                          [{description, quantity, unidad}] con el nombre de
+     *                          la unidad ya resuelto; sin totales.
      * @param array $emisor     Fila de emisor_config: rnc, razon_social, direccion, telefono, correo.
      * @param array $cliente    razon_social, company_name, client_name, rnc.
      * @param ?string $logoPath Ruta absoluta del logo; null o ilegible => razon social en texto.
@@ -273,7 +286,8 @@ final class FerreteriaCotizacionPdf
 
         $pdf->Ln(1.5);
         $pdf->SetFont('Times', 'B', 14);
-        $pdf->Cell($util, 7, $this->enc('COTIZACIÓN MERCANCÍAS'), 0, 1, 'C');
+        $titulo = $this->esConduce() ? 'CONDUCE DE MERCANCÍA' : 'COTIZACIÓN MERCANCÍAS';
+        $pdf->Cell($util, 7, $this->enc($titulo), 0, 1, 'C');
         $pdf->Ln(1.5);
 
         // Bloque izquierdo, como en su hoja: fecha, numero, rotulo y cliente.
@@ -283,6 +297,12 @@ final class FerreteriaCotizacionPdf
             $pdf->Cell($util, self::ALTO_BLOQUE, $this->enc(FerreteriaFormato::fechaLarga($fecha)), 0, 1, 'L');
         }
         $pdf->Cell($util, self::ALTO_BLOQUE, $this->enc($this->codigo()), 0, 1, 'L');
+        // El conduce dice de que cotizacion salio. Si esa cotizacion ya no
+        // existe, cotizacion_code llega null y la linea no va.
+        $origen = $this->esConduce() ? $this->texto($this->cotizacion['cotizacion_code'] ?? '') : '';
+        if ($origen !== '') {
+            $pdf->Cell($util, self::ALTO_BLOQUE, $this->enc('Cotización: ' . $origen), 0, 1, 'L');
+        }
         $pdf->Cell($util, self::ALTO_BLOQUE, $this->enc('NOMBRE O RAZÓN SOCIAL'), 0, 1, 'L');
         $nombreCliente = $this->nombreCliente();
         if ($nombreCliente !== '') {
@@ -303,14 +323,15 @@ final class FerreteriaCotizacionPdf
         $ultima = count($items) - 1;
 
         $pdf->SetFont('Times', '', 10);
-        $marca = ['', $this->enc(self::MARCA), '', ''];
+        // La marca va bajo Descripcion: segunda columna en la cotizacion, tercera en el conduce.
+        $marca = $this->esConduce() ? ['', '', $this->enc(self::MARCA)] : ['', $this->enc(self::MARCA), '', ''];
         $altoMarca = $this->altoFila($pdf, $anchos, $marca);
 
         // La cabecera se dibuja junto con la fila que la sigue: asi nunca queda
         // sola al pie de una pagina y solo se repite donde continuan filas.
         $cabeceraPendiente = true;
         foreach ($items as $i => $item) {
-            $celdas = [
+            $celdas = $this->esConduce() ? $this->celdasConduce($item) : [
                 number_format((float) ($item['quantity'] ?? 0), 2),
                 $this->enc($this->texto($item['description'] ?? '')),
                 // Hasta 4 decimales si los trae: con 2 fijos, 3 x 84.7458
@@ -331,7 +352,7 @@ final class FerreteriaCotizacionPdf
                 $this->cabeceraTabla($pdf, $anchos);
                 $cabeceraPendiente = false;
             }
-            $this->fila($pdf, $anchos, $celdas, ['C', 'L', 'R', 'R'], $alto);
+            $this->fila($pdf, $anchos, $celdas, $this->esConduce() ? ['C', 'C', 'L'] : ['C', 'L', 'R', 'R'], $alto);
         }
 
         // Sin items (la validacion lo impide, pero el PDF no debe romperse) la
@@ -339,13 +360,14 @@ final class FerreteriaCotizacionPdf
         if ($cabeceraPendiente) {
             $this->cabeceraTabla($pdf, $anchos);
         }
-        $this->fila($pdf, $anchos, $marca, ['C', 'L', 'C', 'C'], $altoMarca);
+        $this->fila($pdf, $anchos, $marca, $this->esConduce() ? ['C', 'C', 'L'] : ['C', 'L', 'C', 'C'], $altoMarca);
     }
 
     /** Totales + "Recibido por" + pie: un solo bloque que nunca se parte. */
     private function cierre(FerreteriaCotizacionHoja $pdf): void
     {
-        $filas = $this->filasTotales();
+        // El conduce no lleva totales: su bloque es el espacio, "Recibido por" y el pie.
+        $filas = $this->esConduce() ? [] : $this->filasTotales();
         $pie = $this->lineasPie();
         $alto = self::ESPACIO_TOTALES + count($filas) * self::ALTO_TOTAL
             + self::ESPACIO_RECIBIDO + self::ALTO_RECIBIDO
@@ -469,7 +491,9 @@ final class FerreteriaCotizacionPdf
         $pdf->SetFont('Times', 'B', 10);
         $pdf->SetFillColor(self::AZUL[0], self::AZUL[1], self::AZUL[2]);
         $pdf->SetTextColor(0, 0, 0);
-        $titulos = ['Cantidad', 'Descripción mercancías', 'Valor Unitario', 'Valor Total RD$'];
+        $titulos = $this->esConduce()
+            ? ['Cantidad', 'Unidad', 'Descripción mercancías']
+            : ['Cantidad', 'Descripción mercancías', 'Valor Unitario', 'Valor Total RD$'];
         foreach ($titulos as $k => $titulo) {
             $pdf->Cell($anchos[$k], self::ALTO_CABECERA, $this->enc($titulo), 1, 0, 'C', true);
         }
@@ -503,9 +527,15 @@ final class FerreteriaCotizacionPdf
         return $renglones * self::ALTO_RENGLON;
     }
 
-    /** @return float[] Cantidad | Descripcion | Valor Unitario | Valor Total */
+    /**
+     * @return float[] Cotizacion: Cantidad | Descripcion | Valor Unitario | Valor Total.
+     *                 Conduce: Cantidad | Unidad | Descripcion.
+     */
     private function anchos(FerreteriaCotizacionHoja $pdf): array
     {
+        if ($this->esConduce()) {
+            return [self::ANCHO_CANTIDAD, self::ANCHO_UNIDAD, $this->anchoUtil($pdf) - self::ANCHO_CANTIDAD - self::ANCHO_UNIDAD];
+        }
         $descripcion = $this->anchoUtil($pdf) - self::ANCHO_CANTIDAD - self::ANCHO_UNITARIO - self::ANCHO_TOTAL;
         return [self::ANCHO_CANTIDAD, $descripcion, self::ANCHO_UNITARIO, self::ANCHO_TOTAL];
     }
@@ -513,6 +543,27 @@ final class FerreteriaCotizacionPdf
     private function anchoUtil(FerreteriaCotizacionHoja $pdf): float
     {
         return $pdf->GetPageWidth() - 2 * self::MARGEN;
+    }
+
+    /** documento => 'conduce'. Sin esa clave, o con 'cotizacion', es la cotizacion de siempre. */
+    private function esConduce(): bool
+    {
+        return ($this->cotizacion['documento'] ?? null) === 'conduce';
+    }
+
+    /**
+     * Cantidad | Unidad | Descripcion de una linea del conduce. Nunca el precio,
+     * aunque el item lo traiga: el conduce va con la mercancia. La unidad llega
+     * con su nombre ya resuelto (FerreteriaConduce::itemsPdf), asi que aqui no
+     * se lee el catalogo y el renderizador sigue siendo puro.
+     */
+    private function celdasConduce(array $item): array
+    {
+        return [
+            number_format((float) ($item['quantity'] ?? 0), 2),
+            $this->enc($this->texto($item['unidad'] ?? '')),
+            $this->enc($this->texto($item['description'] ?? '')),
+        ];
     }
 
     /** Base de la linea tal como la calculo totales(); sin ella, la misma regla (spec 6.2). */

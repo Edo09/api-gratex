@@ -78,6 +78,18 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
                    AND COLUMN_NAME = 'cotizacion_formato')
+  UNION ALL
+  SELECT '012', '012_pos.sql',
+         'columnas tenants.pos_enabled y pos_equipos.bloqueos_seguidos + tablas pos_handoff_codes y pos_equipos',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+                   AND COLUMN_NAME = 'pos_enabled')
+         AND EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pos_equipos'
+                   AND COLUMN_NAME = 'bloqueos_seguidos')
+         AND (SELECT COUNT(*) FROM information_schema.TABLES
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME IN ('pos_handoff_codes', 'pos_equipos')) = 2
 ) m
 ORDER BY m.migracion;
 

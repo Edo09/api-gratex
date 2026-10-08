@@ -138,44 +138,7 @@ class authModel
                     : ['tenant_id' => null, 'user_id' => null]];
             }
 
-            // Generate new token for this login
-            $token = TokenGenerator::generateApiToken();
-            $token_hash = TokenGenerator::hashToken($token);
-            $created_at = date('Y-m-d H:i:s');
-
-            if (self::multiTenant()) {
-                $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([
-                    ':user_id' => $user['id'],
-                    ':tenant_id' => $user['tenant_id'],
-                    ':token_hash' => $token_hash,
-                    ':created_at' => $created_at
-                ]);
-            } else {
-                $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([
-                    ':user_id' => $user['id'],
-                    ':token_hash' => $token_hash,
-                    ':created_at' => $created_at
-                ]);
-            }
-
-            // Prepare user data response (without password). Incluye los modulos
-            // a los que el rol da acceso, para que el front muestre/oculte paginas.
-            $user_data = [
-                'id' => (int)$user['id'],
-                'email' => $user['email'],
-                'username' => $user['username'],
-                'name' => $user['name'] . ' ' . $user['last_name'],
-                'role' => $user['role'],
-                'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role']),
-            ];
-
-            // Tercer elemento: empresa del usuario, solo para la bitacora.
-            return ['success', ['token' => $token, 'user' => $user_data],
-                ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null]];
+            return $this->emitirSesion($user);
         } catch (PDOException $e) {
             // El texto de PDO no se le muestra al usuario (puede traer SQL o datos
             // del servidor). Va al log y, en 'detalle', a la bitacora del intento.
@@ -183,6 +146,80 @@ class authModel
             return ['error', 'No se pudo iniciar sesión por un problema del sistema. Inténtalo de nuevo en unos minutos.',
                 ['tenant_id' => null, 'user_id' => null, 'detalle' => 'Database error: ' . $e->getMessage()]];
         }
+    }
+
+    /**
+     * Sesion para un usuario ya autenticado por otra via: el codigo de traspaso
+     * del boton POS (app.* -> pos.*, ver posMasterModel::canjearCodigo). Misma
+     * respuesta que loginUser, sin clave.
+     *
+     * @return array ['success', ['token','user'], ['tenant_id']] o ['error', mensaje]
+     */
+    public function iniciarSesionPorId(int $userId): array
+    {
+        try {
+            $sql = self::multiTenant()
+                ? "SELECT id, tenant_id, email, username, name, last_name, role FROM users WHERE id = :id LIMIT 1"
+                : "SELECT id, email, username, name, last_name, role FROM users WHERE id = :id LIMIT 1";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([':id' => $userId]);
+            $user = $stmt->fetch();
+            if (!$user) {
+                return ['error', 'Ese usuario ya no existe.'];
+            }
+            return $this->emitirSesion($user);
+        } catch (PDOException $e) {
+            error_log('[authModel] iniciarSesionPorId: ' . $e->getMessage());
+            return ['error', 'No se pudo iniciar sesión por un problema del sistema. Inténtalo de nuevo en unos minutos.'];
+        }
+    }
+
+    /**
+     * Crea el token de sesion (api_tokens guarda solo su sha256) y arma la
+     * respuesta del login. Compartido por loginUser e iniciarSesionPorId.
+     *
+     * @param array $user Fila de users (sin la clave hace falta).
+     */
+    private function emitirSesion(array $user): array
+    {
+        // Generate new token for this login
+        $token = TokenGenerator::generateApiToken();
+        $token_hash = TokenGenerator::hashToken($token);
+        $created_at = date('Y-m-d H:i:s');
+
+        if (self::multiTenant()) {
+            $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':user_id' => $user['id'],
+                ':tenant_id' => $user['tenant_id'],
+                ':token_hash' => $token_hash,
+                ':created_at' => $created_at
+            ]);
+        } else {
+            $sql = "INSERT INTO api_tokens(user_id, token_hash, created_at) VALUES(:user_id, :token_hash, :created_at)";
+            $stmt = $this->conexion->prepare($sql);
+            $stmt->execute([
+                ':user_id' => $user['id'],
+                ':token_hash' => $token_hash,
+                ':created_at' => $created_at
+            ]);
+        }
+
+        // Prepare user data response (without password). Incluye los modulos
+        // a los que el rol da acceso, para que el front muestre/oculte paginas.
+        $user_data = [
+            'id' => (int)$user['id'],
+            'email' => $user['email'],
+            'username' => $user['username'],
+            'name' => $user['name'] . ' ' . $user['last_name'],
+            'role' => $user['role'],
+            'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role']),
+        ];
+
+        // Tercer elemento: empresa del usuario, solo para la bitacora.
+        return ['success', ['token' => $token, 'user' => $user_data],
+            ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null]];
     }
 
     /**
