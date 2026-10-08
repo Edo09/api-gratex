@@ -93,7 +93,9 @@ X-API-KEY: {{tokenFerreteria}}
 ### M5 tools/verificar_migraciones_tenant.sql en las DOS DBs de tenant: la fila 031 (031_conduces.sql, "tablas
 ###    conduces, conduce_items y conduce_secuencia") dice APLICADA, y tambien la 027, la 028, la 029 (precios
 ###    en decimal(18,4)) y la 030 (POS). La columna base
-###    es la de esa DB.
+###    es la de esa DB. Y tools/verificar_migraciones_master.sql en la base master: la fila 012
+###    (012_pos.sql, "columnas tenants.pos_enabled y pos_equipos.bloqueos_seguidos + tablas pos_handoff_codes
+###    y pos_equipos") dice APLICADA (el POS lo necesita antes de subir su codigo).
 ### M6 La 031 con el codigo viejo todavia desplegado (solo crea tablas): las cotizaciones y el bloque G de
 ###    tests/test_cotizaciones_ferreteria.http responden igual que antes, en las dos empresas.
 ### M7 Estado en la DB de Ferreteria despues de C1 (<id> = el id que devolvio C1):

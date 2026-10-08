@@ -310,24 +310,32 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
 ### Despliegue de los conduces
 
 1. **Respaldo** de las dos DBs de tenant (`smhynzte_002`, Ferretería, y
-   `smhynzte_new_gratexdb`, Gratex).
-2. **`tools/verificar_migraciones_tenant.sql`** (solo lectura) en las dos: ver qué dice de la
-   027, de la 028, de la 029 (precios) y de la 030 (POS).
-3. **Correr la 027, después la 028, la 029 (`029_precios_4_decimales.sql`) y la 030
-   (`030_pos.sql`)** en la base donde digan `FALTA`, según el ORDEN de la cabecera de cada
-   una. Este despliegue también lleva el código que las necesita. La 030 es la del POS:
-   va junto con `master_migrations/012_pos.sql`, su cabecera la pide en las empresas que
-   vayan a usar el POS y dice que no estorba en las demás; aquí se corre en las dos
-   para que el verificador termine entero en `APLICADA`.
-4. **Correr la 031 (`031_conduces.sql`)**, fuera de horario y después de la 030, en las dos
+   `smhynzte_new_gratexdb`, Gratex) y, si la 012 falta en el master (paso 3), de la base master.
+2. **Los verificadores** (solo lectura): `tools/verificar_migraciones_master.sql` en la base
+   master (su fila `012` es la del POS) y `tools/verificar_migraciones_tenant.sql` en las dos
+   DBs de tenant: ver qué dicen de la 012 del master y de la 027, la 028, la 029 (precios) y
+   la 030 (POS) del tenant.
+3. **En la base master (no en las de tenant): `db/master_migrations/012_pos.sql`** donde su fila
+   diga `FALTA`, y antes de subir el código del POS, como pide su cabecera. Agrega
+   `tenants.pos_enabled` (en 0: nadie ve el POS hasta que se active), `pos_equipos` y
+   `pos_handoff_codes`.
+4. **Correr la 027, después la 028, la 029 (`029_precios_4_decimales.sql`) y la 030
+   (`030_pos.sql`)** en la base de tenant donde digan `FALTA`, según el ORDEN de la cabecera
+   de cada una. Este despliegue también lleva el código que las necesita. La 030 es la del
+   POS: su cabecera la pide solo en las empresas que vayan a usar el POS (va junto con la
+   012 del master) y dice que no estorba en las demás. Corre la 030 igual en las dos DBs: así
+   el verificador termina entero en `APLICADA` y las dos bases quedan con el mismo esquema.
+   Es inofensiva donde no se usa el POS (solo agrega tablas y columnas, no toca datos) y
+   obligatoria donde se vaya a usar.
+5. **Correr la 031 (`031_conduces.sql`)**, fuera de horario y después de la 030, en las dos
    DBs: pegar el archivo completo en la pestaña SQL con la base seleccionada y leer la fila
    final (`base` = esa base, las tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok`
    = `SI`).
-5. **El verificador otra vez** en las dos: de la 027 a la 031 tienen que decir `APLICADA`
-   antes de desplegar.
-6. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
+6. **Los verificadores otra vez:** en las dos DBs de tenant, de la 027 a la 031 tienen que
+   decir `APLICADA`, y en el master la 012, antes de desplegar.
+7. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
    `cotizacion_formato = 'ferreteria'`.
-7. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
+8. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
    - como Ferretería: un conduce desde una cotización, su PDF, una edición y Eliminar (deja de
      salir en la lista); Facturar sin emitir, comprobando que una línea sin precio no deja
      emitir;

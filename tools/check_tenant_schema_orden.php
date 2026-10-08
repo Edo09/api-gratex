@@ -26,7 +26,8 @@
  *     el ultimo, y sus tres tablas armadas son las del snapshot elemento por
  *     elemento. El verificador de migraciones tiene su fila (y las de la 029 de
  *     precios, que deja products.precio .. precio_4 en DECIMAL(18,4), y la
- *     030 del POS, que deja seis tablas y cuatro columnas de facturas).
+ *     030 del POS, que deja seis tablas y cuatro columnas de facturas). El del
+ *     master tiene la de la 012 (POS: dos columnas y dos tablas).
  *
  * No reemplaza aplicar el snapshot, la 026 y la 031 a una DB de verdad; solo
  * atrapa en local lo que mas facil se rompe al mover bloques o al escribir SQL
@@ -42,6 +43,7 @@ $rutaSnapshot = $raiz . '/db/tenant_schema.sql';
 $rutaMigracion = $raiz . '/db/migrations/026_cotizaciones_formatos.sql';
 $rutaMigracion031 = $raiz . '/db/migrations/031_conduces.sql';
 $rutaVerificador = $raiz . '/tools/verificar_migraciones_tenant.sql';
+$rutaVerificadorMaster = $raiz . '/tools/verificar_migraciones_master.sql';
 
 $fallos = 0;
 $total = 0;
@@ -551,6 +553,19 @@ $chk('verificador: la fila 030 (POS) pide las seis tablas del POS y las cuatro c
         . "AND TABLE_NAME IN \('pos_cajas', 'pos_empleados', 'pos_sesiones', 'pos_turnos',\s*'pos_caja_movimientos', 'product_barcodes'\)\) = 6\s+"
         . "AND \(SELECT COUNT\(\*\) FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'facturas'\s+"
         . "AND COLUMN_NAME IN \('turno_id', 'pos_empleado_id', 'pos_idempotency_key', 'envio_pendiente'\)\) = 4/", $verificador) === 1);
+// La 012 del master (012_pos.sql, base master) deja tenants.pos_enabled,
+// pos_equipos.bloqueos_seguidos y las tablas pos_handoff_codes y pos_equipos: es lo
+// mismo que cuenta la consulta final de la propia 012, y su fila del verificador del
+// master (tools/verificar_migraciones_master.sql) lo pide entero.
+$verificadorMaster = is_file($rutaVerificadorMaster) ? str_replace("\r\n", "\n", (string) file_get_contents($rutaVerificadorMaster)) : '';
+$chk('verificador del master: la fila 012 (POS) pide tenants.pos_enabled, pos_equipos.bloqueos_seguidos y las tablas pos_handoff_codes y pos_equipos',
+    preg_match("/SELECT '012', '012_pos\.sql',\s*'[^']*',\s*"
+        . "EXISTS \(SELECT 1 FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'tenants'\s+"
+        . "AND COLUMN_NAME = 'pos_enabled'\)\s+"
+        . "AND EXISTS \(SELECT 1 FROM information_schema\.COLUMNS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'pos_equipos'\s+"
+        . "AND COLUMN_NAME = 'bloqueos_seguidos'\)\s+"
+        . "AND \(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+"
+        . "AND TABLE_NAME IN \('pos_handoff_codes', 'pos_equipos'\)\) = 2/", $verificadorMaster) === 1);
 
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);

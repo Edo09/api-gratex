@@ -149,12 +149,18 @@ Cómo se agrega un formato: [../modules/cotizaciones-formatos.md](../modules/cot
 Conduces, `/api/conduces`, bajo el mismo módulo `cotizaciones`). Sus tablas (`conduces`,
 `conduce_items` y `conduce_secuencia`) vienen en el snapshot que aplica el onboarding; en una
 DB de tenant que ya existía hay que correr antes la migración 031
-(`db/migrations/031_conduces.sql`). El orden en esa DB: `tools/verificar_migraciones_tenant.sql`;
-la 027, la 028, la 029 (`029_precios_4_decimales.sql`) y la 030 (`030_pos.sql`, el POS: va con
-`master_migrations/012_pos.sql` y su código viaja en este mismo despliegue) donde digan `FALTA`;
-la 031; el verificador otra vez, con la 027 a la 031 en `APLICADA`; y solo entonces desplegar `api-gratex`
-y después `fiscalo` (la lista completa, con el respaldo y las pruebas de humo, está en
+(`db/migrations/031_conduces.sql`). El orden: `tools/verificar_migraciones_master.sql` en la
+base master y `tools/verificar_migraciones_tenant.sql` en esa DB; `db/master_migrations/012_pos.sql`
+en la base master (una sola vez para todos los tenants, antes del código del POS, que viaja en
+este mismo despliegue) donde su fila diga `FALTA`; en la DB del tenant, la 027, la 028, la 029
+(`029_precios_4_decimales.sql`) y la 030 (`030_pos.sql`, el POS) donde digan `FALTA`; la 031; los
+verificadores otra vez, con la 012 del master y la 027 a la 031 del tenant en `APLICADA`; y solo
+entonces desplegar `api-gratex` y después `fiscalo` (la lista completa, con el respaldo y las
+pruebas de humo, está en
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#despliegue-de-los-conduces)).
+La 030 se corre en todas las DBs de tenant aunque su cabecera solo la pide donde se vaya a usar el
+POS: es inofensiva donde no (solo agrega tablas y columnas), deja el verificador entero en
+`APLICADA` y los esquemas iguales, y es obligatoria donde sí se use.
 Con `gratex` no hay conduces: el menú no sale y la API responde `422`. Detalle:
 [../api/conduces.md](../api/conduces.md).
 

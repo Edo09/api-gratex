@@ -79,16 +79,20 @@
 --     y es cuestion de segundos, pero una consulta larga sobre cotizaciones o
 --     products la haria esperar (y las escrituras que lleguen detras, tambien).
 --
--- ORDEN: el verificador (tools/verificar_migraciones_tenant.sql) primero; la
--- 027, la 028, la 029 (precios_4_decimales) y la 030 (pos) donde digan FALTA;
--- DESPUES esta 031, y ANTES de desplegar el codigo de conduces (api-gratex y
--- despues fiscalo), con el verificador otra vez y la 027 a la 031 en
--- APLICADA. No depende de la 027, la 028, la 029 ni la 030: 031 es solo el
--- siguiente numero libre. (La 030 es la del POS: va junto con
--- master_migrations/012, su encabezado la pide en las empresas que vayan a
--- usar el POS y dice que no estorba en las demas; aqui se corre en las dos
--- DBs para que el verificador termine entero en APLICADA, y porque el codigo
--- del POS viaja en este mismo despliegue de api-gratex.)
+-- ORDEN: los verificadores primero (tools/verificar_migraciones_master.sql en
+-- la base master y tools/verificar_migraciones_tenant.sql en el tenant);
+-- db/master_migrations/012_pos.sql en la base MASTER (no en las de tenant)
+-- donde su fila diga FALTA, antes de desplegar el codigo del POS, como pide su
+-- encabezado; en el tenant, la 027, la 028, la 029 (precios_4_decimales) y la
+-- 030 (pos) donde digan FALTA; DESPUES esta 031, y ANTES de desplegar el codigo
+-- de conduces (api-gratex y despues fiscalo), con los verificadores otra vez,
+-- la 012 del master y la 027 a la 031 del tenant en APLICADA. No depende de la
+-- 027, la 028, la 029 ni la 030: 031 es solo el siguiente numero libre. (La 030
+-- es la del POS: su encabezado la pide solo en las empresas que vayan a usar el
+-- POS y dice que no estorba en las demas. Se corre igual en las dos DBs de
+-- tenant: es inofensiva donde no se usa el POS, deja el verificador entero en
+-- APLICADA y los esquemas iguales, y es obligatoria donde se vaya a usar; el
+-- codigo del POS viaja en este mismo despliegue de api-gratex.)
 -- Solo crea tablas, asi que es segura con el codigo que corre hoy en
 -- produccion.
 --
