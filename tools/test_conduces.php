@@ -1332,8 +1332,8 @@ $lineaOchoT5 = ['id' => 4, 'conduce_id' => 8, 'product_id' => null, 'description
 $columnasT5 = 'SELECT c.id, c.numero, c.code, c.date, c.cotizacion_id, q.code AS cotizacion_code, c.client_id, cl.client_name, '
     . 'cl.company_name, cl.rnc, c.client_name AS client_name_guardado, c.user_id, c.activo, c.created_at, c.updated_at '
     . 'FROM conduces c LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id LEFT JOIN clients cl ON cl.id = c.client_id';
-$busquedaT5 = 'AND (c.code LIKE :query OR c.client_name LIKE :query OR cl.client_name LIKE :query OR cl.company_name LIKE :query '
-    . 'OR cl.rnc LIKE :query)';
+$busquedaT5 = 'AND (c.code LIKE :query OR q.code LIKE :query OR c.client_name LIKE :query OR cl.client_name LIKE :query '
+    . 'OR cl.company_name LIKE :query OR cl.rnc LIKE :query)';
 $enlacesT5 = static fn(ConexionFalsaT5 $c): array => array_map(static fn(array $e): array => [$e[1], $e[2], $e[3]], $c->enlazados);
 
 $c = new ConexionFalsaT5();
@@ -1358,8 +1358,11 @@ $chk('lineas: una sola consulta para la pagina, solo las activas, en el orden en
 
 $c = new ConexionFalsaT5();
 $modeloT5($c)->listar(20, 10, '  CON-0001 ');
-$chk('listar con busqueda: numero, nombre guardado, nombre y empresa del cliente y RNC',
+$chk('listar con busqueda: numero, codigo de la cotizacion, nombre guardado, nombre y empresa del cliente y RNC',
     str_contains($planoT5($c->consultas[0] ?? ''), ' WHERE c.activo = 1 ' . $busquedaT5 . ' ORDER BY c.date DESC'));
+$chk('listar con busqueda: el codigo de la cotizacion se busca en q.code, la tabla del LEFT JOIN de cotizaciones',
+    str_contains($planoT5($c->consultas[0] ?? ''), 'LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id')
+    && substr_count($planoT5($c->consultas[0] ?? ''), 'q.code LIKE :query') === 1);
 $chk('listar con busqueda: el texto recortado entre % y el offset de la pagina', $enlacesT5($c)
     === [[':query', '%CON-0001%', PDO::PARAM_STR], [':limit', 10, PDO::PARAM_INT], [':offset', 20, PDO::PARAM_INT]]);
 $c = new ConexionFalsaT5();
@@ -1368,13 +1371,17 @@ $chk('listar sin filas: [] sin consultar las lineas; una busqueda en blanco no f
 
 $c = new ConexionFalsaT5();
 $c->totalFilas = 42;
-$chk('contar: COUNT(*) de los activos', $modeloT5($c)->contar(null) === 42
-    && $planoT5($c->consultas[0] ?? '') === 'SELECT COUNT(*) AS total FROM conduces c LEFT JOIN clients cl ON cl.id = c.client_id WHERE c.activo = 1'
+$chk('contar: COUNT(*) de los activos, con los mismos JOIN que listar', $modeloT5($c)->contar(null) === 42
+    && $planoT5($c->consultas[0] ?? '') === 'SELECT COUNT(*) AS total FROM conduces c LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id '
+        . 'LEFT JOIN clients cl ON cl.id = c.client_id WHERE c.activo = 1'
     && $c->paramsDe('SELECT COUNT(*)') === [[]]);
 $c = new ConexionFalsaT5();
 $modeloT5($c)->contar(' juan ');
 $chk('contar con busqueda: la misma condicion que listar', str_ends_with($planoT5($c->consultas[0] ?? ''), ' WHERE c.activo = 1 ' . $busquedaT5)
     && $c->paramsDe('SELECT COUNT(*)') === [[':query' => '%juan%']]);
+$chk('contar con busqueda: tambien busca el codigo de la cotizacion (q.code) y la une con el mismo LEFT JOIN, para que el total coincida con listar',
+    str_contains($planoT5($c->consultas[0] ?? ''), 'LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id')
+    && substr_count($planoT5($c->consultas[0] ?? ''), 'q.code LIKE :query') === 1);
 
 $c = new ConexionFalsaT5();
 $c->respuestas = ['FROM conduces c' => [$cabT5(7, 'CON-000001')], 'FROM conduce_items' => $filasItemsFx];

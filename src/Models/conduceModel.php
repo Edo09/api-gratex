@@ -37,9 +37,15 @@ class conduceModel
            LEFT JOIN cotizaciones q ON q.id = c.cotizacion_id
            LEFT JOIN clients cl ON cl.id = c.client_id';
 
-    /** Búsqueda del listado: número, nombre guardado, nombre y empresa del cliente, y RNC. */
-    private const BUSQUEDA = '(c.code LIKE :query OR c.client_name LIKE :query OR cl.client_name LIKE :query
-                OR cl.company_name LIKE :query OR cl.rnc LIKE :query)';
+    /**
+     * Búsqueda del listado: número del conduce, código de su cotización de
+     * origen (q.code, por el LEFT JOIN de DESDE), nombre guardado, nombre y
+     * empresa del cliente, y RNC. Si borraron la cotización, cotizacion_id
+     * quedó en NULL (ON DELETE SET NULL) y el conduce ya no se encuentra por su
+     * código: conduces no guarda una copia del código de la cotización.
+     */
+    private const BUSQUEDA = '(c.code LIKE :query OR q.code LIKE :query OR c.client_name LIKE :query
+                OR cl.client_name LIKE :query OR cl.company_name LIKE :query OR cl.rnc LIKE :query)';
 
     private $conexion;
 
@@ -71,12 +77,16 @@ class conduceModel
         return $this->conLineas($stmt->fetchAll());
     }
 
-    /** Cuántos conduces activos hay, con la misma búsqueda que listar. */
+    /**
+     * Cuántos conduces activos hay, con la misma búsqueda que listar. Usa el
+     * mismo DESDE (los dos LEFT JOIN son por clave primaria: no multiplican
+     * filas), así el total de la paginación coincide con lo que listar encuentra.
+     */
     public function contar(?string $query): int
     {
         $buscar = self::textoBuscado($query);
         $stmt = $this->conexion->prepare(
-            'SELECT COUNT(*) AS total FROM conduces c LEFT JOIN clients cl ON cl.id = c.client_id'
+            'SELECT COUNT(*) AS total ' . self::DESDE
             . ' WHERE c.activo = 1' . ($buscar !== null ? ' AND ' . self::BUSQUEDA : '')
         );
         $stmt->execute($buscar !== null ? [':query' => '%' . $buscar . '%'] : []);

@@ -136,10 +136,17 @@ Cómo leer la fila:
 |-------|---------|-------|
 | `page` | `1` | Página (1-based). Lo que como entero no llega a 1 (`0`, negativo, `0.5`, texto) vale `1` |
 | `pageSize` | `10` | Filas por página. Igual: lo que no llega a 1 vale `10` |
-| `query` | — | Busca (`LIKE`) en el código (`CON-000007` y `000007` encuentran el mismo), en el nombre guardado y en el `client_name`, `company_name` y `rnc` del cliente. Sin espacios en los extremos; vacío = sin búsqueda |
+| `query` | — | Busca (`LIKE`) en el código del conduce (`CON-000007` y `000007` encuentran el mismo), en el código de su cotización de origen (`COT-000012` y `000012` encuentran los conduces de esa cotización), en el nombre guardado y en el `client_name`, `company_name` y `rnc` del cliente. Sin espacios en los extremos; vacío = sin búsqueda. `pagination.total` cuenta con la misma búsqueda |
 
 Solo conduces activos. Orden: `date DESC, id DESC` (los de la misma fecha, el más nuevo
 primero).
+
+**Buscar por el código de la cotización (decisión del 2026-10-08).** El código sale de la fila
+de `cotizaciones` a la que apunta `cotizacion_id` (el mismo `LEFT JOIN` que da
+`cotizacion_code`). Si esa cotización se eliminó, `cotizacion_id` quedó en `NULL` (`ON DELETE
+SET NULL`) y esos conduces ya no se encuentran por su código: `conduces` no guarda una copia del
+código de la cotización, y no se agregó una columna para eso. Siguen en el listado y se
+encuentran por su propio código, el cliente o el RNC.
 
 **Respuesta `200`:**
 
@@ -451,8 +458,8 @@ la fila del conduce (`GET ?id=`) y lo emite con los endpoints de siempre (`/api/
   `php -d extension=pdo_mysql tools/test_conduces_mysql.php`. Usa solo la base de pruebas
   `smhynzte_conduces_scratch` (credenciales en `tools/.env`, ignorado por git), la vacía al
   empezar y al terminar, y prueba la 031 dos veces, el snapshot nuevo, `conduceModel` de
-  punta a punta, un `1062` real con su reintento, cinco creaciones a la vez y las reglas
-  `ON DELETE`. Nunca apunta a producción.
+  punta a punta (con la búsqueda por el código de la cotización), un `1062` real con su
+  reintento, cinco creaciones a la vez y las reglas `ON DELETE`. Nunca apunta a producción.
 - A mano contra un servidor, con las comprobaciones de la 031 y de la base:
   [../../tests/test_conduces.http](../../tests/test_conduces.http).
 - **En producción**, cada conduce de prueba **gasta su número** (queda con `activo = 0` y

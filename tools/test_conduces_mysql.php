@@ -13,7 +13,8 @@
  *   b) un tenant nuevo (db/tenant_schema.sql de hoy) nace con las mismas tres
  *      tablas que deja la 031;
  *   c) conduceModel de punta a punta: numeración, eliminar (activo = 0), editar
- *      (las líneas de antes a activo = 0), los 1452 reales y las lecturas;
+ *      (las líneas de antes a activo = 0), los 1452 reales y las lecturas, con la
+ *      búsqueda por el código de la cotización de origen;
  *   d) guardados a la vez: un 1062 de verdad que se reintenta, y cinco procesos
  *      que crean un conduce cada uno al mismo tiempo;
  *   e) los topes de cantidad y precio de conduce_items: los de validarForma son los
@@ -623,7 +624,7 @@ try {
     $chk('contar: 2 activos (de 4 filas)', $m->contar(null) === 2 && (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces') === 4);
     $chk('listar de a uno: LIMIT y OFFSET enteros dan la página 1 y la 2',
         $codigos($m->listar(0, 1, null)) === ['CON-000002'] && $codigos($m->listar(1, 1, null)) === ['CON-000051']);
-    $chk('buscar por número: el mismo :query cinco veces funciona con los prepares de la app',
+    $chk('buscar por número: el mismo :query seis veces funciona con los prepares de la app',
         $codigos($m->listar(0, 10, 'CON-000002')) === ['CON-000002'] && $m->contar('CON-000002') === 1);
     $chk('buscar por el nombre guardado, por el nombre del cliente (sin mayúsculas) y por el RNC',
         $codigos($m->listar(0, 10, 'NOMBRE NUEVO')) === ['CON-000002']
@@ -632,6 +633,26 @@ try {
     $chk('cotizacionDeOrigen: id, code y formato; null si no existe',
         $m->cotizacionDeOrigen($cotId) === ['id' => $cotId, 'code' => 'COT-000012', 'formato' => 'ferreteria']
         && $m->cotizacionDeOrigen(999999) === null);
+
+    // Buscar por el código de la cotización de origen (q.code, por el LEFT JOIN a
+    // cotizaciones): una segunda cotización con su propio conduce muestra que la
+    // búsqueda sigue a cotizacion_id y no encuentra a los de otra cotización.
+    $pdo->prepare("INSERT INTO cotizaciones (code, formato, numero, date, client_id, client_name, subtotal, itbis, total)
+                   VALUES ('COT-000013', 'ferreteria', 13, '2026-10-05 10:00:00', ?, 'HOSPITAL DOCENTE', 935.00, 168.30, 1103.30)")
+        ->execute([$clienteId]);
+    $cotId2 = (int) $pdo->lastInsertId();
+    $r = $m->crear(cotScratch($clienteId, $cotId2, $productoId, '2026-10-03 12:00:00'), 5, 'HOSPITAL DOCENTE');
+    $chk('crear desde una segunda cotización (COT-000013): CON-000052', $cotId2 > 0 && esCreado($r, 52));
+    $chk('buscar por el código de la cotización (COT-000012): sus conduces activos, sin el eliminado ni los de otra cotización; contar da lo mismo',
+        $codigos($m->listar(0, 10, 'COT-000012')) === ['CON-000002', 'CON-000051'] && $m->contar('COT-000012') === 2);
+    $chk('buscar por el código de la otra cotización (COT-000013): solo su conduce, también sin mayúsculas',
+        $codigos($m->listar(0, 10, 'COT-000013')) === ['CON-000052'] && $m->contar('COT-000013') === 1
+        && $codigos($m->listar(0, 10, 'cot-000013')) === ['CON-000052'] && $m->contar('cot-000013') === 1);
+    $chk('buscar por parte del código (COT-0000): los tres conduces activos de las dos cotizaciones, con el mismo total',
+        $codigos($m->listar(0, 10, 'COT-0000')) === ['CON-000002', 'CON-000051', 'CON-000052'] && $m->contar('COT-0000') === 3
+        && $codigos($m->listar(0, 2, 'COT-0000')) === ['CON-000002', 'CON-000051'] && $codigos($m->listar(2, 2, 'COT-0000')) === ['CON-000052']);
+    $chk('buscar un código de cotización que no existe (COT-999999): nada, y contar 0',
+        $m->listar(0, 10, 'COT-999999') === [] && $m->contar('COT-999999') === 0);
     ini_set('error_log', $logPrevio === false ? '' : $logPrevio);
 
     // -----------------------------------------------------------------------
@@ -772,11 +793,17 @@ try {
     $pdo->prepare('DELETE FROM products WHERE id = ?')->execute([$productoId]);
     $chk("borrar el producto deja sus {$lineasProducto} líneas como libres (product_id NULL: SET NULL)", $lineasProducto > 0
         && (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduce_items WHERE product_id IS NULL') === $libresAntes + $lineasProducto);
-    $pdo->prepare('DELETE FROM cotizaciones WHERE id = ?')->execute([$cotId]);
+    // Para entonces ya hay más conduces de la COT-000012 (los de d y e): se compara con la cuenta directa.
+    $activosDeLaCot = (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces WHERE cotizacion_id = ? AND activo = 1', [$cotId]);
+    $conCodigoAntes = $m->contar('COT-000012');
+    $pdo->prepare('DELETE FROM cotizaciones WHERE id IN (?, ?)')->execute([$cotId, $cotId2]);
     $fila = $m->obtener($id2) ?? [];
-    $chk('borrar la cotización deja cotizacion_id NULL en sus conduces (SET NULL) y obtener da cotizacion_code null',
+    $chk('borrar las cotizaciones deja cotizacion_id NULL en sus conduces (SET NULL) y obtener da cotizacion_code null',
         (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces WHERE cotizacion_id IS NOT NULL') === 0
         && array_key_exists('cotizacion_code', $fila) && $fila['cotizacion_id'] === null && $fila['cotizacion_code'] === null);
+    $chk("con la cotización borrada, su código ya no encuentra a sus conduces (antes {$conCodigoAntes}, ahora 0) y siguen en el listado por su número",
+        $activosDeLaCot > 2 && $conCodigoAntes === $activosDeLaCot && $m->listar(0, 10, 'COT-000012') === [] && $m->contar('COT-000012') === 0
+        && $codigos($m->listar(0, 10, 'CON-000002')) === ['CON-000002']);
     $pdo->prepare('DELETE FROM clients WHERE id = ?')->execute([$clienteId]);
     $fila = $m->obtener($id2) ?? [];
     $chk('borrar el cliente: el JOIN da client_name, company_name y rnc NULL y queda el nombre guardado',

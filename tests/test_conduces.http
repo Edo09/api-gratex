@@ -29,6 +29,7 @@
 @cotGratex = <id de una cotizacion de Gratex de la DB de Gratex>
 @conduce = <id que devolvio "C1 Crear">
 @codigoConduce = <code que devolvio "C1 Crear" (p. ej. CON-000001)>
+@codigoCotizacion = <code de la cotizacion @cotFerreteria (p. ej. COT-000012; SELECT code FROM cotizaciones WHERE id = @cotFerreteria)>
 @conduce2 = <id que devolvio "C2 Crear otro">
 @conduce3 = <id que devolvio "D8 Crear despues de eliminar">
 @conduce4 = <id que devolvio "C13 Crear desde la desechable">
@@ -51,7 +52,7 @@ X-API-KEY: {{tokenFerreteria}}
 ### ============================================================================
 ### Comprobaciones de servidor que no son peticiones (anotar el resultado de cada una)
 ### M0 Antes de las M de servidor, en local y contra MySQL de verdad (Git Bash, desde api-gratex):
-###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 82/82 OK, exit 0 (unos 20-30 s)
+###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 88/88 OK, exit 0 (unos 20-30 s)
 ###    Usa SOLO la base de pruebas smhynzte_conduces_scratch (el mismo servidor que produccion, MySQL 8.0
 ###    estricto) con el usuario de pruebas; credenciales en tools/.env (ignorado por git: WA_DB_HOST,
 ###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
@@ -60,7 +61,8 @@ X-API-KEY: {{tokenFerreteria}}
 ###    Ya cubre, sin servidor HTTP: la 031 dos veces sobre un tenant de antes de la 031 (M1 con el snapshot
 ###    viejo) y otra vez con conduces guardados (M3); el snapshot nuevo igual al migrado (M4); lo que M7-M9
 ###    miran en la base, a nivel de modelo (crear, eliminar sin reusar el numero, editar con las lineas viejas
-###    en activo = 0 y la fecha conservada); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
+###    en activo = 0 y la fecha conservada); la busqueda por el codigo de la cotizacion de origen (con su
+###    total, y sin hallar nada cuando se borra la cotizacion: C6b); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
 ###    de uk_conduces_numero reintentado una vez; cinco creaciones en paralelo con numeros distintos y
 ###    seguidos, sin deadlock (M10 a nivel de modelo); los topes de cantidad y precio de conduce_items (en el
 ###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP); la
@@ -267,6 +269,13 @@ X-API-KEY: {{tokenFerreteria}}
 
 ### C6 Buscar por el nombre del cliente -> C1 y C2
 GET {{base}}/api/conduces?page=1&pageSize=10&query={{nombreCliente}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C6b Buscar por el codigo de la cotizacion de origen -> C1 y C2 (nacieron de @cotFerreteria), y
+### pagination.total cuenta lo mismo. Poner en @codigoCotizacion el code de @cotFerreteria (COT-000012; tambien
+### sirven solo las cifras, 000012). Un codigo que no existe (COT-999999) da data [] y total 0. Si la cotizacion
+### se elimino, sus conduces ya no salen por su codigo (cotizacion_id quedo en NULL); siguen saliendo por el suyo.
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{codigoCotizacion}}
 X-API-KEY: {{tokenFerreteria}}
 
 ### C7 Editar SIN date, con UNA linea -> 200 con el mismo id, code y numero; la fecha guardada no cambia
