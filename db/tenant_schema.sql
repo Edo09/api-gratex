@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..030  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..031  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -204,7 +204,7 @@ CREATE TABLE IF NOT EXISTS cotizacion_ajustes (
 --     Eliminar pone conduces.activo = 0 y editar pone activo = 0 a las lineas
 --     anteriores (por eso conduce_items -> conduces es ON DELETE RESTRICT).
 --     conduce_secuencia guarda el ultimo numero dado (CON-000001): un numero
---     nunca se vuelve a usar. Ver db/migrations/030_conduces.sql.
+--     nunca se vuelve a usar. Ver db/migrations/031_conduces.sql.
 -- ----------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS conduces (
   id             INT(11)       NOT NULL AUTO_INCREMENT,

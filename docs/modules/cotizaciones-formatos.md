@@ -42,10 +42,10 @@ su propia referencia: [../api/conduces.md](../api/conduces.md).
 | `tests/test_cotizaciones_ferreteria.http` | Pruebas a mano contra un servidor |
 | `src/Controllers/conduceController.php` | `/api/conduces`: el token, el formato `ferreteria` (`422` si no), la ruta, la auditoría y la respuesta |
 | `src/Utils/Cotizacion/FerreteriaConduce.php` | El conduce: sus reglas (las de línea de `FerreteriaFormato`, con precio 0 permitido), la disponibilidad, el número `CON-` y crear/editar/eliminar/vista previa/PDF |
-| `src/Models/conduceModel.php` | Las tablas de la 030: lecturas de los activos, numeración con `conduce_secuencia`, y editar y eliminar sin borrar (`activo = 0`) |
+| `src/Models/conduceModel.php` | Las tablas de la 031: lecturas de los activos, numeración con `conduce_secuencia`, y editar y eliminar sin borrar (`activo = 0`) |
 | `tools/test_conduces.php` | Pruebas del conduce por CLI, sin DB (`--pdf` escribe los PDF de muestra) |
 | `tools/test_conduces_mysql.php` | Pruebas del conduce contra MySQL de verdad, solo en la base `smhynzte_conduces_scratch` (credenciales en `tools/.env`, ignorado por git) |
-| `tests/test_conduces.http` | Pruebas a mano de los conduces contra un servidor, y las comprobaciones de servidor de la 030 |
+| `tests/test_conduces.http` | Pruebas a mano de los conduces contra un servidor, y las comprobaciones de servidor de la 031 |
 
 No hay autoloader: cada archivo hace `require_once` de lo que usa, y
 `CotizacionFormatos::para()` carga la clase del formato solo cuando se usa (una
@@ -78,7 +78,7 @@ petición de Gratex no carga el código ni el PDF de Ferretería).
   - `cotizacion_ajustes` (`cotizacion_id`, `concepto`, `monto`; `UNIQUE (cotizacion_id,
     concepto)`; `ON DELETE CASCADE`): los montos fuera de las líneas. **Cada formato
     declara qué conceptos acepta**; solo se guardan los distintos de cero.
-- **Tenant migration 030** (`db/migrations/030_conduces.sql`): `conduces`, `conduce_items` y
+- **Tenant migration 031** (`db/migrations/031_conduces.sql`): `conduces`, `conduce_items` y
   `conduce_secuencia`, solo para los conduces de Ferretería. No toca las tablas de
   cotizaciones.
 
@@ -312,15 +312,18 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
 1. **Respaldo** de las dos DBs de tenant (`smhynzte_002`, Ferretería, y
    `smhynzte_new_gratexdb`, Gratex).
 2. **`tools/verificar_migraciones_tenant.sql`** (solo lectura) en las dos: ver qué dice de la
-   027, de la 028 y de la 029 (precios).
-3. **Correr la 027, después la 028 y después la 029 (`029_precios_4_decimales.sql`)** en la
-   base donde digan `FALTA`, según el ORDEN de la cabecera de cada una. Este despliegue
-   también lleva el código que las necesita.
-4. **Correr la 030 (`030_conduces.sql`)**, fuera de horario y después de la 029, en las dos
+   027, de la 028, de la 029 (precios) y de la 030 (POS).
+3. **Correr la 027, después la 028, la 029 (`029_precios_4_decimales.sql`) y la 030
+   (`030_pos.sql`)** en la base donde digan `FALTA`, según el ORDEN de la cabecera de cada
+   una. Este despliegue también lleva el código que las necesita. La 030 es la del POS:
+   va junto con `master_migrations/012_pos.sql`, su cabecera la pide en las empresas que
+   vayan a usar el POS y dice que no estorba en las demás; aquí se corre en las dos
+   para que el verificador termine entero en `APLICADA`.
+4. **Correr la 031 (`031_conduces.sql`)**, fuera de horario y después de la 030, en las dos
    DBs: pegar el archivo completo en la pestaña SQL con la base seleccionada y leer la fila
    final (`base` = esa base, las tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok`
    = `SI`).
-5. **El verificador otra vez** en las dos: de la 027 a la 030 tienen que decir `APLICADA`
+5. **El verificador otra vez** en las dos: de la 027 a la 031 tienen que decir `APLICADA`
    antes de desplegar.
 6. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
    `cotizacion_formato = 'ferreteria'`.
@@ -357,12 +360,12 @@ formatos de `src/Utils/Cotizacion/`; Gratex y la facturación siguen con su `rou
 |-----|------|
 | Reglas, totales contra las hojas, validación, número, PDF, modelo con una conexión falsa, registro | `php tools/test_cotizacion_ferreteria.php` (desde `api-gratex`, sin DB; termina en `N/N OK` y sale con 1 si algo falla) |
 | PDF para comparar con el Excel | `php tools/test_cotizacion_ferreteria.php --pdf` (o `--grid`, con la rejilla de 10 mm) → `tools/out/` |
-| Orden de las FK del snapshot y SQL dinámico de la 026 y la 030, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
+| Orden de las FK del snapshot y SQL dinámico de la 026 y la 031, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
 | Paridad del front | `node scripts/parity-cotizacion-ferreteria.ts` (desde `fiscalo`) |
 | API real (crear, editar, vista previa, PDF, borrar, cada `422`, el `409`, la regresión de Gratex) y las comprobaciones M1-M12 de servidor: la 026 dos veces sobre un volcado de cada DB de tenant, la numeración con cinco creaciones simultáneas (`GET_LOCK`) y el estado que queda en la base | `tests/test_cotizaciones_ferreteria.http` contra un servidor con las migraciones |
 | Conduces: reglas, número, PDF en modo conduce, el modelo con una conexión falsa y las piezas del controller | `php tools/test_conduces.php` (sin DB; `--pdf` → `tools/out/`) |
-| Conduces contra MySQL de verdad (la base scratch): la 030 dos veces, el snapshot nuevo, conduceModel de punta a punta, un 1062 real, cinco creaciones en paralelo y las reglas ON DELETE | `php -d extension=pdo_mysql tools/test_conduces_mysql.php` (credenciales en `tools/.env`, ignorado por git; solo `smhynzte_conduces_scratch`) |
-| API real de los conduces (crear, listar, editar, PDF, vista previa, eliminar sin borrar ni reusar el número, el `401` antes del `422`, cada `422`, Gratex sin cambios) y las comprobaciones M1-M17 de servidor: la 030 dos veces y su fila final, cinco creaciones simultáneas y el estado que queda en la base | `tests/test_conduces.http` contra un servidor con la 030 |
+| Conduces contra MySQL de verdad (la base scratch): la 031 dos veces, el snapshot nuevo, conduceModel de punta a punta, un 1062 real, cinco creaciones en paralelo y las reglas ON DELETE | `php -d extension=pdo_mysql tools/test_conduces_mysql.php` (credenciales en `tools/.env`, ignorado por git; solo `smhynzte_conduces_scratch`) |
+| API real de los conduces (crear, listar, editar, PDF, vista previa, eliminar sin borrar ni reusar el número, el `401` antes del `422`, cada `422`, Gratex sin cambios) y las comprobaciones M1-M17 de servidor: la 031 dos veces y su fila final, cinco creaciones simultáneas y el estado que queda en la base | `tests/test_conduces.http` contra un servidor con la 031 |
 
 El CLI nunca abre una base: el modelo se crea sin constructor y con una conexión
 falsa. `crear()`, `actualizar()`, `preview()` y `pdf()` de un formato sí leen la base

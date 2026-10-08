@@ -718,7 +718,7 @@ final class ConexionFalsaT5
     public array $consultas = [];
     /** @var array<int,array{0:string,1:mixed,2:mixed,3:mixed}> cada bindValue(): SQL, clave, valor y tipo */
     public array $enlazados = [];
-    /** conduce_secuencia.ultimo; null = la fila no existe (la semilla de la 030 no corrio). */
+    /** conduce_secuencia.ultimo; null = la fila no existe (la semilla de la 031 no corrio). */
     public ?int $ultimo = 0;
     /** Conduces escritos por esta conexion: id => ['numero' => int, 'code' => string, 'activo' => int]. */
     public array $conduces = [];
@@ -1001,7 +1001,7 @@ $chk('mensajes genericos del modelo (500)',
     && conduceModel::MSG_ELIMINAR === 'No se pudo eliminar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.');
 
 $c = new ConexionFalsaT5();
-$c->ultimo = null;   // sin la semilla de la 030
+$c->ultimo = null;   // sin la semilla de la 031
 $r = $modeloT5($c)->crear($cotT5(), 5, 'HOSPITAL DOCENTE');
 $chk('primer conduce (aun sin la fila de la secuencia): CON-000001, numero 1 y el id del INSERT',
     $r === ['success', ['id' => 77, 'code' => 'CON-000001', 'numero' => 1]]);
@@ -1102,7 +1102,7 @@ $chk('crear, cotizacion de origen borrada (1452 conduces_cotizacion_fk) => 422 M
 $c = new ConexionFalsaT5();
 $c->fallar['INSERT IGNORE INTO conduce_secuencia'] = ConexionFalsaT5::error(1146, "Table 'tenant.conduce_secuencia' doesn't exist");
 $r = $modeloT5($c)->crear($cotT5(), 5, 'X');
-$chk('sin la 030 (tabla inexistente) => generico 500, sin rollBack de una transaccion que no empezo',
+$chk('sin la 031 (tabla inexistente) => generico 500, sin rollBack de una transaccion que no empezo',
     $r === ['error', conduceModel::MSG_GUARDAR, 500] && $c->rollbacks === 0 && $c->commits === 0);
 $chk('errorAlGuardar: otro error (1205) => el generico con 500',
     $privadoT5('errorAlGuardar', ConexionFalsaT5::error(1205, 'Lock wait timeout exceeded'), 'GENERICO') === ['error', 'GENERICO', 500]);

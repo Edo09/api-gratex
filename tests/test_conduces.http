@@ -2,7 +2,7 @@
 ### Conduces de mercancia (Ferreteria) -> /api/conduces
 ### Ver docs/api/conduces.md y docs/modules/cotizaciones-formatos.md (Conduces).
 ###
-### Correr contra un servidor con la tenant 030 aplicada en las DOS DBs de tenant
+### Correr contra un servidor con la tenant 031 aplicada en las DOS DBs de tenant
 ### (local o staging; en produccion solo la seccion "Produccion" del final). Antes:
 ###   - el tenant de Ferreteria con cotizacion_formato = 'ferreteria' en el master;
 ###   - una cotizacion de Ferreteria para @cotFerreteria (F1 de
@@ -57,7 +57,7 @@ X-API-KEY: {{tokenFerreteria}}
 ###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
 ###    CONDUCES_DB_NAME no es una base de conduces terminada en _scratch, borra TODAS las tablas de esa base al
 ###    empezar y al terminar (tambien si algo falla) y la deja vacia. Nunca apunta a produccion.
-###    Ya cubre, sin servidor HTTP: la 030 dos veces sobre un tenant de antes de la 030 (M1 con el snapshot
+###    Ya cubre, sin servidor HTTP: la 031 dos veces sobre un tenant de antes de la 031 (M1 con el snapshot
 ###    viejo) y otra vez con conduces guardados (M3); el snapshot nuevo igual al migrado (M4); lo que M7-M9
 ###    miran en la base, a nivel de modelo (crear, eliminar sin reusar el numero, editar con las lineas viejas
 ###    en activo = 0 y la fecha conservada); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
@@ -65,11 +65,11 @@ X-API-KEY: {{tokenFerreteria}}
 ###    seguidos, sin deadlock (M10 a nivel de modelo); y las reglas ON DELETE (M15).
 ###    Siguen siendo de servidor: M1 sobre los volcados de smhynzte_002 y smhynzte_new_gratexdb, M2, M5, M6,
 ###    M10 por HTTP (prueba ademas el controller), M11-M14, M16, M17 y todas las peticiones de abajo.
-### M1 Migracion 030, DOS veces, sobre un volcado (dump) de CADA DB de tenant (smhynzte_002 de Ferreteria y
+### M1 Migracion 031, DOS veces, sobre un volcado (dump) de CADA DB de tenant (smhynzte_002 de Ferreteria y
 ###    smhynzte_new_gratexdb de Gratex, cada uno restaurado en una DB de prueba) y tambien en una DB armada con
-###    el snapshot de ANTES de la 030: el de master sin conduces y con la 029 de precios (git show <commit que
-###    agrego 029_precios_4_decimales.sql>:db/tenant_schema.sql). En phpMyAdmin:
-###    entrar a esa base, pestana SQL, pegar TODO db/migrations/030_conduces.sql y ejecutar. La ultima consulta
+###    el snapshot de ANTES de la 031: el de master sin conduces y con la 029 de precios y la 030 del POS (git
+###    show <commit que agrego 030_pos.sql>:db/tenant_schema.sql). En phpMyAdmin:
+###    entrar a esa base, pestana SQL, pegar TODO db/migrations/031_conduces.sql y ejecutar. La ultima consulta
 ###    es UNA fila. 1a corrida:
 ###      base = el nombre de esa DB (nunca information_schema ni NULL)
 ###      motor_cotizaciones = InnoDB, motor_products = InnoDB
@@ -83,18 +83,18 @@ X-API-KEY: {{tokenFerreteria}}
 ###    2a corrida (sin tocar nada entre las dos): la MISMA fila, y nada cambia: cada paso ejecuta DO 0,
 ###    SHOW CREATE TABLE conduces / conduce_items / conduce_secuencia queda igual que despues de la 1a, y
 ###    SELECT * FROM conduce_secuencia sigue (1, 0).
-### M2 La 030 sin base seleccionada (o con information_schema seleccionada): base = NULL (o information_schema),
+### M2 La 031 sin base seleccionada (o con information_schema seleccionada): base = NULL (o information_schema),
 ###    todo_ok = NO y no se creo nada. Seleccionar la base del tenant y volver a correrla da la fila de M1.
-### M3 La 030 otra vez al final de este archivo (ya con conduces creados): la misma fila, salvo
+### M3 La 031 otra vez al final de este archivo (ya con conduces creados): la misma fila, salvo
 ###    fila_secuencia = (1, N) con N = el ultimo numero dado; la corrida no la vuelve a (1, 0) ni toca filas.
 ### M4 Snapshot nuevo: db/tenant_schema.sql sobre una DB vacia (o php tools/create_tenant.php contra un master de
 ###    prueba) termina sin errno 150/1824; SHOW TABLES incluye conduces, conduce_items y conduce_secuencia, y
 ###    SELECT * FROM conduce_secuencia -> (1, 0).
-### M5 tools/verificar_migraciones_tenant.sql en las DOS DBs de tenant: la fila 030 (030_conduces.sql, "tablas
-###    conduces, conduce_items y conduce_secuencia") dice APLICADA, y tambien la 027, la 028 y la 029 (precios
-###    en decimal(18,4)). La columna base
+### M5 tools/verificar_migraciones_tenant.sql en las DOS DBs de tenant: la fila 031 (031_conduces.sql, "tablas
+###    conduces, conduce_items y conduce_secuencia") dice APLICADA, y tambien la 027, la 028, la 029 (precios
+###    en decimal(18,4)) y la 030 (POS). La columna base
 ###    es la de esa DB.
-### M6 La 030 con el codigo viejo todavia desplegado (solo crea tablas): las cotizaciones y el bloque G de
+### M6 La 031 con el codigo viejo todavia desplegado (solo crea tablas): las cotizaciones y el bloque G de
 ###    tests/test_cotizaciones_ferreteria.http responden igual que antes, en las dos empresas.
 ### M7 Estado en la DB de Ferreteria despues de C1 (<id> = el id que devolvio C1):
 ###    SELECT numero, code, date, cotizacion_id, client_id, client_name, user_id, activo FROM conduces WHERE id = <id>;

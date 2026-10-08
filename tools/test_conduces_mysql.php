@@ -5,16 +5,16 @@
  * tools/test_conduces.php prueba conduceModel con una conexión falsa. Lo que
  * solo un MySQL de verdad puede decir se prueba aquí, en una base de pruebas del
  * mismo servidor que producción (MySQL 8.0, modo estricto, InnoDB):
- *   a) un tenant "viejo" (el snapshot de antes de la 030, con la 029 de precios) recibe la 030 dos
- *      veces: la primera crea las tres tablas y su resultado dice todo_ok = SI;
- *      la segunda no cambia nada;
+ *   a) un tenant "viejo" (el snapshot de antes de la 031, con la 029 de precios y la
+ *      030 del POS) recibe la 031 dos veces: la primera crea las tres tablas y su
+ *      resultado dice todo_ok = SI; la segunda no cambia nada;
  *   b) un tenant nuevo (db/tenant_schema.sql de hoy) nace con las mismas tres
- *      tablas que deja la 030;
+ *      tablas que deja la 031;
  *   c) conduceModel de punta a punta: numeración, eliminar (activo = 0), editar
  *      (las líneas de antes a activo = 0), los 1452 reales y las lecturas;
  *   d) guardados a la vez: un 1062 de verdad que se reintenta, y cinco procesos
  *      que crean un conduce cada uno al mismo tiempo;
- *   e) las reglas ON DELETE de las FK, la 030 otra vez con conduces guardados,
+ *   e) las reglas ON DELETE de las FK, la 031 otra vez con conduces guardados,
  *      y la base queda vacía.
  *
  * SEGURIDAD. Solo usa la base de CONDUCES_DB_NAME, y se niega si el nombre no
@@ -30,9 +30,9 @@
  *   php -d extension=pdo_mysql tools/test_conduces_mysql.php
  *   php -d extension=pdo_mysql tools/test_conduces_mysql.php --antes=<rev>
  *     El tenant viejo sale de <rev>:db/tenant_schema.sql. Por defecto es el del
- *     commit que agregó la 029 (029_precios_4_decimales.sql): lo que master tenía
- *     antes de los conduces, con los precios en DECIMAL(18,4), que sigue siendo
- *     el de antes aunque la rama ya esté en master.
+ *     commit que agregó la 030 (030_pos.sql): lo que master tenía antes de los
+ *     conduces, con los precios en DECIMAL(18,4) (029) y las tablas del POS (030),
+ *     que sigue siendo el de antes aunque la rama ya esté en master.
  * El propio script se lanza con --worker para los guardados simultáneos.
  */
 
@@ -328,9 +328,9 @@ try {
     $chk("{$db}: sin tablas al empezar (borradas las que hubiera)", objetosEn($pdo, $db) === 0);
 
     // -----------------------------------------------------------------------
-    // a) Tenant viejo + la 030 dos veces
+    // a) Tenant viejo + la 031 dos veces
     // -----------------------------------------------------------------------
-    echo "\n== a) Tenant viejo (snapshot de antes de la 030, con la 029 de precios) y la 030 dos veces ==\n";
+    echo "\n== a) Tenant viejo (snapshot de antes de la 031, con la 029 de precios y la 030 del POS) y la 031 dos veces ==\n";
     $revAntes = null;
     foreach ($argv as $arg) {
         if (str_starts_with($arg, '--antes=')) {
@@ -338,61 +338,64 @@ try {
         }
     }
     if ($revAntes === null) {
-        // Un tenant "de antes de la 030" es uno al día hasta la 029 (precios) y
-        // sin conduces: el snapshot del commit que agregó 029_precios_4_decimales.sql,
-        // que ya está en master. El padre del commit de conduces ya no sirve:
-        // es anterior a la 029 de precios.
-        $commitPrecios = trim((string) salidaGit($raiz, ['log', '--diff-filter=A', '--format=%H', '-1', '--', 'db/migrations/029_precios_4_decimales.sql']));
-        $revAntes = $commitPrecios !== '' ? substr($commitPrecios, 0, 12) : 'master';
+        // Un tenant "de antes de la 031" es uno al día hasta la 030 (POS) y sin
+        // conduces: el snapshot del commit que agregó 030_pos.sql, que ya está en
+        // master y trae también la 029 (precios). El padre del commit de conduces
+        // ya no sirve: es anterior a la 029 y a la 030.
+        $commitPos = trim((string) salidaGit($raiz, ['log', '--diff-filter=A', '--format=%H', '-1', '--', 'db/migrations/030_pos.sql']));
+        $revAntes = $commitPos !== '' ? substr($commitPos, 0, 12) : 'master';
     }
     $snapshotAntes = salidaGit($raiz, ['show', $revAntes . ':db/tenant_schema.sql']);
     $chk("el snapshot de {$revAntes} se lee y no trae las tablas de conduces",
         $snapshotAntes !== null && $snapshotAntes !== '' && !str_contains($snapshotAntes, 'CREATE TABLE IF NOT EXISTS conduce'));
     correrSql($pdo, (string) $snapshotAntes);
     $tablasViejo = tablasDe($pdo, $db);
-    // La 029 de precios ya está en ese tenant: products.precio .. precio_4 en decimal(18,4).
+    // La 029 de precios y la 030 del POS ya están en ese tenant: products.precio .. precio_4 en
+    // decimal(18,4) y las seis tablas del POS (la 031 no depende de ninguna de las dos).
     $preciosViejo = (int) valorDe($pdo,
         "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = 'products'"
         . " AND COLUMN_NAME IN ('precio', 'precio_2', 'precio_3', 'precio_4') AND COLUMN_TYPE LIKE 'decimal(18,4)%'", [$db]);
-    $chk('tenant viejo: ' . count($tablasViejo) . ' tablas, con cotizaciones y products, la 029 de precios (decimal(18,4)) y sin las de conduces',
+    $tablasPos = ['pos_cajas', 'pos_empleados', 'pos_sesiones', 'pos_turnos', 'pos_caja_movimientos', 'product_barcodes'];
+    $chk('tenant viejo: ' . count($tablasViejo) . ' tablas, con cotizaciones y products, la 029 de precios (decimal(18,4)), la 030 del POS (6 tablas) y sin las de conduces',
         in_array('cotizaciones', $tablasViejo, true) && in_array('products', $tablasViejo, true)
-        && $preciosViejo === 4 && array_intersect(TABLAS_CONDUCES, $tablasViejo) === []);
+        && $preciosViejo === 4 && array_diff($tablasPos, $tablasViejo) === []
+        && array_intersect(TABLAS_CONDUCES, $tablasViejo) === []);
     $ddlViejo = ddlsDe($pdo, $tablasViejo);
 
-    $mig030 = (string) file_get_contents($raiz . '/db/migrations/030_conduces.sql');
-    $r1 = correrSql($pdo, $mig030);
+    $mig031 = (string) file_get_contents($raiz . '/db/migrations/031_conduces.sql');
+    $r1 = correrSql($pdo, $mig031);
     $f1 = $r1[0] ?? [];
     echo '         resultado: ' . json_encode($f1, JSON_UNESCAPED_UNICODE) . "\n";
-    $chk('030, 1.ª corrida: el resultado es una fila con las columnas de COMO CORRERLA', count($r1) === 1 && array_keys($f1) === [
+    $chk('031, 1.ª corrida: el resultado es una fila con las columnas de COMO CORRERLA', count($r1) === 1 && array_keys($f1) === [
         'base', 'motor_cotizaciones', 'motor_products', 'tipo_cotizaciones_id', 'tipo_products_id', 'conduces',
         'conduce_items', 'conduce_secuencia', 'indices', 'fk_conduces_cotizacion', 'fk_conduce_items_conduce',
         'fk_conduce_items_product', 'fila_secuencia', 'todo_ok',
     ]);
-    $chk("030: base = {$db}", ($f1['base'] ?? null) === $db);
-    $chk('030: cotizaciones, products, conduces, conduce_items y conduce_secuencia son InnoDB',
+    $chk("031: base = {$db}", ($f1['base'] ?? null) === $db);
+    $chk('031: cotizaciones, products, conduces, conduce_items y conduce_secuencia son InnoDB',
         [$f1['motor_cotizaciones'] ?? null, $f1['motor_products'] ?? null, $f1['conduces'] ?? null,
             $f1['conduce_items'] ?? null, $f1['conduce_secuencia'] ?? null] === array_fill(0, 5, 'InnoDB'));
     $tipo = static fn(string $tabla, string $columna): ?string => ($v = valorDe($pdo,
         'SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ?',
         [$db, $tabla, $columna])) === false ? null : (string) $v;
-    $chk('030: cotizacion_id y product_id copian el tipo de cotizaciones.id y products.id ('
+    $chk('031: cotizacion_id y product_id copian el tipo de cotizaciones.id y products.id ('
         . ($f1['tipo_cotizaciones_id'] ?? '?') . ' / ' . ($f1['tipo_products_id'] ?? '?') . ')',
         $tipo('conduces', 'cotizacion_id') === $tipo('cotizaciones', 'id') && $tipo('cotizaciones', 'id') === ($f1['tipo_cotizaciones_id'] ?? null)
         && $tipo('conduce_items', 'product_id') === $tipo('products', 'id') && $tipo('products', 'id') === ($f1['tipo_products_id'] ?? null));
-    $chk('030: indices = 6', (int) ($f1['indices'] ?? 0) === 6);
-    $chk('030: ON DELETE de las FK: SET NULL (cotizacion), RESTRICT (conduce), SET NULL (producto)',
+    $chk('031: indices = 6', (int) ($f1['indices'] ?? 0) === 6);
+    $chk('031: ON DELETE de las FK: SET NULL (cotizacion), RESTRICT (conduce), SET NULL (producto)',
         [$f1['fk_conduces_cotizacion'] ?? null, $f1['fk_conduce_items_conduce'] ?? null, $f1['fk_conduce_items_product'] ?? null]
         === ['SET NULL', 'RESTRICT', 'SET NULL']);
-    $chk('030: fila_secuencia = (1, 0) y todo_ok = SI', ($f1['fila_secuencia'] ?? null) === '(1, 0)' && ($f1['todo_ok'] ?? null) === 'SI');
-    $chk('030: las ' . count($ddlViejo) . ' tablas que ya estaban siguen iguales (SHOW CREATE TABLE)', ddlsDe($pdo, $tablasViejo) === $ddlViejo);
+    $chk('031: fila_secuencia = (1, 0) y todo_ok = SI', ($f1['fila_secuencia'] ?? null) === '(1, 0)' && ($f1['todo_ok'] ?? null) === 'SI');
+    $chk('031: las ' . count($ddlViejo) . ' tablas que ya estaban siguen iguales (SHOW CREATE TABLE)', ddlsDe($pdo, $tablasViejo) === $ddlViejo);
     $tablasMigrado = tablasDe($pdo, $db);
     $ddlMigrado = ddlsDe($pdo, TABLAS_CONDUCES);
     $secuencia = static fn(): array => filasDe($pdo, 'SELECT id, ultimo FROM conduce_secuencia ORDER BY id');
-    $chk('030: conduce_secuencia tiene una sola fila, (1, 0)', $secuencia() === [['id' => 1, 'ultimo' => 0]]);
+    $chk('031: conduce_secuencia tiene una sola fila, (1, 0)', $secuencia() === [['id' => 1, 'ultimo' => 0]]);
 
-    $r2 = correrSql($pdo, $mig030);
-    $chk('030, 2.ª corrida: el mismo resultado', $r2 === $r1);
-    $chk('030, 2.ª corrida: no cambia nada (las mismas tablas, el mismo SHOW CREATE TABLE de las tres, la secuencia igual)',
+    $r2 = correrSql($pdo, $mig031);
+    $chk('031, 2.ª corrida: el mismo resultado', $r2 === $r1);
+    $chk('031, 2.ª corrida: no cambia nada (las mismas tablas, el mismo SHOW CREATE TABLE de las tres, la secuencia igual)',
         tablasDe($pdo, $db) === $tablasMigrado && ddlsDe($pdo, TABLAS_CONDUCES) === $ddlMigrado
         && $secuencia() === [['id' => 1, 'ultimo' => 0]]);
 
@@ -407,11 +410,11 @@ try {
     $chk('tenant nuevo: ' . count($tablasNuevo) . ' tablas, con conduces, conduce_items y conduce_secuencia',
         array_diff(TABLAS_CONDUCES, $tablasNuevo) === []);
     foreach (TABLAS_CONDUCES as $t) {
-        $chk("tenant nuevo: {$t} es igual a la que deja la 030 (SHOW CREATE TABLE)", ddlDe($pdo, $t) === ($ddlMigrado[$t] ?? null));
+        $chk("tenant nuevo: {$t} es igual a la que deja la 031 (SHOW CREATE TABLE)", ddlDe($pdo, $t) === ($ddlMigrado[$t] ?? null));
     }
     $chk('tenant nuevo: la secuencia nace con (1, 0)', $secuencia() === [['id' => 1, 'ultimo' => 0]]);
-    $r3 = correrSql($pdo, $mig030);
-    $chk('la 030 sobre el tenant nuevo: todo_ok = SI y no cambia nada',
+    $r3 = correrSql($pdo, $mig031);
+    $chk('la 031 sobre el tenant nuevo: todo_ok = SI y no cambia nada',
         ($r3[0]['todo_ok'] ?? null) === 'SI' && tablasDe($pdo, $db) === $tablasNuevo
         && ddlsDe($pdo, TABLAS_CONDUCES) === $ddlMigrado && $secuencia() === [['id' => 1, 'ultimo' => 0]]);
 
@@ -635,9 +638,9 @@ try {
         (int) valorDe($pdo, 'SELECT COUNT(*) FROM conduces') === (int) valorDe($pdo, 'SELECT COUNT(DISTINCT numero) FROM conduces'));
 
     // -----------------------------------------------------------------------
-    // e) Las reglas ON DELETE y la 030 con conduces guardados
+    // e) Las reglas ON DELETE y la 031 con conduces guardados
     // -----------------------------------------------------------------------
-    echo "\n== e) Reglas ON DELETE y la 030 otra vez ==\n";
+    echo "\n== e) Reglas ON DELETE y la 031 otra vez ==\n";
     $codigoBorrar = null;
     $detalleBorrar = '';
     try {
@@ -667,8 +670,8 @@ try {
     $n = $ultimo();
     $cuentasAntes = $cuentas();
     $ddlAntes = ddlsDe($pdo, TABLAS_CONDUCES);
-    $r4 = correrSql($pdo, $mig030);
-    $chk("la 030 otra vez, con conduces guardados: todo_ok = SI, fila_secuencia = (1, {$n}) y no cambia nada",
+    $r4 = correrSql($pdo, $mig031);
+    $chk("la 031 otra vez, con conduces guardados: todo_ok = SI, fila_secuencia = (1, {$n}) y no cambia nada",
         ($r4[0]['todo_ok'] ?? null) === 'SI' && ($r4[0]['fila_secuencia'] ?? null) === "(1, {$n})"
         && $cuentas() === $cuentasAntes && ddlsDe($pdo, TABLAS_CONDUCES) === $ddlAntes);
 } catch (Throwable $e) {

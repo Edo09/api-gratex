@@ -66,13 +66,13 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
 ## DB del tenant — Tablas de negocio
 
-Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–030).
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–031).
 
 | Tabla | Dominio |
 |---|---|
 | `clients` | Clientes (+ datos fiscales para e-CF) |
 | `cotizaciones` / `cotizacion_items` / `cotizacion_ajustes` | Cotizaciones; el formato del tenant decide qué columnas usa (migración 026) |
-| `conduces` / `conduce_items` / `conduce_secuencia` | Conduces de mercancía del formato Ferretería; ninguna fila se borra (migración 030) |
+| `conduces` / `conduce_items` / `conduce_secuencia` | Conduces de mercancía del formato Ferretería; ninguna fila se borra (migración 031) |
 | `facturas` / `factura_items` | Facturas (+ tracking e-CF completo) |
 | `ncf_sequences` | Secuencias NCF / e-NCF como **rangos autorizados** por DGII |
 | `emisor_config` | Config fiscal del emisor (fila única) |
@@ -146,7 +146,7 @@ varchar(30) (clave del formato; Ferretería: `cargos_bancarios`, `manejo_bancari
 concepto)`; solo se guardan los montos distintos de cero. Detalle:
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
 
-### `conduces` / `conduce_items` / `conduce_secuencia` (030)
+### `conduces` / `conduce_items` / `conduce_secuencia` (031)
 El conduce de mercancía del formato Ferretería: la nota de entrega que sale de una
 cotización y no imprime precios. **Ninguna fila se borra:** Eliminar pone
 `conduces.activo = 0`, y editar pone `activo = 0` a las líneas anteriores e inserta las
@@ -170,7 +170,7 @@ decimal(18,4) (precio interno sin ITBIS, solo para Facturar: el conduce nunca lo
 reemplazada por una edición). Índice `idx_conduce_items_conduce (conduce_id, activo)`.
 
 `conduce_secuencia`: una sola fila (`id` = 1) con `ultimo` int unsigned, el último número
-dado (la 030 y el snapshot la siembran con `(1, 0)`). Crear un conduce la bloquea
+dado (la 031 y el snapshot la siembran con `(1, 0)`). Crear un conduce la bloquea
 (`SELECT … FOR UPDATE`) y toma `GREATEST(ultimo, MAX(numero)) + 1`; el UNIQUE de `numero`
 es la red de seguridad.
 
@@ -326,8 +326,8 @@ Detalle del módulo: [../modules/gastos.md](../modules/gastos.md).
 clients      1───* cotizaciones / facturas / conduces  (client_id, nullable)
 cotizaciones 1───* cotizacion_items               (FK CASCADE)
 cotizaciones 1───* cotizacion_ajustes             (FK CASCADE, 026)
-cotizaciones 1───* conduces                       (cotizacion_id, FK SET NULL, 030)
-conduces     1───* conduce_items                  (FK RESTRICT, 030: nunca se borran)
+cotizaciones 1───* conduces                       (cotizacion_id, FK SET NULL, 031)
+conduces     1───* conduce_items                  (FK RESTRICT, 031: nunca se borran)
 facturas     1───* factura_items                  (FK CASCADE)
 facturas     1───* aprobaciones_comerciales        (factura_id, soft link por e_ncf)
 gastos       1───* gasto_items                     (FK CASCADE)
@@ -344,9 +344,9 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 
 | Artefacto | Para qué |
 |---|---|
-| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–030). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–031). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–030 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–031 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 
