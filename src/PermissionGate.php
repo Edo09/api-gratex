@@ -12,6 +12,8 @@ require_once(__DIR__ . '/Models/RoleModel.php');
  *   'public'             -> sin auth.
  *   'dgii' | 'integration' -> principal externo; resuelve tenant best-effort, el
  *                            controller hace su propia validacion (firma/secret).
+ *   'pos-caja'           -> equipo de caja del POS (X-POS-EQUIPO); resuelve el
+ *                            tenant del equipo, el controller valida (PosAuth).
  *   '<permiso>'          -> ruta de usuario-app: 401 si no hay user valido, 403 si
  *                            el rol del user no tiene el permiso.
  *   'authenticated'      -> ruta de usuario-app sin modulo: 401 si no hay user
@@ -53,6 +55,15 @@ class PermissionGate
         // el controller valida firma/secret. Sin chequeo de rol.
         if ($required === 'dgii' || $required === 'integration') {
             self::resolverTenant('externo');
+            return;
+        }
+
+        // Equipo de caja del POS (X-POS-EQUIPO): el tenant sale del token del
+        // equipo, no de un usuario. El controller valida de verdad y responde
+        // con el codigo que lleva a la pantalla correcta (ver PosAuth).
+        if ($required === 'pos-caja') {
+            require_once __DIR__ . '/Pos/PosAuth.php';
+            PosAuth::resolverTenantSiSePuede();
             return;
         }
 

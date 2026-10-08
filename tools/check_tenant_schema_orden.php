@@ -252,15 +252,14 @@ $repetidas = array_keys(array_filter($conteo, fn($n) => $n > 1));
 $chk('ninguna tabla se crea dos veces' . ($repetidas ? ' (repetidas: ' . implode(', ', $repetidas) . ')' : ''), $repetidas === []);
 
 echo "\n== Cotizaciones y conduces: estado final de las migraciones 026 y 030 ==\n";
-// La cabecera llega a la migracion mas alta de db/migrations/, no a una fija:
-// una migracion nueva que no se refleja en el snapshot falla aqui.
-$numeros = array_map(
-    fn(string $ruta): string => substr(basename($ruta), 0, 3),
-    glob($raiz . '/db/migrations/[0-9][0-9][0-9]_*.sql') ?: []
-);
-sort($numeros);
-$ultima = $numeros !== [] ? end($numeros) : '???';
-$chk("cabecera: rango de migraciones 012..{$ultima}", str_contains($crudo, "012..{$ultima}"));
+// La cabecera dice hasta que migracion incluye el snapshot: la ultima de
+// db/migrations/ (antes estaba fija en 028 y fallaba con cada migracion nueva).
+$ultimaMigracion = max(array_map(
+    static fn($f) => (int) basename($f),
+    glob(__DIR__ . '/../db/migrations/[0-9][0-9][0-9]_*.sql') ?: ['0']
+));
+$rangoEsperado = sprintf('012..%03d', $ultimaMigracion);
+$chk("cabecera: rango de migraciones $rangoEsperado", str_contains($crudo, $rangoEsperado));
 
 $porNombre = [];
 foreach ($lista as $t) {

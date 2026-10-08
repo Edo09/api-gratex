@@ -139,6 +139,15 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
             echo json_encode($respuesta);
         }
+        // Boton POS de app.* (docs/specs/pos.md A2): codigo de un solo uso, 60 s,
+        // con el que pos.* abre ya autenticado. El canje va ANTES: su ruta
+        // contiene a la otra.
+        else if (preg_match('#/api/auth/pos-handoff/canje/?$#', $endpoint)) {
+            authPosCanje($authModel, $_POST);
+        }
+        else if (preg_match('#/api/auth/pos-handoff/?$#', $endpoint)) {
+            authPosHandoff($auth);
+        }
         else {
             echo json_encode(['success' => false, 'error' => 'Invalid endpoint']);
         }
@@ -173,4 +182,101 @@ switch ($_SERVER['REQUEST_METHOD']) {
     default:
         echo json_encode(['success' => false, 'error' => 'Method not allowed']);
         break;
+}
+
+/**
+ * POST /api/auth/pos-handoff — con la sesion de app.*: crea el codigo y la URL
+ * de pos.* que lo lleva en el fragmento (#code=, nunca llega a un servidor).
+ * Pide el modulo 'pos' y el POS activo en la empresa.
+ */
+function authPosHandoff(AuthMiddleware $auth): void
+{
+    require_once __DIR__ . '/../Models/RoleModel.php';
+    require_once __DIR__ . '/../PermissionGate.php';
+    require_once __DIR__ . '/../Pos/PosAuth.php';
+    require_once __DIR__ . '/../Models/posMasterModel.php';
+    try {
+        $v = $auth->validateRequest();
+        if (empty($v['valid']) || ($v['user_id'] ?? null) === null) {
+            throw new PosError('Inicia sesión para abrir el POS.', 401, 'SESION_REQUERIDA');
+        }
+        $perms = (new RoleModel())->getPermissionsForRole($v['tenant_id'] ?? null, (string) ($v['role'] ?? ''));
+        if (!PermissionGate::permMatches($perms, 'pos')) {
+            throw new PosError('No tienes permiso para abrir el POS. Pídeselo a un administrador.', 403, 'SIN_PERMISO');
+        }
+        PosAuth::exigirPosActivo(TenantResolver::current());
+
+        $codigo = (new posMasterModel())->crearCodigo((int) $v['user_id'], (int) $v['tenant_id']);
+        $base = rtrim((string) (getenv('POS_PUBLIC_URL') ?: ($_ENV['POS_PUBLIC_URL'] ?? 'https://pos.fiscalpoint.com.do')), '/');
+        AuditLogger::log([
+            'module' => 'pos', 'action' => 'POS_TRASPASO_CREADO', 'entity_type' => 'usuario', 'entity_id' => $v['user_id'],
+            'description' => 'Código para abrir el POS desde app.* (60 s, un solo uso).',
+        ]);
+        echo json_encode(['success' => true, 'data' => [
+            'url' => $base . '/#code=' . $codigo,
+            'code' => $codigo,
+            'expira_en' => posMasterModel::CODIGO_SEGUNDOS,
+        ]]);
+    } catch (PosError $e) {
+        http_response_code($e->http());
+        echo json_encode(['success' => false, 'error' => $e->getMessage(), 'codigo' => $e->codigo()]);
+    } catch (Throwable $e) {
+        error_log('[auth] pos-handoff: ' . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'No se pudo abrir el POS. Inténtalo de nuevo.', 'codigo' => 'ERROR_INTERNO']);
+    }
+}
+
+/**
+ * POST /api/auth/pos-handoff/canje {code} — publico: pos.* cambia el codigo por
+ * una sesion del mismo usuario, con la MISMA respuesta que el login. pos.* la
+ * usa solo para habilitar el equipo y la cierra (POST /api/auth/signout).
+ * El rol y el POS se vuelven a revisar: pudieron cambiar en esos 60 s.
+ *
+ * @param mixed $body
+ */
+function authPosCanje(authModel $authModel, $body): void
+{
+    require_once __DIR__ . '/../Models/RoleModel.php';
+    require_once __DIR__ . '/../PermissionGate.php';
+    require_once __DIR__ . '/../Pos/PosAuth.php';
+    require_once __DIR__ . '/../Models/posMasterModel.php';
+    try {
+        $codigo = is_object($body) ? trim((string) ($body->code ?? '')) : '';
+        $canje = preg_match('/^[0-9a-f]{48}$/', $codigo) === 1 ? (new posMasterModel())->canjearCodigo($codigo) : null;
+        if ($canje === null) {
+            throw new PosError('El enlace venció o ya se usó. Entra con tu usuario y contraseña.', 401, 'CODIGO_INVALIDO');
+        }
+        if (!TenantResolver::resolveById($canje['tenant_id'])) {
+            throw new PosError('Tu empresa no está activa.', 403, 'EMPRESA_INACTIVA');
+        }
+        PosAuth::exigirPosActivo(TenantResolver::current());
+        $perfil = $authModel->getUserProfile($canje['user_id']);
+        if ($perfil === null || !PermissionGate::permMatches($perfil['permissions'] ?? [], 'pos')) {
+            throw new PosError('No tienes permiso para abrir el POS. Pídeselo a un administrador.', 403, 'SIN_PERMISO');
+        }
+
+        $sesion = $authModel->iniciarSesionPorId($canje['user_id']);
+        if ($sesion[0] !== 'success') {
+            throw new PosError($sesion[1], 500, 'ERROR_INTERNO');
+        }
+        AuditLogger::authEvent([
+            'action'             => 'LOGIN_SUCCESS',
+            'user_id'            => $canje['user_id'],
+            'username'           => $sesion[1]['user']['username'] ?? null,
+            'email'              => $sesion[1]['user']['email'] ?? null,
+            'tenant_id'          => $canje['tenant_id'],
+            'session_token_hash' => hash('sha256', $sesion[1]['token']),
+            'success'            => true,
+            'description'        => 'Inicio de sesión en el POS con el código del botón POS de app.*.',
+        ]);
+        echo json_encode(['success' => true, 'data' => $sesion[1]]);
+    } catch (PosError $e) {
+        http_response_code($e->http());
+        echo json_encode(['success' => false, 'error' => $e->getMessage(), 'codigo' => $e->codigo()]);
+    } catch (Throwable $e) {
+        error_log('[auth] pos-handoff/canje: ' . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'No se pudo abrir el POS. Inténtalo de nuevo.', 'codigo' => 'ERROR_INTERNO']);
+    }
 }

@@ -54,6 +54,10 @@ $ADMIN_MODULES = [
     'users',
     'roles',
     'audit',
+    // POS (docs/specs/pos.md): cajas, empleados con PIN y equipos de caja, y el
+    // boton POS de app.*. Los empleados del POS NO son usuarios: entran con
+    // PIN en un equipo habilitado (ruta 'pos', principal 'pos-caja').
+    'pos',
 ];
 
 return [
@@ -124,6 +128,13 @@ return [
         'ecf'                      => ['GET' => 'aprobaciones', '*' => 'dgii'],
         // Solo principal integracion (X-API-SECRET); el controller filtra por tenant.
         'integracion'              => 'integration',
+
+        // POS. 'pos' lo llama el equipo de caja con su token (X-POS-EQUIPO), no un
+        // usuario: el gate resuelve el tenant del equipo y el controller valida
+        // equipo y sesion del empleado (PosAuth). 'pos-admin' es de usuario-app
+        // con el modulo 'pos' (el controller lo exige aunque el gate este en sombra).
+        'pos'                      => 'pos-caja',
+        'pos-admin'                => 'pos',
     ],
 
     // Roles de sistema sembrados por tenant (migracion 003 + create_tenant.php).

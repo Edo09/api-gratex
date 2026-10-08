@@ -18,7 +18,7 @@
 ### ============================================================================
 
 @base = https://gratex.net/api
-@token = 38d8ec2e2009e40b6df4e68b11ce8e08
+@token = PEGA_AQUI_EL_TOKEN_DE_TU_SESION
 # mod_security de gratex.net responde 406 sin un User-Agent de navegador.
 @ua = Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36
 # Fecha de hoy, dd-mm-aaaa. La nota del paso 3 la usa como fecha del E32.
@@ -53,8 +53,9 @@ Content-Type: application/json
 
 ### ----------------------------------------------------------------------------
 ### 1) E32 a consumidor final: 7 x RD$25 = RD$175.00 (va por RFCE).
-###    2026-10-08: NO SE EMITIO. Gratex no tiene rango E32 vigente en ecf
-###    ("se acabaron o vencieron los numeros"). Pendiente de rango nuevo.
+###    2026-10-08: YA CORRIDO, NO REPETIR. Primer intento sin rango E32; con el
+###    rango 6005547018 registrado salio E320000000001 (factura 1386):
+###    RFCE ACEPTADO, total 175.00, sin mensajes.
 ###    Esperado: status true, estado_dgii RFCE_ACEPTADO, total 175.
 ###    Si la DGII lo rechaza: copiar el `error` completo. Es el no-go de F4.
 ### ----------------------------------------------------------------------------
@@ -108,6 +109,9 @@ Content-Type: application/json
 
 ### ----------------------------------------------------------------------------
 ### 3) E34 sobre el E32 del paso 1, SIN cliente (devolucion de 2 de las 7):
+###    2026-10-08: YA CORRIDO, NO REPETIR. E340000000007 (factura 1387) sobre
+###    E320000000001: ACEPTADO, sin <Comprador>, total 50.00. El saldo (5 x 25 =
+###    125.00) se acredito con E340000000008 (factura 1388), tambien ACEPTADO.
 ###    2 x RD$25 = RD$50.00. Es V-1 y V-7 a la vez: hasta este cambio una nota
 ###    de credito sobre un E32 a consumidor final no se podia emitir.
 ###    Esperado: status true, ACEPTADO, total 50. El XML va sin <Comprador>.

@@ -27,6 +27,14 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
   para el final. Ver 028 y 030 (la 030 también nombra con `@db` las tablas de
   sus `REFERENCES`, y lee con SQL armado la fila que muestra al final: una
   tabla que quizá no se creó no se puede nombrar en el `SELECT` final).
+- Desde la 029/030 (y la master 012) la segunda sentencia es una **guardia**: si
+  `@db` es `information_schema` u otra base de sistema, o no tiene la tabla que
+  la migracion espera, falla con `#1049 Unknown database 'ALTO_elige_la_base_...'`
+  o `#1146 Table '<base>.<tabla>' doesn't exist` ANTES de tocar nada. Paso el
+  2026-10-08 con la 029: phpMyAdmin seguia parado en information_schema despues
+  de la migracion anterior. Los CREATE TABLE van antes de cualquier consulta a
+  information_schema y todo lo posterior nombra la base con `@db` (probado
+  inyectando un `USE information_schema` a mitad del lote).
 - Cambios al **master** (`gratex_master`): `db/master_migrations/` (+ reflejar
   en `db/master_schema.sql` para instalaciones nuevas).
 
