@@ -638,6 +638,8 @@ Content-Type: application/json
 
 ### E26 Cantidad que no cabe (1.000.000.000 o mas; conduce_items.quantity guarda hasta 999999999.99 con 2 decimales)
 ###     -> 422 "Línea 2: la cantidad es demasiado grande." (antes: 500 generico por el 1264 de MySQL; no se guarda nada)
+###     Una cantidad mayor que 999999999.999 y menor que 1e9 (p. ej. 999999999.9995) pasa la linea (se toma por un
+###     entero), se redondea a 1e9 al guardar y recibe el 422 de respaldo, SIN numero de linea.
 POST {{base}}/api/conduces
 X-API-KEY: {{tokenFerreteria}}
 Content-Type: application/json
@@ -651,9 +653,12 @@ Content-Type: application/json
   ]
 }
 
-### E27 Precio que no cabe (100.000.000.000.000 o mas, 1e14; conduce_items.amount guarda menos de 1e14)
+### E27 Precio que no cabe (100.000.000.000.000 o mas, 1e14; la columna conduce_items.amount es DECIMAL(18,4))
 ###     -> 422 "Línea 1: el precio es demasiado grande." (la cantidad se revisa antes que el precio: una linea con las dos
 ###     cosas dice "la cantidad"; y las lineas van en orden: sale el error de la primera linea mala)
+###     Un precio de 99999999999999.5 a menos de 1e14 pasa la linea, PHP lo manda como 1.0E+14 y recibe el 422 de
+###     respaldo, SIN numero de linea. Menor que 99999999999999.5 se guarda (con mas de 14 cifras significativas las
+###     ultimas se redondean).
 POST {{base}}/api/conduces
 X-API-KEY: {{tokenFerreteria}}
 Content-Type: application/json

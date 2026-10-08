@@ -49,11 +49,23 @@ final class FerreteriaConduce
      * y el usuario veía un error genérico. Con los decimales que admite
      * normalizarLinea (2 en la cantidad), lo más grande que entra de cantidad
      * es 999999999.99. Un float no distingue 99999999999999.9999 de 10^14:
-     * ese ya cuenta como el tope y se rechaza; el precio más alto que
-     * entra es 99999999999999.98. PDO manda el float a MySQL con 14 cifras
-     * (ini precision), y un precio de 99999999999999.5 en adelante llega
-     * como "1.0E+14": pasa este tope y MySQL lo rechaza; ese caso lo atrapa
-     * conduceModel::errorAlGuardar con MSG_FUERA_DE_RANGO.
+     * ese ya cuenta como el tope y se rechaza con "Línea N: ...".
+     *
+     * Lo que pasa estos topes no siempre se guarda, y no hay un "el más alto
+     * que entra" de 99999999999999.98. PDO manda el float a MySQL como texto
+     * con 14 cifras significativas (ini precision):
+     * - un precio menor que 99999999999999.5 se guarda; con más de 14 cifras
+     *   significativas las últimas se redondean (12345678901.2345 queda en
+     *   12345678901.235);
+     * - uno de 99999999999999.5 a menos de 10^14 pasa este tope y llega como
+     *   "1.0E+14": MySQL lo rechaza (1264);
+     * - una cantidad mayor que 999999999.999 y menor que 10^9 (p. ej.
+     *   999999999.9995) pasa este tope y la revisión de decimales
+     *   (unidadMedidaModel::decimalesDe tolera una diferencia relativa de
+     *   1e-12 y la toma por un entero); el INSERT la redondea a 2 decimales
+     *   (1e9) y MySQL la rechaza (1264).
+     * Esos dos casos los atrapa conduceModel::errorAlGuardar con
+     * MSG_FUERA_DE_RANGO (422, sin número de línea).
      */
     public const LIMITE_CANTIDAD = 1e9;
     public const LIMITE_PRECIO = 1e14;

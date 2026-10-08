@@ -26,9 +26,11 @@
 --      conduces.cotizacion_id y conduce_items.product_id, signo incluido: la
 --      FK no se crea si los tipos difieren, y la DDL de produccion puede no
 --      ser la del repo.
---   2) Crea conduces, conduce_items y conduce_secuencia si faltan. Si
---      cotizaciones o products no son InnoDB, o falta alguna de las dos, NO
---      crea ninguna (o las tres o ninguna) y el resultado final lo muestra.
+--   2) Crea conduces, conduce_items y conduce_secuencia si faltan (las tres o
+--      ninguna). Si falta cotizaciones, la guardia de la segunda sentencia se
+--      detiene antes, con el #1146 de abajo, y no se hace nada. Si falta
+--      products, o cotizaciones o products no son InnoDB, NO crea ninguna y
+--      el resultado final lo muestra con todo_ok = NO.
 --   3) Siembra la fila unica de conduce_secuencia (id 1, ultimo 0) con
 --      INSERT IGNORE: si ya existe, no la toca.
 --   Reglas ON DELETE: conduce_items -> conduces es RESTRICT (un conduce nunca

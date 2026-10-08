@@ -325,7 +325,7 @@ foreach ([0, '0', -1, '-5', -1000000000, -1e300] as $noPositiva) {
 }
 
 $r = $validarConduce($conPrecio(99999999999999.98));
-$chk('precio 99999999999999.98: el mayor que cabe en amount como número, pasa', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 99999999999999.98);
+$chk('precio 99999999999999.98 (bajo 1e14): pasa validarForma; de punta a punta llega al 422 de respaldo (ver LIMITE_PRECIO)', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 99999999999999.98);
 $r = $validarConduce($conPrecio('99999999999999'), false);
 $chk('precio "99999999999999" (14 cifras, texto): pasa (PUT)', ($r['ok'] ?? null) === true && $r['cot']['items'][0]['amount'] === 99999999999999.0);
 $rechazaConduce('precio 100000000000000 (1e14, justo sobre el tope)', $conPrecio(100000000000000), $msgPrecioGrande(1));
