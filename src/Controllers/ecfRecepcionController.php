@@ -27,7 +27,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
         } catch (Throwable $e) {
             error_log('[ecfRecepcion] fatal: ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
             http_response_code(500);
-            echo json_encode(['status' => false, 'error' => 'Error interno: ' . $e->getMessage()]);
+            // Endpoint publico (sin credenciales): el detalle va solo al log de arriba.
+            echo json_encode(['status' => false, 'error' => 'Error interno.']);
         }
         break;
 

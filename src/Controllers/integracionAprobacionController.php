@@ -25,6 +25,7 @@ require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ACECFEmissionService.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -99,14 +100,13 @@ function handleIntegracionAprobacion(): void
     $decision = (string) $input['estado'] === '2' ? 'RECHAZADO' : 'ACEPTADO';
     $store = new IntegracionStoreModel();
 
-    // Apuntar al mismo ambiente en que se recibio el e-CF (evita codigo 02).
-    if (empty($input['ambiente'])) {
-        $recibido = $store->getRecibidoByENCF($tenantId, (string) $input['rnc_emisor'], (string) $input['e_ncf']);
-        if ($recibido && !empty($recibido['ambiente'])) {
-            $input['ambiente'] = $recibido['ambiente'];
-        } else {
-            $input['ambiente'] = $tenant['ambiente'] ?: 'ecf';
-        }
+    // Apuntar al mismo ambiente en que se recibio el e-CF (evita codigo 02). El
+    // cliente no elige ambiente (igual que en la emision): si lo manda, se pisa.
+    $recibido = $store->getRecibidoByENCF($tenantId, (string) $input['rnc_emisor'], (string) $input['e_ncf']);
+    if ($recibido && !empty($recibido['ambiente'])) {
+        $input['ambiente'] = $recibido['ambiente'];
+    } else {
+        $input['ambiente'] = $tenant['ambiente'] ?: 'ecf';
     }
 
     // Integracion: el comprador somos el tenant.
@@ -133,7 +133,8 @@ function handleIntegracionAprobacion(): void
             'success' => false, 'error_message' => $e->getMessage(),
             'description' => 'Fallo enviando aprobacion comercial por integracion.',
         ]);
-        respondIntegracionApc(false, 'Fallo enviando ACECF a DGII: ' . $e->getMessage(), 502);
+        // Sin rutas del server ni nombres de configuracion (el detalle va al log).
+        respondIntegracionApc(false, 'Fallo enviando ACECF a DGII: ' . EcfUsuarioException::mensajePublico($e), 502);
         return;
     }
 

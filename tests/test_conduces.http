@@ -1,0 +1,948 @@
+### ============================================================================
+### Conduces de mercancia (Ferreteria) -> /api/conduces
+### Ver docs/api/conduces.md y docs/modules/cotizaciones-formatos.md (Conduces).
+###
+### Correr contra un servidor con la tenant 031 aplicada en las DOS DBs de tenant
+### (local o staging; en produccion solo la seccion "Produccion" del final). Antes:
+###   - el tenant de Ferreteria con cotizacion_formato = 'ferreteria' en el master;
+###   - una cotizacion de Ferreteria para @cotFerreteria (F1 de
+###     tests/test_cotizaciones_ferreteria.http crea una);
+###   - llenar las variables de abajo (tokens del login de cada tenant, ids reales).
+### Los ids de los conduces salen de las respuestas de "Crear". Correr los bloques en
+### el orden del archivo: D cuenta con los numeros de C1 y C2. Ningun conduce se
+### borra de la base: los de prueba quedan con activo = 0 y gastan su numero.
+### ============================================================================
+
+@base = http://localhost:8000
+@tokenFerreteria = <token de sesion de un usuario de Ferreteria con el modulo cotizaciones>
+@tokenGratex = <token de sesion de un usuario de Gratex con el modulo cotizaciones>
+@tokenVencido = <un token de Ferreteria ya cerrado con POST /api/auth/signout, o uno inventado>
+@tokenGratexVencido = <un token de Gratex ya cerrado con POST /api/auth/signout>
+@clienteFerreteria = <id de un cliente de la DB de Ferreteria>
+@otroClienteFerreteria = <id de otro cliente de la DB de Ferreteria>
+@nombreCliente = <parte del nombre del cliente de @clienteFerreteria, sin espacios (p. ej. MOSCOSO)>
+@productoFerreteria = <id de un producto de la DB de Ferreteria>
+@cotFerreteria = <id de una cotizacion de Ferreteria (formato 'ferreteria') de la DB de Ferreteria>
+@cotSinFormato = <id de una cotizacion con formato NULL en la DB de Ferreteria (SELECT id FROM cotizaciones WHERE formato IS NULL LIMIT 1); si no hay, saltar E3>
+@cotDesechable = <id que devolvio "Q1 Crear una cotizacion desechable">
+@clienteGratex = <id de un cliente de la DB de Gratex>
+@cotGratex = <id de una cotizacion de Gratex de la DB de Gratex>
+@conduce = <id que devolvio "C1 Crear">
+@codigoConduce = <code que devolvio "C1 Crear" (p. ej. CON-000001)>
+@codigoCotizacion = <code de la cotizacion @cotFerreteria (p. ej. COT-000012; SELECT code FROM cotizaciones WHERE id = @cotFerreteria)>
+@conduce2 = <id que devolvio "C2 Crear otro">
+@conduce3 = <id que devolvio "D8 Crear despues de eliminar">
+@conduce4 = <id que devolvio "C13 Crear desde la desechable">
+
+### Step 1: Login (una vez por tenant; el token va en X-API-KEY)
+POST {{base}}/api/auth/login
+Content-Type: application/json
+
+{
+  "emailOrUsername": "<usuario>",
+  "password": "<password>"
+}
+
+###
+
+### C0 Branding de Ferreteria -> data.cotizacion_formato = "ferreteria" (el menu Conduces sale solo asi)
+GET {{base}}/api/branding
+X-API-KEY: {{tokenFerreteria}}
+
+### ============================================================================
+### Comprobaciones de servidor que no son peticiones (anotar el resultado de cada una)
+### M0 Antes de las M de servidor, en local y contra MySQL de verdad (Git Bash, desde api-gratex):
+###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 91/91 OK, exit 0 (unos 20-30 s)
+###    Usa SOLO la base de pruebas smhynzte_conduces_scratch (el mismo servidor que produccion, MySQL 8.0
+###    estricto) con el usuario de pruebas; credenciales en tools/.env (ignorado por git: WA_DB_HOST,
+###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
+###    CONDUCES_DB_NAME no es una base de conduces terminada en _scratch, borra TODAS las tablas de esa base al
+###    empezar y al terminar (tambien si algo falla) y la deja vacia. Nunca apunta a produccion.
+###    Ya cubre, sin servidor HTTP: la 031 dos veces sobre un tenant de antes de la 031 (M1 con el snapshot
+###    viejo) y otra vez con conduces guardados (M3); el snapshot nuevo igual al migrado (M4); lo que M7-M9
+###    miran en la base, a nivel de modelo (crear, eliminar sin reusar el numero, editar con las lineas viejas
+###    en activo = 0 y la fecha conservada); la busqueda por el codigo de la cotizacion de origen (con su
+###    total, y sin hallar nada cuando se borra la cotizacion: C6b); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
+###    de uk_conduces_numero reintentado una vez; cinco creaciones en paralelo con numeros distintos y
+###    seguidos, sin deadlock (M10 a nivel de modelo); los topes de cantidad y precio de conduce_items (en el
+###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP; tambien lo
+###    que pasa validarForma y no cabe: un precio de 99999999999999.98 y una cantidad de 999999999.9995 -> 422 de
+###    respaldo, y el redondeo a 14 cifras significativas del precio); la
+###    guardia de la 031 (sin base seleccionada, con information_schema o sin cotizaciones: la 031 falla y no
+###    crea nada; el usuario de pruebas recibe #1142 y no #1049, porque MySQL revisa permisos antes de
+###    buscar la base: lo de M2 sigue siendo de servidor); y las reglas ON DELETE (M15).
+###    Siguen siendo de servidor: M1 sobre los volcados de smhynzte_002 y smhynzte_new_gratexdb, M2, M5, M6,
+###    M10 por HTTP (prueba ademas el controller), M11-M14, M16, M17 y todas las peticiones de abajo.
+### M1 Migracion 031, DOS veces, sobre un volcado (dump) de CADA DB de tenant (smhynzte_002 de Ferreteria y
+###    smhynzte_new_gratexdb de Gratex, cada uno restaurado en una DB de prueba) y tambien en una DB armada con
+###    el snapshot de ANTES de la 031: el de master sin conduces y con la 029 de precios y la 030 del POS (git
+###    show <commit que agrego 030_pos.sql>:db/tenant_schema.sql). En phpMyAdmin:
+###    entrar a esa base, pestana SQL, pegar TODO db/migrations/031_conduces.sql y ejecutar. La ultima consulta
+###    es UNA fila. 1a corrida:
+###      base = el nombre de esa DB (nunca information_schema ni NULL)
+###      motor_cotizaciones = InnoDB, motor_products = InnoDB
+###      tipo_cotizaciones_id, tipo_products_id = el tipo de cada id (int en MySQL 8.0.19+, como produccion;
+###        int(11) en uno mas viejo; anotarlo)
+###      conduces = InnoDB, conduce_items = InnoDB, conduce_secuencia = InnoDB
+###      indices = 6
+###      fk_conduces_cotizacion = SET NULL, fk_conduce_items_conduce = RESTRICT, fk_conduce_items_product = SET NULL
+###      fila_secuencia = (1, 0)
+###      todo_ok = SI
+###    2a corrida (sin tocar nada entre las dos): la MISMA fila, y nada cambia: cada paso ejecuta DO 0,
+###    SHOW CREATE TABLE conduces / conduce_items / conduce_secuencia queda igual que despues de la 1a, y
+###    SELECT * FROM conduce_secuencia sigue (1, 0).
+### M2 La 031 sin base seleccionada (o con information_schema seleccionada, donde la deja phpMyAdmin despues
+###    de otra migracion): la guardia de su segunda sentencia falla con "#1049 Unknown database
+###    'ALTO_elige_la_base_de_la_empresa_en_el_panel'" y no se creo nada (ninguna tabla nueva, ninguna fila).
+###    En la base master o cualquiera sin cotizaciones: "#1146 Table '<base>.cotizaciones' doesn't exist", y
+###    tampoco se crea nada. Seleccionar la base del tenant y volver a correrla da la fila de M1.
+###    (La proteccion propia de la 031, base = NULL / information_schema y todo_ok = NO, sigue ahi como
+###    segunda red, pero la guardia se detiene antes.)
+### M3 La 031 otra vez al final de este archivo (ya con conduces creados): la misma fila, salvo
+###    fila_secuencia = (1, N) con N = el ultimo numero dado; la corrida no la vuelve a (1, 0) ni toca filas.
+### M4 Snapshot nuevo: db/tenant_schema.sql sobre una DB vacia (o php tools/create_tenant.php contra un master de
+###    prueba) termina sin errno 150/1824; SHOW TABLES incluye conduces, conduce_items y conduce_secuencia, y
+###    SELECT * FROM conduce_secuencia -> (1, 0).
+### M5 tools/verificar_migraciones_tenant.sql en las DOS DBs de tenant: la fila 031 (031_conduces.sql, "tablas
+###    conduces, conduce_items y conduce_secuencia") dice APLICADA, y tambien la 027, la 028, la 029 (precios
+###    en decimal(18,4)) y la 030 (POS). La columna base
+###    es la de esa DB. Y tools/verificar_migraciones_master.sql en la base master: la fila 012
+###    (012_pos.sql, "columnas tenants.pos_enabled y pos_equipos.bloqueos_seguidos + tablas pos_handoff_codes
+###    y pos_equipos") dice APLICADA (el POS lo necesita antes de subir su codigo).
+### M6 La 031 con el codigo viejo todavia desplegado (solo crea tablas): las cotizaciones y el bloque G de
+###    tests/test_cotizaciones_ferreteria.http responden igual que antes, en las dos empresas.
+### M7 Estado en la DB de Ferreteria despues de C1 (<id> = el id que devolvio C1):
+###    SELECT numero, code, date, cotizacion_id, client_id, client_name, user_id, activo FROM conduces WHERE id = <id>;
+###      -> numero N, CON-00000N (6 cifras), '2026-10-05 09:30:00', @cotFerreteria, @clienteFerreteria, la razon
+###         social del cliente (si no, company_name; si no, client_name), el id del usuario del token y 1.
+###    SELECT product_id, description, quantity, unidad_medida, amount, indicador_facturacion,
+###           indicador_bien_servicio, activo FROM conduce_items WHERE conduce_id = <id> ORDER BY id;
+###      -> la linea del producto con el indicador_bien_servicio de products (C1 manda 1; un producto de servicio
+###         queda en 2), 2.000, '43', 935.0000; la libre con NULL / 'CORTE DE TUBO' / 1.000 / '43' / 0.0000 / 1 / 1;
+###         las dos con activo 1.
+###    SELECT ultimo FROM conduce_secuencia WHERE id = 1;  -> N.
+### M8 Edicion (C7 y C8 sobre el conduce de C1):
+###    - SELECT id, description, activo FROM conduce_items WHERE conduce_id = <id> ORDER BY id;
+###      despues de C7: las 2 lineas de C1 con activo 0 y la de C7 con activo 1 (nada se borro);
+###      despues de C8: tambien la de C7 en 0, y las 2 de C8 en 1.
+###    - SELECT numero, code, cotizacion_id, client_id, client_name, date, updated_at FROM conduces WHERE id = <id>;
+###      numero, code y cotizacion_id como en M7 (C8 manda otra cotizacion_id y se ignora); despues de C7, date
+###      sigue '2026-10-05 09:30:00' (hora incluida) y updated_at tiene valor; despues de C8, date es
+###      '2026-10-06 HH:MM:SS' con la hora de RD de ese momento, y client_id / client_name son los de
+###      @otroClienteFerreteria.
+### M9 Eliminar sin borrar (D1 sobre el conduce de C2, el de numero mas alto en ese momento):
+###    SELECT numero, code, activo, updated_at FROM conduces WHERE id = <id de C2>;  -> la fila sigue, activo 0,
+###      updated_at con la hora de D1.
+###    SELECT COUNT(*), SUM(activo) FROM conduce_items WHERE conduce_id = <id de C2>;  -> lo mismo que antes de D1
+###      (D1 no toca las lineas).
+###    Despues de D8: SELECT numero, code, activo FROM conduces ORDER BY numero DESC LIMIT 3;
+###      -> N+2 (el de D8, activo 1), N+1 (el de C2, activo 0) y N (el de C1, activo 1): el N+1 no se reuso.
+###      SELECT ultimo FROM conduce_secuencia WHERE id = 1;  -> N+2.
+### M10 Numeracion con concurrencia: cinco creaciones a la vez desde una terminal bash, con el token de
+###    Ferreteria, el id de una cotizacion de Ferreteria y el de un cliente de esa DB. Correrla al final (despues
+###    del bloque G), nunca entre C2 y D8: D8 espera el numero de C2 + 1.
+###      BASE=http://localhost:8000; TOKEN='<token de Ferreteria>'; COT=<id de cotizacion>; CLIENTE=<id de cliente>
+###      for i in 1 2 3 4 5; do
+###        curl -s -X POST "$BASE/api/conduces" -H "X-API-KEY: $TOKEN" -H "Content-Type: application/json" \
+###          -d '{"cotizacion_id":'"$COT"',"client_id":'"$CLIENTE"',"items":[{"product_id":null,"description":"PRUEBA CONCURRENCIA '"$i"'","quantity":1,"amount":0}]}' &
+###      done; wait; echo
+###    Esperado: cinco {"status":true,"data":{"id":...,"code":"CON-...","numero":...}} con cinco numero distintos
+###    y consecutivos, sin errores; en el error_log ningun "Deadlock" (1213) ni linea "[conduces]". Un 500 "Otro
+###    conduce se guardó al mismo tiempo" o dos numero iguales = la fila de conduce_secuencia no serializa:
+###    anotarlo como bug. Despues eliminar los cinco (quedan con activo = 0 y sus numeros no se reusan):
+###      for ID in <id1> <id2> <id3> <id4> <id5>; do
+###        curl -s -X DELETE "$BASE/api/conduces" -H "X-API-KEY: $TOKEN" -H "Content-Type: application/json" -d '{"id":'"$ID"'}'; echo
+###      done
+### M11 Cotizaciones intactas: CHECKSUM TABLE cotizaciones, cotizacion_items, cotizacion_ajustes; en la DB de
+###    Ferreteria antes de C1 y despues de D9 (sin nadie mas cotizando entretanto) -> los mismos tres valores.
+###    Los conduces no escriben en las tablas de cotizaciones (Q1 y Q2, que si las tocan, van despues).
+### M12 Auditoria (master, tabla audit_logs):
+###    SELECT action, entity_type, entity_id, description, old_values IS NOT NULL AS con_antes,
+###           new_values IS NOT NULL AS con_despues FROM audit_logs WHERE module = 'conduces' ORDER BY id DESC LIMIT 25;
+###    -> CREATE (C1, C2, D8, C13 y los cinco de M10) con new_values = el cuerpo; UPDATE (C7, C8, C16) con
+###       old_values = la fila de antes y new_values = el cuerpo; DELETE (D1, D9 y los cinco de M10) con
+###       old_values = la fila; entity_type 'conduce' y entity_id = el id del conduce en todas. Ni los 401, ni los
+###       422, ni los 404 dejan fila.
+### M13 Gratex no consulta su DB: despues de G1-G4, SELECT COUNT(*) FROM conduces en la DB de Gratex -> 0, y
+###    conduce_secuencia sigue (1, 0); en el error_log no hay ninguna linea "[conduces]" de esas peticiones.
+### M14 Permiso (con PERMISSIONS_ENFORCE=true en el .env): un usuario de Ferreteria cuyo rol NO tiene el modulo
+###    cotizaciones -> GET /api/conduces responde 403 "No tienes permiso para hacer esto. Pídeselo a un
+###    administrador." y audit_logs tiene un ACCESS_DENIED del modulo cotizaciones. Con PERMISSIONS_ENFORCE=false
+###    responde 200, y el error_log dice "[PermissionGate][SHADOW] denegaria conduces GET (req=cotizaciones, rol sin permiso)".
+### M15 La base no deja borrar: la cubre M0 (tools/test_conduces_mysql.php, seccion f, reglas ON DELETE: 1451 por
+###    RESTRICT al borrar un conduce con lineas, y SET NULL al borrar un producto o una cotizacion). No se corre
+###    en un servidor: no hay nada que ejecutar aqui.
+### M16 PDF largo: un conduce de 30+ lineas (desde el front, Conduce sobre una cotizacion larga; o C1 con 30+
+###    lineas libres) -> la cabecera de la tabla se repite en cada pagina con filas, la marca "No hay más productos"
+###    queda en la pagina de la ultima fila, el bloque "Recibido por:" + pie no se parte y cada pagina dice
+###    "Página X de Y". Ninguna pagina imprime un precio.
+### M17 Ferreteria sin logo (tenants.logo_path NULL): el PDF del conduce imprime la razon social en negrita
+###    arriba y nunca el logo de Gratex (como la cotizacion).
+### ============================================================================
+
+### ============================================================================
+### 401 ANTES que 422: el token se revisa primero (no se crea ni se lee nada)
+### ============================================================================
+
+### A1 Sin token -> 401 "Credenciales requeridas. Integracion: X-API-KEY + X-API-SECRET. App: Authorization: Bearer <token>."
+GET {{base}}/api/conduces
+
+### A2 Token vencido o falso -> 401 "Invalid or inactive API token"
+GET {{base}}/api/conduces
+X-API-KEY: {{tokenVencido}}
+
+### A3 Token vencido con un cuerpo que daria 422 (trae ajustes) -> 401, nunca 422; no se crea nada
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenVencido}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": { "mano_obra": 1500 }
+}
+
+### A4 Token vencido sobre el PDF de un id que no existe -> 401, nunca 404
+GET {{base}}/api/conduces/999999999/pdf
+X-API-KEY: {{tokenVencido}}
+
+### A5 Token vencido de GRATEX -> 401, no el 422 "Los conduces no están disponibles para tu empresa."
+GET {{base}}/api/conduces
+X-API-KEY: {{tokenGratexVencido}}
+
+### ============================================================================
+### FERRETERIA: el camino feliz
+### ============================================================================
+
+### C1 Crear desde una cotizacion -> 200 {id, code "CON-000001" (o el siguiente), numero}
+### Una linea de producto (bien/servicio sale del producto) y una libre SIN precio: amount 0 vale en un
+### conduce (la factura que salga de el pedira el precio).
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-10-05 09:30:00",
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 2,
+      "unidad_medida": "43", "amount": 935, "indicador_facturacion": 1, "indicador_bien_servicio": 1 },
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1,
+      "unidad_medida": "43", "amount": 0, "indicador_facturacion": 1, "indicador_bien_servicio": 1 }
+  ]
+}
+
+### C2 Crear otro desde la MISMA cotizacion (una cotizacion da varios conduces) -> 200, numero = el de C1 + 1
+### Fecha de solo dia: se guarda 2026-10-06 con la hora actual de RD. formato, tipo, total, sent_email y
+### user_id se ignoran (user_id sale del token). Sin unidad ni indicadores: '43', ITBIS 18%, bien.
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-10-06",
+  "formato": "gratex",
+  "tipo": "factura",
+  "total": 1,
+  "sent_email": true,
+  "user_id": 999,
+  "items": [
+    { "product_id": null, "description": "ARENA LAVADA (SEGUNDA ENTREGA)", "quantity": 3, "amount": 0 }
+  ]
+}
+
+### C3 Obtener uno -> data [fila]: numero (entero), code, date "2026-10-05 09:30:00", cotizacion_id,
+### cotizacion_code "COT-...", client_name / company_name / rnc del cliente de hoy, client_name_guardado,
+### activo 1, e items (solo los activos, en orden) con quantity "2.000" y amount "935.0000" y "0.0000"
+GET {{base}}/api/conduces?id={{conduce}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C4 Listado -> solo activos, orden date DESC, id DESC (C2 antes que C1); pagination con totalPages entero
+GET {{base}}/api/conduces?page=1&pageSize=10
+X-API-KEY: {{tokenFerreteria}}
+
+### C5 Buscar por codigo -> el conduce de C1 (probar tambien solo las cifras, p. ej. 000001: encuentra el mismo)
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{codigoConduce}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C6 Buscar por el nombre del cliente -> C1 y C2
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{nombreCliente}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C6b Buscar por el codigo de la cotizacion de origen -> C1 y C2 (nacieron de @cotFerreteria), y
+### pagination.total cuenta lo mismo. Poner en @codigoCotizacion el code de @cotFerreteria (COT-000012; tambien
+### sirven solo las cifras, 000012). Un codigo que no existe (COT-999999) da data [] y total 0. Si la cotizacion
+### se elimino, sus conduces ya no salen por su codigo (cotizacion_id quedo en NULL); siguen saliendo por el suyo.
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{codigoCotizacion}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C7 Editar SIN date, con UNA linea -> 200 con el mismo id, code y numero; la fecha guardada no cambia
+### (repetir C3: date sigue "2026-10-05 09:30:00" e items trae solo la linea nueva; las dos de C1 siguen en
+### la base con activo = 0, ver M8)
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce}},
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 1,
+      "unidad_medida": "43", "amount": 935, "indicador_facturacion": 1, "indicador_bien_servicio": 1 }
+  ]
+}
+
+### C8 Editar con fecha de solo dia, OTRO cliente y otra cotizacion_id -> 200 con el mismo code y numero; la
+### fecha pasa a 2026-10-06 con la hora actual de RD, el cliente cambia y cotizacion_id se ignora (C3: sigue
+### la cotizacion de C1). La linea en Metro (26) admite 4.5.
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce}},
+  "cotizacion_id": 999999999,
+  "client_id": {{otroClienteFerreteria}},
+  "date": "2026-10-06",
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 2, "amount": 150 },
+    { "product_id": null, "description": "TUBO PVC 1/2", "quantity": 4.5, "unidad_medida": "26", "amount": 0 }
+  ]
+}
+
+### C9 Vista previa SIN id (un conduce nuevo) -> 200 base64 "Conduce_Preview.pdf": en el numero dice
+### VISTA PREVIA, "Cotización: COT-..." es la de @cotFerreteria, la fecha es hoy, la unidad sale como Metro y
+### no hay precios. No guarda nada: C4 sigue igual y conduce_secuencia no cambia.
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 2, "amount": 935 },
+    { "product_id": null, "description": "TUBO PVC 1/2", "quantity": 4.5, "unidad_medida": "26", "amount": 0 }
+  ]
+}
+
+### C10 Vista previa CON id -> imprime el code del conduce, su cotizacion y su fecha guardada (la del cuerpo
+### no viene); el cotizacion_id del cuerpo se ignora
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce}},
+  "cotizacion_id": 999999999,
+  "client_id": {{otroClienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 2, "amount": 150 }
+  ]
+}
+
+### C11 PDF en base64 -> filename "Conduce_CON-00000N.pdf". Abrirlo: titulo CONDUCE DE MERCANCÍA, la fecha
+### (OCTUBRE 6/2026.-), el numero, "Cotización: COT-...", NOMBRE O RAZÓN SOCIAL con el cliente y su RNC, la
+### tabla Cantidad | Unidad | Descripción mercancías con el NOMBRE de la unidad (Unidad, Metro), la marca
+### "No hay más productos debajo de la línea" bajo Descripción, "Recibido por:" y el pie. Ningun precio, ni
+### "Valor Unitario", "Sub-total", "ITBIS" ni "TOTAL".
+GET {{base}}/api/conduces/{{conduce}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### C12 PDF como descarga directa -> application/pdf, Content-Disposition: attachment; filename="Conduce_CON-00000N.pdf"
+GET {{base}}/api/conduces/{{conduce}}/pdf
+X-API-KEY: {{tokenFerreteria}}
+
+### ============================================================================
+### FERRETERIA: 422 (status:false con el texto para el usuario; no se guarda nada)
+### ============================================================================
+
+### E1 Sin cotizacion_id -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E2 Cotizacion que no existe -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": 999999999,
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E3 Cotizacion con formato NULL (de Gratex, de antes de la 026) -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotSinFormato}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E4 cotizacion_id que no es un entero ("abc") -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": "abc",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E5 Sin client_id -> 422 "Elige un cliente para el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E6 Cliente que no existe -> 422 "Elige un cliente para el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": 999999999,
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E7 Sin lineas -> 422 "Agrega al menos una línea al conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": []
+}
+
+### E8 Fecha que no existe -> 422 "La fecha no es válida."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-02-30",
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E9 Fecha con T (ISO) -> 422 "La fecha no es válida." (solo YYYY-MM-DD o YYYY-MM-DD HH:MM:SS)
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-10-05T09:30:00",
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E10 Con ajustes, aunque vengan vacios -> 422 "Los conduces no llevan cargos ni abonos."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": {}
+}
+
+### E11 Ajustes y sin cliente: los ajustes primero -> 422 "Los conduces no llevan cargos ni abonos."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 1500, "abono": 0, "retencion_isr": false }
+}
+
+### E12 Precio negativo -> 422 "Línea 1: el precio no puede ser negativo."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": -150 } ]
+}
+
+### E13 Linea 2 sin precio (sin la clave amount) -> 422 "El precio de la línea 2 no es válido. Revísalo."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 },
+    { "product_id": null, "description": "ARENA", "quantity": 1 }
+  ]
+}
+
+### E14 Precio con 5 decimales -> 422 "Línea 1: el precio admite hasta 4 decimales."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 84.74581 } ]
+}
+
+### E15 Producto que no existe -> 422 "Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": 999999999, "description": "NO EXISTE", "quantity": 1, "amount": 150 } ]
+}
+
+### E16 Unidad que no esta en el catalogo -> 422 "La unidad de medida de la línea 1 no es válida. Elige otra unidad en esa línea."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0, "unidad_medida": "999" } ]
+}
+
+### E17 Fraccion en "Unidad" (43) -> 422 "Línea 1: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad."
+### (con la master 010 aplicada; sin ella la regla no bloquea)
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "FUNDAS CEMENTO GRIS", "quantity": 1.5, "amount": 0, "unidad_medida": "43" } ]
+}
+
+### E18 Linea sin descripcion -> 422 "La línea 1 no tiene descripción. Escríbela o quita esa línea."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "   ", "quantity": 1, "amount": 0 } ]
+}
+
+### E19 Indicador de ITBIS fuera de 1-4 -> 422 "Línea 1: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0, "indicador_facturacion": 5 } ]
+}
+
+### E20 Editar sin id -> 422 "No se pudo identificar el conduce que quieres modificar. Ábrelo de nuevo desde el listado."
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E21 Editar con ajustes -> 422 "Los conduces no llevan cargos ni abonos." (C3: el conduce no cambio)
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": { "abono": 100 }
+}
+
+### E22 Editar con un cliente que no existe -> 422 "Elige un cliente para el conduce."
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce}},
+  "client_id": 999999999,
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E23 Eliminar sin id -> 422 "No se pudo identificar el conduce que quieres eliminar. Actualiza el listado e inténtalo de nuevo."
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{}
+
+### E24 Vista previa sin id desde una cotizacion que no existe -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": 999999999,
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
+}
+
+### E25 Vista previa con ajustes -> 422 "Los conduces no llevan cargos ni abonos."
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": { "mano_obra": 500 }
+}
+
+### E26 Cantidad que no cabe (1.000.000.000 o mas; conduce_items.quantity guarda hasta 999999999.99 con 2 decimales)
+###     -> 422 "Línea 2: la cantidad es demasiado grande." (antes: 500 generico por el 1264 de MySQL; no se guarda nada)
+###     Una cantidad mayor que 999999999.999 y menor que 1e9 (p. ej. 999999999.9995) pasa la linea (se toma por un
+###     entero), se redondea a 1e9 al guardar y recibe el 422 de respaldo, SIN numero de linea.
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 },
+    { "product_id": null, "description": "ARENA", "quantity": 1000000000, "amount": 0 }
+  ]
+}
+
+### E27 Precio que no cabe (100.000.000.000.000 o mas, 1e14; la columna conduce_items.amount es DECIMAL(18,4))
+###     -> 422 "Línea 1: el precio es demasiado grande." (la cantidad se revisa antes que el precio: una linea con las dos
+###     cosas dice "la cantidad"; y las lineas van en orden: sale el error de la primera linea mala)
+###     Un precio de 99999999999999.5 a menos de 1e14 pasa la linea, PHP lo manda como 1.0E+14 y recibe el 422 de
+###     respaldo, SIN numero de linea. Menor que 99999999999999.5 se guarda (con mas de 14 cifras significativas las
+###     ultimas se redondean).
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 100000000000000 } ]
+}
+
+### ============================================================================
+### RUTAS: 404 de las que no existen y de los ids que no estan (sin crear ni cambiar nada)
+### ============================================================================
+
+### R1 POST al PDF -> 404 "Esta dirección de conduces no existe." y no se crea ningun conduce (C4 igual)
+POST {{base}}/api/conduces/{{conduce}}/pdf
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "NO SE CREA", "quantity": 1, "amount": 0 } ]
+}
+
+### R2 GET a /preview -> 404 "Esta dirección de conduces no existe."
+GET {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+
+### R3 DELETE con el id en la URL -> 404 "Esta dirección de conduces no existe." (el id va en el cuerpo); C3: sigue activo
+DELETE {{base}}/api/conduces/{{conduce}}
+X-API-KEY: {{tokenFerreteria}}
+
+### R4 PDF con un id que no es numero -> 404 "Esta dirección de conduces no existe."
+GET {{base}}/api/conduces/abc/pdf
+X-API-KEY: {{tokenFerreteria}}
+
+### R5 PDF del id 0 -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+GET {{base}}/api/conduces/0/pdf
+X-API-KEY: {{tokenFerreteria}}
+
+### R6 PDF de un id que no existe -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+GET {{base}}/api/conduces/999999999/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### R7 Obtener un id que no existe -> 200 {"status":true,"data":[]}
+GET {{base}}/api/conduces?id=999999999
+X-API-KEY: {{tokenFerreteria}}
+
+### R8 Obtener con un id que no es numero -> 200 {"status":true,"data":[]}
+GET {{base}}/api/conduces?id=abc
+X-API-KEY: {{tokenFerreteria}}
+
+### R9 Editar uno que no existe, con un cuerpo que daria 422 (ajustes) -> 404 "Este conduce ya no existe. Puede
+### que lo hayan eliminado; vuelve al listado." (la fila se busca antes de revisar el cuerpo)
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": 999999999,
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ],
+  "ajustes": {}
+}
+
+### ============================================================================
+### FERRETERIA: eliminar sin borrar, y el numero no se reusa (despues de C y E)
+### ============================================================================
+
+### D1 Eliminar el de C2 (el de numero mas alto) -> 200 "Conduce eliminado"; la fila queda con activo = 0 (M9)
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce2}}
+}
+
+### D2 Eliminarlo otra vez -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce2}}
+}
+
+### D3 Obtener el eliminado -> 200 {"status":true,"data":[]}
+GET {{base}}/api/conduces?id={{conduce2}}
+X-API-KEY: {{tokenFerreteria}}
+
+### D4 Listado -> el eliminado ya no sale; total baja en 1
+GET {{base}}/api/conduces?page=1&pageSize=10
+X-API-KEY: {{tokenFerreteria}}
+
+### D5 PDF del eliminado -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+GET {{base}}/api/conduces/{{conduce2}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### D6 Editar el eliminado -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce2}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "ARENA LAVADA", "quantity": 3, "amount": 0 } ]
+}
+
+### D7 Vista previa con el id del eliminado -> 404 "Este conduce ya no existe. Puede que lo hayan eliminado; vuelve al listado."
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce2}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "ARENA LAVADA", "quantity": 3, "amount": 0 } ]
+}
+
+### D8 Crear despues de eliminar -> 200 con numero = el de C2 + 1: el numero eliminado NO se reusa (en las
+### cotizaciones de Ferreteria, borrar la de numero mas alto si lo libera). Poner su id en @conduce3.
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotFerreteria}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "PRUEBA NUMERO NO REUSADO", "quantity": 1, "amount": 0 } ]
+}
+
+### D9 Eliminar el de D8 (limpieza) -> 200 "Conduce eliminado"
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce3}}
+}
+
+### ============================================================================
+### FERRETERIA: la cotizacion de origen se elimina y el conduce se queda (FK SET NULL)
+### ============================================================================
+
+### Q1 Crear una cotizacion desechable (formato ferreteria) -> 200 {id, code, numero, total}; poner su id en @cotDesechable
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "PRUEBA CONDUCE COTIZACION ELIMINADA", "quantity": 1, "amount": 100 } ]
+}
+
+### C13 Crear desde la desechable -> 200 {id, code, numero}; poner su id en @conduce4
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotDesechable}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "PRUEBA CONDUCE COTIZACION ELIMINADA", "quantity": 1, "amount": 100 } ]
+}
+
+### Q2 Eliminar la cotizacion desechable -> 200 "Cotization deleted" (el conduce no la bloquea: su FK es SET NULL)
+DELETE {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotDesechable}}
+}
+
+### C14 Obtener el conduce de C13 -> sigue activo, con cotizacion_id null y cotizacion_code null (la pantalla
+### dice "eliminada"); sus lineas siguen igual
+GET {{base}}/api/conduces?id={{conduce4}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C15 PDF del conduce de C13 -> sin la linea "Cotización:"; lo demas como C11
+GET {{base}}/api/conduces/{{conduce4}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### C16 Editar el conduce de C13 -> 200 (un PUT no mira la cotizacion de origen); cotizacion_id sigue null
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce4}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "PRUEBA CONDUCE COTIZACION ELIMINADA (EDITADO)", "quantity": 2, "amount": 100 } ]
+}
+
+### C17 Crear desde la cotizacion ya eliminada -> 422 "Elige una cotización de Ferretería para crear el conduce."
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotDesechable}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "NO SE CREA", "quantity": 1, "amount": 0 } ]
+}
+
+### ============================================================================
+### GRATEX: no tiene conduces, y nada de lo suyo cambia
+### Correr tambien el bloque G0-G13 de tests/test_cotizaciones_ferreteria.http antes y despues del
+### despliegue y comparar: mismo status, sobre y data.
+### ============================================================================
+
+### G0 Branding de Gratex -> data.cotizacion_formato = "gratex" (el front no muestra el menu Conduces)
+GET {{base}}/api/branding
+X-API-KEY: {{tokenGratex}}
+
+### G1 Listado de conduces como Gratex -> 422 "Los conduces no están disponibles para tu empresa."
+GET {{base}}/api/conduces?page=1&pageSize=10
+X-API-KEY: {{tokenGratex}}
+
+### G2 Crear como Gratex, con un cuerpo valido -> 422 "Los conduces no están disponibles para tu empresa."; no
+### se crea nada (M13)
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": {{cotGratex}},
+  "client_id": {{clienteGratex}},
+  "items": [ { "product_id": null, "description": "Banner 3x2 full color", "quantity": 1, "amount": 0 } ]
+}
+
+### G3 PDF como Gratex -> 422 "Los conduces no están disponibles para tu empresa." (antes del 404)
+GET {{base}}/api/conduces/1/pdf?format=base64
+X-API-KEY: {{tokenGratex}}
+
+### G4 Ruta que no existe como Gratex -> 422 "Los conduces no están disponibles para tu empresa." (el formato se
+### revisa antes que la ruta)
+POST {{base}}/api/conduces/1/pdf
+X-API-KEY: {{tokenGratex}}
+Content-Type: application/json
+
+{}
+
+### G5 Listado de cotizaciones de Gratex -> igual que antes del despliegue
+GET {{base}}/api/cotizaciones?page=1&pageSize=10
+X-API-KEY: {{tokenGratex}}
+
+### G6 Una cotizacion de Gratex -> las mismas claves de siempre
+GET {{base}}/api/cotizaciones?id={{cotGratex}}
+X-API-KEY: {{tokenGratex}}
+
+### G7 PDF de una cotizacion de Gratex -> el de Gratex de siempre (comparar sin /CreationDate)
+GET {{base}}/api/cotizaciones/{{cotGratex}}/pdf?format=base64
+X-API-KEY: {{tokenGratex}}
+
+### G8 La cotizacion de Ferreteria de origen -> igual que antes de C1 (los conduces no la tocan; ver M11)
+GET {{base}}/api/cotizaciones?id={{cotFerreteria}}
+X-API-KEY: {{tokenFerreteria}}
+
+### ============================================================================
+### Produccion (pruebas de humo del despliegue, spec 7.4). Solo esto, con datos reales.
+### DECISION DEL 2026-10-08: se hace la prueba COMPLETA y GASTA CON-000001 (el conduce de prueba queda con
+### activo = 0 y su numero no se reusa): el primer conduce real de Ferreteria sera CON-000002.
+###   Ferreteria, en este orden:
+###   1. Crear: C1 sobre una cotizacion real (o desde el front: boton Conduce de la cotizacion), con una linea
+###      libre SIN precio (C1 ya trae CORTE DE TUBO con amount 0). Anotar su id y su code (CON-000001) y
+###      comprobar con C3.
+###   2. Editar sin quitar esa linea: C7 con la linea libre agregada a su cuerpo (C7 trae una sola linea y la
+###      quitaria), o desde la pantalla del conduce. Repetir C3.
+###   3. PDF: C11 (o el boton PDF de la lista): CONDUCE DE MERCANCÍA, sin precios.
+###   4. Facturar e-CF desde el front (no hay bloque para esto): Conduces > Facturar > Factura electronica (e-CF).
+###      La linea sin precio llega en 0: Emitir e-CF (y Vista previa) tiene que quedar bloqueado, con "Escribe el
+###      precio: en el conduce esta linea no tenia." bajo la linea. No escribir el precio, no emitir, salir sin
+###      guardar (riesgo de MontoItem 0 en la DGII).
+###   5. Eliminar: D1 con el id de ese conduce (ponerlo en @conduce2), o Eliminar en la pantalla del conduce;
+###      C4 ya no lo lista.
+###   La comprobacion de solo la vista previa (C9) existe y no gasta numero, pero no ejercita el bloqueo del precio 0.
+###   Gratex: G0, G1 y el bloque G de tests/test_cotizaciones_ferreteria.http; sin menu Conduces.
+### Nunca en produccion: M10 (cinco conduces de prueba), D8 y el bloque Q. (M15 no se corre en ningun
+### servidor: la cubre M0.)
+### ============================================================================

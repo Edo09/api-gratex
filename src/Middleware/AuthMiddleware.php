@@ -12,6 +12,20 @@ class AuthMiddleware
         $this->authModel = new authModel();
     }
 
+    /**
+     * Primer segmento de la ruta del API, calculado igual que src/Router.php: a
+     * partir del PRIMER '/api/' (las URLs de callback de la DGII traen dos).
+     * '' si la peticion no trae ruta (CLI).
+     */
+    public static function rutaApi(): string
+    {
+        $path = (string) (parse_url((string) ($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH) ?? '');
+        $pos = strpos($path, '/api/');
+        $resto = $pos !== false ? substr($path, $pos + 5) : ltrim($path, '/');
+        $segmentos = explode('/', ltrim($resto, '/'));
+        return strtolower((string) ($segmentos[0] ?? ''));
+    }
+
     private static function multiTenant(): bool
     {
         return filter_var(
@@ -34,6 +48,19 @@ class AuthMiddleware
         // --- Integration credentials (api_key + api_secret) ---
         // Presence of X-API-SECRET signals integration mode (machine, JSON->XML).
         if (self::multiTenant() && isset($_SERVER['HTTP_X_API_SECRET'])) {
+            // Una credencial de integracion solo vale en /api/integracion/*. En
+            // cualquier otra ruta se rechaza ANTES de resolver el tenant: un tenant
+            // de integracion no tiene DB propia, asi que un controller de la app
+            // caeria en la DB por defecto del .env (la de Gratex), y PermissionGate
+            // en modo sombra (PERMISSIONS_ENFORCE=false) solo lo anotaba en el log.
+            if (self::rutaApi() !== 'integracion') {
+                return [
+                    'valid' => false,
+                    'user_id' => null,
+                    'tenant_id' => null,
+                    'message' => 'Estas credenciales solo sirven para las rutas /api/integracion/*.'
+                ];
+            }
             $apiKey = isset($_SERVER['HTTP_X_API_KEY']) ? trim($_SERVER['HTTP_X_API_KEY']) : '';
             $apiSecret = trim((string) $_SERVER['HTTP_X_API_SECRET']);
             if ($apiKey === '' || !TenantResolver::resolveByCredentials($apiKey, $apiSecret)) {

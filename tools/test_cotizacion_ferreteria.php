@@ -1326,6 +1326,232 @@ $chk('PDF: descripciones con saltos no agregan paginas (' . $t7bSucio . ' vs ' .
     $t7bLimpio > 0 && $t7bSucio === $t7bLimpio);
 
 // ---------------------------------------------------------------------------
+// T2 (conduces): extracciones de FerreteriaFormato sin cambiar la cotización
+// ---------------------------------------------------------------------------
+// normalizarLinea, aplicarCatalogoLineas y cuatro helpers pasan a públicos para
+// que FerreteriaConduce use las mismas reglas de línea. Esta sección prueba que
+// la cotización no ve ninguna diferencia: cada mensaje sale byte a byte igual
+// por validarForma y por normalizarLinea (bandera omitida o en false), el orden
+// de las reglas no cambia, y la bandera del conduce solo toca el precio.
+// normalizarLinea y los helpers se llaman por reflexión (PHP >= 8.1 la permite
+// sobre métodos privados): así este mismo cuadro corre contra el código de
+// antes de la extracción y contra el de después, y los textos se comparan con
+// lo que la cotización respondía antes de tocar nada.
+echo "\n== T2: extracciones de FerreteriaFormato (conduces) ==\n";
+
+$firmaT2 = static function (string $metodo): string {
+    $m = new ReflectionMethod('FerreteriaFormato', $metodo);
+    $params = array_map(static function (ReflectionParameter $p): string {
+        $txt = $p->getType() . ' $' . $p->getName();
+        return $p->isDefaultValueAvailable() ? $txt . ' = ' . var_export($p->getDefaultValue(), true) : $txt;
+    }, $m->getParameters());
+    return ($m->isPublic() ? 'public ' : 'private ') . ($m->isStatic() ? 'static ' : '')
+        . $metodo . '(' . implode(', ', $params) . '): ' . $m->getReturnType();
+};
+foreach ([
+    'normalizarLinea' => 'public static normalizarLinea(mixed $item, int $n, callable $problemaCantidad, callable $unidadValida, bool $precioCeroValido = false): array|string',
+    'aplicarCatalogoLineas' => 'public static aplicarCatalogoLineas(array $items, array $productos): array|string',
+    'normalizarFecha' => 'public static normalizarFecha(mixed $crudo): string|false|null',
+    'leerNumero' => 'public static leerNumero(mixed $v): ?float',
+    'leerEntero' => 'public static leerEntero(mixed $v): ?int',
+    'ahoraRd' => 'public static ahoraRd(): string',
+    // Las dos de la cotización no cambian de firma.
+    'validarForma' => 'public static validarForma(object $body, callable $problemaCantidad, callable $unidadValida): array',
+    'aplicarCatalogo' => 'public static aplicarCatalogo(array $cot, ?array $cliente, array $productos): array',
+] as $metodoT2 => $esperadaT2) {
+    $obtenidaT2 = method_exists('FerreteriaFormato', $metodoT2) ? $firmaT2($metodoT2) : '(no existe)';
+    $chk("firma: {$esperadaT2}" . ($obtenidaT2 === $esperadaT2 ? '' : " (es {$obtenidaT2})"), $obtenidaT2 === $esperadaT2);
+}
+
+// normalizarLinea con las unidades de prueba de la sección de Task 4
+// ($problemaCantidadFx, $unidadValidaFx). $bandera null = sin el 5.º argumento,
+// como la llama validarForma.
+$normalizarT2 = new ReflectionMethod('FerreteriaFormato', 'normalizarLinea');
+$lineaT2 = static fn(mixed $item, int $n, ?bool $bandera = null): array|string => $bandera === null
+    ? $normalizarT2->invoke(null, $item, $n, $problemaCantidadFx, $unidadValidaFx)
+    : $normalizarT2->invoke(null, $item, $n, $problemaCantidadFx, $unidadValidaFx, $bandera);
+$lineaBaseT2 = static fn(): object => (object) [
+    'product_id' => 55, 'description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2, 'amount' => 935,
+    'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1,
+];
+$conT2 = static function (array $cambios, array $quitar = []) use ($lineaBaseT2): object {
+    $l = $lineaBaseT2();
+    foreach ($cambios as $campo => $valor) {
+        $l->$campo = $valor;
+    }
+    foreach ($quitar as $campo) {
+        unset($l->$campo);
+    }
+    return $l;
+};
+// El cuerpo del ejemplo de la spec con $item como línea 3 (o en lugar de la 2).
+$formaT2 = static fn(mixed $item, int $posicion = 2): array => $validar($cuerpo(function (object $b) use ($item, $posicion) {
+    $b->items[$posicion] = is_object($item) ? clone $item : $item;
+}));
+
+// Cada regla de línea, con el texto que respondía la cotización antes de la extracción.
+$cuadroT2 = [
+    ['una línea que no es objeto', 'FUNDAS', 'La línea 3 no es válida. Quítala y vuelve a agregarla.'],
+    ['descripción en blanco', $conT2(['description' => '   ']), 'La línea 3 no tiene descripción. Escríbela o quita esa línea.'],
+    ['descripción de 1001 caracteres', $conT2(['description' => str_repeat('Ñ', 1001)]),
+        'La descripción de la línea 3 es muy larga: admite hasta 1000 caracteres.'],
+    ['unidad fuera del catálogo', $conT2(['unidad_medida' => '999']),
+        'La unidad de medida de la línea 3 no es válida. Elige otra unidad en esa línea.'],
+    ['cantidad 0', $conT2(['quantity' => 0]), 'Línea 3: la cantidad debe ser mayor que 0.'],
+    ['1.5 en Unidad', $conT2(['quantity' => 1.5]),
+        'Línea 3: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad.'],
+    ['1.125 m', $conT2(['unidad_medida' => '26', 'quantity' => 1.125]), 'Línea 3: la cantidad admite hasta 2 decimales.'],
+    ['precio "caro"', $conT2(['amount' => 'caro']), 'El precio de la línea 3 no es válido. Revísalo.'],
+    ['sin precio', $conT2([], ['amount']), 'El precio de la línea 3 no es válido. Revísalo.'],
+    ['precio null', $conT2(['amount' => null]), 'El precio de la línea 3 no es válido. Revísalo.'],
+    ['precio con 5 decimales', $conT2(['amount' => 84.74581]), 'Línea 3: el precio admite hasta 4 decimales.'],
+    ['ITBIS 5', $conT2(['indicador_facturacion' => 5]), 'Línea 3: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento.'],
+    ['bien/servicio 3', $conT2(['indicador_bien_servicio' => 3]), 'Línea 3: elige si es un bien o un servicio.'],
+    ['product_id "x"', $conT2(['product_id' => 'x']),
+        'Línea 3: el producto no es válido. Búscalo de nuevo o déjala como línea libre.'],
+];
+foreach ($cuadroT2 as [$descT2, $itemT2, $msgT2]) {
+    $porFormaT2 = $formaT2($itemT2);
+    $sinBanderaT2 = $lineaT2($itemT2, 3);
+    $apagadaT2 = $lineaT2($itemT2, 3, false);
+    $okT2 = ($porFormaT2['error'] ?? null) === $msgT2 && $sinBanderaT2 === $msgT2 && $apagadaT2 === $msgT2;
+    $chk("cotización, {$descT2}: \"{$msgT2}\" (validarForma y normalizarLinea, sin bandera y con false)"
+        . ($okT2 ? '' : ' (dio ' . json_encode([$porFormaT2, $sinBanderaT2, $apagadaT2], JSON_UNESCAPED_UNICODE) . ')'), $okT2);
+    $prendidaT2 = $lineaT2($itemT2, 3, true);
+    $chk("conduce (bandera true), {$descT2}: el mismo texto"
+        . ($prendidaT2 === $msgT2 ? '' : ' (dio ' . json_encode($prendidaT2, JSON_UNESCAPED_UNICODE) . ')'), $prendidaT2 === $msgT2);
+}
+
+// El precio 0 o negativo en la cotización: el mismo texto de siempre.
+foreach ([['0', 0], ['0.0', 0.0], ['"0"', '0'], ['-935', -935], ['"-0.01"', '-0.01']] as [$descT2, $montoT2]) {
+    $itemT2 = $conT2(['amount' => $montoT2]);
+    $porFormaT2 = $formaT2($itemT2);
+    $chk("cotización, precio {$descT2}: sigue siendo \"Línea 3: el precio debe ser mayor que 0.\"",
+        ($porFormaT2['error'] ?? null) === 'Línea 3: el precio debe ser mayor que 0.'
+        && $lineaT2($itemT2, 3) === 'Línea 3: el precio debe ser mayor que 0.'
+        && $lineaT2($itemT2, 3, false) === 'Línea 3: el precio debe ser mayor que 0.');
+}
+
+// La bandera del conduce: 0 pasa (una línea libre se guarda sin precio), los 4
+// decimales siguen, y un negativo tiene su propio texto con el número de línea.
+foreach ([['0', 0, 0.0], ['0.0', 0.0, 0.0], ['"0"', '0', 0.0], ['"0.0000"', '0.0000', 0.0], ['84.7458', 84.7458, 84.7458]] as [$descT2, $montoT2, $guardadoT2]) {
+    $rT2 = $lineaT2($conT2(['amount' => $montoT2]), 3, true);
+    $chk("conduce, precio {$descT2}: pasa y se guarda " . var_export($guardadoT2, true),
+        is_array($rT2) && $rT2['amount'] === $guardadoT2);
+}
+foreach ([['-935', -935, 3], ['"-0.01"', '-0.01', 7], ['-0.00001 (negativo y con 5 decimales)', -0.00001, 1]] as [$descT2, $montoT2, $nT2]) {
+    $esperadoT2 = 'Línea ' . $nT2 . ': el precio no puede ser negativo.';
+    $rT2 = $lineaT2($conT2(['amount' => $montoT2]), $nT2, true);
+    $chk("conduce, precio {$descT2} en la línea {$nT2}: \"{$esperadoT2}\""
+        . ($rT2 === $esperadoT2 ? '' : ' (dio ' . json_encode($rT2, JSON_UNESCAPED_UNICODE) . ')'), $rT2 === $esperadoT2);
+}
+$validaT2 = $lineaT2($lineaBaseT2(), 1);
+$chk('una línea válida sale idéntica sin bandera, con false y con true', $validaT2 === [
+    'product_id' => 55, 'description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2.0, 'amount' => 935.0,
+    'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1,
+] && $lineaT2($lineaBaseT2(), 1, false) === $validaT2 && $lineaT2($lineaBaseT2(), 1, true) === $validaT2);
+
+// Varios errores en la misma línea: gana el primero en el orden de siempre
+// (descripción, unidad, cantidad, precio, ITBIS, bien/servicio, producto).
+$precioMalT2 = 'El precio de la línea 2 no es válido. Revísalo.';
+$itbisMalT2 = 'Línea 2: el tipo de ITBIS no es válido. Elige 18%, 16%, 0% o exento.';
+foreach ([
+    ['precio "caro" + ITBIS 5', ['amount' => 'caro', 'indicador_facturacion' => 5], $precioMalT2, $precioMalT2],
+    ['precio -1 + ITBIS 5', ['amount' => -1, 'indicador_facturacion' => 5],
+        'Línea 2: el precio debe ser mayor que 0.', 'Línea 2: el precio no puede ser negativo.'],
+    ['precio 0 + ITBIS 5', ['amount' => 0, 'indicador_facturacion' => 5], 'Línea 2: el precio debe ser mayor que 0.', $itbisMalT2],
+    ['precio con 5 decimales + bien/servicio 3', ['amount' => 84.74581, 'indicador_bien_servicio' => 3],
+        'Línea 2: el precio admite hasta 4 decimales.', 'Línea 2: el precio admite hasta 4 decimales.'],
+    ['descripción vacía + precio "caro"', ['description' => '', 'amount' => 'caro'],
+        'La línea 2 no tiene descripción. Escríbela o quita esa línea.', 'La línea 2 no tiene descripción. Escríbela o quita esa línea.'],
+    ['unidad 999 + cantidad 0', ['unidad_medida' => '999', 'quantity' => 0],
+        'La unidad de medida de la línea 2 no es válida. Elige otra unidad en esa línea.',
+        'La unidad de medida de la línea 2 no es válida. Elige otra unidad en esa línea.'],
+    ['cantidad 0 + precio "caro"', ['quantity' => 0, 'amount' => 'caro'],
+        'Línea 2: la cantidad debe ser mayor que 0.', 'Línea 2: la cantidad debe ser mayor que 0.'],
+    ['ITBIS 5 + bien/servicio 3 + product_id "x"', ['indicador_facturacion' => 5, 'indicador_bien_servicio' => 3, 'product_id' => 'x'],
+        $itbisMalT2, $itbisMalT2],
+] as [$descT2, $cambiosT2, $cotizacionT2, $conduceT2]) {
+    $itemT2 = $conT2($cambiosT2);
+    $porFormaT2 = $formaT2($itemT2, 1);
+    $okT2 = ($porFormaT2['error'] ?? null) === $cotizacionT2 && $lineaT2($itemT2, 2) === $cotizacionT2;
+    $chk("orden, {$descT2}: la cotización dice \"{$cotizacionT2}\"", $okT2);
+    $rT2 = $lineaT2($itemT2, 2, true);
+    $chk("orden, {$descT2}: el conduce dice \"{$conduceT2}\""
+        . ($rT2 === $conduceT2 ? '' : ' (dio ' . json_encode($rT2, JSON_UNESCAPED_UNICODE) . ')'), $rT2 === $conduceT2);
+}
+
+// Los helpers: mismo cuerpo, ahora públicos.
+$helperT2 = static fn(string $metodo, mixed ...$args): mixed => (new ReflectionMethod('FerreteriaFormato', $metodo))->invoke(null, ...$args);
+$chk('normalizarFecha: null, "" y "  " = null; "2026-10-05 09:30:00" tal cual; 2026-02-30, 25:00:00 y 20261005 = false',
+    $helperT2('normalizarFecha', null) === null && $helperT2('normalizarFecha', '') === null && $helperT2('normalizarFecha', '  ') === null
+    && $helperT2('normalizarFecha', ' 2026-10-05 09:30:00 ') === '2026-10-05 09:30:00'
+    && $helperT2('normalizarFecha', '2026-02-30') === false && $helperT2('normalizarFecha', '2026-10-05 25:00:00') === false
+    && $helperT2('normalizarFecha', 20261005) === false);
+$antesT2 = (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('H:i');
+$soloDiaT2 = (string) $helperT2('normalizarFecha', '2026-10-05');
+$despuesT2 = (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('H:i');
+$chk("normalizarFecha('2026-10-05'): ese día con la hora de ahora en RD ({$soloDiaT2})",
+    preg_match('/^2026-10-05 \d{2}:\d{2}:\d{2}$/', $soloDiaT2) === 1 && in_array(substr($soloDiaT2, 11, 5), [$antesT2, $despuesT2], true));
+$chk('leerNumero: " 12.5 " = 12.5, 7 = 7.0; "x", true, null e INF = null',
+    $helperT2('leerNumero', ' 12.5 ') === 12.5 && $helperT2('leerNumero', 7) === 7.0 && $helperT2('leerNumero', 'x') === null
+    && $helperT2('leerNumero', true) === null && $helperT2('leerNumero', null) === null && $helperT2('leerNumero', INF) === null);
+$chk('leerEntero: 5, 5.0 y " 5 " = 5, "-3" = -3; 5.5, true y "x" = null',
+    $helperT2('leerEntero', 5) === 5 && $helperT2('leerEntero', 5.0) === 5 && $helperT2('leerEntero', ' 5 ') === 5
+    && $helperT2('leerEntero', '-3') === -3 && $helperT2('leerEntero', 5.5) === null && $helperT2('leerEntero', true) === null
+    && $helperT2('leerEntero', 'x') === null);
+$antesT2 = (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('Y-m-d H:i');
+$ahoraT2 = (string) $helperT2('ahoraRd');
+$despuesT2 = (new DateTimeImmutable('now', new DateTimeZone('America/Santo_Domingo')))->format('Y-m-d H:i');
+$chk("ahoraRd(): Y-m-d H:i:s de ahora en Santo Domingo ({$ahoraT2})",
+    preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $ahoraT2) === 1 && in_array(substr($ahoraT2, 0, 16), [$antesT2, $despuesT2], true));
+
+// aplicarCatalogo: la cotización recibe los mismos arreglos, en el mismo orden de reglas.
+$msgProductoT2 = static fn(int $n): string => 'Línea ' . $n . ': el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.';
+$cotCatT2 = $cotT7($casos['pintura'], null);
+$cotCatT2['items'][1]['product_id'] = 55;   // existe, es servicio
+$cotCatT2['items'][2]['product_id'] = 99;   // no existe
+$productosT2 = [55 => ['indicador_bien_servicio' => 2]];
+$chk('aplicarCatalogo: producto borrado => [error, "Línea 3: …ya no existe en el catálogo…", 422], igual que antes',
+    FerreteriaFormato::aplicarCatalogo($cotCatT2, $cliT7, $productosT2) === ['error', $msgProductoT2(3), 422]);
+$chk('aplicarCatalogo: sin cliente gana al producto borrado (el cliente va primero)',
+    FerreteriaFormato::aplicarCatalogo($cotCatT2, null, $productosT2) === ['error', 'Elige un cliente para la cotización.', 422]);
+$cotAbonoT2 = $cotCatT2;
+$cotAbonoT2['ajustes']['abono'] = 50000.0;
+$chk('aplicarCatalogo: producto borrado gana al abono de más (las líneas van antes que los totales)',
+    FerreteriaFormato::aplicarCatalogo($cotAbonoT2, $cliT7, $productosT2) === ['error', $msgProductoT2(3), 422]);
+$llavesT2 = $cotCatT2;
+$llavesT2['items'] = [5 => $cotCatT2['items'][0], 9 => $cotCatT2['items'][2]];
+$chk('aplicarCatalogo: las líneas se cuentan por posición, no por clave (claves 5 y 9 => Línea 2)',
+    FerreteriaFormato::aplicarCatalogo($llavesT2, $cliT7, $productosT2) === ['error', $msgProductoT2(2), 422]);
+$cotCatT2['items'][2]['product_id'] = null;
+$esperadoCotT2 = $cotCatT2;
+$esperadoCotT2['items'][1]['indicador_bien_servicio'] = 2;
+$chk('aplicarCatalogo ok: [ok, cot con bien/servicio del catálogo, totales()] exacto', FerreteriaFormato::aplicarCatalogo($cotCatT2, $cliT7, $productosT2) === [
+    'ok', $esperadoCotT2, FerreteriaFormato::totales(FerreteriaFormato::lineasDesdeFilas($esperadoCotT2['items']), $esperadoCotT2['ajustes']),
+]);
+
+// aplicarCatalogoLineas: la parte por línea, la que usa también el conduce.
+$catalogoLineasT2 = static fn(array $items, array $productos): array|string => method_exists('FerreteriaFormato', 'aplicarCatalogoLineas')
+    ? FerreteriaFormato::aplicarCatalogoLineas($items, $productos)
+    : '(no existe aplicarCatalogoLineas)';
+$itemsT2 = [
+    3 => ['product_id' => null, 'description' => 'CORTE DE TUBO', 'quantity' => 1.0, 'amount' => 0.0,
+        'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1],
+    8 => ['product_id' => 55, 'description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2.0, 'amount' => 935.0,
+        'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1],
+];
+$servicioT2 = $itemsT2[8];
+$servicioT2['indicador_bien_servicio'] = 2;
+$chk('aplicarCatalogoLineas: reindexa, bien/servicio sale del catálogo (como int) y la línea libre queda igual',
+    $catalogoLineasT2($itemsT2, [55 => ['indicador_bien_servicio' => '2']]) === [$itemsT2[3], $servicioT2]);
+$chk('aplicarCatalogoLineas: producto que no existe => "Línea 2: …ya no existe en el catálogo…" (texto exacto)',
+    $catalogoLineasT2($itemsT2, []) === $msgProductoT2(2));
+$chk('aplicarCatalogoLineas: es el mismo texto que aplicarCatalogo devuelve en [1]',
+    $catalogoLineasT2($itemsT2, []) === (FerreteriaFormato::aplicarCatalogo(['date' => null, 'client_id' => 1, 'items' => $itemsT2, 'ajustes' => []], $cliT7, [])[1] ?? null));
+$chk('aplicarCatalogoLineas: sin líneas => []', $catalogoLineasT2([], []) === []);
+
+// ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
 

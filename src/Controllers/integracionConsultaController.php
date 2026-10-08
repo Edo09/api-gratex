@@ -6,6 +6,7 @@
  *   GET /api/integracion/aprobaciones  -> aprobaciones comerciales recibidas
  *   GET /api/integracion/empresas      -> empresas que cubre esta credencial
  *   GET /api/integracion/estado        -> estado en DGII de un e-CF que emitio
+ *   GET /api/integracion/xml           -> XML firmado de un e-CF que emitio (respaldo)
  *   Headers: X-API-KEY + X-API-SECRET (tenant tipo integracion)
  *   Query: ?page=1&pageSize=20&rnc=<empresa>
  *
@@ -87,6 +88,12 @@ function handleIntegracionConsulta(): void
             'recurso' => 'empresas',
             'data' => TenantResolver::siblings(),
         ]);
+        return;
+    }
+
+    // XML firmado de un e-CF emitido, del respaldo del master.
+    if (preg_match('#/integracion/xml/?$#i', $endpoint)) {
+        handleIntegracionXml($tenant);
         return;
     }
 
@@ -186,7 +193,8 @@ function handleIntegracionEstado(array $tenant): void
         error_log('[integracionEstado] consulta fallo (tenant ' . $tenantId . ', ' . $eNcf . '): ' . $e->getMessage());
         respondIntegracionEstado(502, [
             'status' => false,
-            'error' => 'Fallo consultando el estado a DGII: ' . $e->getMessage(),
+            // Sin rutas del server ni nombres de configuracion (el detalle va al log).
+            'error' => 'Fallo consultando el estado a DGII: ' . EcfUsuarioException::mensajePublico($e),
         ]);
         return;
     }
@@ -246,4 +254,59 @@ function respondIntegracionEstado(int $code, array $body): void
 {
     http_response_code($code);
     echo json_encode($body);
+}
+
+/**
+ * GET /api/integracion/xml?e_ncf=E320000000012[&rnc=...]
+ *
+ * El XML firmado del ULTIMO envio de ese e-NCF, del respaldo del master
+ * (ecf_integracion_backup). Para volver a bajar un comprobante y, en la
+ * certificacion, para el XML integro de cada E32 <250k que se sube a mano al
+ * portal DGII (public/integracion.html, paso 8). Va con su codigo de seguridad
+ * y su track_id, para verificarlo contra la DGII con /estado: tiene que ser el
+ * mismo e-CF cuyo RFCE acepto la DGII, no el de una corrida anterior.
+ */
+function handleIntegracionXml(array $tenant): void
+{
+    $eNcf = strtoupper(trim((string) ($_GET['e_ncf'] ?? '')));
+    if (!preg_match('/^E\d{12}$/', $eNcf)) {
+        respondIntegracionEstado(422, [
+            'status' => false,
+            'error' => 'e_ncf invalido: debe ser E + tipo + 10 digitos (ej. E320000000012).',
+        ]);
+        return;
+    }
+
+    $fila = (new IntegracionStoreModel())->getXmlEmitidoByENCF((int) $tenant['id'], (string) $tenant['rnc'], $eNcf);
+    $xml = (string) ($fila['xml_firmado'] ?? '');
+    if ($xml === '') {
+        respondIntegracionEstado(404, ['status' => false, 'error' => 'No hay respaldo de ese e-NCF para este RNC.']);
+        return;
+    }
+
+    require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
+    $trackId = (string) ($fila['track_id'] ?? '');
+    $cuerpo = json_encode([
+        'status' => true,
+        'recurso' => 'xml',
+        'rnc' => $tenant['rnc'],
+        'empresa' => $tenant['nombre'],
+        'e_ncf' => $eNcf,
+        'tipo_ecf' => $fila['tipo_ecf'] ?? null,
+        'track_id' => $trackId !== '' ? $trackId : null,
+        // Un E32 sin track_id fue por RecepcionFC (RFCE): se verifica por codigo.
+        'flujo' => ($trackId === '' && (string) ($fila['tipo_ecf'] ?? '') === '32') ? 'RFCE' : 'ECF',
+        'codigo_seguridad' => ECFEmissionService::codigoSeguridadDeXml($xml),
+        // Cuando se guardo el respaldo (hora del server): dice de que corrida es.
+        'fecha_emision' => $fila['created_at'] ?? null,
+        'archivo' => $eNcf . '.xml',
+        // Tal cual se firmo: cualquier cambio de formato invalida la firma.
+        'xml_firmado' => $xml,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($cuerpo === false) {
+        respondIntegracionEstado(500, ['status' => false, 'error' => 'No se pudo serializar el XML: ' . json_last_error_msg()]);
+        return;
+    }
+    http_response_code(200);
+    echo $cuerpo;
 }

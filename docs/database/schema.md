@@ -66,12 +66,13 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
 ## DB del tenant — Tablas de negocio
 
-Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–028).
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–031).
 
 | Tabla | Dominio |
 |---|---|
 | `clients` | Clientes (+ datos fiscales para e-CF) |
 | `cotizaciones` / `cotizacion_items` / `cotizacion_ajustes` | Cotizaciones; el formato del tenant decide qué columnas usa (migración 026) |
+| `conduces` / `conduce_items` / `conduce_secuencia` | Conduces de mercancía del formato Ferretería; ninguna fila se borra (migración 031) |
 | `facturas` / `factura_items` | Facturas (+ tracking e-CF completo) |
 | `ncf_sequences` | Secuencias NCF / e-NCF como **rangos autorizados** por DGII |
 | `emisor_config` | Config fiscal del emisor (fila única) |
@@ -144,6 +145,34 @@ varchar(30) (clave del formato; Ferretería: `cargos_bancarios`, `manejo_bancari
 `abono`, `retencion_isr`), `monto` decimal(18,2). UNIQUE `uk_cotizacion_ajuste (cotizacion_id,
 concepto)`; solo se guardan los montos distintos de cero. Detalle:
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
+
+### `conduces` / `conduce_items` / `conduce_secuencia` (031)
+El conduce de mercancía del formato Ferretería: la nota de entrega que sale de una
+cotización y no imprime precios. **Ninguna fila se borra:** Eliminar pone
+`conduces.activo = 0`, y editar pone `activo = 0` a las líneas anteriores e inserta las
+nuevas. Por eso un número `CON-…` nunca se vuelve a usar. Las tablas de cotizaciones no
+cambian.
+
+`conduces`: `id`, `numero` (int unsigned, UNIQUE `uk_conduces_numero`: consecutivo
+`CON-000001`), `code` varchar(20), `date` datetime (índice `idx_conduces_date`),
+`cotizacion_id` (mismo tipo que `cotizaciones.id`; FK `conduces_cotizacion_fk` `ON DELETE SET
+NULL`, índice `idx_conduces_cotizacion`; `NULL` = la cotización se eliminó), `client_id`
+(nullable, sin FK), `client_name` varchar(100) (nombre guardado, por si el cliente se borra),
+`user_id` (referencia a `master.users.id`, sin FK cross-DB), `activo` tinyint(1) default 1
+(índice `idx_conduces_activo`; 0 = eliminado), `created_at`, `updated_at`.
+
+`conduce_items`: `id`, `conduce_id` (FK `conduce_items_conduce_fk` a `conduces` `ON DELETE
+RESTRICT`), `product_id` (mismo tipo que `products.id`; FK `conduce_items_product_fk` `ON
+DELETE SET NULL`, índice `idx_conduce_items_product`; `NULL` = línea libre), `description`
+text, `quantity` decimal(12,3), `unidad_medida` varchar(10) default `'43'`, `amount`
+decimal(18,4) (precio interno sin ITBIS, solo para Facturar: el conduce nunca lo imprime),
+`indicador_facturacion`, `indicador_bien_servicio`, `activo` tinyint(1) default 1 (0 = línea
+reemplazada por una edición). Índice `idx_conduce_items_conduce (conduce_id, activo)`.
+
+`conduce_secuencia`: una sola fila (`id` = 1) con `ultimo` int unsigned, el último número
+dado (la 031 y el snapshot la siembran con `(1, 0)`). Crear un conduce la bloquea
+(`SELECT … FOR UPDATE`) y toma `GREATEST(ultimo, MAX(numero)) + 1`; el UNIQUE de `numero`
+es la red de seguridad.
 
 ### `products` (migración 012)
 Catálogo de productos/servicios del tenant: `id`, `nombre`, `descripcion`, `precio`,
@@ -294,14 +323,16 @@ Detalle del módulo: [../modules/gastos.md](../modules/gastos.md).
 ## Relaciones (DB del tenant)
 
 ```
-clients      1───* cotizaciones / facturas        (client_id, nullable)
+clients      1───* cotizaciones / facturas / conduces  (client_id, nullable)
 cotizaciones 1───* cotizacion_items               (FK CASCADE)
 cotizaciones 1───* cotizacion_ajustes             (FK CASCADE, 026)
+cotizaciones 1───* conduces                       (cotizacion_id, FK SET NULL, 031)
+conduces     1───* conduce_items                  (FK RESTRICT, 031: nunca se borran)
 facturas     1───* factura_items                  (FK CASCADE)
 facturas     1───* aprobaciones_comerciales        (factura_id, soft link por e_ncf)
 gastos       1───* gasto_items                     (FK CASCADE)
-products     1───* cotizacion_items / factura_items / gasto_items  (product_id, SET NULL)
-ncf_sequences / emisor_config / ecf_recibidos / proveedores — standalone
+products     1───* cotizacion_items / factura_items / gasto_items / conduce_items  (product_id, SET NULL)
+ncf_sequences / emisor_config / ecf_recibidos / proveedores / conduce_secuencia — standalone
 ```
 
 En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado por `tenant_id`
@@ -313,9 +344,9 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 
 | Artefacto | Para qué |
 |---|---|
-| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–028). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–031). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–030 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–031 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 

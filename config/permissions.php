@@ -91,6 +91,12 @@ return [
         // conecta al fallback del .env en vez de a la DB del tenant.
         'inventario'               => 'products',
         'cotizaciones'             => 'cotizaciones',
+        // Conduces de mercancia (Ferreteria): salen de una cotizacion y viven
+        // bajo su permiso, sin modulo/seed RBAC nuevos (spec conduces 4.1). Sin
+        // esta entrada la ruta quedaria sin RBAC: PermissionGate solo anotaria
+        // "ruta sin mapeo RBAC" en el error_log y cualquier rol con un token
+        // valido podria usar los conduces, tuviera o no el modulo cotizaciones.
+        'conduces'                 => 'cotizaciones',
         'facturas'                 => 'facturas',
         'facturas-simples'         => 'facturas-simples',
         'gastos'                   => 'gastos',

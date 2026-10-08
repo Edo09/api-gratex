@@ -145,6 +145,25 @@ de `emisor_config`, y la `direccion` en dos líneas como máximo: el `UPDATE` de
 propio y no debe cotizar con el de Gratex, quita el módulo `cotizaciones` de sus roles.
 Cómo se agrega un formato: [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
 
+**Conduces:** con `ferreteria` el tenant también tiene los conduces de mercancía (menú
+Conduces, `/api/conduces`, bajo el mismo módulo `cotizaciones`). Sus tablas (`conduces`,
+`conduce_items` y `conduce_secuencia`) vienen en el snapshot que aplica el onboarding; en una
+DB de tenant que ya existía hay que correr antes la migración 031
+(`db/migrations/031_conduces.sql`). El orden: `tools/verificar_migraciones_master.sql` en la
+base master y `tools/verificar_migraciones_tenant.sql` en esa DB; `db/master_migrations/012_pos.sql`
+en la base master (una sola vez para todos los tenants, antes del código del POS, que viaja en
+este mismo despliegue) donde su fila diga `FALTA`; en la DB del tenant, la 027, la 028, la 029
+(`029_precios_4_decimales.sql`) y la 030 (`030_pos.sql`, el POS) donde digan `FALTA`; la 031; los
+verificadores otra vez, con la 012 del master y la 027 a la 031 del tenant en `APLICADA`; y solo
+entonces desplegar `api-gratex` y después `fiscalo` (la lista completa, con el respaldo y las
+pruebas de humo, está en
+[../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#despliegue-de-los-conduces)).
+La 030 se corre en todas las DBs de tenant aunque su cabecera solo la pide donde se vaya a usar el
+POS: es inofensiva donde no (solo agrega tablas y columnas), deja el verificador entero en
+`APLICADA` y los esquemas iguales, y es obligatoria donde sí se use.
+Con `gratex` no hay conduces: el menú no sale y la API responde `422`. Detalle:
+[../api/conduces.md](../api/conduces.md).
+
 ---
 
 ## Fase 5 — Verificar
@@ -163,6 +182,19 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
    Crear una cotización de prueba, abrir su PDF (logo, datos y pie del tenant; con un
    formato propio, sin la cuenta bancaria de Gratex) y borrarla. Pasos listos en
    `tests/test_cotizaciones_ferreteria.http`.
+5. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, la prueba completa, que
+   **gasta `CON-000001`** (decisión del 2026-10-08: el primer conduce real será `CON-000002`; el
+   de prueba queda con `activo = 0` y su número no se reusa). En este orden:
+   1. crear un conduce desde esa cotización, con una línea libre sin precio;
+   2. editarlo sin quitar esa línea;
+   3. abrir su PDF (`CONDUCE DE MERCANCÍA`, sin precios);
+   4. Facturar > Factura electrónica (e-CF) desde la lista de Conduces: con la línea en precio 0,
+      Emitir e-CF (y Vista previa) tiene que bloquearse («Escribe el precio: en el conduce esta
+      línea no tenía.»); no escribir el precio ni emitir;
+   5. eliminarlo desde la pantalla del conduce (deja de salir en la lista).
+
+   La comprobación de solo la vista previa existe y no gasta número, pero no ejercita el
+   bloqueo del precio 0. Pasos listos en `tests/test_conduces.http` (sección Producción).
 
 ---
 
@@ -205,6 +237,8 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | Clientes de prueba DGII duplicados | El schema se aplicó dos veces sobre la misma DB | `DELETE FROM clients WHERE rnc IN ('131880681','533445861');` y dejar una corrida limpia |
 | La cotización sale con la cuenta bancaria y los textos de Gratex | El tenant sigue en `cotizacion_formato = 'gratex'` (el default) | Activar su formato (Fase 4) o quitar el módulo `cotizaciones` de sus roles |
 | Al guardar una cotización: "La pantalla de cotizaciones está desactualizada…" (`409`) | Se cambió `cotizacion_formato` con la pantalla abierta, o el navegador tiene el front de antes | Recargar la página |
+| `Los conduces no están disponibles para tu empresa.` (`422`) | El tenant no está en `cotizacion_formato = 'ferreteria'`: los conduces son solo de ese formato | Si el cliente es Ferretería, activar su formato (Fase 4); si no, es lo esperado (recargar el front: el menú Conduces no debe salir) |
+| Conduces: `500` al listar o guardar, y en el log `[conduces] … Table '….conduces' doesn't exist` | La DB del tenant no tiene la migración 031 | Correr `db/migrations/031_conduces.sql` en esa DB y revisar su fila final (`todo_ok` = `SI`) |
 
 ---
 
@@ -218,4 +252,5 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | Certificado | `<CERT_DIR>/<rnc>/cert.p12` + `tenants.cert_path` |
 | Logo | `logos/<tenant_id>.<ext>` + `tenants.logo_path` |
 | Formato de cotización | `tenants.cotizacion_formato` (master; `gratex` por defecto) |
+| Conduces (solo `ferreteria`) | `conduces` / `conduce_items` / `conduce_secuencia` (DB del tenant, migración 031) |
 | Secuencias e-NCF | `ncf_sequences` (DB del tenant), por ambiente |

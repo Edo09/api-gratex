@@ -4,7 +4,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
   `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
-  migraciones ya incluidas, hasta la 030). Las migraciones sueltas activas (012–030)
+  migraciones ya incluidas, hasta la 031). Las migraciones sueltas activas (012–031)
   son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
@@ -17,15 +17,17 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027 y 028; en el master, 008, 010 y 011).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030 y 031; en el master, 008, 010 y 011).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
   migración que dependa de la base del tenant la fija en la PRIMERA sentencia,
   `SET @db := DATABASE();`, nombra todo con `@db` (`TABLE_SCHEMA = @db`,
   `` `', @db, '`.tabla `` en el SQL dinámico) y deja el `SELECT` de resultado
-  para el final. Ver 028.
-- Desde la 029/030 (y la master 012) la segunda sentencia es una **guardia**: si
+  para el final. Ver 028 y 031 (la 031 también nombra con `@db` las tablas de
+  sus `REFERENCES`, y lee con SQL armado la fila que muestra al final: una
+  tabla que quizá no se creó no se puede nombrar en el `SELECT` final).
+- Desde la 029/030/031 (y la master 012) la segunda sentencia es una **guardia**: si
   `@db` es `information_schema` u otra base de sistema, o no tiene la tabla que
   la migracion espera, falla con `#1049 Unknown database 'ALTO_elige_la_base_...'`
   o `#1146 Table '<base>.<tabla>' doesn't exist` ANTES de tocar nada. Paso el

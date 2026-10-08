@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..030  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..031  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -196,6 +196,65 @@ CREATE TABLE IF NOT EXISTS cotizacion_ajustes (
   UNIQUE KEY uk_cotizacion_ajuste (cotizacion_id, concepto),
   CONSTRAINT cotizacion_ajustes_cot_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 2e) Conduces de mercancia (formato ferreteria). Van despues de cotizaciones
+--     y del catalogo: conduces.cotizacion_id es FK a cotizaciones y
+--     conduce_items.product_id es FK a products. Ninguna fila se borra:
+--     Eliminar pone conduces.activo = 0 y editar pone activo = 0 a las lineas
+--     anteriores (por eso conduce_items -> conduces es ON DELETE RESTRICT).
+--     conduce_secuencia guarda el ultimo numero dado (CON-000001): un numero
+--     nunca se vuelve a usar. Ver db/migrations/031_conduces.sql.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS conduces (
+  id             INT(11)       NOT NULL AUTO_INCREMENT,
+  numero         INT UNSIGNED  NOT NULL,
+  code           VARCHAR(20)   NOT NULL COMMENT 'CON-000001',
+  date           DATETIME      NOT NULL,
+  cotizacion_id  INT(11)       NULL COMMENT 'Cotizacion de origen; NULL si se elimino la cotizacion',
+  client_id      INT(11)       NULL,
+  client_name    VARCHAR(100)  NULL COMMENT 'Nombre guardado (el cliente se puede borrar)',
+  user_id        INT(11)       NULL COMMENT 'master users.id (sin FK cross-DB)',
+  activo         TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = eliminado (nunca se borra la fila)',
+  created_at     DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at     DATETIME      NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_conduces_numero (numero),
+  KEY idx_conduces_cotizacion (cotizacion_id),
+  KEY idx_conduces_date (date),
+  KEY idx_conduces_activo (activo),
+  CONSTRAINT conduces_cotizacion_fk FOREIGN KEY (cotizacion_id) REFERENCES cotizaciones (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Lineas del conduce. amount y los dos indicadores son internos (para
+-- Facturar); el conduce nunca los imprime.
+CREATE TABLE IF NOT EXISTS conduce_items (
+  id                      INT(11)       NOT NULL AUTO_INCREMENT,
+  conduce_id              INT(11)       NOT NULL,
+  product_id              INT(11)       NULL COMMENT 'NULL = linea libre',
+  description             TEXT          NOT NULL,
+  quantity                DECIMAL(12,3) NOT NULL DEFAULT 1.000,
+  unidad_medida           VARCHAR(10)   NOT NULL DEFAULT '43',
+  amount                  DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT 'Precio interno (sin ITBIS) para facturar; nunca se imprime',
+  indicador_facturacion   TINYINT       NOT NULL DEFAULT 1,
+  indicador_bien_servicio TINYINT       NOT NULL DEFAULT 1,
+  activo                  TINYINT(1)    NOT NULL DEFAULT 1 COMMENT '0 = linea reemplazada por una edicion',
+  PRIMARY KEY (id),
+  KEY idx_conduce_items_conduce (conduce_id, activo),
+  KEY idx_conduce_items_product (product_id),
+  CONSTRAINT conduce_items_conduce_fk FOREIGN KEY (conduce_id) REFERENCES conduces (id) ON DELETE RESTRICT,
+  CONSTRAINT conduce_items_product_fk FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Una sola fila (id = 1) con el ultimo numero dado; conduceModel la bloquea
+-- (SELECT ... FOR UPDATE) al crear un conduce.
+CREATE TABLE IF NOT EXISTS conduce_secuencia (
+  id      TINYINT       NOT NULL COMMENT 'Siempre 1: una sola fila',
+  ultimo  INT UNSIGNED  NOT NULL DEFAULT 0 COMMENT 'Ultimo numero de conduce asignado',
+  PRIMARY KEY (id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO conduce_secuencia (id, ultimo) VALUES (1, 0);
 
 -- ----------------------------------------------------------------------------
 -- 3) Facturas (con tracking e-CF, RFCE, secuencia y notas E33/E34).

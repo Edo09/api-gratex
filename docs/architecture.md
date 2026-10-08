@@ -118,7 +118,7 @@ Referencia de payloads de la API: [api/facturas.md](api/facturas.md).
   `loginUser()`, `saveIntegrationEcf()`.
 - **Esquemas:** `db/tenant_schema.sql` (negocio), `db/master_schema.sql` (routing/auth).
   Detalle de tablas: [database/schema.md](database/schema.md).
-- **Migraciones:** `db/migrations/` (tenant, activas 012–028; 001–011 en `deprecated/`),
+- **Migraciones:** `db/migrations/` (tenant, activas 012–031; 001–011 en `deprecated/`),
   `db/master_migrations/` (master). Ver [../db/migrations/README.md](../db/migrations/README.md).
 
 ---
