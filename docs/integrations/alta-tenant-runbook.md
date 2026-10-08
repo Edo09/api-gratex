@@ -189,9 +189,9 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
    2. editarlo sin quitar esa línea;
    3. abrir su PDF (`CONDUCE DE MERCANCÍA`, sin precios);
    4. Facturar > Factura electrónica (e-CF) desde la lista de Conduces: con la línea en precio 0,
-      Emitir (y Vista previa) tiene que bloquearse («Escribe el precio: en el conduce esta línea
-      no tenía.»); no escribir el precio ni emitir;
-   5. eliminarlo (deja de salir en la lista).
+      Emitir e-CF (y Vista previa) tiene que bloquearse («Escribe el precio: en el conduce esta
+      línea no tenía.»); no escribir el precio ni emitir;
+   5. eliminarlo desde la pantalla del conduce (deja de salir en la lista).
 
    La comprobación de solo la vista previa existe y no gasta número, pero no ejercita el
    bloqueo del precio 0. Pasos listos en `tests/test_conduces.http` (sección Producción).

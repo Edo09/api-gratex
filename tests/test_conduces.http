@@ -929,10 +929,11 @@ X-API-KEY: {{tokenFerreteria}}
 ###      quitaria), o desde la pantalla del conduce. Repetir C3.
 ###   3. PDF: C11 (o el boton PDF de la lista): CONDUCE DE MERCANCÍA, sin precios.
 ###   4. Facturar e-CF desde el front (no hay bloque para esto): Conduces > Facturar > Factura electronica (e-CF).
-###      La linea sin precio llega en 0: Emitir (y Vista previa) tiene que quedar bloqueado, con "Escribe el
+###      La linea sin precio llega en 0: Emitir e-CF (y Vista previa) tiene que quedar bloqueado, con "Escribe el
 ###      precio: en el conduce esta linea no tenia." bajo la linea. No escribir el precio, no emitir, salir sin
 ###      guardar (riesgo de MontoItem 0 en la DGII).
-###   5. Eliminar: D1 con el id de ese conduce (ponerlo en @conduce2), o Eliminar en la lista; C4 ya no lo lista.
+###   5. Eliminar: D1 con el id de ese conduce (ponerlo en @conduce2), o Eliminar en la pantalla del conduce;
+###      C4 ya no lo lista.
 ###   La comprobacion de solo la vista previa (C9) existe y no gasta numero, pero no ejercita el bloqueo del precio 0.
 ###   Gratex: G0, G1 y el bloque G de tests/test_cotizaciones_ferreteria.http; sin menu Conduces.
 ### Nunca en produccion: M10 (cinco conduces de prueba), D8 y el bloque Q. (M15 no se corre en ningun

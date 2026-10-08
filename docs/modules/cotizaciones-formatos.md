@@ -348,12 +348,12 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
       la pantalla del conduce);
    3. abrir su PDF (bloque C11, o el botón PDF de la lista): `CONDUCE DE MERCANCÍA`, sin precios;
    4. Facturar > Factura electrónica (e-CF) desde la lista de Conduces, con esa línea en precio
-      0: Emitir (y Vista previa) tiene que quedar bloqueado, con «Escribe el precio: en el
+      0: Emitir e-CF (y Vista previa) tiene que quedar bloqueado, con «Escribe el precio: en el
       conduce esta línea no tenía.» bajo la línea. No escribir el precio, no emitir y salir sin
       guardar (es la prueba del riesgo de `MontoItem` 0 ante la DGII, y se hace en la pantalla,
       no en el `.http`);
-   5. eliminarlo (bloque D1 con el id de ese conduce, o Eliminar en la lista): queda con
-      `activo = 0` y deja de salir en la lista.
+   5. eliminarlo (bloque D1 con el id de ese conduce, o Eliminar en la pantalla del conduce):
+      queda con `activo = 0` y deja de salir en la lista.
 
    Como Gratex: nada cambió y no hay menú Conduces. La comprobación de solo la vista previa
    (bloque C9) sigue existiendo y no gasta número, pero no ejercita el bloqueo del precio 0.
