@@ -407,6 +407,295 @@ $sinItemsFx = $filaConduceFx;
 unset($sinItemsFx['items']);
 $chk('sin items: []', FerreteriaConduce::datosPdf($sinItemsFx, $nombresUnidadFx, null)['conduce']['items'] === []);
 
+// ===========================================================================
+// T4 — PDF del conduce (FerreteriaCotizacionPdf con documento => 'conduce')
+// ===========================================================================
+// Mismo metodo que la seccion T5 de tools/test_cotizacion_ferreteria.php: FPDF
+// comprime cada pagina (FlateDecode) y el renderizador no tiene modo de
+// prueba, asi que se inflan los streams con gzuncompress y se busca el texto
+// ahi: se prueba el mismo PDF que recibe el usuario. Con --pdf ademas escribe
+// muestras en tools/out/ para mirarlas a ojo; --grid (implica --pdf) les
+// superpone la rejilla de 10 mm.
+
+require_once __DIR__ . '/../src/Utils/Cotizacion/FerreteriaCotizacionPdf.php';
+
+echo "\n== T4: PDF del conduce (FerreteriaCotizacionPdf) ==\n";
+
+$t4Args = array_slice($argv ?? [], 1);
+$t4Grilla = in_array('--grid', $t4Args, true);
+$t4Escribir = $t4Grilla || in_array('--pdf', $t4Args, true);
+
+// Emisor, cliente y lineas: los del fixture de la cotizacion de Ferreteria.
+$t4Fx = json_decode((string) file_get_contents(__DIR__ . '/fixtures/cotizacion_ferreteria.json'), true);
+$t4Casos = array_column($t4Fx['casos'] ?? [], null, 'id');
+$t4Logo = __DIR__ . '/fixtures/ferreteria_logo.jpeg';
+$chk('fixture: cotizacion_ferreteria.json (pintura, largo_60) y ferreteria_logo.jpeg',
+    isset($t4Casos['pintura'], $t4Casos['largo_60'], $t4Fx['emisor']) && is_file($t4Logo));
+
+// Paginas = objetos "/Type /Page"; los N primeros streams son su contenido
+// (despues vienen los recursos, como el logo).
+$t4ContarPaginas = static fn(string $bytes): int => (int) preg_match_all('#/Type /Page\b#', $bytes);
+$t4Paginas = static function (string $bytes) use ($t4ContarPaginas): array {
+    preg_match_all('/stream\n(.*?)\nendstream/s', $bytes, $m);
+    $paginas = [];
+    foreach (array_slice($m[1], 0, $t4ContarPaginas($bytes)) as $s) {
+        $plano = @gzuncompress($s);
+        $paginas[] = $plano === false ? $s : $plano;
+    }
+    return $paginas;
+};
+$t4Iso = static fn(string $s): string => mb_convert_encoding($s, 'ISO-8859-1', 'UTF-8');
+// Rect de FPDF: "x y w h re S" en puntos (mm * 72 / 25.4), con h negativo.
+$t4Celda = static fn(float $w, float $h): string => sprintf('%.2F %.2F re S', $w * 72 / 25.4, -$h * 72 / 25.4);
+// X e Y (puntos) del primer texto que empieza con $inicio: "BT x y Td (texto) Tj".
+$t4Pos = static function (string $txt, string $inicio): ?array {
+    return preg_match('/BT ([\d.]+) ([\d.]+) Td \(' . preg_quote($inicio, '/') . '/', $txt, $m) ? [$m[1], (float) $m[2]] : null;
+};
+
+// Lo que FerreteriaConduce::datosPdf le pasa al renderizador (spec 4.4): las
+// lineas con el nombre de su unidad ya resuelto, sin precios ni totales.
+// $unidades se reparte en ciclo sobre las lineas.
+$t4Conduce = static function (array $lineas, ?string $code, ?string $cotizacionCode, array $unidades): array {
+    $items = [];
+    foreach (array_values($lineas) as $i => $l) {
+        $items[] = [
+            'description' => (string) $l['description'],
+            'quantity' => (float) $l['quantity'],
+            'unidad' => $unidades[$i % count($unidades)],
+        ];
+    }
+    return [
+        'documento' => 'conduce',
+        'code' => $code,
+        'date' => '2026-05-14 09:00:00',
+        'cotizacion_code' => $cotizacionCode,
+        'items' => $items,
+    ];
+};
+$t4Render = static function (array $doc, bool $grilla = false) use ($t4Fx, $t4Casos, $t4Logo): string {
+    $pdf = new FerreteriaCotizacionPdf($doc, $t4Fx['emisor'], $t4Casos['pintura']['cliente'], $t4Logo);
+    $pdf->setDebugGrid($grilla);
+    return $pdf->render();
+};
+
+// --- el renderizador sigue puro: la unidad llega por nombre, no lee el catalogo ---
+$t4Codigo = '';
+foreach (token_get_all((string) file_get_contents(__DIR__ . '/../src/Utils/Cotizacion/FerreteriaCotizacionPdf.php')) as $tok) {
+    if (is_array($tok) && in_array($tok[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+        continue;
+    }
+    $t4Codigo .= is_array($tok) ? $tok[1] : $tok;
+}
+$chk('puro: no usa Database, TenantResolver, BrandingResolver, EmisorConfigModel ni unidadMedidaModel',
+    !preg_match('/\b(Database|TenantResolver|BrandingResolver|EmisorConfigModel|unidadMedidaModel)\b/', $t4Codigo));
+$chk('ANCHO_UNIDAD = 30.0 mm',
+    ((new ReflectionClass('FerreteriaCotizacionPdf'))->getConstants()['ANCHO_UNIDAD'] ?? null) === 30.0);
+
+// --- pintura como conduce: 7 lineas, 1 pagina ---
+$t4Doc = $t4Conduce($t4Casos['pintura']['lineas'], 'CON-000007', 'COT-000012', ['Galones']);
+$t4Bytes = $t4Render($t4Doc);
+$t4Txt = implode("\n", $t4Paginas($t4Bytes));
+$chk('conduce: render() devuelve un PDF de 1 pagina', str_starts_with($t4Bytes, '%PDF') && $t4ContarPaginas($t4Bytes) === 1);
+$chk('conduce: titulo CONDUCE DE MERCANCÍA, no el de la cotizacion',
+    str_contains($t4Txt, $t4Iso('(CONDUCE DE MERCANCÍA)')) && !str_contains($t4Txt, $t4Iso('COTIZACIÓN MERCANCÍAS')));
+$t4Orden = array_map(static fn(string $aguja): int|false => strpos($t4Txt, $aguja), [
+    '(MAYO 14/2026.-)', '(CON-000007)', $t4Iso('(Cotización: COT-000012)'), $t4Iso('(NOMBRE O RAZÓN SOCIAL)'),
+    '(HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO)', '(401-51513-1)',
+]);
+$t4Ordenado = $t4Orden;
+sort($t4Ordenado);
+$chk('conduce: bloque izquierdo en orden: fecha larga, CON-000007, Cotización: COT-000012, rotulo, cliente, RNC',
+    !in_array(false, $t4Orden, true) && $t4Orden === $t4Ordenado);
+$chk('conduce: cabecera Cantidad | Unidad | Descripción mercancías',
+    str_contains($t4Txt, '(Cantidad)') && str_contains($t4Txt, '(Unidad)') && str_contains($t4Txt, $t4Iso('(Descripción mercancías)')));
+$chk('conduce: ni Valor Unitario, ni Valor Total, ni Sub-total, ni ITBIS, ni TOTAL, ni RD$',
+    !str_contains($t4Txt, 'Valor Unitario') && !str_contains($t4Txt, 'Valor Total') && !str_contains($t4Txt, 'Sub-total')
+    && !str_contains($t4Txt, 'ITBIS') && !str_contains($t4Txt, 'TOTAL') && !str_contains($t4Txt, 'RD$'));
+$chk('conduce: fila 7.00 | Galones | GALONES DE PINTURA BLNACA SEMIGLOSS',
+    str_contains($t4Txt, '(7.00)') && str_contains($t4Txt, '(Galones)') && str_contains($t4Txt, '(GALONES DE PINTURA BLNACA SEMIGLOSS)'));
+$chk('conduce: celdas de 24 | 30 | 131.9 mm (Cantidad | Unidad | Descripción), ninguna de 29 mm (Valor Unitario)',
+    str_contains($t4Txt, $t4Celda(24, 4.5)) && str_contains($t4Txt, $t4Celda(30, 4.5))
+    && str_contains($t4Txt, $t4Celda(131.9, 4.5)) && !str_contains($t4Txt, $t4Celda(29, 4.5)));
+// Descripcion empieza en 15 (margen) + 24 (Cantidad) + 30 (Unidad) + 1 (cMargin) = 70 mm.
+$t4PosDesc = $t4Pos($t4Txt, 'GALONES DE PINTURA');
+$t4PosMarca = $t4Pos($t4Txt, '***');
+$chk('conduce: descripciones alineadas a la izquierda en x = 70 mm',
+    ($t4PosDesc[0] ?? null) === sprintf('%.2F', 70 * 72 / 25.4));
+$chk('conduce: la marca "No hay más productos" va en la columna Descripción (misma x que las descripciones)',
+    $t4PosMarca !== null && $t4PosMarca[0] === ($t4PosDesc[0] ?? null)
+    && str_contains($t4Txt, $t4Iso('No hay más productos debajo de la línea')));
+// Sin filas de totales, entre la marca y "Recibido por" quedan la fila de la
+// marca (texto a 3.31 mm de su borde), ESPACIO_TOTALES 1.5 y ESPACIO_RECIBIDO
+// 6: el texto de "Recibido por" cae 12.75 mm debajo del de la marca.
+$t4PosRecibido = $t4Pos($t4Txt, 'Recibido por:');
+$t4Hueco = ($t4PosMarca !== null && $t4PosRecibido !== null) ? ($t4PosMarca[1] - $t4PosRecibido[1]) * 25.4 / 72 : null;
+$chk('conduce: "Recibido por" 12.75 mm bajo la marca (cierre sin filas de totales; dio '
+    . ($t4Hueco === null ? '-' : sprintf('%.2f', $t4Hueco)) . ' mm)',
+    $t4Hueco !== null && abs($t4Hueco - 12.75) < 0.02);
+$chk('conduce: Recibido por + pie (razon social, correo mailto, telefono)',
+    str_contains($t4Txt, '(Recibido por:)') && str_contains($t4Txt, '(FERREHERRAMIENTAS VENTURA, SRL)')
+    && str_contains($t4Bytes, '/URI (mailto:yaironventura0201@hotmail.com)') && str_contains($t4Txt, $t4Iso('(Teléfono 829-898-7798)')));
+$chk('conduce: una sola pagina no lleva "Página X de Y"', !str_contains($t4Txt, $t4Iso('Página')));
+
+// Aunque un item traiga su precio interno, el conduce no lo imprime: la pagina es la misma.
+$t4ConPrecio = $t4Doc;
+$t4ConPrecio['items'] = array_map(static fn(array $it, array $l): array => $it + ['amount' => (float) $l['amount']],
+    $t4Doc['items'], $t4Casos['pintura']['lineas']);
+$t4TxtPrecio = implode("\n", $t4Paginas($t4Render($t4ConPrecio)));
+$chk('conduce: un item con amount no imprime precio (ni 2,000.00 ni 14,000.00; misma pagina)',
+    !str_contains($t4TxtPrecio, '(2,000.00)') && !str_contains($t4TxtPrecio, '(14,000.00)') && $t4TxtPrecio === $t4Txt);
+
+// --- vista previa y cotizacion de origen borrada ---
+$t4TxtPrevia = implode("\n", $t4Paginas($t4Render($t4Conduce($t4Casos['pintura']['lineas'], null, 'COT-000012', ['Galones']))));
+$chk('conduce sin numero (vista previa): VISTA PREVIA y ningun CON-',
+    str_contains($t4TxtPrevia, '(VISTA PREVIA)') && !str_contains($t4TxtPrevia, 'CON-')
+    && str_contains($t4TxtPrevia, $t4Iso('(Cotización: COT-000012)')));
+$t4TxtSinCot = implode("\n", $t4Paginas($t4Render($t4Conduce($t4Casos['pintura']['lineas'], 'CON-000007', null, ['Galones']))));
+$t4TxtCotBlanco = implode("\n", $t4Paginas($t4Render($t4Conduce($t4Casos['pintura']['lineas'], 'CON-000007', '  ', ['Galones']))));
+$chk('cotizacion_code null o en blanco (cotizacion borrada): sin linea "Cotización:", el resto igual',
+    str_contains($t4TxtSinCot, $t4Iso('(CONDUCE DE MERCANCÍA)')) && str_contains($t4TxtSinCot, '(CON-000007)')
+    && !str_contains($t4TxtSinCot, $t4Iso('Cotización')) && $t4TxtCotBlanco === $t4TxtSinCot);
+
+// --- Unidad envuelve: "Millones de Unidades Térmicas" (id 29 del catalogo DGII) no cabe en 30 mm ---
+$t4Largas = $t4Conduce(array_slice($t4Casos['pintura']['lineas'], 0, 2), 'CON-000008', 'COT-000012',
+    ['Millones de Unidades Térmicas', 'Metro']);
+$t4TxtLargas = implode("\n", $t4Paginas($t4Render($t4Largas)));
+$chk('Unidad larga: se parte en renglones dentro de su columna ("Millones de" / "Unidades Térmicas")',
+    !str_contains($t4TxtLargas, $t4Iso('(Millones de Unidades Térmicas)'))
+    && str_contains($t4TxtLargas, '(Millones de)') && str_contains($t4TxtLargas, $t4Iso('(Unidades Térmicas)')));
+$chk('Unidad larga: su fila crece a 2 renglones (9 mm) en las tres celdas',
+    str_contains($t4TxtLargas, $t4Celda(24, 9)) && str_contains($t4TxtLargas, $t4Celda(30, 9)) && str_contains($t4TxtLargas, $t4Celda(131.9, 9)));
+$chk('Unidad corta (Metro): su fila sigue de 1 renglon (4.5 mm)',
+    str_contains($t4TxtLargas, '(Metro)') && str_contains($t4TxtLargas, $t4Celda(30, 4.5)));
+
+// --- 60 lineas: saltos de pagina, cabecera repetida, "Página X de Y" ---
+// Unidades de 1 y 2 renglones mezcladas, para que el alto de fila varie.
+$t4Largo = $t4Casos['largo_60']['lineas'];
+$t4Unidades = ['Unidad', 'Metro Cuadrado', 'Millones de Unidades Térmicas'];
+$t4Bytes60 = $t4Render($t4Conduce($t4Largo, 'CON-000060', 'COT-000060', $t4Unidades));
+$t4N60 = $t4ContarPaginas($t4Bytes60);
+$t4Pags60 = $t4Paginas($t4Bytes60);
+$chk("60 lineas: mas de una pagina ({$t4N60}), un stream por pagina", $t4N60 > 1 && count($t4Pags60) === $t4N60);
+$t4Numeradas = true;
+foreach ($t4Pags60 as $t4k => $t4p) {
+    $t4Numeradas = $t4Numeradas && str_contains($t4p, $t4Iso('(Página ' . ($t4k + 1) . ' de ' . $t4N60 . ')'));
+}
+$chk("60 lineas: cada pagina dice \"Página X de {$t4N60}\"", $t4Numeradas);
+$chk('60 lineas: las 60 filas impresas, sin precios',
+    str_contains($t4Pags60[0], 'NUMERO 1 CON') && str_contains(implode("\n", $t4Pags60), 'NUMERO 60 CON')
+    && !str_contains(implode("\n", $t4Pags60), 'Valor'));
+
+// Las reglas de corte para cada largo de 1 a 60 lineas (como la cotizacion,
+// pero con el cierre del conduce, mas corto: sin filas de totales).
+$t4MarcaSuelta = [];
+$t4CierrePartido = [];
+$t4CabeceraMal = [];
+$t4CierreSolo = 0;
+for ($t4n = 1; $t4n <= count($t4Largo); $t4n++) {
+    $t4Pags = $t4Paginas($t4Render($t4Conduce(array_slice($t4Largo, 0, $t4n), 'CON-000060', 'COT-000060', $t4Unidades)));
+    $t4Ultima = count($t4Pags) - 1;
+    $t4Donde = static fn(string $aguja): array => array_keys(array_filter($t4Pags, static fn(string $p): bool => str_contains($p, $aguja)));
+    // 1) la marca en la misma pagina que la ultima fila
+    $t4PagFila = $t4Donde('NUMERO ' . $t4n . ' CON');
+    if ($t4PagFila === [] || $t4PagFila !== $t4Donde('No hay m')) {
+        $t4MarcaSuelta[] = $t4n;
+    }
+    // 2) "Recibido por" + pie, todos en la ultima pagina (con logo, la razon social solo sale en el pie)
+    foreach (['(Recibido por:)', '(FERREHERRAMIENTAS VENTURA, SRL)', $t4Iso('(Teléfono 829-898-7798)')] as $t4Aguja) {
+        if ($t4Donde($t4Aguja) !== [$t4Ultima]) {
+            $t4CierrePartido[] = $t4n;
+            break;
+        }
+    }
+    // 3) cabecera de tabla en cada pagina con filas, y en ninguna otra
+    foreach ($t4Pags as $t4k => $t4p) {
+        if (str_contains($t4p, 'ARTICULO DE PRUEBA') !== str_contains($t4p, $t4Iso('(Descripción mercancías)'))) {
+            $t4CabeceraMal[] = $t4n . '/p' . ($t4k + 1);
+        }
+    }
+    if (!str_contains($t4Pags[$t4Ultima], 'ARTICULO DE PRUEBA')) {
+        $t4CierreSolo++;
+    }
+}
+$chk('conduce, cortes 1..60: la marca siempre en la pagina de la ultima fila'
+    . ($t4MarcaSuelta ? ' (fallan n=' . implode(',', $t4MarcaSuelta) . ')' : ''), $t4MarcaSuelta === []);
+$chk('conduce, cortes 1..60: "Recibido por" + pie nunca se parten y van en la ultima pagina'
+    . ($t4CierrePartido ? ' (fallan n=' . implode(',', $t4CierrePartido) . ')' : ''), $t4CierrePartido === []);
+$chk('conduce, cortes 1..60: cabecera de tabla solo en paginas con filas'
+    . ($t4CabeceraMal ? ' (fallan ' . implode(',', $t4CabeceraMal) . ')' : ''), $t4CabeceraMal === []);
+$chk("conduce, cortes 1..60: algun largo empuja el cierre solo a una pagina nueva ({$t4CierreSolo} casos)", $t4CierreSolo > 0);
+
+// --- la cotizacion no cambia (spec 4.4, modo cotizacion) ---
+// sha1 del contenido de las paginas (streams inflados) de cada caso del
+// fixture, con su code y el logo, tomado con el renderizador de ANTES del modo
+// conduce (feat/conduces en 6a1e310) y este mismo armado. Si el fixture cambia
+// a proposito, se recalculan con ese commit.
+$t4Huellas = [
+    'pintura' => 'e234b5f28bc6578c4b63b22f8b3e39fead8163e8',
+    'pintura_retencion_abono' => 'bfb56fd8d544c935d93261612fdc7508898fb879',
+    'pintura_mano_obra' => 'b74c8f8f8b62b27953ba56a1e3c905c29ee9aad3',
+    'b150000049' => '4e94f5881e98ba30b65fce39ab6be9aef0f71bfd',
+    'ceramicas' => '5c0eeafcaffa38a41f8cc452973eba44d85b87ea',
+    'redondeo_8475' => '600965d02c6ffefd5d3e042a3e40d782e4584f68',
+    'flotante' => '14b23b288a0ecd85f1e7198b56755ee619688454',
+    'mixto' => '66f26cdfe18144fe5312a9380e18c41d17e4a708',
+    'exento' => '0cc69a49896cda15b776c6e618727d8f77a66e95',
+    'largo_60' => 'ecba6baaf3f69307eed42b9fd8279499c965f021',
+];
+$chk('huellas: una por cada caso del fixture, en su orden', array_keys($t4Huellas) === array_keys($t4Casos));
+// La cotizacion como se la pasa FerreteriaFormato::pdf(): items + totales ya calculados.
+$t4Cotizacion = static function (array $caso, ?string $documento): array {
+    $cot = [
+        'code' => $caso['code'],
+        'date' => $caso['date'],
+        'items' => array_map(static fn(array $l): array => [
+            'description' => (string) $l['description'],
+            'quantity' => (float) $l['quantity'],
+            'amount' => (float) $l['amount'],
+        ], $caso['lineas']),
+        'totales' => FerreteriaFormato::totales(array_map(static fn(array $l): array => [
+            'quantity' => (float) $l['quantity'],
+            'amount' => (float) $l['amount'],
+            'indicador_facturacion' => (int) $l['indicador_facturacion'],
+        ], $caso['lineas']), $caso['ajustes']),
+    ];
+    if ($documento !== null) {
+        $cot['documento'] = $documento;
+    }
+    return $cot;
+};
+// Dos PDF iguales solo difieren en la hora de creacion (Info /CreationDate).
+$t4SinFecha = static fn(string $bytes): string => (string) preg_replace('#/CreationDate \([^)]*\)#', '', $bytes);
+foreach ($t4Casos as $t4Id => $t4Caso) {
+    $t4Sin = (new FerreteriaCotizacionPdf($t4Cotizacion($t4Caso, null), $t4Fx['emisor'], $t4Caso['cliente'], $t4Logo))->render();
+    $t4Con = (new FerreteriaCotizacionPdf($t4Cotizacion($t4Caso, 'cotizacion'), $t4Fx['emisor'], $t4Caso['cliente'], $t4Logo))->render();
+    $chk("cotizacion {$t4Id}: mismas paginas que antes del modo conduce (sha1)",
+        sha1(implode("\n", $t4Paginas($t4Sin))) === ($t4Huellas[$t4Id] ?? ''));
+    $chk("cotizacion {$t4Id}: con documento 'cotizacion' sale el mismo PDF que sin documento",
+        $t4SinFecha($t4Con) === $t4SinFecha($t4Sin));
+}
+
+// --- --pdf [--grid]: muestras para mirarlas a ojo ---
+if ($t4Escribir) {
+    $t4Dir = __DIR__ . '/out';
+    if (!is_dir($t4Dir)) {
+        mkdir($t4Dir, 0775, true);
+    }
+    $t4Salidas = [
+        'pintura' => $t4Doc,
+        'b150000049' => $t4Conduce($t4Casos['b150000049']['lineas'], 'CON-000002', 'COT-000002', ['Unidad']),
+        'unidades_largas' => $t4Largas,
+        'largo_60' => $t4Conduce($t4Largo, 'CON-000060', 'COT-000060', $t4Unidades),
+        'sin_cotizacion' => $t4Conduce($t4Casos['pintura']['lineas'], 'CON-000007', null, ['Galones']),
+        'vista_previa' => $t4Conduce($t4Casos['pintura']['lineas'], null, 'COT-000012', ['Galones']),
+    ];
+    foreach ($t4Salidas as $t4Id => $t4Salida) {
+        $t4Ruta = $t4Dir . '/conduce_ferreteria_' . $t4Id . '.pdf';
+        $chk('--pdf: tools/out/' . basename($t4Ruta) . ($t4Grilla ? ' (con rejilla)' : ''),
+            file_put_contents($t4Ruta, $t4Render($t4Salida, $t4Grilla)) !== false);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Las tareas siguientes agregan sus secciones AQUÍ, encima del resumen.
 // ---------------------------------------------------------------------------
