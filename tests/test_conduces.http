@@ -152,10 +152,9 @@ X-API-KEY: {{tokenFerreteria}}
 ###    cotizaciones -> GET /api/conduces responde 403 "No tienes permiso para hacer esto. Pídeselo a un
 ###    administrador." y audit_logs tiene un ACCESS_DENIED del modulo cotizaciones. Con PERMISSIONS_ENFORCE=false
 ###    responde 200, y el error_log dice "[PermissionGate][SHADOW] denegaria conduces GET (req=cotizaciones, rol sin permiso)".
-### M15 La base no deja borrar (SOLO en una DB de prueba, nunca en produccion):
-###    DELETE FROM conduces WHERE id = <id de C1>;  -> error 1451 (conduce_items_conduce_fk, RESTRICT); nada se borra.
-###    Borrar un producto que use una linea de conduce (DELETE FROM products WHERE id = <id de un producto de
-###    prueba>) deja esa linea con product_id NULL (conduce_items_product_fk, SET NULL) y el conduce sigue igual.
+### M15 La base no deja borrar: la cubre M0 (tools/test_conduces_mysql.php, seccion e, reglas ON DELETE: 1451 por
+###    RESTRICT al borrar un conduce con lineas, y SET NULL al borrar un producto o una cotizacion). No se corre
+###    en un servidor: no hay nada que ejecutar aqui.
 ### M16 PDF largo: un conduce de 30+ lineas (desde el front, Conduce sobre una cotizacion larga; o C1 con 30+
 ###    lineas libres) -> la cabecera de la tabla se repite en cada pagina con filas, la marca "No hay más productos"
 ###    queda en la pagina de la ultima fila, el bloque "Recibido por:" + pie no se parte y cada pagina dice
@@ -874,7 +873,13 @@ X-API-KEY: {{tokenFerreteria}}
 ###   desde el front), D1 sobre ESE conduce y C4 (ya no sale). El conduce de prueba queda con activo = 0 y
 ###   GASTA su numero: el primer conduce real ya no sera CON-000001. Si Ferreteria quiere empezar en
 ###   CON-000001, hacer solo C9 (la vista previa no gasta numero) y C4.
+###   Limite de esa alternativa: sin ningun conduce no hay fila sobre la que pulsar Facturar, asi que ni el
+###   bloqueo de la linea sin precio (riesgo de MontoItem 0 en la DGII) ni crear, editar y eliminar se
+###   ejercitan solo con la vista previa; hay que elegir entre gastar CON-000001 en la prueba (el numero nunca
+###   se reusa) o apoyarse en las comprobaciones de antes de produccion (el navegador contra el mock y los
+###   bloques C y D de este archivo en un stack de prueba), y eso lo decide el dueño.
 ###   Facturar desde el front sin emitir: una linea sin precio no deja emitir ni guardar.
 ###   Gratex: G0, G1 y el bloque G de tests/test_cotizaciones_ferreteria.http; sin menu Conduces.
-### Nunca en produccion: M10 (cinco conduces de prueba), M15, D8 y el bloque Q.
+### Nunca en produccion: M10 (cinco conduces de prueba), D8 y el bloque Q. (M15 no se corre en ningun
+### servidor: la cubre M0.)
 ### ============================================================================
