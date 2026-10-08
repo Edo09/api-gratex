@@ -148,7 +148,7 @@ concepto)`; solo se guardan los montos distintos de cero. Detalle:
 
 ### `conduces` / `conduce_items` / `conduce_secuencia` (031)
 El conduce de mercancía del formato Ferretería: la nota de entrega que sale de una
-cotización y no imprime precios. **Ninguna fila se borra:** Eliminar pone
+cotización, o se crea sin ella, y no imprime precios. **Ninguna fila se borra:** Eliminar pone
 `conduces.activo = 0`, y editar pone `activo = 0` a las líneas anteriores e inserta las
 nuevas. Por eso un número `CON-…` nunca se vuelve a usar. Las tablas de cotizaciones no
 cambian.
@@ -156,7 +156,7 @@ cambian.
 `conduces`: `id`, `numero` (int unsigned, UNIQUE `uk_conduces_numero`: consecutivo
 `CON-000001`), `code` varchar(20), `date` datetime (índice `idx_conduces_date`),
 `cotizacion_id` (mismo tipo que `cotizaciones.id`; FK `conduces_cotizacion_fk` `ON DELETE SET
-NULL`, índice `idx_conduces_cotizacion`; `NULL` = la cotización se eliminó), `client_id`
+NULL`, índice `idx_conduces_cotizacion`; `NULL` = sin cotización: se creó sin ella o la cotización se eliminó), `client_id`
 (nullable, sin FK), `client_name` varchar(100) (nombre guardado, por si el cliente se borra),
 `user_id` (referencia a `master.users.id`, sin FK cross-DB), `activo` tinyint(1) default 1
 (índice `idx_conduces_activo`; 0 = eliminado), `created_at`, `updated_at`.

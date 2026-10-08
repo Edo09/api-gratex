@@ -205,17 +205,29 @@ $chk("problemaCantidad recibe la unidad normalizada ('43') y 2 decimales, una ve
     $llamadasCantidad === [[2.0, '43', 2], [1.0, '43', 2]]);
 $chk('la cantidad sale como número exacto (2 y 1)', $igual($cot['items'][0]['quantity'] ?? null, 2) && $igual($cot['items'][1]['quantity'] ?? null, 1));
 
-// --- cotizacion_id: obligatorio al crear, ignorado al editar ---
+// --- cotizacion_id: opcional al crear (ausente o null = conduce sin cotizacion), ignorado al editar ---
 $r = $validarConduce($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }), false);
 $chk('PUT sin cotizacion_id pasa (cotizacion_id null)', ($r['ok'] ?? null) === true && $r['cot']['cotizacion_id'] === null);
 $r = $validarConduce($cuerpoConduce(function (object $b) { $b->cotizacion_id = 99; }), false);
 $chk('PUT con cotizacion_id 99: se ignora (null), un conduce no cambia de origen', ($r['ok'] ?? null) === true && $r['cot']['cotizacion_id'] === null);
+$r = $validarConduce($cuerpoConduce(function (object $b) { $b->cotizacion_id = 'abc'; }), false);
+$chk('PUT con cotizacion_id "abc": tambien se ignora, ni se lee', ($r['ok'] ?? null) === true && $r['cot']['cotizacion_id'] === null);
 $r = $validarConduce($cuerpoConduce(function (object $b) { $b->cotizacion_id = '12'; }));
 $chk('POST con cotizacion_id "12" (texto) = 12', ($r['ok'] ?? null) === true && $r['cot']['cotizacion_id'] === 12);
-$rechazaConduce('sin cotizacion_id', $cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }),
-    'Elige una cotización de Ferretería para crear el conduce.');
-foreach ([0, -4, 'abc', 1.5, null, true] as $malo) {
-    $rechazaConduce('cotizacion_id ' . var_export($malo, true), $cuerpoConduce(function (object $b) use ($malo) { $b->cotizacion_id = $malo; }),
+// Sin cotizacion (2026-10-08): la clave ausente o null crea un conduce sin origen; el resto de cot es el mismo.
+$r = $validarConduce($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }));
+$chk('POST sin la clave cotizacion_id: pasa, cotizacion_id null y cot con las mismas claves, en el mismo orden',
+    ($r['ok'] ?? null) === true && array_key_exists('cotizacion_id', $r['cot']) && $r['cot']['cotizacion_id'] === null
+    && array_keys($r['cot']) === ['date', 'client_id', 'cotizacion_id', 'items']);
+$chk('POST sin cotizacion: el cliente, la fecha y las lineas salen igual que con cotizacion',
+    ['date' => $cot['date'], 'client_id' => $cot['client_id'], 'items' => $cot['items']]
+    === ['date' => $r['cot']['date'] ?? null, 'client_id' => $r['cot']['client_id'] ?? null, 'items' => $r['cot']['items'] ?? null]);
+$r = $validarConduce($cuerpoConduce(function (object $b) { $b->cotizacion_id = null; }));
+$chk('POST con cotizacion_id null (JSON null): pasa, cotizacion_id null',
+    ($r['ok'] ?? null) === true && array_key_exists('cotizacion_id', $r['cot']) && $r['cot']['cotizacion_id'] === null);
+// Lo que viene y no es un entero positivo no es "sin cotizacion": sigue siendo el error de siempre.
+foreach ([0, -1, -4, 'abc', '', '  ', '0', '-3', 1.5, true, false, []] as $malo) {
+    $rechazaConduce('cotizacion_id ' . json_encode($malo), $cuerpoConduce(function (object $b) use ($malo) { $b->cotizacion_id = $malo; }),
         'Elige una cotización de Ferretería para crear el conduce.');
 }
 
@@ -422,8 +434,12 @@ $chk('la descripción se guarda limpia (saltos y tabuladores -> un espacio)', ($
 // --- orden de las reglas de cabecera ---
 $rechazaConduce('ajustes + sin cliente: los ajustes primero', $cuerpoConduce(function (object $b) { $b->ajustes = null; unset($b->client_id); }),
     'Los conduces no llevan cargos ni abonos.');
-$rechazaConduce('sin cotización + sin cliente: la cotización primero', $cuerpoConduce(function (object $b) { unset($b->cotizacion_id, $b->client_id); }),
+$rechazaConduce('cotización mala + sin cliente: la cotización primero', $cuerpoConduce(function (object $b) { $b->cotizacion_id = 0; unset($b->client_id); }),
     'Elige una cotización de Ferretería para crear el conduce.');
+$rechazaConduce('sin cotización + sin cliente: el cliente (la cotización es opcional)', $cuerpoConduce(function (object $b) { unset($b->cotizacion_id, $b->client_id); }),
+    'Elige un cliente para el conduce.');
+$rechazaConduce('sin cotización + sin líneas: las líneas', $cuerpoConduce(function (object $b) { unset($b->cotizacion_id); $b->items = []; }),
+    'Agrega al menos una línea al conduce.');
 $rechazaConduce('sin cliente + fecha mala: el cliente primero', $cuerpoConduce(function (object $b) { unset($b->client_id); $b->date = 'x'; }),
     'Elige un cliente para el conduce.');
 $rechazaConduce('fecha mala + sin líneas: la fecha primero', $cuerpoConduce(function (object $b) { $b->date = 'x'; $b->items = []; }),
@@ -1158,6 +1174,18 @@ $chk('sin fecha => ahora (Y-m-d H:i:s); sin usuario => user_id null',
     preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string) ($cab[':date'] ?? '')) === 1
     && array_key_exists(':user_id', $cab) && $cab[':user_id'] === null);
 
+// Sin cotizacion (2026-10-08): cot trae cotizacion_id null y la cabecera lo guarda como NULL. Un (int) null
+// daria 0, y la FK a cotizaciones(id) lo rechazaria (1452): el conduce sin cotizacion no se podria crear.
+$c = new ConexionFalsaT5();
+$r = $modeloT5($c)->crear(['cotizacion_id' => null] + $cotT5(), 5, 'HOSPITAL DOCENTE');
+$cab = $c->paramsDe('INSERT INTO conduces ')[0] ?? [];
+$chk('crear sin cotizacion: success con el siguiente numero y la cabecera igual, con :cotizacion_id NULL (no 0)',
+    $r === ['success', ['id' => 77, 'code' => 'CON-000001', 'numero' => 1]]
+    && $cab === [':numero' => 1, ':code' => 'CON-000001', ':date' => '2026-10-05 09:30:00', ':cotizacion_id' => null,
+        ':client_id' => 123, ':client_name' => 'HOSPITAL DOCENTE', ':user_id' => 5]);
+$chk('crear sin cotizacion: las lineas se guardan como siempre (2) y 1 commit',
+    count($c->paramsDe('INSERT INTO conduce_items')) === 2 && $c->commits === 1 && $c->rollbacks === 0);
+
 // numero = GREATEST(ultimo, MAX(numero)) + 1, y la secuencia queda en ese numero.
 foreach ([[4, [2], 5], [0, [9], 10], [7, [7], 8], [3, [], 4]] as [$ultimoT5, $hechosT5, $esperadoT5]) {
     $c = new ConexionFalsaT5();
@@ -1452,8 +1480,21 @@ $chk('ok: bien/servicio del catalogo (2) en la linea de producto; la libre conse
 $esperadoT6 = $cotT6;
 $esperadoT6['items'][0]['indicador_bien_servicio'] = 2;
 $chk('ok: el resto de cot queda igual', ($r[1] ?? null) === $esperadoT6);
-$chk('crear sin cotizacion de origen (no existe) => 422 MSG_COTIZACION',
+$chk('crear con una cotizacion de origen que no existe (cotizacion_id 12, origen null) => 422 MSG_COTIZACION',
     FerreteriaConduce::aplicarCatalogo($cotT6, true, null, $clienteT6, $productosT6) === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+// Sin cotizacion (2026-10-08): cot trae cotizacion_id null (lo que validarForma deja, ver arriba) y no hay origen que revisar.
+$cotSinCotT6 = array_merge($cotT6, ['cotizacion_id' => null]);
+$r = FerreteriaConduce::aplicarCatalogo($cotSinCotT6, true, null, $clienteT6, $productosT6);
+$esperadoSinCotT6 = $cotSinCotT6;
+$esperadoSinCotT6['items'][0]['indicador_bien_servicio'] = 2;
+$chk('crear sin cotizacion (cotizacion_id null, origen null): no pide origen, aplica el catalogo y deja el resto de cot igual',
+    ($r[0] ?? '') === 'ok' && ($r[1] ?? null) === $esperadoSinCotT6 && array_key_exists('cotizacion_id', $r[1] ?? []));
+$chk('crear sin cotizacion: el cliente que no existe => 422 MSG_SIN_CLIENTE',
+    FerreteriaConduce::aplicarCatalogo($cotSinCotT6, true, null, null, $productosT6) === ['error', FerreteriaConduce::MSG_SIN_CLIENTE, 422]);
+$chk('crear sin cotizacion: el producto que ya no esta en el catalogo => el texto de la cotizacion, con su linea',
+    FerreteriaConduce::aplicarCatalogo($cotSinCotT6, true, null, $clienteT6, []) === [
+        'error', 'Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.', 422,
+    ]);
 foreach ([null, 'gratex', 'Ferreteria', ''] as $formatoT6) {
     $chk('crear desde una cotizacion con formato ' . var_export($formatoT6, true) . ' => 422 MSG_COTIZACION',
         FerreteriaConduce::aplicarCatalogo($cotT6, true, ['formato' => $formatoT6] + $origenT6, $clienteT6, $productosT6)
@@ -1492,6 +1533,11 @@ $chk('filaPreview sin fila ni fecha: date null (datosPdf pone la de ahora)',
     FerreteriaConduce::filaPreview($sinFechaT6, $clienteT6, null, $origenT6)['date'] === null);
 $chk('filaPreview de un conduce cuya cotizacion se elimino: cotizacion_code null',
     FerreteriaConduce::filaPreview($cotT6, $clienteT6, ['cotizacion_code' => null] + $filaConduceFx, $origenT6)['cotizacion_code'] === null);
+$chk('filaPreview sin fila y sin origen (conduce nuevo sin cotizacion): cotizacion_code null, el resto igual',
+    FerreteriaConduce::filaPreview($cotSinCotT6, $clienteT6, null, null)
+        === array_merge(FerreteriaConduce::filaPreview($cotT6, $clienteT6, null, $origenT6), ['cotizacion_code' => null]));
+$chk('filaPreview sin cotizacion -> datosPdf: cotizacion_code null (el PDF no lleva la linea Cotizacion)',
+    FerreteriaConduce::datosPdf(FerreteriaConduce::filaPreview($cotSinCotT6, $clienteT6, null, null), $nombresUnidadFx, null)['conduce']['cotizacion_code'] === null);
 $datosPreviaT6 = FerreteriaConduce::datosPdf(FerreteriaConduce::filaPreview($cotT6, $clienteT6, null, $origenT6), $nombresUnidadFx, null);
 $chk('filaPreview -> datosPdf: las lineas sin precio y el cliente con razon_social', $datosPreviaT6['conduce']['items'] === [
     ['description' => 'FUNDAS CEMENTO GRIS', 'quantity' => 2.0, 'unidad' => 'Unidad'],
@@ -1696,6 +1742,56 @@ $c->choquesNumero = 2;
 $chk('crear: el error del modelo pasa tal cual (dos choques => 500 MSG_CHOQUE)',
     $conducesT6($c)->crear($cuerpoConduce()) === ['error', FerreteriaConduce::MSG_CHOQUE, 500]);
 
+// --- sin cotizacion (2026-10-08): la clave ausente o null; no se lee ninguna cotizacion ---
+$sinCotizacionT6 = [
+    'sin la clave' => static function (object $b) { unset($b->cotizacion_id); },
+    'con cotizacion_id null' => static function (object $b) { $b->cotizacion_id = null; },
+];
+foreach ($sinCotizacionT6 as $descT6 => $quitarT6) {
+    $c = $conexionT6();
+    $r = $conducesT6($c)->crear($cuerpoConduce($quitarT6));
+    $chk("crear sin cotizacion ({$descT6}): success con el id, el code y el numero del modelo", $r === ['success', ['id' => 77, 'code' => 'CON-000001', 'numero' => 1]]);
+    $cab = $c->paramsDe('INSERT INTO conduces ')[0] ?? [];
+    $chk("crear sin cotizacion ({$descT6}): la cabecera con :cotizacion_id NULL, y el mismo cliente, usuario del token y fecha",
+        array_key_exists(':cotizacion_id', $cab) && $cab[':cotizacion_id'] === null && ($cab[':client_id'] ?? null) === 123
+        && ($cab[':user_id'] ?? null) === 5 && ($cab[':date'] ?? null) === '2026-10-05 09:30:00'
+        && ($cab[':client_name'] ?? null) === 'HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO');
+    $lin = $c->paramsDe('INSERT INTO conduce_items');
+    $chk("crear sin cotizacion ({$descT6}): las lineas con el catalogo aplicado (bien/servicio 2) y la libre con precio 0",
+        count($lin) === 2 && ($lin[0][':indicador_bien_servicio'] ?? null) === 2 && ($lin[1][':amount'] ?? null) === 0.0);
+    $chk("crear sin cotizacion ({$descT6}): no lee cotizaciones; si revisa el cliente y los productos",
+        !$c->huboSql('FROM cotizaciones') && ($c->paramsDe('SELECT * FROM clients')[0] ?? null) === [':id' => 123]
+        && ($c->paramsDe('SELECT id, indicador_bien_servicio FROM products')[0] ?? null) === [55]);
+}
+$c = $conexionT6();
+$c->respuestas['FROM cotizaciones WHERE id = :id'] = [['id' => 12, 'code' => 'ABC123', 'formato' => null]];
+$r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }));
+$chk('crear sin cotizacion funciona aunque la DB tenga cotizaciones de Gratex: no se mira ninguna', ($r[0] ?? '') === 'success' && !$c->huboSql('FROM cotizaciones'));
+foreach ([
+    ['con un cliente que no existe', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM clients WHERE id = :id'] = [], FerreteriaConduce::MSG_SIN_CLIENTE],
+    ['con un producto que ya no esta en el catalogo', static fn(ConexionFalsaT5 $c) => $c->respuestas['FROM products WHERE id IN'] = [],
+        'Línea 1: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.'],
+] as [$descT6, $cambiarT6, $msgT6]) {
+    $c = $conexionT6();
+    $cambiarT6($c);
+    $r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }));
+    $chk("crear sin cotizacion {$descT6} => 422 \"{$msgT6}\", sin guardar ni tocar la secuencia",
+        $r === ['error', $msgT6, 422] && $c->paramsDe('INSERT INTO conduces ') === [] && !$c->huboSql('conduce_secuencia'));
+}
+$c = $conexionT6();
+$r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { unset($b->cotizacion_id, $b->client_id); }));
+$chk('crear sin cotizacion y sin cliente => 422 MSG_SIN_CLIENTE antes de leer la DB (no pide cotizacion)',
+    $r === ['error', FerreteriaConduce::MSG_SIN_CLIENTE, 422] && $c->consultas === []);
+$c = $conexionT6();
+$r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { $b->cotizacion_id = 0; }));
+$chk('crear con cotizacion_id 0 => 422 MSG_COTIZACION antes de leer la DB (no se vuelve "sin cotizacion")',
+    $r === ['error', FerreteriaConduce::MSG_COTIZACION, 422] && $c->consultas === []);
+$c = $conexionT6();
+$c->fallar['FROM clients'] = ConexionFalsaT5::error(2006, 'MySQL server has gone away');
+$r = $conducesT6($c)->crear($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }));
+$chk('crear sin cotizacion con la DB caida al revisar => 500 "No se pudo revisar el conduce…"',
+    $r === ['error', 'No se pudo revisar el conduce. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.', 500] && $c->paramsDe('INSERT INTO conduces ') === []);
+
 $c = $conexionT6();
 $chk('actualizar([]) (no esta o esta eliminado) => 404 MSG_NO_EXISTE sin leer la DB',
     $conducesT6($c)->actualizar([], $cuerpoConduce()) === $noExisteT6 && $c->consultas === []);
@@ -1742,6 +1838,13 @@ $c = $conexionT6();
 $c->respuestas['FROM cotizaciones WHERE id = :id'] = [['id' => 12, 'code' => 'ABC123', 'formato' => null]];
 $chk('preview sin id desde una cotizacion de Gratex => 422 MSG_COTIZACION, como el POST',
     $conducesT6($c)->preview($cuerpoConduce(), null) === ['error', FerreteriaConduce::MSG_COTIZACION, 422]);
+$c = $conexionT6();
+$r = $conducesT6($c)->preview($cuerpoConduce(function (object $b) { unset($b->cotizacion_id); }), null);
+$txt = $textoPdfT6($r);
+$chk('preview sin id y sin cotizacion: el PDF de CONDUCE DE MERCANCÍA con VISTA PREVIA, el cliente elegido y la fecha del cuerpo, sin la linea "Cotización:"',
+    $txt !== '' && str_contains($txt, $isoT6('(CONDUCE DE MERCANCÍA)')) && str_contains($txt, '(VISTA PREVIA)')
+    && str_contains($txt, '(HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO)') && str_contains($txt, '(OCTUBRE 5/2026.-)')
+    && !str_contains($txt, $isoT6('Cotización')) && !$c->huboSql('FROM cotizaciones') && $c->paramsDe('INSERT') === []);
 
 $c = $conexionT6();
 $txt = $textoPdfT6($conducesT6($c)->pdf($filaConduceFx));
@@ -1751,6 +1854,14 @@ $chk('pdf: el cliente de hoy con razon_social (getCliente), como la cotizacion',
     && ($c->paramsDe('SELECT * FROM clients')[0] ?? null) === [':id' => 123]);
 $chk('pdf: unidades por nombre (Metro), la que no esta en el catalogo con su codigo (999), sin precios',
     str_contains($txt, '(Metro) Tj') && str_contains($txt, '(999) Tj') && !str_contains($txt, '935.00') && !str_contains($txt, '45.50'));
+// Un conduce sin cotizacion (cotizacion_id y cotizacion_code NULL, como obtener() lo devuelve) y uno cuya cotizacion se
+// elimino (cotizacion_id NULL por ON DELETE SET NULL) son la misma fila: el PDF no lleva la linea "Cotización:".
+$c = $conexionT6();
+$txt = $textoPdfT6($conducesT6($c)->pdf(['cotizacion_id' => null, 'cotizacion_code' => null] + $filaConduceFx));
+$chk('pdf de un conduce sin cotizacion (cotizacion_code NULL): su numero, su cliente y sus lineas, sin la linea "Cotización:"',
+    str_contains($txt, $isoT6('(CONDUCE DE MERCANCÍA)')) && str_contains($txt, '(CON-000001)') && str_contains($txt, '(OCTUBRE 5/2026.-)')
+    && str_contains($txt, '(HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO)') && str_contains($txt, '(Metro) Tj')
+    && !str_contains($txt, $isoT6('Cotización')) && !str_contains($txt, 'COT-'));
 $c = $conexionT6();
 $c->respuestas['FROM clients WHERE id = :id'] = [];
 $txt = $textoPdfT6($conducesT6($c)->pdf(['client_name' => null, 'company_name' => null, 'rnc' => null] + $filaConduceFx));

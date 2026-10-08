@@ -2,8 +2,8 @@
 
 Conduces de mercancía del formato de cotización **Ferretería**: la nota de entrega que va
 con la mercancía y que el cliente firma ("Recibido por"). Sale de una cotización de
-Ferretería, lleva su propio número (`CON-000001`) y se imprime como la cotización, pero
-**sin precios ni totales**. Cada línea guarda por dentro su precio y su ITBIS, solo para
+Ferretería o se crea sin cotización, lleva su propio número (`CON-000001`) y se imprime como
+la cotización, pero **sin precios ni totales**. Cada línea guarda por dentro su precio y su ITBIS, solo para
 facturar desde el conduce.
 
 Tres reglas definen el módulo:
@@ -11,9 +11,11 @@ Tres reglas definen el módulo:
 - **Solo Ferretería.** Las rutas atienden solo a empresas con
   `master.tenants.cotizacion_formato = 'ferreteria'`; a cualquier otra le responden `422`
   ([abajo](#autenticación-permisos-y-disponibilidad)).
-- **Solo desde una cotización.** No hay conduce en blanco: el `POST` exige la cotización de
-  origen. Una cotización puede dar todos los conduces que hagan falta (uno por entrega); no
-  se lleva la cuenta de lo entregado contra lo cotizado.
+- **Con o sin cotización (decisión del 2026-10-08).** El `POST` acepta `cotizacion_id` pero
+  no lo exige: ausente o `null` crea un conduce **sin cotización**; si viene, tiene que ser
+  una cotización de Ferretería. (Antes el `POST` exigía la cotización de origen.) Una
+  cotización puede dar todos los conduces que hagan falta (uno por entrega); no se lleva la
+  cuenta de lo entregado contra lo cotizado.
 - **Nada se borra.** Eliminar pone `conduces.activo = 0`; editar pone `activo = 0` a las
   líneas de antes e inserta las nuevas. Por eso un número `CON-…` **nunca se vuelve a
   usar**, ni después de eliminar el conduce.
@@ -72,7 +74,7 @@ del servidor, con el prefijo `[conduces]`.
 | GET | `/api/conduces` | Lista paginada de los conduces activos (`?page`, `?pageSize`, `?query`) |
 | GET | `/api/conduces?id={id}` | Un conduce activo, con sus líneas activas |
 | GET | `/api/conduces/{id}/pdf` | PDF guardado (`?format=base64` o descarga) |
-| POST | `/api/conduces` | Crear desde una cotización de Ferretería |
+| POST | `/api/conduces` | Crear, desde una cotización de Ferretería o sin cotización |
 | POST | `/api/conduces/preview` | **PDF sin guardar**: de uno nuevo, o de uno guardado si el cuerpo trae `id` |
 | PUT | `/api/conduces` | Editar (`id` en el cuerpo) |
 | DELETE | `/api/conduces` | Eliminar (`id` en el cuerpo): `activo = 0`, no borra nada |
@@ -116,8 +118,9 @@ Cómo leer la fila:
   `client_name || client_name_guardado` (así lo usa el front en la lista, el formulario y
   Facturar).
 - **`cotizacion_code`** es el código de la cotización de origen. `cotizacion_id` y
-  `cotizacion_code` valen `null` si esa cotización se eliminó (FK `ON DELETE SET NULL`): el
-  conduce sigue igual y la pantalla dice "eliminada".
+  `cotizacion_code` valen `null` si el conduce se creó sin cotización, o si esa cotización
+  se eliminó (FK `ON DELETE SET NULL`): las dos filas son iguales, el conduce sigue como
+  estaba y la pantalla dice "Sin cotización" en los dos casos.
 - **`items`** son solo las líneas **activas**, en el orden en que se guardaron. Las de antes
   de cada edición siguen en la base con `activo = 0` y la API no las devuelve.
 - **`amount`** es el precio unitario **sin ITBIS**. Con los dos indicadores, solo sirve
@@ -143,10 +146,10 @@ primero).
 
 **Buscar por el código de la cotización (decisión del 2026-10-08).** El código sale de la fila
 de `cotizaciones` a la que apunta `cotizacion_id` (el mismo `LEFT JOIN` que da
-`cotizacion_code`). Si esa cotización se eliminó, `cotizacion_id` quedó en `NULL` (`ON DELETE
-SET NULL`) y esos conduces ya no se encuentran por su código: `conduces` no guarda una copia del
-código de la cotización, y no se agregó una columna para eso. Siguen en el listado y se
-encuentran por su propio código, el cliente o el RNC.
+`cotizacion_code`). Un conduce sin cotización (`cotizacion_id` `NULL`) no se encuentra por un
+código `COT-…`, sea porque se creó sin ella o porque la cotización se eliminó (`ON DELETE SET
+NULL`): `conduces` no guarda una copia del código de la cotización, y no se agregó una columna
+para eso. Siguen en el listado y se encuentran por su propio código, el cliente o el RNC.
 
 **Respuesta `200`:**
 
@@ -170,10 +173,12 @@ existe, está eliminado o no es un entero mayor que 0 (sigue siendo `status: tru
 { "status": true, "data": [ { "id": 41, "code": "CON-000007", "...": "..." } ] }
 ```
 
-### POST `/api/conduces` — Crear (desde una cotización)
+### POST `/api/conduces` — Crear (con o sin cotización)
 
 El cuerpo que manda el formulario del conduce (fiscalo `ConduceForm.tsx`): la cotización de
-origen, el cliente y las líneas ya editadas.
+origen (opcional), el cliente y las líneas ya editadas. **Sin cotización** es el mismo cuerpo
+sin la clave `cotizacion_id` (o con `"cotizacion_id": null`); lo que cambia es que el conduce
+queda con `cotizacion_id` `NULL` y su PDF no lleva la línea `Cotización:`.
 
 ```json
 {
@@ -191,7 +196,7 @@ origen, el cliente y las líneas ya editadas.
 
 | Campo | Req. | Reglas y default |
 |-------|------|------------------|
-| `cotizacion_id` | ✅ | Entero > 0 de una cotización que exista **con `formato = 'ferreteria'`**. Una de Gratex (`formato` `NULL`), una que no existe o un id que no es entero → `422` |
+| `cotizacion_id` | ❌ | Ausente o `null`: un conduce **sin cotización** (`cotizacion_id` `NULL` en la base). Si viene, entero > 0 de una cotización que exista **con `formato = 'ferreteria'`**. Una de Gratex (`formato` `NULL`), una que no existe, `0`, un negativo o un valor que no es entero (`"abc"`, `""`, `true`) → `422`: no se toma por «sin cotización» |
 | `client_id` | ✅ | Entero > 0 de un cliente que exista. Puede ser otro que el de la cotización |
 | `date` | ❌ | `YYYY-MM-DD HH:MM:SS` o `YYYY-MM-DD` (se le pone la hora actual de RD), fecha real. Ausente o `""`: ahora (hora de RD) |
 | `items` | ✅ | ≥ 1 línea (abajo) |
@@ -217,8 +222,8 @@ Lo que hace el servidor, en orden:
 
 1. Revisa la forma del cuerpo, sin DB: `ajustes`, `cotizacion_id`, `client_id`, `date`,
    `items` y cada línea. Responde el primer error.
-2. Revisa contra la DB del tenant: la cotización de origen (que exista y sea de Ferretería),
-   el cliente y los productos.
+2. Revisa contra la DB del tenant: la cotización de origen, si el cuerpo trae una (que
+   exista y sea de Ferretería; sin cotización no se lee ninguna), el cliente y los productos.
 3. Numera, guarda la cabecera y las líneas en una transacción ([numeración](#numeración-nunca-se-reusa)).
    `client_name` guarda la razón social del cliente, si no el nombre de la empresa, si no
    el nombre (recortado a 100), y `user_id` el usuario del token.
@@ -310,8 +315,9 @@ que tenía.
 ### POST `/api/conduces/preview` — PDF sin guardar
 
 - **Sin `id`** (un conduce nuevo): el cuerpo del POST, con las **mismas revisiones**,
-  incluida la cotización de origen de Ferretería. En la posición del número imprime
-  `VISTA PREVIA`, y la línea `Cotización:` lleva el código de esa cotización.
+  incluida la cotización de origen de Ferretería si trae una. En la posición del número
+  imprime `VISTA PREVIA`, y la línea `Cotización:` lleva el código de esa cotización (sin
+  cotización, esa línea no sale).
 - **Con `id`** (uno guardado): el cuerpo del PUT. El conduce tiene que estar activo (si no,
   `404`); imprime su código y la cotización de la fila, y el `cotizacion_id` del cuerpo se
   ignora.
@@ -368,7 +374,7 @@ Todos con `status: false`. `N` es el número de la línea como la ve el usuario 
 | 422 | `Los conduces no están disponibles para tu empresa.` | La empresa no está en el formato `ferreteria` (todas las rutas) |
 | 404 | `Esta dirección de conduces no existe.` | Método o sub-ruta que no existe |
 | 422 | `Los conduces no llevan cargos ni abonos.` | El cuerpo trae la clave `ajustes` |
-| 422 | `Elige una cotización de Ferretería para crear el conduce.` | POST, o vista previa sin `id`: falta `cotizacion_id`, no es entero > 0, no existe o no es de Ferretería |
+| 422 | `Elige una cotización de Ferretería para crear el conduce.` | POST, o vista previa sin `id`, con un `cotizacion_id` que no es entero > 0, que no existe o que no es de Ferretería. Ausente o `null` no es un error: es un conduce sin cotización |
 | 422 | `Elige un cliente para el conduce.` | Falta `client_id`, no es entero > 0 o el cliente no existe (también en PUT, si borraron el guardado) |
 | 422 | `La fecha no es válida.` | `date` no es `YYYY-MM-DD` ni `YYYY-MM-DD HH:MM:SS`, o no existe (`2026-02-30`) |
 | 422 | `Agrega al menos una línea al conduce.` | Sin `items`, no es una lista, o vacía |

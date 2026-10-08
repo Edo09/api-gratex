@@ -10,8 +10,9 @@ require_once __DIR__ . '/../../Models/conduceModel.php';
 /**
  * Conduce de mercancía de Ferretería: la nota de entrega que va con la
  * mercancía y que el cliente firma ("Recibido por"). Sale de una cotización de
- * Ferretería, lleva su propio número (CON-000001) y se imprime como la
- * cotización, pero sin precios ni totales (spec 2026-10-05-conduces-design).
+ * Ferretería o se crea sin cotización (decisión del dueño, 2026-10-08), lleva
+ * su propio número (CON-000001) y se imprime como la cotización, pero sin
+ * precios ni totales (spec 2026-10-05-conduces-design).
  *
  * Las funciones estáticas son las reglas puras: la forma del cuerpo, el
  * número, quién puede usar conduces y lo que recibe el PDF. No tocan la base de
@@ -117,8 +118,11 @@ final class FerreteriaConduce
      *
      * date: 'Y-m-d H:i:s' (solo el día lleva la hora de ahora en RD) o null si
      * no vino (al crear, ahora; al editar, la guardada). cotizacion_id solo se
-     * lee al crear: un conduce nunca cambia de origen. Las claves formato y
-     * tipo no se leen.
+     * lee al crear: un conduce nunca cambia de origen. Ausente o null es un
+     * conduce sin cotización (cot['cotizacion_id'] null); si viene, tiene que
+     * ser un entero mayor que 0, y cualquier otra cosa (0, -1, "", "abc",
+     * true) es MSG_COTIZACION: no se adivina como "sin cotización". Las claves
+     * formato y tipo no se leen.
      *
      * @param callable(float $cantidad, string $unidad, int $maxDec): ?string $problemaCantidad
      * @param callable(string $unidad): bool $unidadValida
@@ -133,8 +137,8 @@ final class FerreteriaConduce
             return ['ok' => false, 'error' => self::MSG_AJUSTES];
         }
         $cotizacionId = null;
-        if ($esCreacion) {
-            $cotizacionId = FerreteriaFormato::leerEntero($body->cotizacion_id ?? null);
+        if ($esCreacion && ($body->cotizacion_id ?? null) !== null) {
+            $cotizacionId = FerreteriaFormato::leerEntero($body->cotizacion_id);
             if ($cotizacionId === null || $cotizacionId <= 0) {
                 return ['ok' => false, 'error' => self::MSG_COTIZACION];
             }
@@ -221,8 +225,9 @@ final class FerreteriaConduce
      *
      * $row es la fila de conduceModel::obtener(), o la que arma la vista previa
      * con la misma forma. $code null = todavía sin número: el renderizador
-     * imprime VISTA PREVIA. Sin fecha, ahora en RD. cotizacion_code null = la
-     * cotización de origen se eliminó, y el PDF no lleva la línea Cotización.
+     * imprime VISTA PREVIA. Sin fecha, ahora en RD. cotizacion_code null = sin
+     * cotización (el conduce nació sin ella, o la de origen se eliminó: son la
+     * misma fila), y el PDF no lleva la línea Cotización.
      *
      * El cliente es el de hoy (el LEFT JOIN de clients; razon_social si la fila
      * la trae). Si lo borraron, conduces.client_id no tiene FK y el JOIN no
@@ -279,22 +284,24 @@ final class FerreteriaConduce
     /**
      * Reglas que dependen de la DB, ya con lo que la DB contestó, en el orden
      * de validarForma:
-     *  1. al crear, la cotización de origen existe y es de Ferretería (al
-     *     editar no se mira: un conduce nunca cambia de origen);
+     *  1. al crear con cotización (cot['cotizacion_id'] no es null), la
+     *     cotización de origen existe y es de Ferretería; sin cotización no
+     *     hay origen que revisar, y al editar no se mira: un conduce nunca
+     *     cambia de origen;
      *  2. el cliente existe, también al editar: si borraron el guardado, hay
      *     que elegir otro;
      *  3. cada producto existe y de él sale bien/servicio, con las reglas y el
      *     texto de la cotización (FerreteriaFormato::aplicarCatalogoLineas).
      *
      * @param array      $cot       'cot' de validarForma
-     * @param array|null $origen    conduceModel::cotizacionDeOrigen() (null = no existe)
+     * @param array|null $origen    conduceModel::cotizacionDeOrigen() (null = no existe, o no se buscó: conduce sin cotización)
      * @param array|null $cliente   cotizacionModel::getCliente() (null = no existe)
      * @param array      $productos cotizacionModel::getProductosInfo()
      * @return array ['ok', array $cot] | ['error', string, 422]
      */
     public static function aplicarCatalogo(array $cot, bool $esCreacion, ?array $origen, ?array $cliente, array $productos): array
     {
-        if ($esCreacion && ($origen['formato'] ?? null) !== FerreteriaFormato::NOMBRE) {
+        if ($esCreacion && ($cot['cotizacion_id'] ?? null) !== null && ($origen['formato'] ?? null) !== FerreteriaFormato::NOMBRE) {
             return ['error', self::MSG_COTIZACION, 422];
         }
         if ($cliente === null) {
@@ -314,7 +321,8 @@ final class FerreteriaConduce
      *  - date: la del cuerpo; si no viene, la guardada (un PUT sin fecha la
      *    conserva); si tampoco hay, null y datosPdf pone la de ahora.
      *  - cotizacion_code: con fila, el de la fila (el cuerpo no cambia el
-     *    origen); sin fila, el de la cotización que se revisó al validar.
+     *    origen); sin fila, el de la cotización que se revisó al validar, o
+     *    null si el conduce nuevo no lleva cotización ($origen null).
      *  - el cliente: el elegido (getCliente, que existe), y como nombre guardado
      *    el que se guardaría.
      */
@@ -464,8 +472,8 @@ final class FerreteriaConduce
      *  - Con id en el cuerpo, el de ese conduce: $row tiene que ser el conduce
      *    activo (si no, 404); imprime su número y su cotización, y el
      *    cotizacion_id del cuerpo se ignora, como en el PUT.
-     *  - Sin id, el de uno nuevo: la cotización del cuerpo se revisa como en el
-     *    POST, y el PDF dice VISTA PREVIA.
+     *  - Sin id, el de uno nuevo: la cotización del cuerpo (si trae una) se
+     *    revisa como en el POST, y el PDF dice VISTA PREVIA.
      */
     public function preview(object $body, ?array $row): array
     {
@@ -502,8 +510,8 @@ final class FerreteriaConduce
     /**
      * Lo común de crear, actualizar y vista previa: la forma del cuerpo
      * (validarForma, sin DB), lo que solo sabe la DB (la cotización de origen
-     * al crear, el cliente y los productos) y las reglas que dependen de eso
-     * (aplicarCatalogo).
+     * al crear con cotización, el cliente y los productos) y las reglas que
+     * dependen de eso (aplicarCatalogo).
      *
      * Las unidades son el catálogo de master: problemaCantidad e isValid son
      * fail-open, una lectura fallida del catálogo no bloquea el conduce.
@@ -519,7 +527,8 @@ final class FerreteriaConduce
                 return ['error', $forma['error'], 422];
             }
             $cot = $forma['cot'];
-            $origen = $esCreacion ? $this->modelo->cotizacionDeOrigen((int) $cot['cotizacion_id']) : null;
+            // Sin cotización (cotizacion_id null) no hay origen que leer.
+            $origen = $esCreacion && $cot['cotizacion_id'] !== null ? $this->modelo->cotizacionDeOrigen((int) $cot['cotizacion_id']) : null;
             $cliente = $this->cotizaciones->getCliente($cot['client_id']);
             $productos = $this->cotizaciones->getProductosInfo(array_column($cot['items'], 'product_id'));
         } catch (Throwable $e) {

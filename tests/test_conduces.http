@@ -33,6 +33,8 @@
 @conduce2 = <id que devolvio "C2 Crear otro">
 @conduce3 = <id que devolvio "D8 Crear despues de eliminar">
 @conduce4 = <id que devolvio "C13 Crear desde la desechable">
+@conduce5 = <id que devolvio "C18 Crear SIN cotizacion">
+@conduce6 = <id que devolvio "C19 Crear SIN cotizacion con cotizacion_id null">
 
 ### Step 1: Login (una vez por tenant; el token va en X-API-KEY)
 POST {{base}}/api/auth/login
@@ -52,7 +54,7 @@ X-API-KEY: {{tokenFerreteria}}
 ### ============================================================================
 ### Comprobaciones de servidor que no son peticiones (anotar el resultado de cada una)
 ### M0 Antes de las M de servidor, en local y contra MySQL de verdad (Git Bash, desde api-gratex):
-###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 91/91 OK, exit 0 (unos 20-30 s)
+###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 107/107 OK, exit 0 (unos 20-30 s)
 ###    Usa SOLO la base de pruebas smhynzte_conduces_scratch (el mismo servidor que produccion, MySQL 8.0
 ###    estricto) con el usuario de pruebas; credenciales en tools/.env (ignorado por git: WA_DB_HOST,
 ###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
@@ -64,7 +66,9 @@ X-API-KEY: {{tokenFerreteria}}
 ###    en activo = 0 y la fecha conservada); la busqueda por el codigo de la cotizacion de origen (con su
 ###    total, y sin hallar nada cuando se borra la cotizacion: C6b); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
 ###    de uk_conduces_numero reintentado una vez; cinco creaciones en paralelo con numeros distintos y
-###    seguidos, sin deadlock (M10 a nivel de modelo); los topes de cantidad y precio de conduce_items (en el
+###    seguidos, sin deadlock (M10 a nivel de modelo; dos de los cinco crean sin cotizacion); los conduces
+###    creados SIN cotizacion (cotizacion_id NULL: numeracion seguida mezclados con los de cotizacion, listar,
+###    contar, buscar por su cliente, y no hallarlos por un codigo COT: C18 a C25 son lo mismo por HTTP); los topes de cantidad y precio de conduce_items (en el
 ###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP; tambien lo
 ###    que pasa validarForma y no cabe: un precio de 99999999999999.98 y una cantidad de 999999999.9995 -> 422 de
 ###    respaldo, y el redondeo a 14 cifras significativas del precio); la
@@ -361,12 +365,14 @@ X-API-KEY: {{tokenFerreteria}}
 ### FERRETERIA: 422 (status:false con el texto para el usuario; no se guarda nada)
 ### ============================================================================
 
-### E1 Sin cotizacion_id -> 422 "Elige una cotización de Ferretería para crear el conduce."
+### E1 cotizacion_id 0 -> 422 "Elige una cotización de Ferretería para crear el conduce." (ausente o null ya NO es
+### error: es un conduce sin cotizacion, ver C18 y C19; 0, un negativo, "", true o "abc" no se toman por "sin cotizacion")
 POST {{base}}/api/conduces
 X-API-KEY: {{tokenFerreteria}}
 Content-Type: application/json
 
 {
+  "cotizacion_id": 0,
   "client_id": {{clienteFerreteria}},
   "items": [ { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 } ]
 }
@@ -840,7 +846,7 @@ Content-Type: application/json
 }
 
 ### C14 Obtener el conduce de C13 -> sigue activo, con cotizacion_id null y cotizacion_code null (la pantalla
-### dice "eliminada"); sus lineas siguen igual
+### dice "Sin cotización", igual que uno creado sin cotizacion: C18); sus lineas siguen igual
 GET {{base}}/api/conduces?id={{conduce4}}
 X-API-KEY: {{tokenFerreteria}}
 
@@ -868,6 +874,98 @@ Content-Type: application/json
   "cotizacion_id": {{cotDesechable}},
   "client_id": {{clienteFerreteria}},
   "items": [ { "product_id": null, "description": "NO SE CREA", "quantity": 1, "amount": 0 } ]
+}
+
+### ============================================================================
+### FERRETERIA: conduce SIN cotizacion (decision del 2026-10-08: el boton "Nuevo conduce" de la pantalla Conduces)
+### cotizacion_id ausente o null -> el conduce se guarda con cotizacion_id NULL: igual que uno cuya cotizacion se
+### elimino (C14), y la pantalla dice "Sin cotización" en los dos casos. Va al final de los bloques de Ferreteria (despues de D8, D9 y C13 a C17): no mueve los
+### numeros que esos bloques esperan. Estos conduces gastan su numero: eliminarlos al final (C25).
+### ============================================================================
+
+### C18 Crear SIN cotizacion (sin la clave cotizacion_id) -> 200 {id, code, numero} con el siguiente numero
+### (el que sigue al de C13); poner su id en @conduce5
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "date": "2026-10-08 09:00:00",
+  "items": [
+    { "product_id": {{productoFerreteria}}, "description": "FUNDAS CEMENTO GRIS", "quantity": 2, "amount": 935 },
+    { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 0 }
+  ]
+}
+
+### C19 Crear SIN cotizacion con "cotizacion_id": null -> 200 con el numero siguiente al de C18; poner su id en @conduce6
+POST {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "cotizacion_id": null,
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "ARENA LAVADA (SIN COTIZACION)", "quantity": 3, "amount": 0 } ]
+}
+
+### C20 Obtener el de C18 -> sigue activo, con cotizacion_id null y cotizacion_code null, el cliente de hoy y
+### sus 2 lineas (M7 con cotizacion_id NULL)
+GET {{base}}/api/conduces?id={{conduce5}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C21 Buscar por el nombre del cliente -> sale el de C18 (y el de C19) junto con los de cotizacion
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{nombreCliente}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C22 Buscar por el codigo de la cotizacion (@codigoCotizacion) -> NO sale ninguno de C18 ni C19 (no tienen
+### cotizacion); sigue pasando lo de C6b con los de esa cotizacion. pagination.total cuenta lo mismo
+GET {{base}}/api/conduces?page=1&pageSize=10&query={{codigoCotizacion}}
+X-API-KEY: {{tokenFerreteria}}
+
+### C23 PDF del de C18 -> CONDUCE DE MERCANCÍA con su CON-..., sin la linea "Cotización:" y sin precios
+GET {{base}}/api/conduces/{{conduce5}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### C24 Vista previa SIN id y SIN cotizacion -> 200 base64: en el numero dice VISTA PREVIA, no hay linea
+### "Cotización:", la fecha es hoy y no hay precios. No guarda nada ni gasta numero
+POST {{base}}/api/conduces/preview
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "TUBO PVC 1/2", "quantity": 4, "amount": 0 } ]
+}
+
+### C25 Limpieza: editar el de C18 (200; cotizacion_id sigue null: un PUT no lo toca) y eliminar los dos de C18 y C19
+### (DELETE con cada id: 200 "Conduce eliminado"; quedan con activo = 0 y sus numeros no se reusan)
+PUT {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce5}},
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "CORTE DE TUBO (EDITADO)", "quantity": 1, "amount": 0 } ]
+}
+
+###
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce5}}
+}
+
+###
+DELETE {{base}}/api/conduces
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{conduce6}}
 }
 
 ### ============================================================================
@@ -943,6 +1041,7 @@ X-API-KEY: {{tokenFerreteria}}
 ###      C4 ya no lo lista.
 ###   La comprobacion de solo la vista previa (C9) existe y no gasta numero, pero no ejercita el bloqueo del precio 0.
 ###   Gratex: G0, G1 y el bloque G de tests/test_cotizaciones_ferreteria.http; sin menu Conduces.
-### Nunca en produccion: M10 (cinco conduces de prueba), D8 y el bloque Q. (M15 no se corre en ningun
+### Nunca en produccion: M10 (cinco conduces de prueba), D8, el bloque Q y C18 a C25 (gastan numeros: el
+### primer conduce real tiene que ser CON-000002; "Nuevo conduce" se prueba en local o staging). (M15 no se corre en ningun
 ### servidor: la cubre M0.)
 ### ============================================================================
