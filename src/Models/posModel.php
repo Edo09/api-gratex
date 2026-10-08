@@ -48,7 +48,7 @@ class posModel
 
     public function crearCaja(string $nombre): array
     {
-        $nombre = self::nombreValido($nombre, 60, 'caja');
+        $nombre = self::nombreValido($nombre, 60, 'de la caja');
         try {
             $stmt = $this->conexion->prepare('INSERT INTO pos_cajas (nombre) VALUES (:n)');
             $stmt->execute([':n' => $nombre]);
@@ -68,7 +68,7 @@ class posModel
         $params = [':id' => $id];
         if (array_key_exists('nombre', $campos)) {
             $sets[] = 'nombre = :n';
-            $params[':n'] = self::nombreValido((string) $campos['nombre'], 60, 'caja');
+            $params[':n'] = self::nombreValido((string) $campos['nombre'], 60, 'de la caja');
         }
         if (array_key_exists('activa', $campos)) {
             $sets[] = 'activa = :a';
@@ -130,7 +130,7 @@ class posModel
      */
     public function crearEmpleado(string $nombre, string $rol, callable $generar): array
     {
-        $nombre = self::nombreValido($nombre, 80, 'empleado');
+        $nombre = self::nombreValido($nombre, 80, 'del empleado');
         $rol = self::rolValido($rol);
         for ($i = 0; $i < 10; $i++) {
             [$pin, $hmac] = $generar();
@@ -198,7 +198,7 @@ class posModel
         $params = [':id' => $id];
         if (array_key_exists('nombre', $campos)) {
             $sets[] = 'nombre = :n';
-            $params[':n'] = self::nombreValido((string) $campos['nombre'], 80, 'empleado');
+            $params[':n'] = self::nombreValido((string) $campos['nombre'], 80, 'del empleado');
         }
         if (array_key_exists('rol', $campos)) {
             $sets[] = 'rol = :r';
@@ -314,7 +314,7 @@ class posModel
     {
         $nombre = trim(preg_replace('/\s+/', ' ', $nombre));
         if ($nombre === '') {
-            throw new PosError("Escribe el nombre de la {$que}.", 422, 'NOMBRE_REQUERIDO');
+            throw new PosError("Escribe el nombre {$que}.", 422, 'NOMBRE_REQUERIDO');
         }
         if (mb_strlen($nombre) > $max) {
             throw new PosError("El nombre no puede pasar de {$max} caracteres.", 422, 'NOMBRE_LARGO');

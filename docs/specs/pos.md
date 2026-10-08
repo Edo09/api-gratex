@@ -136,11 +136,11 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] Con sesión de admin, el POS pide elegir la caja ("Caja 1"…) o crear una.
 - [ ] El servidor entrega un **token de equipo** atado a tenant + caja. Se guarda en el `localStorage` de pos.\*; la sesión del admin se descarta.
 - [ ] El token de equipo **solo** sirve para rutas `/api/pos/*`. No abre app.\* ni otras rutas.
-- [ ] Revocable desde app.\* (M1). Tras revocarlo, la siguiente petición del equipo vuelve a "Equipo no habilitado".
+- [x] Revocable desde app.\* (M1). Tras revocarlo, la siguiente petición del equipo vuelve a "Equipo no habilitado".
 - [ ] Una caja puede tener **un solo** equipo habilitado a la vez. Habilitar otro equipo para esa caja revoca el anterior, con confirmación.
 
 **A5 · Empleados POS** — `Piloto`
-- [ ] El admin los crea en app.\* (M1) con nombre y rol (`cajero` | `supervisor`).
+- [x] El admin los crea en app.\* (M1) con nombre y rol (`cajero` | `supervisor`).
 - [x] Al crearlo, el sistema **genera un PIN aleatorio de 4 dígitos, único en el tenant**, y lo muestra **una sola vez**. El admin puede regenerarlo; el anterior deja de servir y el nuevo nunca es igual al anterior.
 - [ ] El admin nunca elige el PIN, así que el sistema nunca dice "ese PIN ya existe" y no revela el de nadie.
 - [ ] Un empleado desactivado no entra ni autoriza. Sus turnos e históricos se conservan.
@@ -402,10 +402,14 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 ### 6.9 Administración en app.\*
 
-**M1 · Sección POS (módulo `pos`)** — `Piloto`
-- [ ] **Cajas**: crear, renombrar, desactivar.
-- [ ] **Equipos**: lista de equipos habilitados (caja, fecha, quién lo habilitó, último uso) con opción de revocar.
-- [ ] **Empleados**: crear (el PIN se muestra una vez), regenerar PIN, cambiar rol, desactivar.
+**Principio (decisión del 2026-10-08):** el POS solo vende. Empleados, cajas, equipos,
+productos, ventas y turnos se administran y se ven en app.\*, con los mismos datos.
+
+**M1 · Sección POS (módulo `pos`)** — `Piloto`. En app.\* es **Ventas → Punto de venta**
+(ícono de impresora), visible con el módulo `pos` y solo si la empresa tiene `pos_enabled`.
+- [x] **Cajas**: crear, renombrar, desactivar.
+- [x] **Equipos**: lista de equipos habilitados (caja, fecha, quién lo habilitó, último uso, bloqueo por PIN) con opción de revocar. Revocar también sirve para quitar un bloqueo sin esperar.
+- [x] **Empleados**: crear (el PIN se muestra una vez), regenerar PIN, cambiar rol, desactivar.
 - [ ] **Turnos**: lista con filtros (caja, empleado, fecha) y el detalle del cierre (K8), reimprimible.
 
 **M2 · Ficha del producto** — `Piloto`
@@ -669,6 +673,24 @@ cada una e idénticas al snapshot), traspaso de sesión (A2), administración de
 empleados y equipos (K1, A5, A4), PIN con bloqueo y sesiones (A6, A7), `pos_enabled`
 (A8) y el principal `pos-caja` en el gate. Contrato en [../api/pos.md](../api/pos.md);
 `tools/test_pos_backend.php` da 89/89 con el gate en enforce y en sombra (PIN de 4 dígitos con bloqueo progresivo, cambiado el mismo día).
+
+**Semana 2, front (2026-10-08):** `pos.html` + `src/pos/` en fiscalo-react (bundle propio:
+19 KB + el bloque compartido), regla de host en `vercel.json` y botón **POS** en el navbar
+de app.\* (A1). Pantallas: habilitar el equipo (login de admin o código del botón; elegir o
+crear la caja; reemplazar con confirmación), PIN de 4 dígitos (teclado en pantalla y
+físico, intentos restantes, cuenta regresiva del bloqueo que sobrevive a la recarga),
+pantalla del cajero con bloqueo manual y a los 10 min, aviso sin conexión. Probado de
+punta a punta en el navegador contra el API local (Docker). **Falta:** configuración de
+impresora del equipo (P6) y, en la semana 3, la venta.
+
+**app.\*: Punto de venta (M1, 2026-10-08):** `src/features/pos/` en fiscalo-react, item
+`punto-venta` en Ventas (módulo `pos` + `requierePos`: no se ve ni redirige mientras no se
+sabe si la empresa tiene POS). Pestañas **Empleados** (alta con PIN visible una sola vez,
+editar nombre/rol, activar/desactivar, PIN nuevo con confirmación) y **Cajas y equipos**
+(alta/edición de cajas, equipo de cada caja con último uso y bloqueo, revocar con
+confirmación, guía para habilitar una PC). `scripts/test-nav-formato.ts` 75/75 (18 casos
+nuevos de la puerta del POS). Probado en el navegador contra el API local. **Falta:**
+pestaña Turnos (con la semana 3) y M2/M3.
 
 | Semana | Fechas | Qué |
 |---|---|---|
