@@ -173,7 +173,12 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
 5. **Conduce** (solo con `ferreteria`): antes de borrar esa cotización, crear un conduce desde
    ella, abrir su PDF (`CONDUCE DE MERCANCÍA`, sin precios) y eliminarlo. El conduce de prueba
    gasta su número (no se reusa); si el cliente quiere empezar en `CON-000001`, prueba solo la
-   vista previa. Pasos listos en `tests/test_conduces.http`.
+   vista previa. Con solo la vista previa no hay ningún conduce sobre el que pulsar Facturar,
+   así que ni el bloqueo de la línea sin precio (el riesgo de `MontoItem` 0 ante la DGII) ni
+   crear, editar y eliminar se ejercitan: hay que elegir entre gastar `CON-000001` en la
+   prueba (el número no se reusa nunca) o apoyarse en las comprobaciones de antes de producción
+   (el navegador contra el mock y los bloques C y D de `tests/test_conduces.http` en un stack de
+   prueba), y lo decide el dueño. Pasos listos en `tests/test_conduces.http`.
 
 ---
 

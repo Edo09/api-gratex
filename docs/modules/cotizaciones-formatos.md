@@ -309,24 +309,33 @@ entrega). Referencia de la API: [../api/conduces.md](../api/conduces.md).
 
 ### Despliegue de los conduces
 
-1. **Respaldo y migración 029**, fuera de horario, en las dos DBs de tenant
-   (`smhynzte_002`, Ferretería, y `smhynzte_new_gratexdb`, Gratex): pegar el archivo completo
-   en la pestaña SQL con la base seleccionada y leer la fila final (`base` = esa base, las
-   tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok` = `SI`).
-2. **`tools/verificar_migraciones_tenant.sql`** en las dos: la 027, la 028 y la 029 tienen que
-   decir `APLICADA` antes de seguir, porque este despliegue también lleva el código que
-   necesita la 027 y la 028. Si una dice `FALTA`, correrla primero según el ORDEN de su
-   cabecera.
-3. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
+1. **Respaldo** de las dos DBs de tenant (`smhynzte_002`, Ferretería, y
+   `smhynzte_new_gratexdb`, Gratex).
+2. **`tools/verificar_migraciones_tenant.sql`** (solo lectura) en las dos: ver qué dice de la
+   027 y de la 028.
+3. **Correr la 027 y después la 028** en la base donde digan `FALTA`, según el ORDEN de la
+   cabecera de cada una. Este despliegue también lleva el código que las necesita.
+4. **Correr la 029**, fuera de horario y después de la 028, en las dos DBs: pegar el archivo
+   completo en la pestaña SQL con la base seleccionada y leer la fila final (`base` = esa
+   base, las tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok` = `SI`).
+5. **El verificador otra vez** en las dos: la 027, la 028 y la 029 tienen que decir
+   `APLICADA` antes de desplegar.
+6. **Subir `api-gratex` y después `fiscalo`.** No hay ajuste que cambiar: Ferretería ya tiene
    `cotizacion_formato = 'ferreteria'`.
-4. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
+7. **Pruebas de humo** (`tests/test_conduces.http`, sección Producción):
    - como Ferretería: un conduce desde una cotización, su PDF, una edición y Eliminar (deja de
      salir en la lista); Facturar sin emitir, comprobando que una línea sin precio no deja
      emitir;
    - como Gratex: nada cambió y no hay menú Conduces.
 
    El conduce de prueba gasta su número: el primer conduce real de Ferretería ya no será
-   `CON-000001`. Si eso importa, probar solo la vista previa, que no gasta número.
+   `CON-000001`. Si eso importa, probar solo la vista previa, que no gasta número. Con solo la
+   vista previa no hay ningún conduce sobre el que pulsar Facturar, así que ni el bloqueo de la
+   línea sin precio (el riesgo de `MontoItem` 0 ante la DGII) ni crear, editar y eliminar se
+   ejercitan: hay que elegir entre gastar `CON-000001` en la prueba (el número no se reusa
+   nunca) o apoyarse en las comprobaciones de antes de producción (el navegador contra el mock
+   y los bloques C y D de `tests/test_conduces.http` en un stack de prueba), y lo decide el
+   dueño.
 
 ### Redondeo
 
