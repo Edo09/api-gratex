@@ -761,6 +761,20 @@ try {
         $chk("crear con {$que} (sin pasar por validarForma): el 1264 real => 422 MSG_FUERA_DE_RANGO, y el rollback no deja nada",
             $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422] && $cuentas() === $antesTopes);
     }
+    // Lo que pasa validarForma y aun así no cabe (ver LIMITE_CANTIDAD y LIMITE_PRECIO): un precio de
+    // 99999999999999.5 a menos de 1e14 llega a MySQL como "1.0E+14" (PHP manda el float con 14 cifras
+    // significativas), y una cantidad entre 999999999.999 y 1e9 se redondea a 2 decimales (1e9).
+    foreach ([['precio 99999999999999.98', lineaScratch(null, 'X', 1.0, 99999999999999.98)],
+              ['cantidad 999999999.9995', lineaScratch(null, 'X', 999999999.9995, 1.0)]] as [$que, $linea]) {
+        $r = $m->crear(cotScratch($clienteId, $cotId, null, null, [$linea]), 5, 'X');
+        $chk("crear con {$que} (pasa validarForma): el 1264 real => 422 MSG_FUERA_DE_RANGO, y el rollback no deja nada",
+            $r === ['error', FerreteriaConduce::MSG_FUERA_DE_RANGO, 422] && $cuentas() === $antesTopes);
+    }
+    $r = $m->crear(cotScratch($clienteId, $cotId, null, null, [lineaScratch(null, 'REDONDEO', 1.0, 12345678901.2345),
+        lineaScratch(null, 'TRUNCADO', 1.0, 99999999999999.4)]), 5, 'HOSPITAL DOCENTE');
+    $chk('con más de 14 cifras significativas el precio se redondea a 14 al guardar: 12345678901.2345 queda en 12345678901.2350 y 99999999999999.4 en 99999999999999.0000',
+        ($r[0] ?? null) === 'success' && array_column($lineasDe((int) ($r[1]['id'] ?? 0)), 'amount') === ['12345678901.2350', '99999999999999.0000']);
+    $antesTopes = $cuentas();
     $activasTope = filasDe($pdo, 'SELECT id FROM conduce_items WHERE conduce_id = ? AND activo = 1 ORDER BY id', [$idTope]);
     $r = $m->actualizar($idTope, cotScratch($clienteId, $cotId, null, '2026-10-01 07:00:00', [lineaScratch(null, 'X', 1e9, 1.0)]), 9, 'OTRO');
     $chk('actualizar con una cantidad fuera de rango => 422 MSG_FUERA_DE_RANGO; el rollback deja las líneas activas y el nombre como estaban',
@@ -769,9 +783,9 @@ try {
         && valorDe($pdo, 'SELECT client_name FROM conduces WHERE id = ?', [$idTope]) === 'HOSPITAL DOCENTE');
     clearstatcache();
     $logTopes = (string) file_get_contents($logModelo);
-    $chk("el error_log trae el detalle de MySQL: el 1264 de 'quantity' (dos veces) y el de 'amount' (una)",
-        substr_count($logTopes, " 1264 Out of range value for column 'quantity'") === 2
-        && substr_count($logTopes, " 1264 Out of range value for column 'amount'") === 1);
+    $chk("el error_log trae el detalle de MySQL: el 1264 de 'quantity' (tres veces) y el de 'amount' (dos)",
+        substr_count($logTopes, " 1264 Out of range value for column 'quantity'") === 3
+        && substr_count($logTopes, " 1264 Out of range value for column 'amount'") === 2);
     ini_set('error_log', $logPrevioTopes === false ? '' : $logPrevioTopes);
 
     // -----------------------------------------------------------------------

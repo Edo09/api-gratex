@@ -318,6 +318,16 @@ $rechazaConduce('cantidad 999999999.995 en Metro (3 decimales, bajo el tope): lo
     'Línea 1: la cantidad admite hasta 2 decimales.');
 $rechazaConduce('cantidad 999999999.5 en Unidad (bajo el tope): las fracciones, como siempre', $conCantidad(999999999.5),
     'Línea 1: la unidad «Unidad» no admite fracciones: usa una cantidad entera o cambia la unidad.');
+// El hueco bajo el tope (ver LIMITE_CANTIDAD): decimalesDe tolera una diferencia relativa de 1e-12 y toma por un
+// entero lo que está a menos de ~0.001 de 1e9. Pasa validarForma; el INSERT la redondea a 2 decimales (1e9) y
+// MySQL la rechaza: la atrapa el 422 de respaldo (tools/test_conduces_mysql.php, sección e).
+$rechazaConduce('cantidad 999999999.999 en Metro (justo bajo el hueco): los decimales, como siempre', $conCantidad(999999999.999, '26'),
+    'Línea 1: la cantidad admite hasta 2 decimales.');
+foreach ([999999999.9991, 999999999.9995] as $enElHueco) {
+    $r = $validarConduce($conCantidad($enElHueco, '26'));
+    $chk('cantidad ' . $enElHueco . ' en Metro (el hueco bajo 1e9): pasa validarForma tal cual, sin "Línea N" (llega al 422 de respaldo)',
+        ($r['ok'] ?? null) === true && $r['cot']['items'][0]['quantity'] === $enElHueco);
+}
 // Cero y negativos siguen igual: "debe ser mayor que 0", aunque el valor sea enorme.
 foreach ([0, '0', -1, '-5', -1000000000, -1e300] as $noPositiva) {
     $rechazaConduce('cantidad ' . var_export($noPositiva, true) . ' (cero o negativa: no es "demasiado grande")', $conCantidad($noPositiva),

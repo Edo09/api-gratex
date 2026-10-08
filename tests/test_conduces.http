@@ -52,7 +52,7 @@ X-API-KEY: {{tokenFerreteria}}
 ### ============================================================================
 ### Comprobaciones de servidor que no son peticiones (anotar el resultado de cada una)
 ### M0 Antes de las M de servidor, en local y contra MySQL de verdad (Git Bash, desde api-gratex):
-###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 88/88 OK, exit 0 (unos 20-30 s)
+###      php -d extension=pdo_mysql tools/test_conduces_mysql.php      -> 91/91 OK, exit 0 (unos 20-30 s)
 ###    Usa SOLO la base de pruebas smhynzte_conduces_scratch (el mismo servidor que produccion, MySQL 8.0
 ###    estricto) con el usuario de pruebas; credenciales en tools/.env (ignorado por git: WA_DB_HOST,
 ###    WA_DB_PORT, WA_DB_USER, WA_DB_PASS y CONDUCES_DB_NAME=smhynzte_conduces_scratch). Se niega a correr si
@@ -65,7 +65,9 @@ X-API-KEY: {{tokenFerreteria}}
 ###    total, y sin hallar nada cuando se borra la cotizacion: C6b); los 1452 reales de producto y de cotizacion -> 422; un 1062 real
 ###    de uk_conduces_numero reintentado una vez; cinco creaciones en paralelo con numeros distintos y
 ###    seguidos, sin deadlock (M10 a nivel de modelo); los topes de cantidad y precio de conduce_items (en el
-###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP); la
+###    tope se guarda tal cual; sobre el tope, el 1264 real -> 422; E26 y E27 son lo mismo por HTTP; tambien lo
+###    que pasa validarForma y no cabe: un precio de 99999999999999.98 y una cantidad de 999999999.9995 -> 422 de
+###    respaldo, y el redondeo a 14 cifras significativas del precio); la
 ###    guardia de la 031 (sin base seleccionada, con information_schema o sin cotizaciones: la 031 falla y no
 ###    crea nada; el usuario de pruebas recibe #1142 y no #1049, porque MySQL revisa permisos antes de
 ###    buscar la base: lo de M2 sigue siendo de servidor); y las reglas ON DELETE (M15).
