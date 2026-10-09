@@ -220,6 +220,63 @@ class inventoryModel
     }
 
     /**
+     * Deshace lo que una factura todavia tiene movido: el saldo neto de sus
+     * movimientos (referencia factura/<id>), producto por producto.
+     *
+     * Para el reenvio de un e-CF rechazado (facturaController::handleReenviar):
+     * el intento rechazado ya movio la mercancia y el envio nuevo la mueve otra
+     * vez con su propia factura. A diferencia de revertirVenta, no supone que
+     * hubo movimiento: si el primero fallo (o ya se deshizo) el saldo es 0 y no
+     * hace nada, asi que repetirlo no duplica la devolucion.
+     *
+     * @return int cuantos movimientos se registraron
+     */
+    public function devolverSaldoDeFactura(int $facturaId, ?int $userId = null): int
+    {
+        try {
+            $stmt = $this->conexion->prepare(
+                "SELECT product_id, SUM(cantidad) AS neto FROM inventory_movements
+                 WHERE referencia_tipo = 'factura' AND referencia_id = :id
+                 GROUP BY product_id
+                 HAVING ROUND(SUM(cantidad), 3) <> 0"
+            );
+            $stmt->execute([':id' => $facturaId]);
+            // Salio (venta): vuelve como DEVOLUCION. Entro (nota de credito E34):
+            // sale como VENTA. Mismas etiquetas que ya muestra el kardex.
+            $porTipo = ['DEVOLUCION' => [], 'VENTA' => []];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $neto = round((float) $r['neto'], 3);
+                $porTipo[$neto < 0 ? 'DEVOLUCION' : 'VENTA'][] = [
+                    'product_id' => (int) $r['product_id'],
+                    'cantidad' => -$neto,
+                    'costo_unitario' => null,
+                ];
+            }
+            $total = 0;
+            foreach ($porTipo as $tipo => $lineas) {
+                if ($lineas === []) {
+                    continue;
+                }
+                $res = $this->aplicarMovimientos($lineas, [
+                    'tipo_movimiento' => $tipo,
+                    'referencia_tipo' => 'factura',
+                    'referencia_id' => $facturaId,
+                    'user_id' => $userId,
+                ]);
+                if ($res[0] !== 'success') {
+                    error_log('[inventario] saldo de factura ' . $facturaId . ': ' . $res[1]);
+                    continue;
+                }
+                $total += count($res[1]);
+            }
+            return $total;
+        } catch (Throwable $e) {
+            error_log('[inventario] saldo de factura ' . $facturaId . ' fallo inesperado: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    /**
      * Mueve el inventario de una compra (gasto) ya guardada.
      *
      * Que comprobantes mueven existencias. Espejo de efectoInventario() en el

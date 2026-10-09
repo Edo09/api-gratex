@@ -592,6 +592,41 @@ class facturaModel
     private const LOCK_SECUENCIA_SIMPLE = "CONCAT(DATABASE(), ':factura_simple_seq')";
 
     /**
+     * Candado del reenvio de un e-CF rechazado (facturaController::handleReenviar):
+     * dos clics seguidos, o dos usuarios a la vez, mandarian el mismo
+     * comprobante dos veces a la DGII. No espera: si otro reenvio lo tiene, este
+     * se rechaza. Se suelta solo al cerrarse la conexion, al final del request.
+     */
+    public function tomarLockReenvio(int $facturaId): bool
+    {
+        try {
+            $stmt = $this->conexion->prepare("SELECT GET_LOCK(CONCAT(DATABASE(), ':reenvio_ecf:', :id), 0)");
+            $stmt->execute([':id' => $facturaId]);
+            return (int) $stmt->fetchColumn() === 1;
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo tomar el lock de reenvio ' . $facturaId . ': ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Archiva el intento rechazado que un reenvio ya reemplazo, para que no se
+     * pueda reenviar otra vez. Solo si sigue en rechazo: cuando el envio nuevo
+     * reuso su e-NCF, saveFacturaConECF ya lo archivo y esto no hace nada.
+     */
+    public function archivarRechazoReenviado(int $facturaId): void
+    {
+        try {
+            $this->conexion->prepare(
+                "UPDATE facturas SET estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO')
+                 WHERE id = :id AND estado_dgii IN ('RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO')"
+            )->execute([':id' => $facturaId]);
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo archivar el rechazo reenviado ' . $facturaId . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Toma el candado con nombre que serializa la numeracion de facturas
      * simples. Es un lock de MySQL a nivel de CONEXION, no de tabla: no bloquea
      * filas, asi que la emision de e-CF sigue su curso mientras tanto.

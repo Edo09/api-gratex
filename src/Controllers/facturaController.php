@@ -116,7 +116,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         if ($isReenviarRequest) {
-            handleReenviar((int) $reenviarMatches[1], $facturaModel);
+            handleReenviar((int) $reenviarMatches[1], $facturaModel, $clientModel);
             break;
         }
         if ($isPreviewRequest) {
@@ -150,7 +150,21 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         respond(false, 'No se pudieron leer los datos de la factura. Recarga la página e inténtalo de nuevo.', 400);
         return;
     }
+    emitirFacturaEcf($input, $facturaModel, $clientModel);
+}
 
+/**
+ * Valida, emite a la DGII, guarda y responde un e-CF. Cuerpo de POST
+ * /api/facturas y del reenvio de un rechazado (handleReenviar), que arma el
+ * mismo $input desde la factura guardada: las dos rutas pasan por las mismas
+ * reglas.
+ *
+ * @param ?int $reenvioDe id de la factura RECHAZADA que este envio reemplaza:
+ *                        al guardar se archiva y se le devuelve al almacen lo
+ *                        que habia descontado (el envio nuevo descuenta otra vez).
+ */
+function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel $clientModel, ?int $reenvioDe = null): void
+{
     $tipoEcf = (string) ($input['tipo_ecf'] ?? '');
     $clientId = $input['client_id'] ?? null;
     $items = $input['items'] ?? null;
@@ -484,6 +498,13 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         return;
     }
 
+    // Reenvio: el intento rechazado queda archivado. Si el envio nuevo reuso su
+    // e-NCF, saveFacturaConECF ya lo archivo; si tomo otro (el contador no se
+    // pudo devolver), sin esto seguiria ofreciendo "Reenviar" y se emitiria dos veces.
+    if ($reenvioDe !== null) {
+        $facturaModel->archivarRechazoReenviado($reenvioDe);
+    }
+
     // Inventario: la venta descuenta (la Nota de Credito repone). Va DESPUES de
     // guardar y de que DGII acepto — a esta altura el e-CF ya existe, asi que
     // un problema de inventario no puede tumbar la factura: se registra en el
@@ -497,12 +518,18 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
             throw new RuntimeException('falta ' . $rutaInventario);
         }
         require_once $rutaInventario;
-        (new inventoryModel())->registrarVenta(
+        $inventario = new inventoryModel();
+        $inventario->registrarVenta(
             (int) ($saved[1]['factura_id'] ?? 0),
             $facturaInput['items'],
             $tipoEcf,
             $userId
         );
+        // El intento rechazado ya habia movido la mercancia: se deshace lo que
+        // le quede, o el reenvio la descontaria dos veces.
+        if ($reenvioDe !== null) {
+            $inventario->devolverSaldoDeFactura($reenvioDe, $userId);
+        }
     } catch (Throwable $e) {
         error_log('[inventario] no se pudo descontar la factura: ' . $e->getMessage());
     }
@@ -516,6 +543,9 @@ function handleEmisionECF(facturaModel $facturaModel, clientModel $clientModel):
         'fecha_emision_dgii' => $result['fecha_emision_dgii'],
         'dgii_response' => $dgiiResp,
     ];
+    if ($reenvioDe !== null) {
+        $data['reenvio_de'] = $reenvioDe;
+    }
 
     // DGII proceso el e-CF y lo RECHAZO (o no se encontro). El intento queda
     // persistido (historial) y, si la secuencia no se consumio
@@ -867,9 +897,156 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
     }
 }
 
-function handleReenviar(int $facturaId, facturaModel $facturaModel): void
+/**
+ * POST /api/facturas/{id}/reenviar — vuelve a enviar a la DGII un e-CF que
+ * rechazo SIN consumir la secuencia (p.ej. cod. 145, fecha de vencimiento de
+ * la secuencia invalida): corregido el dato, el comprobante sale otra vez con
+ * el mismo e-NCF, que ECFEmissionService ya habia devuelto al contador.
+ *
+ * Arma el mismo body que manda el front al emitir y lo pasa por
+ * emitirFacturaEcf: mismas validaciones, mismo guardado. Las lineas salen del
+ * XML firmado (nombre, descripcion, cantidad, precio y descuento tal como se
+ * enviaron) completadas con lo que el XML no trae y la base si (producto,
+ * unidad, indicadores). Cliente y emisor se leen de nuevo: si el rechazo era
+ * por un dato del cliente, la correccion ya entra.
+ */
+function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel $clientModel): void
 {
-    respond(false, 'Reenvio aun no implementado: implica reconstruir XML desde la factura guardada.', 501);
+    // Antes de leer el estado: el segundo de dos clics seguidos se corta aqui, y
+    // uno posterior encuentra la factura ya archivada por el primero.
+    if (!$facturaModel->tomarLockReenvio($facturaId)) {
+        respond(false, 'Este comprobante ya se está reenviando. Espera unos segundos y actualiza.', 409);
+        return;
+    }
+    $facturas = $facturaModel->getFacturas($facturaId);
+    if (empty($facturas)) {
+        respond(false, 'No encontramos esta factura. Puede que ya no exista; actualiza el listado.', 404);
+        return;
+    }
+    $f = $facturas[0];
+    $estado = (string) ($f['estado_dgii'] ?? '');
+
+    if (empty($f['tipo_ecf'])) {
+        respond(false, 'Solo se pueden reenviar comprobantes electrónicos.', 422);
+        return;
+    }
+    if (str_ends_with($estado, '_ARCHIVADO')) {
+        respond(false, 'Este comprobante ya se reenvió. Búscalo en el listado de facturas.', 409);
+        return;
+    }
+    if (!in_array($estado, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'], true)) {
+        respond(false, 'Solo se puede reenviar un comprobante que la DGII rechazó.', 409);
+        return;
+    }
+    if ((string) ($f['secuencia_utilizada'] ?? '') === '1') {
+        respond(false, 'La DGII consumió el e-NCF de este comprobante, así que no se puede reenviar con el mismo número. Emítelo de nuevo desde Nueva factura.', 409);
+        return;
+    }
+    $ambiente = AmbienteResolver::active();
+    if ($ambiente !== null && (string) ($f['ambiente_dgii'] ?? '') !== $ambiente) {
+        respond(false, 'Este comprobante se envió en otro ambiente de la DGII (' . ($f['ambiente_dgii'] ?? 'desconocido') . ') y no se puede reenviar desde aquí.', 409);
+        return;
+    }
+
+    $guardadas = $facturaModel->getFacturaItems($facturaId);
+    if (empty($guardadas)) {
+        respond(false, 'No se encontraron las líneas de esta factura, así que no se puede reenviar. Avisa a soporte.', 422);
+        return;
+    }
+
+    emitirFacturaEcf(
+        armarInputReenvio($f, $guardadas, RequestContext::userId()),
+        $facturaModel,
+        $clientModel,
+        $facturaId
+    );
+}
+
+/**
+ * El body de POST /api/facturas que reproduce una factura guardada (ver
+ * handleReenviar). Puro: no lee la base ni la DGII.
+ *
+ * @param array    $f         fila de facturas (con xml_firmado)
+ * @param array    $guardadas lineas de factura_items, en orden de guardado
+ * @param int|null $userId    quien reenvia (null = quien la emitio)
+ */
+function armarInputReenvio(array $f, array $guardadas, ?int $userId): array
+{
+    require_once __DIR__ . '/../Utils/Pdf/EcfDocumento.php';
+    $xml = (string) ($f['xml_firmado'] ?? '');
+    $lineasXml = EcfDocumento::itemsXml($xml);
+    // Solo se cruzan si cuadran una a una (mismo orden: NumeroLinea = orden de guardado).
+    $usarXml = count($lineasXml) === count($guardadas);
+    $conValor = static fn($v) => $v !== null && trim((string) $v) !== '';
+
+    $items = [];
+    foreach (array_values($guardadas) as $i => $g) {
+        $x = $usarXml ? $lineasXml[$i] : [];
+        $nombre = $conValor($x['nombre_item'] ?? null) ? (string) $x['nombre_item'] : (string) ($g['description'] ?? '');
+        $item = [
+            'numero_linea' => $i + 1,
+            'nombre_item' => mb_substr(trim($nombre), 0, 80),
+            'indicador_facturacion' => (int) ($g['indicador_facturacion'] ?? 1),
+            'indicador_bien_servicio' => (int) ($g['indicador_bien_servicio'] ?? 1),
+            'cantidad' => (float) ($conValor($x['cantidad'] ?? null) ? $x['cantidad'] : $g['quantity']),
+            'unidad_medida' => (string) ($g['unidad_medida'] ?? '43'),
+            'precio_unitario' => (float) ($conValor($x['precio'] ?? null) ? $x['precio'] : $g['amount']),
+        ];
+        if ($conValor($x['descripcion'] ?? null)) {
+            $item['descripcion'] = (string) $x['descripcion'];
+        }
+        $descuento = (float) ($conValor($x['descuento'] ?? null) ? $x['descuento'] : ($g['descuento_monto'] ?? 0));
+        if ($descuento > 0) {
+            $item['descuento_monto'] = $descuento;
+        }
+        if ((int) ($g['product_id'] ?? 0) > 0) {
+            $item['product_id'] = (int) $g['product_id'];
+        }
+        $items[] = $item;
+    }
+
+    $tipoPagoXml = campoXmlReenvio($xml, 'TipoPago');
+    $tipoPago = $tipoPagoXml !== '' ? (int) $tipoPagoXml : (int) ($f['tipo_pago'] ?? 1);
+    $input = [
+        'tipo_ecf' => (string) $f['tipo_ecf'],
+        'client_id' => $f['client_id'] ?: null,
+        'user_id' => $userId ?? $f['user_id'] ?? null,
+        'tipo_pago' => $tipoPago,
+        'tipo_ingresos' => campoXmlReenvio($xml, 'TipoIngresos') ?: '01',
+        // El descuento ya viaja en cada linea: 0 para que no se aplique el del cliente encima.
+        'descuento' => 0,
+        'precios_incluyen_itbis' => campoXmlReenvio($xml, 'IndicadorMontoGravado') === '1',
+        'items' => $items,
+    ];
+    // A credito se conserva el PLAZO, no la fecha: reenviado otro dia, la fecha
+    // vieja podria quedar antes de la emision nueva y la DGII la rechaza.
+    if ($tipoPago === 2) {
+        $emision = DateTime::createFromFormat('!d-m-Y', campoXmlReenvio($xml, 'FechaEmision'));
+        $limite = DateTime::createFromFormat('!d-m-Y', campoXmlReenvio($xml, 'FechaLimitePago'));
+        if ($emision && $limite && $limite > $emision) {
+            $input['fecha_limite_pago'] = date('Y-m-d', strtotime('+' . $emision->diff($limite)->days . ' days'));
+        }
+    }
+    if (in_array((string) $f['tipo_ecf'], InformacionReferencia::TIPOS_NOTA, true) && !empty($f['ncf_modificado'])) {
+        $fechaOriginal = !empty($f['fecha_ncf_modificado']) ? strtotime((string) $f['fecha_ncf_modificado']) : false;
+        $input['informacion_referencia'] = [
+            'ncf_modificado' => (string) $f['ncf_modificado'],
+            'rnc_otro_contribuyente' => null,
+            'fecha_ncf_modificado' => $fechaOriginal ? date('d-m-Y', $fechaOriginal) : '',
+            'codigo_modificacion' => (string) ($f['codigo_modificacion'] ?? ''),
+            'razon_modificacion' => (string) ($f['razon_modificacion'] ?? ''),
+        ];
+    }
+    return $input;
+}
+
+/** Texto de un nodo simple del XML firmado ('' si no esta). Mismo criterio que EcfDocumento::campoXml. */
+function campoXmlReenvio(string $xml, string $tag): string
+{
+    if ($xml === '' || !preg_match('/<' . $tag . '>([^<]*)<\/' . $tag . '>/i', $xml, $m)) {
+        return '';
+    }
+    return trim(html_entity_decode($m[1], ENT_QUOTES | ENT_XML1, 'UTF-8'));
 }
 
 function handlePreview(clientModel $clientModel): void
