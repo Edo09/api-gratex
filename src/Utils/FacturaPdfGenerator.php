@@ -458,19 +458,25 @@ class FacturaPdfGenerator extends FPDF
         //  - E43 (Gastos Menores): el e-CF no lleva Comprador -> no se imprime receptor.
         //  - E47 (Pagos al Exterior): comprador extranjero, sin RNC dominicano; el XML
         //    escribe IdentificadorExtranjero -> se etiqueta "Identificación Tributaria".
+        // Todas las lineas del receptor con MultiCell: un nombre largo ("Att.
+        // HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO") salta de linea en
+        // vez de salirse de la pagina. La tabla arranca debajo de lo que ocupe
+        // (ver table_start_y mas abajo), asi que el bloque puede crecer.
         if ($receptor['mostrar']) {
             // Sin RNC (p.ej. E32 Consumo sin comprador) no se imprime la linea.
             if ($receptor['rnc'] !== '') {
                 $this->SetX(-73);
-                $this->Cell(70, 3.8, $this->convertEncoding($receptor['label_id'] . ': ' . $receptor['rnc']), 0, 1, 'L');
+                $this->MultiCell(70, 3.8, $this->convertEncoding($receptor['label_id'] . ': ' . $receptor['rnc']), 0, 'L');
             }
             $this->SetX(-73);
             $this->MultiCell(70, 3.8, $this->convertEncoding('Razón Social: ' . $receptor['razon_social']), 0, 'L');
             if ($receptor['contacto'] !== '') {
                 $this->SetX(-73);
-                $this->Cell(70, 3.8, $this->convertEncoding($receptor['contacto']), 0, 1, 'L');
+                $this->MultiCell(70, 3.8, $this->convertEncoding($receptor['contacto']), 0, 'L');
             }
         }
+
+        $finBloqueDerecho = $this->GetY();
 
         // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
         // NCF Modificado y el Motivo. Se persisten al emitir la nota (ver
@@ -488,11 +494,11 @@ class FacturaPdfGenerator extends FPDF
             $this->Cell(125, 3.8, $lineNcf, 0, 1, 'L');
         }
 
-        // Force cursor below the header block so the table header doesn't overlap
-        // the emisor / receptor columns.
-        if ($this->GetY() < $tableStartY) {
-            $this->SetY($tableStartY);
-        }
+        // La tabla arranca debajo de TODO el encabezado: el minimo de la
+        // plantilla, la linea del NCF Modificado (que deja el cursor en y=48) y
+        // el bloque del receptor, que crece con un nombre largo. Solo con el
+        // GetY() de la nota, un receptor de varias lineas quedaba bajo la tabla.
+        $this->SetY(max($this->GetY(), $finBloqueDerecho, $tableStartY));
 
         // Table header — columnas exactas y en el orden exigido por la norma
         // DGII (anchos y etiquetas los fija el motor; la plantilla solo dibuja):
