@@ -400,6 +400,27 @@ class posModel
     }
 
     /**
+     * Ventas cobradas por un empleado en una caja entre dos fechas de factura
+     * (`facturas.date`, la misma hora que sale en el recibo), de cualquier turno.
+     * Con el nombre del cliente si es credito fiscal.
+     */
+    public function ventasDelEmpleadoEnCaja(int $cajaId, int $empleadoId, string $desde, string $hasta): array
+    {
+        $stmt = $this->conexion->prepare(
+            "SELECT f.id, f.e_ncf, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago, m.turno_id,
+                    c.razon_social, c.company_name, c.client_name
+             FROM pos_turnos t
+             JOIN pos_caja_movimientos m ON m.turno_id = t.id AND m.tipo = 'VENTA'
+             JOIN facturas f ON f.id = m.factura_id
+             LEFT JOIN clients c ON c.id = f.client_id
+             WHERE t.caja_id = :caja AND f.pos_empleado_id = :emp AND f.date >= :desde AND f.date < :hasta
+             ORDER BY f.id DESC"
+        );
+        $stmt->execute([':caja' => $cajaId, ':emp' => $empleadoId, ':desde' => $desde, ':hasta' => $hasta]);
+        return $stmt->fetchAll();
+    }
+
+    /**
      * Cierra el turno si sigue abierto (una sola vez: `abierto = 1` en el WHERE).
      * Montos en pesos. Devuelve false si otro lo cerro antes.
      */

@@ -17,6 +17,7 @@
 //   POST   /api/pos/turno/cerrar -> {turno_id, conteo, permiso?} cierre a ciegas (K6-K8)
 //   POST   /api/pos/turno/nota -> {turno_id, nota} nota del cierre, una vez
 //   GET    /api/pos/ventas  -> ventas cobradas del turno abierto de la caja (K9)
+//   GET    /api/pos/ventas/dia -> ventas de hoy del empleado en esta caja (todos sus turnos)
 //   POST   /api/pos/eventos -> {tipo: cancelada|quitada, monto_centavos, lineas} (V4)
 //   POST   /api/pos/clientes/rnc -> {rnc} cliente de credito fiscal; si no existe se crea (F2)
 //
@@ -319,6 +320,12 @@ try {
             PosAuth::requerirSesion($pos, $equipo);
             $caja = $pos->cajaPorId($equipo['caja_id']);
             posResponder(200, PosCierre::ventasDelTurno($pos, $caja ?? ['id' => $equipo['caja_id']]));
+            break;
+
+        case 'GET ventas/dia':
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = $pos->cajaPorId($equipo['caja_id']);
+            posResponder(200, PosCierre::ventasDelDia($pos, $caja ?? ['id' => $equipo['caja_id'], 'nombre' => ''], $sesion['empleado']));
             break;
 
         case 'POST eventos':

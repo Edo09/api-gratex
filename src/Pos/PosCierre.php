@@ -298,4 +298,56 @@ final class PosCierre
         ], $pos->ventasCobradasDelTurno($turno['id']));
         return ['turno_caja' => $turno, 'ventas' => $ventas];
     }
+
+    /**
+     * Ventas de hoy del empleado en esta caja, de todos sus turnos (tambien los ya
+     * cerrados), con el resumen por forma de pago. "Hoy" es el dia de la fecha de
+     * la factura, que el POS escribe con la hora del servidor (date()).
+     */
+    public static function ventasDelDia(posModel $pos, array $caja, array $empleado): array
+    {
+        $hoy = new DateTimeImmutable('today');
+        $filas = $pos->ventasDelEmpleadoEnCaja((int) $caja['id'], (int) $empleado['id'],
+            $hoy->format('Y-m-d H:i:s'), $hoy->modify('+1 day')->format('Y-m-d H:i:s'));
+
+        $ventas = [];
+        $porForma = [];
+        $total = 0;
+        foreach ($filas as $v) {
+            $centavos = (int) round(((float) $v['total']) * 100);
+            $forma = (int) $v['forma_pago'];
+            $cliente = null;
+            foreach (['razon_social', 'company_name', 'client_name'] as $campo) {
+                if (trim((string) ($v[$campo] ?? '')) !== '') {
+                    $cliente = trim((string) $v[$campo]);
+                    break;
+                }
+            }
+            $ventas[] = [
+                'factura_id' => (int) $v['id'],
+                'e_ncf' => $v['e_ncf'],
+                'tipo_ecf' => (string) $v['tipo_ecf'],
+                'fecha' => $v['date'],
+                'turno_id' => (int) $v['turno_id'],
+                'cliente' => (string) $v['tipo_ecf'] === '31' ? $cliente : null,
+                'total_centavos' => $centavos,
+                'forma_pago' => $forma,
+                'forma_pago_nombre' => PosVenta::FORMAS_PAGO[$forma] ?? 'Otra',
+                'estado_dgii' => $v['estado_dgii'],
+                'envio_pendiente' => (int) $v['envio_pendiente'] === 1,
+            ];
+            $total += $centavos;
+            $porForma[$forma] ??= ['forma_pago' => $forma, 'nombre' => PosVenta::FORMAS_PAGO[$forma] ?? 'Otra', 'cantidad' => 0, 'total_centavos' => 0];
+            $porForma[$forma]['cantidad']++;
+            $porForma[$forma]['total_centavos'] += $centavos;
+        }
+        ksort($porForma);
+        return [
+            'fecha' => $hoy->format('Y-m-d'),
+            'caja' => ['id' => (int) $caja['id'], 'nombre' => (string) ($caja['nombre'] ?? '')],
+            'empleado' => ['id' => (int) $empleado['id'], 'nombre' => (string) $empleado['nombre']],
+            'resumen' => ['cantidad' => count($ventas), 'total_centavos' => $total, 'por_forma' => array_values($porForma)],
+            'ventas' => $ventas,
+        ];
+    }
 }

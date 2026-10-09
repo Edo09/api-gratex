@@ -253,6 +253,23 @@ cron confirmado, Q4).
 cobradas del turno abierto de la caja (K9), con e-NCF, hora, total, forma de pago, estado
 DGII y `envio_pendiente`. Para reimprimir, `GET /api/pos/ventas/{id}/recibo`.
 
+**`GET /api/pos/ventas/dia`** (con `X-POS-SESION`) — botón **Ventas del día**: las ventas
+cobradas **hoy** por el empleado de la sesión **en la caja del equipo**, de todos sus
+turnos (también los ya cerrados). "Hoy" es por `facturas.date`, la hora que sale en el
+recibo. Sin las rechazadas al emitir (no tienen cobro).
+
+```json
+{ "fecha": "2026-10-09", "caja": { "id": 1, "nombre": "Caja 1" }, "empleado": { "id": 7, "nombre": "Ana" },
+  "resumen": { "cantidad": 2, "total_centavos": 66000,
+               "por_forma": [ { "forma_pago": 1, "nombre": "Efectivo", "cantidad": 1, "total_centavos": 57000 },
+                              { "forma_pago": 3, "nombre": "Tarjeta", "cantidad": 1, "total_centavos": 9000 } ] },
+  "ventas": [ { "factura_id": 1410, "e_ncf": "E310000000022", "tipo_ecf": "31", "fecha": "2026-10-09 11:35:20",
+                "turno_id": 9, "cliente": "CLIENTE CON DESCUENTO SRL", "total_centavos": 9000, "forma_pago": 3,
+                "forma_pago_nombre": "Tarjeta", "estado_dgii": "ACEPTADO", "envio_pendiente": false } ] }
+```
+
+`cliente` solo en crédito fiscal. Para reimprimir, `GET /api/pos/ventas/{id}/recibo`.
+
 **`POST /api/pos/eventos`** (con `X-POS-SESION`) `{ "tipo": "cancelada" | "quitada",
 "monto_centavos": 4500, "lineas": [{product_id, nombre, cantidad}] }` — venta cancelada o
 línea quitada del carrito (V4). Si el empleado tiene su turno abierto suma al cierre
@@ -314,9 +331,9 @@ para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.
 
 `tools/test_pos_venta.php`: 48 verificaciones del cobro (turno, validaciones sin gastar
 e-NCF, venta en efectivo, idempotencia y candado, rechazo, DGII lenta y caída con su
-reenvío, recibo, bitácora). `tools/test_pos_cierre.php`: 44 verificaciones del cierre
+reenvío, recibo, bitácora). `tools/test_pos_cierre.php`: 50 verificaciones del cierre
 (esperado y diferencia, permiso de supervisor, PIN de cajero, conteo inválido, nota, ventas
-del turno, eventos V4, candado, lista de app.\*). `tools/test_pos_e31.php`: 35
+del turno y del día, eventos V4, candado, lista de app.\*). `tools/test_pos_e31.php`: 35
 verificaciones del crédito fiscal (cliente nuevo, existente, no inscrito y consulta caída;
 validaciones; E31 aceptado por `ConsultaResultado`; descuento del cliente; rechazo al
 recibir y después; DGII lenta y caída sin duplicar el envío; necesita además

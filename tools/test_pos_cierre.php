@@ -286,6 +286,36 @@ $chk('Luis cerro el turno de Ana desde su propia sesion de supervisor, sin permi
     ($resp['data']['reporte']['cerrado_por']['nombre'] ?? '') === 'Luis' && ($resp['data']['reporte']['empleado']['nombre'] ?? '') === 'Ana', $resp);
 
 // ---------------------------------------------------------------------------
+echo "\n5b. Ventas del dia: del cajero en esta caja, de todos sus turnos de hoy\n";
+$ana = $entrar('Ana', $eq1);
+[$h, $r] = $api('GET', '/pos/ventas/dia', null, $ana);
+$d = $r['data'] ?? [];
+$chk('Ana: sus 4 ventas de hoy aunque el turno ya se cerro, la mas nueva primero, sin la rechazada', $h === 200
+    && count($d['ventas'] ?? []) === 4 && $d['ventas'][0]['e_ncf'] === $encfPendiente && $d['fecha'] === date('Y-m-d')
+    && ($d['empleado']['nombre'] ?? '') === 'Ana' && ($d['caja']['id'] ?? 0) === $caja1, [$h, $d]);
+$chk('resumen: 4 ventas por 292.50; efectivo 2 (229.50), transferencia 1 (38.00), tarjeta 1 (25.00)',
+    ($d['resumen'] ?? null) === ['cantidad' => 4, 'total_centavos' => 29250, 'por_forma' => [
+        ['forma_pago' => 1, 'nombre' => 'Efectivo', 'cantidad' => 2, 'total_centavos' => 22950],
+        ['forma_pago' => 2, 'nombre' => 'Transferencia / depósito', 'cantidad' => 1, 'total_centavos' => 3800],
+        ['forma_pago' => 3, 'nombre' => 'Tarjeta', 'cantidad' => 1, 'total_centavos' => 2500]]], $d['resumen'] ?? $d);
+$ayer = (int) ($d['ventas'][3]['factura_id'] ?? 0);
+$pdo->exec("UPDATE `{$dbA}`.facturas SET date = DATE_SUB(date, INTERVAL 1 DAY) WHERE id = {$ayer}");
+[$h, $r] = $api('GET', '/pos/ventas/dia', null, $ana);
+$chk('una venta de ayer no sale', $h === 200 && count($r['data']['ventas'] ?? []) === 3
+    && !in_array($ayer, array_column($r['data']['ventas'] ?? [], 'factura_id'), true), [$h, $r]);
+$pdo->exec("UPDATE `{$dbA}`.facturas SET date = DATE_ADD(date, INTERVAL 1 DAY) WHERE id = {$ayer}");
+$bea = $entrar('Bea', $eq1);
+[$h, $r] = $api('GET', '/pos/ventas/dia', null, $bea);
+$chk('Bea en la misma caja: solo la suya (25.00), nada de Ana', $h === 200 && count($r['data']['ventas'] ?? []) === 1
+    && ($r['data']['resumen']['total_centavos'] ?? 0) === 2500, [$h, $r]);
+$beaCaja2 = $entrar('Bea', $eq2);
+[$h, $r] = $api('GET', '/pos/ventas/dia', null, $beaCaja2);
+$chk('Bea en otra caja: nada (las ventas son de la caja 1)', $h === 200 && ($r['data']['ventas'] ?? null) === []
+    && ($r['data']['resumen']['cantidad'] ?? -1) === 0, [$h, $r]);
+[$h, $r] = $api('GET', '/pos/ventas/dia', null, $eq1);
+$chk('sin sesion de empleado: 401 SESION_REQUERIDA', $h === 401 && ($r['codigo'] ?? '') === 'SESION_REQUERIDA', [$h, $r]);
+
+// ---------------------------------------------------------------------------
 echo "\n6. app.*: Punto de venta -> Turnos\n";
 [$h, $r] = $api('GET', '/pos-admin/turnos', null, $admin);
 $lista = $r['data']['turnos'] ?? [];
