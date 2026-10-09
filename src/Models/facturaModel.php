@@ -1140,8 +1140,15 @@ class facturaModel
      * Ojo con los errores: se llama DESPUES de que la DGII recibio el e-CF. Por
      * eso el mensaje pide NO volver a emitirla (saldria otro e-NCF para la misma
      * venta) y trae el e-NCF para que soporte la ubique.
+     *
+     * Venta del POS (docs/specs/pos.md §9.5): `$factura['pos']` = {turno_id,
+     * pos_empleado_id, pos_idempotency_key, envio_pendiente}. Esas columnas
+     * (migracion 030) solo se escriben cuando vienen: un tenant que aun no tiene
+     * la migracion sigue facturando desde app.* igual que siempre.
+     * `$antesDeConfirmar($facturaId)` corre dentro de la MISMA transaccion (el
+     * movimiento de caja del POS): si falla, no queda ni la factura a medias.
      */
-    public function saveFacturaConECF(array $factura, array $ecf): array
+    public function saveFacturaConECF(array $factura, array $ecf, ?callable $antesDeConfirmar = null): array
     {
         try {
             $this->conexion->beginTransaction();
@@ -1205,20 +1212,29 @@ class facturaModel
                 }
             }
 
+            $pos = is_array($factura['pos'] ?? null) ? $factura['pos'] : null;
             $sql = 'INSERT INTO facturas
                 (no_factura, date, client_id, client_name, total, tipo_pago, NCF, user_id,
                  tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
                  fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
                  rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta,
-                 ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion)
+                 ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion'
+                . ($pos ? ', turno_id, pos_empleado_id, pos_idempotency_key, envio_pendiente' : '') . ')
                 VALUES
                 (:no_factura, :date, :client_id, :client_name, :total, :tipo_pago, NULL, :user_id,
                  :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
                  :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
                  :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta,
-                 :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion)';
+                 :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion'
+                . ($pos ? ', :turno_id, :pos_empleado_id, :pos_idempotency_key, :envio_pendiente' : '') . ')';
+            $parametrosPos = $pos ? [
+                ':turno_id' => $pos['turno_id'],
+                ':pos_empleado_id' => $pos['pos_empleado_id'],
+                ':pos_idempotency_key' => $pos['pos_idempotency_key'],
+                ':envio_pendiente' => !empty($pos['envio_pendiente']) ? 1 : 0,
+            ] : [];
             $stmt = $this->conexion->prepare($sql);
-            $stmt->execute([
+            $stmt->execute($parametrosPos + [
                 ':no_factura' => $factura['no_factura'] ?? $ecf['e_ncf'],
                 ':date' => $factura['date'],
                 ':client_id' => $factura['client_id'],
@@ -1278,6 +1294,10 @@ class facturaModel
                 ]);
             }
 
+            if ($antesDeConfirmar !== null) {
+                $antesDeConfirmar($facturaId);
+            }
+
             $this->conexion->commit();
             return ['success', [
                 'factura_id' => $facturaId,
@@ -1287,7 +1307,9 @@ class facturaModel
                 'codigo_seguridad' => $ecf['codigo_seguridad'] ?? null,
                 'total' => $factura['total'],
             ]];
-        } catch (PDOException $e) {
+        } catch (Throwable $e) {
+            // Throwable y no solo PDOException: un fallo del gancho
+            // ($antesDeConfirmar) tambien tiene que deshacer la factura.
             if ($this->conexion->inTransaction()) {
                 $this->conexion->rollBack();
             }

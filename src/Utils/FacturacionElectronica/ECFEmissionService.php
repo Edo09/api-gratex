@@ -314,6 +314,11 @@ class ECFEmissionService
             'emisor' => $emisorMerged,
             'comprador' => $payload['comprador'] ?? [],
             'items' => $payload['items'] ?? [],
+            // TablaFormasPago: la misma que lleva el RFCE, para que el e-CF
+            // firmado y su resumen digan lo mismo (el POS la manda; app.* aun
+            // no). En el set de pruebas (strict) se queda como estaba: sin ella.
+            'formas_pago' => !$strictInput && is_array($payload['formas_pago'] ?? null)
+                ? $payload['formas_pago'] : [],
             // Descuentos/recargos globales del documento: solo en el set de
             // pruebas, cuyos totales ya los incluyen. La emision normal calcula
             // los totales de las lineas (EcfItemMapper::totales) y no los
@@ -377,6 +382,20 @@ class ECFEmissionService
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];
 
+        // Opciones del POS (docs/specs/pos.md F6). Sin ellas, todo como siempre.
+        //  - dgii_timeout: segundos de espera al ENVIAR (el resto del sistema usa
+        //    DGII_ECF_TIMEOUT, 30 s). El token ya se pidio con el timeout normal.
+        //  - tolerar_fallo_envio: si el envio del RFCE no llega a tener respuesta
+        //    (timeout o caida), el resultado sale como RFCE_PENDIENTE con los XML
+        //    firmados, en vez de una excepcion. El e-NCF NO se devuelve: no se
+        //    sabe si la DGII lo recibio, y la venta se queda con el. Se reenvia
+        //    despues consultando primero (reenviarRFCE / consultarEstadoRFCE).
+        $opcionesEnvio = ['environment' => $ambiente];
+        if ((int) ($payload['dgii_timeout'] ?? 0) > 0) {
+            $opcionesEnvio['timeout'] = (int) $payload['dgii_timeout'];
+        }
+        $tolerarFalloEnvio = !empty($payload['tolerar_fallo_envio']);
+
         $montoTotal = (float) ($payload['totales']['monto_total'] ?? 0);
         $usaRFCE = $tipoEcf === '32' && $montoTotal < self::RFCE_THRESHOLD;
 
@@ -416,9 +435,36 @@ class ECFEmissionService
             $unsignedRfce = $this->rfceBuilder->build($rfceXmlData);
             $signedRfce = $this->signer->sign($certContent, $certPassword, $unsignedRfce);
 
-            $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
-                'environment' => $ambiente,
-            ]);
+            try {
+                $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, $opcionesEnvio);
+            } catch (Throwable $e) {
+                if (!$tolerarFalloEnvio) {
+                    throw $e;
+                }
+                error_log(sprintf('[ECF] RFCE %s sin respuesta de la DGII (%s): queda pendiente de envio. %s',
+                    $eNcf, get_class($e), $e->getMessage()));
+                return [
+                    'e_ncf' => $eNcf,
+                    'tipo_ecf' => $tipoEcf,
+                    'signed_xml' => $signedXml,
+                    'codigo_seguridad' => $codigoSeguridad,
+                    'track_id' => null,
+                    'estado' => 'RFCE_PENDIENTE',
+                    'ambiente' => $ambiente,
+                    'fecha_emision_dgii' => $fechaEmisionDgii,
+                    'dgii_response' => null,
+                    'dgii_status_code' => null,
+                    'flujo' => 'RFCE',
+                    'monto_total' => $montoTotal,
+                    'rfce_xml' => $signedRfce,
+                    'rfce_track_id' => null,
+                    'rfce_estado' => 'PENDIENTE',
+                    'rfce_response' => null,
+                    'rfce_status_code' => null,
+                    'envio_pendiente' => true,
+                    'error_envio' => get_class($e) . ': ' . $e->getMessage(),
+                ];
+            }
 
             $rfceEstado = $this->mapEstado($rfceReception);
             $rfceTrackId = $this->extractTrackId($rfceReception);
@@ -533,6 +579,35 @@ class ECFEmissionService
             '[ECF] reclamar secuencia: type=%s valor=%d ambiente=%s estado=%s dispensamos=si utilizada=%s rango_id=%s -> %s',
             $type, $valor, $ambiente, $estado, $flagTxt, $rangoId !== null ? (string) $rangoId : 'null', $resultado
         ));
+    }
+
+    /**
+     * Reenvia a la DGII un RFCE ya firmado que quedo pendiente (POS, F7). El que
+     * llama tiene que haber consultado antes (consultarEstadoRFCE) y no haberlo
+     * encontrado: si la DGII ya lo tenia, reenviarlo lo duplicaria.
+     *
+     * @return array{estado: string, response: mixed, status_code: int|null}
+     *   estado: RFCE_ACEPTADO, RFCE_RECHAZADO, RFCE_EN_PROCESO... (mapEstado con prefijo)
+     * Lanza excepcion si tampoco esta vez hay respuesta (sigue pendiente).
+     */
+    public function reenviarRFCE(string $rfceXml, ?string $ambiente = null, ?int $timeout = null): array
+    {
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
+        $opciones = ['environment' => $tokenInfo['ambiente']];
+        if ($timeout !== null && $timeout > 0) {
+            $opciones['timeout'] = $timeout;
+        }
+        $recepcion = $this->reception->recibirResumen($rfceXml, $tokenInfo['token'], $opciones);
+        return [
+            'estado' => 'RFCE_' . $this->mapEstado($recepcion),
+            'response' => $recepcion['data'],
+            'status_code' => $recepcion['status_code'],
+        ];
     }
 
     /**

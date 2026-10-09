@@ -9,6 +9,10 @@
 //   POST   /api/pos/sesion   -> {pin} -> {token, empleado, caja, turno_caja}
 //   DELETE /api/pos/sesion   -> cierra la sesion (bloqueo de pantalla o salir)
 //   GET    /api/pos/catalogo -> productos con su precio final, categorias (C1-C4)
+//   POST   /api/pos/turno    -> {fondo_centavos} abre el turno del empleado (K2, K3)
+//   POST   /api/pos/ventas   -> cobra y emite (§9.5); ver src/Pos/PosVenta.php
+//   GET    /api/pos/ventas/{id}/recibo?ancho=80 -> datos del recibo (reimprimir)
+//   POST   /api/pos/pendientes/reenviar -> reenvia las ventas sin respuesta DGII (F7)
 //
 // Errores: {status:false, error, codigo}. Codigos que cambian de pantalla:
 //   EQUIPO_NO_HABILITADO -> habilitar el equipo     SESION_REQUERIDA -> PIN
@@ -22,6 +26,7 @@ require_once __DIR__ . '/../Models/posModel.php';
 require_once __DIR__ . '/../Models/posMasterModel.php';
 require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Pos/PosPrecio.php';
+require_once __DIR__ . '/../Pos/PosVenta.php';
 
 /** Una linea de auditoria del POS. Nunca con el PIN ni tokens. */
 function posAudit(string $action, $entityId, ?array $new, string $descripcion, bool $ok = true): void
@@ -110,6 +115,20 @@ try {
     $resto = trim(substr($path, strpos($path, '/api/pos') + strlen('/api/pos')), '/');
     $metodo = $_SERVER['REQUEST_METHOD'];
 
+    // Reimprimir el recibo de una venta del POS (K9, P5).
+    if ($metodo === 'GET' && preg_match('#^ventas/(\d+)/recibo$#', $resto, $m) === 1) {
+        PosAuth::requerirSesion($pos, $equipo);
+        if ($pos->ventaPos((int) $m[1]) === null) {
+            throw new PosError('No encontramos esa venta del POS.', 404, 'VENTA_NO_EXISTE');
+        }
+        $recibo = PosVenta::recibo((int) $m[1], PosVenta::ancho($_GET['ancho'] ?? null));
+        if ($recibo === null) {
+            throw new PosError('No se pudo preparar el recibo. Inténtalo de nuevo.', 500, 'RECIBO_FALLIDO');
+        }
+        posResponder(200, ['recibo' => $recibo]);
+        return;
+    }
+
     switch ("{$metodo} {$resto}") {
 
         case 'GET estado':
@@ -185,6 +204,41 @@ try {
             posAudit('POS_SESION_CERRADA', $equipo['id'], ['empleado_id' => $sesion['empleado']['id'], 'empleado' => $sesion['empleado']['nombre']],
                 'Sesión del POS cerrada (bloqueo de pantalla o salida).');
             posResponder(200, ['cerrada' => true]);
+            break;
+
+        case 'POST turno':
+            // Apertura del turno con su fondo inicial (K2). Solo el empleado de
+            // la sesion, en la caja de este equipo.
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = posCajaDelEquipo($pos, $equipo);
+            $body = InputSanitizer::jsonInput() ?? [];
+            $fondo = is_array($body) ? ($body['fondo_centavos'] ?? null) : null;
+            if (!is_int($fondo)) {
+                throw new PosError('Escribe el fondo inicial de la caja (0 si empieza vacía).', 422, 'FONDO_INVALIDO');
+            }
+            $turno = $pos->abrirTurno($caja['id'], $sesion['empleado']['id'], $fondo / 100);
+            posAudit('POS_TURNO_ABIERTO', $equipo['id'], [
+                'turno_id' => $turno['id'], 'caja_id' => $caja['id'], 'empleado_id' => $sesion['empleado']['id'],
+                'empleado' => $sesion['empleado']['nombre'], 'fondo_inicial' => $turno['fondo_inicial'],
+            ], 'Turno del POS abierto.');
+            posResponder(201, ['turno_caja' => $turno]);
+            break;
+
+        case 'POST ventas':
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = posCajaDelEquipo($pos, $equipo);
+            $body = InputSanitizer::jsonInput() ?? [];
+            if (!is_array($body)) {
+                throw new PosError('No se pudieron leer los datos de la venta. Inténtalo de nuevo.', 400, 'CUERPO_INVALIDO');
+            }
+            RequestContext::set('username', 'POS · ' . $sesion['empleado']['nombre']);
+            posResponder(201, PosVenta::cobrar($pos, $equipo, $sesion['empleado'], $caja, $body));
+            break;
+
+        case 'POST pendientes/reenviar':
+            // Sin sesion de empleado: lo llama el POS en segundo plano, tambien
+            // con la pantalla bloqueada. Solo toca las ventas de esta empresa.
+            posResponder(200, PosVenta::reenviarPendientes($pos));
             break;
 
         case 'GET catalogo':

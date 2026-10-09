@@ -246,7 +246,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 ### 6.4 Comprobante fiscal
 
 **F1 · E32 por defecto** — `Piloto`
-- [ ] Sin cliente → E32 a consumidor final (sin `client_id`, como ya permite la emisión).
+- [x] Sin cliente → E32 a consumidor final (sin `client_id`, como ya permite la emisión).
 
 **F2 · E31 con RNC** — `Piloto`
 - [ ] Casilla "Crédito fiscal" → RNC o cédula.
@@ -254,28 +254,28 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] RNC no encontrado en la DGII → no se puede emitir E31; la venta puede salir como E32.
 
 **F3 · E32 de RD$250,000 o más** — `Piloto`
-- [ ] Exige identificar al comprador (RNC o cédula) antes de cobrar. **Regla a confirmar en la fase 0** contra el formato e-CF.
+- [ ] Exige identificar al comprador (RNC o cédula) antes de cobrar. **Regla a confirmar en la fase 0** contra el formato e-CF. *Por ahora el POS no cobra ventas de RD$250,000 o más (`COMPRADOR_REQUERIDO`): van por app.\*.*
 
 **F4 · Precios con ITBIS incluido en el XML** — `Piloto` · *go/no-go en la fase 0*
-- [ ] Las ventas del POS (E32, E31 y sus E34) se emiten con **`IndicadorMontoGravado = 1`**: el precio unitario del XML es el precio final.
-- [ ] Total del e-CF = total del carrito, al centavo. Prueba obligatoria: **7 × RD$25 = RD$175.00**. Con el cálculo actual (`= 0`, neto + 18 % encima) ese total es imposible: da 174.99 o 175.01.
+- [ ] Las ventas del POS (E32, E31 y sus E34) se emiten con **`IndicadorMontoGravado = 1`**: el precio unitario del XML es el precio final. *E32 hecho; E31 y E34 con su entrega.*
+- [x] Total del e-CF = total del carrito, al centavo. Prueba obligatoria: **7 × RD$25 = RD$175.00**. Con el cálculo actual (`= 0`, neto + 18 % encima) ese total es imposible: da 174.99 o 175.01.
 - [x] El indicador **no** necesita columna: se lee del XML firmado. `factura_items.subtotal` sigue guardando la base **sin** ITBIS (lo que suman el reporte de ventas y el 607) e `itbis_amount` el ITBIS, repartidos para sumar exacto el encabezado. La RI y el detalle en app.\* vuelven a juntarlos (ver [§9.5](#95-emisión-post-apiposventas)). *Hecho en la fase 0: campo `precios_incluyen_itbis` de `POST /api/facturas`.*
 - [ ] **Si la DGII lo rechaza en la fase 0**, el plan B es `= 0` con el neto a 4 decimales. El total puede variar ±1 centavo respecto a la góndola, y se cobra lo que diga el e-CF. Esto se decide antes del lunes 2026-10-12.
 
 **F5 · Idempotencia** — `Piloto`
-- [ ] Cada intento de venta lleva una clave única generada por el POS.
-- [ ] Repetir con la misma clave devuelve **la misma factura** y sus datos de recibo, **nunca otro e-NCF**.
-- [ ] Un doble toque en "Cobrar" emite una sola vez.
+- [x] Cada intento de venta lleva una clave única generada por el POS.
+- [x] Repetir con la misma clave devuelve **la misma factura** y sus datos de recibo, **nunca otro e-NCF**.
+- [x] Un doble toque en "Cobrar" emite una sola vez.
 
 **F6 · DGII lenta** — `Piloto` · *requiere el visto bueno del contador (Q1)*
-- [ ] Espera máxima a la DGII en ventas POS: **5 s** (configurable, `POS_DGII_TIMEOUT`). El resto del sistema sigue en 30 s.
-- [ ] Respuesta **aceptada** → recibo.
-- [ ] Respuesta **rechazada** → no hay recibo. Se muestra el motivo y el carrito queda intacto. (El e-NCF se puede reutilizar, ya lo maneja la emisión.)
-- [ ] **Sin respuesta en 5 s o fallo de transporte** → la venta queda firmada y guardada como *envío pendiente*, se imprime el recibo y el envío se reintenta solo (F7).
+- [x] Espera máxima a la DGII en ventas POS: **5 s** (configurable, `POS_DGII_TIMEOUT`). El resto del sistema sigue en 30 s.
+- [x] Respuesta **aceptada** → recibo.
+- [x] Respuesta **rechazada** → no hay recibo. Se muestra el motivo y el carrito queda intacto. (El e-NCF se puede reutilizar, ya lo maneja la emisión.)
+- [x] **Sin respuesta en 5 s o fallo de transporte** → la venta queda firmada y guardada como *envío pendiente*, se imprime el recibo y el envío se reintenta solo (F7).
 
 **F7 · Reintento de envíos pendientes** — `Piloto`
-- [ ] Un proceso reenvía las ventas con *envío pendiente* hasta tener respuesta: cron de cPanel, o el propio POS cuando está libre si no hay cron (Q4).
-- [ ] Si después llega un **rechazo**, se muestra una alerta persistente en el POS (al supervisor) y en app.\*, con la venta y el motivo.
+- [x] Un proceso reenvía las ventas con *envío pendiente* hasta tener respuesta: cron de cPanel, o el propio POS cuando está libre si no hay cron (Q4).
+- [ ] Si después llega un **rechazo**, se muestra una alerta persistente en el POS (al supervisor) y en app.\*, con la venta y el motivo. *En el POS ya sale (franja roja hasta "Entendido"); en app.\* falta.*
 
 **F8 · Corregir el aviso de "carga manual"** — `Piloto`
 - [ ] Quitar el aviso *"La factura íntegra debe cargarse manualmente al portal DGII"* de `ECFEmissionService` y corregir el comentario de `RFCEXmlBuilder`. En producción basta el RFCE.
@@ -288,27 +288,27 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 ### 6.5 Cobro e impresión
 
 **P1 · Forma de pago** — `Piloto`
-- [ ] Una por venta: **Efectivo** (código DGII 1), **Tarjeta** (3), **Transferencia / depósito** (2).
-- [ ] Se envía en `TablaFormasPago`, así el 607 la reparte bien sin tocarlo.
+- [x] Una por venta: **Efectivo** (código DGII 1), **Tarjeta** (3), **Transferencia / depósito** (2).
+- [x] Se envía en `TablaFormasPago`, así el 607 la reparte bien sin tocarlo.
 
 **P2 · Efectivo y devuelta** — `Piloto`
-- [ ] Monto recibido: botones Exacto, 100, 200, 500, 1000, 2000 y teclado numérico.
-- [ ] No se puede cobrar si lo recibido es menor que el total.
-- [ ] La devuelta se ve en grande. Se guardan el recibido y la devuelta.
+- [x] Monto recibido: botones Exacto, 100, 200, 500, 1000, 2000 y teclado numérico.
+- [x] No se puede cobrar si lo recibido es menor que el total.
+- [x] La devuelta se ve en grande. Se guardan el recibido y la devuelta.
 
 **P3 · Tarjeta y transferencia** — `Piloto`
-- [ ] Monto = total. Sin número de referencia.
+- [x] Monto = total. Sin número de referencia.
 
 **P4 · Impresión automática** — `Piloto`
-- [ ] Al emitir, el recibo se imprime **siempre**, en tirilla, con el modo página web que ya existe (`imprimirRecibo` → `reciboHtml` → `printHtml`).
-- [ ] Sale con el **diálogo de impresión normal** del navegador, con la térmica POS 80 como impresora predeterminada (el cajero solo confirma). Decisión del 2026-10-08.
-- [ ] `--kiosk-printing` (sin diálogo) queda como opción del montaje: no cambia el código.
+- [x] Al emitir, el recibo se imprime **siempre**, en tirilla, con el modo página web que ya existe (`imprimirRecibo` → `reciboHtml` → `printHtml`).
+- [x] Sale con el **diálogo de impresión normal** del navegador, con la térmica POS 80 como impresora predeterminada (el cajero solo confirma). Decisión del 2026-10-08.
+- [x] `--kiosk-printing` (sin diálogo) queda como opción del montaje: no cambia el código.
 
 **P5 · Reimpresión** — `Piloto`
 - [ ] Desde "Ventas del turno" (K9).
 
 **P6 · Impresora del equipo** — `Piloto`
-- [ ] El POS tiene su propia configuración de impresora (ancho 72/76/80, **80 por defecto**, y hoja de prueba), porque la de app.\* vive en el `localStorage` de otro dominio.
+- [x] El POS tiene su propia configuración de impresora (ancho 72/76/80, **80 por defecto**, y hoja de prueba), porque la de app.\* vive en el `localStorage` de otro dominio.
 - [ ] Se pide la primera vez que se habilita el equipo.
 
 **P7 · Guía para montar la caja** — `Piloto`
@@ -317,21 +317,21 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 ### 6.6 Caja y turnos
 
 **K1 · Cajas** — `Piloto`
-- [ ] El admin las crea en app.\* (nombre, activa). Una caja = un puesto físico con su gaveta.
+- [x] El admin las crea en app.\* (nombre, activa). Una caja = un puesto físico con su gaveta.
 
 **K2 · Apertura** — `Piloto`
-- [ ] Si el empleado entra en una caja sin turno abierto → pide el fondo inicial (monto) → abre el turno (caja + empleado).
+- [x] Si el empleado entra en una caja sin turno abierto → pide el fondo inicial (monto) → abre el turno (caja + empleado).
 
 **K3 · Reglas del turno** — `Piloto`
-- [ ] Un turno abierto **por caja** y un turno abierto **por empleado**.
-- [ ] No se vende sin un turno propio abierto en esa caja.
+- [x] Un turno abierto **por caja** y un turno abierto **por empleado**.
+- [x] No se vende sin un turno propio abierto en esa caja.
 
 **K4 · Turno abierto de otro empleado** — `Piloto`
-- [ ] El empleado que entra **no puede vender**. Ve "Turno abierto de *María* desde las 8:05 a. m. Un supervisor debe cerrarlo".
+- [x] El empleado que entra **no puede vender**. Ve "Turno abierto de *María* desde las 8:05 a. m. Un supervisor debe cerrarlo".
 - [ ] Un supervisor, con su PIN, cierra ese turno con conteo a ciegas (K6). Después el nuevo empleado abre el suyo.
 
 **K5 · Turno propio de un día anterior** — `Piloto`
-- [ ] Se puede seguir vendiendo, con un banner fijo: "Turno abierto desde ayer, 8:05 p. m.".
+- [x] Se puede seguir vendiendo, con un banner fijo: "Turno abierto desde ayer, 8:05 p. m.".
 
 **K6 · Cierre** — `Piloto`
 - [ ] **Conteo a ciegas:** se cuenta sin ver cuánto debería haber.
@@ -712,6 +712,26 @@ se mandaba dos veces (el efecto dependía de un callback que cambiaba en cada re
 la segunda sesión cerraba la primera; ahora se envía una vez por PIN tecleado.
 **Falta para cobrar:** `POST /api/pos/ventas`, cobro y devuelta, impresión, turnos, y
 registrar en la bitácora las ventas canceladas y las líneas quitadas (V4).
+
+**Cobro (2026-10-08):** apertura de turno con fondo (`POST /api/pos/turno`, K2/K3; turno
+ajeno bloquea el cobro, K4; banner de turno de ayer, K5) y `POST /api/pos/ventas`
+(`src/Pos/PosVenta.php`): E32 a consumidor final < RD$250k, líneas armadas en el
+servidor, clave de idempotencia + candado `GET_LOCK`, `TablaFormasPago` en RFCE **y**
+e-CF, factura + movimiento de caja en una transacción (`saveFacturaConECF` con gancho;
+las columnas POS solo se escriben en ventas POS, app.\* intacto), venta a nombre del admin
+que habilitó la caja (`facturas.user_id` es NOT NULL). DGII sin respuesta en
+`POS_DGII_TIMEOUT` → `RFCE_PENDIENTE` impreso y reenviado por
+`/api/pos/pendientes/reenviar` (consulta antes de reenviar). En el POS: diálogo de cobro
+(efectivo con devuelta y billetes, tarjeta, transferencia; F9/F2/F3), impresión del
+recibo de app.\* (`reciboHtml` + `printHtml`), cobro "sin confirmar" que congela el
+carrito y reintenta con la misma clave, configuración de impresora con hoja de prueba.
+Pruebas: `tools/test_pos_venta.php` 48/48 contra la DGII simulada
+(`tools/mock_dgii_local.php`), `test_pos_backend.php` 100/100, una emisión normal de app.\*
+sin cambios, y de punta a punta en el navegador (venta en efectivo, respuesta perdida →
+reintento → misma venta, DGII lenta → pendiente → aceptada sin reenvío).
+**Falta:** cierre de turno (K6-K8) — hoy un turno no se puede cerrar —, ventas del turno y
+reimpresión (K9/P5), E31 con RNC (F2), alerta de rechazo tardío en app.\*, V4 en la
+bitácora, F9 (deshabilitar el cobro sin conexión; hoy queda "sin confirmar").
 
 | Semana | Fechas | Qué |
 |---|---|---|

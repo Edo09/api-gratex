@@ -89,6 +89,9 @@ $posActivo($tenantB, 1);
 
 // Datos de corridas anteriores: cada corrida empieza limpia.
 foreach ([$dbA, $dbB] as $db) {
+    // Ventas del POS (tools/test_pos_venta.php): sus movimientos apuntan a los turnos.
+    $pdo->exec("DELETE FROM `{$db}`.pos_caja_movimientos");
+    $pdo->exec("DELETE FROM `{$db}`.facturas WHERE pos_empleado_id IS NOT NULL");
     $pdo->exec("DELETE FROM `{$db}`.pos_sesiones");
     $pdo->exec("DELETE FROM `{$db}`.pos_turnos");
     $pdo->exec("DELETE FROM `{$db}`.pos_empleados");

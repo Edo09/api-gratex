@@ -39,6 +39,14 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `CAJA_OCUPADA` | 409 | "Esta caja ya tiene un equipo": confirmar y repetir con `reemplazar: true` |
 | `DUPLICADO`, `NOMBRE_REQUERIDO`, `ROL_INVALIDO`, `CAMPO_INVALIDO` | 409 / 422 | Error en el formulario |
 | `POS_SIN_CONFIGURAR` | 500 | Falta `POS_PIN_PEPPER` en el server |
+| `TURNO_REQUERIDO`, `TURNO_AJENO`, `TURNO_CAJA_OCUPADA`, `TURNO_EN_OTRA_CAJA`, `FONDO_INVALIDO` | 409 / 422 | Turno (abrirlo; el de otro cajero lo cierra un supervisor) |
+| `TOTAL_DISTINTO` | 409 | Algún precio cambió: refrescar el catálogo y cobrar de nuevo (trae `total_centavos`) |
+| `PRODUCTO_NO_DISPONIBLE`, `PRECIO_CERO`, `CANTIDAD_INVALIDA`, `LINEA_INVALIDA`, `VENTA_VACIA` | 409 / 422 | Corregir la venta (traen `product_id` cuando aplica) |
+| `FORMA_PAGO_INVALIDA`, `RECIBIDO_INSUFICIENTE`, `COMPRADOR_REQUERIDO` | 422 | Corregir el cobro |
+| `DGII_RECHAZO` | 422 | La DGII rechazó: no se cobró, la venta sigue en pantalla (trae `e_ncf`) |
+| `EMISION_FALLIDA` | 502 | No se emitió (DGII caída antes de enviar, certificado...): reintentar o contingencia |
+| `VENTA_EN_PROCESO` | 409 | Otra petición con la misma clave está emitiendo: reintentar con la MISMA clave |
+| `GUARDADO_FALLIDO` | 500 | La DGII la recibió pero no se guardó: NO reintentar, avisar a soporte con el `e_ncf` |
 
 Con `PERMISSIONS_ENFORCE=true` el gate central responde un 403 propio, sin `codigo`,
 antes que `/api/pos-admin` (para pos.\* es el mismo `SIN_PERMISO`).
@@ -139,12 +147,73 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 - Un producto con un precio que no se puede leer se omite (queda en el log) y la caja
   sigue funcionando.
 
+**`POST /api/pos/turno`** (con `X-POS-SESION`) `{ "fondo_centavos": 150000 }` → `201
+{turno_caja}`. Abre el turno del empleado en la caja del equipo (K2). Un turno abierto
+por caja y uno por empleado (K3, lo garantiza la base): `TURNO_CAJA_OCUPADA` (con
+`turno_caja`) o `TURNO_EN_OTRA_CAJA`. El cierre (K6-K8) llega aparte.
+
+**`POST /api/pos/ventas`** (con `X-POS-SESION`) — cobra y emite (§9.5). Por ahora
+**E32 a consumidor final, por debajo de RD$250,000** (va por RFCE).
+
+```json
+{
+  "clave": "8d0c6c1e-3f0a-4b2e-9a51-0e6f3b7c9d12",
+  "lineas": [{ "product_id": 12, "cantidad": 3 }, { "product_id": 18, "cantidad": 2.75 }],
+  "total_centavos": 17950,
+  "forma_pago": 1,
+  "recibido_centavos": 20000,
+  "ancho": 80,
+  "iniciada_ms": 1791505612000
+}
+```
+
+- **No lleva precios:** el servidor arma cada línea desde `product_id` con el mismo
+  cálculo del catálogo (`PosPrecio`). `total_centavos` es el que vio el cajero: si no
+  coincide con el del servidor, `409 TOTAL_DISTINTO` y no se emite nada.
+- **`clave`** (UUID): una por intento de venta. La misma clave devuelve **la misma
+  venta** (`repetida: true`), nunca otro e-NCF; un candado de MySQL cubre el doble toque.
+  El POS la conserva mientras no sabe cómo terminó el cobro (red caída) y reintenta con
+  ella; después de una respuesta definitiva usa una nueva.
+- `forma_pago`: 1 efectivo (`recibido_centavos` ≥ total; vacío en el POS = exacto),
+  2 transferencia/depósito, 3 tarjeta. Va en `TablaFormasPago` del RFCE **y** del e-CF.
+- Se emite con `IndicadorMontoGravado = 1`. La venta queda a nombre del admin que habilitó
+  el equipo (`user_id`, que es obligatorio) y del empleado (`pos_empleado_id`), con
+  `turno_id`. Factura, movimiento de caja y salida de inventario van juntos.
+- **DGII lenta o caída** (sin respuesta en `POS_DGII_TIMEOUT` s, 5 por defecto): `201`
+  con `envio_pendiente: true` y `estado_dgii: RFCE_PENDIENTE`. Se imprime igual
+  (decisión 17) y se reenvía sola (abajo). **Rechazo:** `422 DGII_RECHAZO`; la factura
+  queda como historial, sin dinero ni inventario.
+
+Respuesta `201`:
+
+```json
+{
+  "venta": { "factura_id": 1402, "e_ncf": "E320000000012", "tipo_ecf": "32",
+             "estado_dgii": "RFCE_ACEPTADO", "envio_pendiente": false, "total_centavos": 24500 },
+  "cobro": { "forma_pago": 1, "forma_pago_nombre": "Efectivo", "total_centavos": 24500,
+             "recibido_centavos": 50000, "devuelta_centavos": 25500 },
+  "recibo": { "...": "los mismos datos de GET /api/facturas/{id}/pdf?format=datos" },
+  "repetida": false
+}
+```
+
+**`GET /api/pos/ventas/{id}/recibo?ancho=80`** (con `X-POS-SESION`) — `{recibo}` para
+reimprimir. Solo ventas del POS (`404 VENTA_NO_EXISTE` si no).
+
+**`POST /api/pos/pendientes/reenviar`** (solo `X-POS-EQUIPO`) — revisa hasta 5 ventas con
+envío pendiente. Primero **consulta** a la DGII por e-NCF + código de seguridad: si ya la
+tenía, solo actualiza el estado; si no la encuentra, reenvía el RFCE firmado que se
+guardó. Responde `{revisadas, aceptadas, rechazadas: [{factura_id, e_ncf, motivo}],
+pendientes}`. El POS lo llama al entrar, cada 2 minutos y después de cada venta (no hay
+cron confirmado, Q4).
+
 ## Bitácora
 
 Todo va a `audit_logs` con módulo `pos`: `POS_TRASPASO_CREADO`, `POS_CAJA_CREADA` /
 `_ACTUALIZADA`, `POS_EMPLEADO_CREADO` / `_ACTUALIZADO`, `POS_PIN_REGENERADO`,
 `POS_EQUIPO_HABILITADO` / `_REVOCADO`, `POS_SESION_ABIERTA` / `_CERRADA`,
-`POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`. Los empleados no son usuarios del master:
+`POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`, `POS_TURNO_ABIERTO`, `POS_VENTA`,
+`POS_VENTA_RECHAZADA`, `POS_VENTA_ENVIADA`, `POS_VENTA_FALLIDA`, `POS_VENTA_SIN_GUARDAR`. Los empleados no son usuarios del master:
 `user_id` va vacío y el nombre del empleado va en `username` (`POS · Ana`) y en los
 valores. **Nunca se registra un PIN ni un token.**
 
@@ -154,3 +223,9 @@ valores. **Nunca se registra un PIN ni un token.**
 prueba (traspaso, administración, bloqueo por PIN, sesiones, catálogo y precio final,
 aislamiento entre empresas, bitácora sin PIN). Pasa con el gate en `enforce` y en sombra. Ver su cabecera
 para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.
+
+`tools/test_pos_venta.php`: 48 verificaciones del cobro (turno, validaciones sin gastar
+e-NCF, venta en efectivo, idempotencia y candado, rechazo, DGII lenta y caída con su
+reenvío, recibo, bitácora). Emite de verdad, así que corre contra la DGII simulada
+`tools/mock_dgii_local.php` con un certificado autofirmado y se niega a correr si
+`DGII_ECF_BASE_URL` / `DGII_FC_BASE_URL` no son locales.
