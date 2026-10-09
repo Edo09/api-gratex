@@ -559,7 +559,7 @@ class posModel
     public function ventaPorClave(string $clave): ?array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, e_ncf, tipo_ecf, estado_dgii, total, envio_pendiente, turno_id, respuesta_dgii, rfce_respuesta
+            'SELECT id, e_ncf, tipo_ecf, estado_dgii, total, envio_pendiente, turno_id, client_id, respuesta_dgii, rfce_respuesta
              FROM facturas WHERE pos_idempotency_key = :k LIMIT 1'
         );
         $stmt->execute([':k' => $clave]);
@@ -628,7 +628,7 @@ class posModel
     public function ventasPendientes(int $limite): array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, e_ncf, tipo_ecf, estado_dgii, codigo_seguridad, ambiente_dgii, rfce_xml
+            'SELECT id, e_ncf, tipo_ecf, estado_dgii, codigo_seguridad, ambiente_dgii, rfce_xml, track_id, xml_firmado
              FROM facturas WHERE envio_pendiente = 1 ORDER BY id LIMIT ' . max(1, min(20, $limite))
         );
         $stmt->execute();
@@ -653,6 +653,46 @@ class posModel
             ':p' => $sigue ? 1 : 0,
             ':id' => $facturaId,
         ]);
+    }
+
+    /** Resultado de un e-CF completo (E31): estado, respuesta y trackId; fuera de pendientes si ya es definitivo. */
+    public function marcarEnvioECF(int $facturaId, string $estado, $respuesta, ?string $trackId, bool $sigue): void
+    {
+        $stmt = $this->conexion->prepare(
+            'UPDATE facturas SET estado_dgii = :e, respuesta_dgii = :r, track_id = COALESCE(:t, track_id), envio_pendiente = :p
+             WHERE id = :id'
+        );
+        $stmt->execute([
+            ':e' => $estado,
+            ':r' => $respuesta !== null ? json_encode($respuesta, JSON_UNESCAPED_UNICODE) : null,
+            ':t' => $trackId,
+            ':p' => $sigue ? 1 : 0,
+            ':id' => $facturaId,
+        ]);
+    }
+
+    // ------------------------------------------------------------------
+    // Clientes del POS (credito fiscal, F2)
+    // ------------------------------------------------------------------
+
+    /**
+     * Cliente por RNC o cedula (solo digitos). Varios clientes pueden compartir
+     * RNC (contactos de una misma empresa): se usa el primero que se creo.
+     */
+    public function clientePorRnc(string $rnc): ?array
+    {
+        $stmt = $this->conexion->prepare('SELECT * FROM clients WHERE rnc = :r ORDER BY id LIMIT 1');
+        $stmt->execute([':r' => $rnc]);
+        $f = $stmt->fetch();
+        return $f ?: null;
+    }
+
+    public function clientePorId(int $id): ?array
+    {
+        $stmt = $this->conexion->prepare('SELECT * FROM clients WHERE id = :id');
+        $stmt->execute([':id' => $id]);
+        $f = $stmt->fetch();
+        return $f ?: null;
     }
 
     // ------------------------------------------------------------------

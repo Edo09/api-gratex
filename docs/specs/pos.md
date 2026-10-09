@@ -213,7 +213,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] Importe de la línea = precio final × cantidad − descuento.
 
 **V2 · Totales** — `Piloto`
-- [ ] Subtotal, Descuentos, "ITBIS (incluido)" informativo y **Total**.
+- [x] Subtotal, Descuentos, "ITBIS (incluido)" informativo y **Total**. *Subtotal y descuento salen solo cuando hay descuento (hoy, el del cliente, V5).*
 - [x] Total = suma de las líneas **al centavo**. Es el mismo total que dice el e-CF (F4).
 
 **V3 · Existencia** — `Piloto`
@@ -225,11 +225,11 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] Ventas canceladas y líneas eliminadas quedan en la auditoría y salen en el reporte de cierre (cantidad y monto).
 
 **V5 · Cliente** — `Piloto`
-- [ ] Buscar cliente por nombre o RNC. Opcional: sin cliente, es consumidor final.
-- [ ] Con cliente, su `clients.descuento` se aplica solo a las líneas sin descuento propio (el backend ya lo hace). Ese descuento no pide PIN porque lo configuró el admin.
+- [x] Buscar cliente por ~~nombre o~~ RNC. Opcional: sin cliente, es consumidor final. *En el piloto el cliente entra solo por RNC o cédula, con el crédito fiscal (F2): en el POS un cliente sin E31 no cambia nada del comprobante.*
+- [x] Con cliente, su `clients.descuento` se aplica solo a las líneas sin descuento propio (el backend ya lo hace). Ese descuento no pide PIN porque lo configuró el admin. *Hoy ninguna línea del POS trae descuento propio (llega con v1). Si el admin cambia el descuento a mitad de una venta, `TOTAL_DISTINTO` trae la ficha nueva y la caja recalcula.*
 
 **V6 · Atajos de teclado** — `Piloto`
-- [ ] F9 Efectivo · F2 Tarjeta · F3 Transferencia · ESC Cancelar · F1 ir al buscador.
+- [x] F9 Efectivo · F2 Tarjeta · F3 Transferencia · ESC Cancelar · F1 ir al buscador. *Más F4 crédito fiscal (RNC).*
 
 **V7 · Cambiar el precio de una línea** — `v1`
 - [ ] El cajero escribe el nuevo precio final y un **supervisor lo autoriza con PIN** (S1).
@@ -249,15 +249,16 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] Sin cliente → E32 a consumidor final (sin `client_id`, como ya permite la emisión).
 
 **F2 · E31 con RNC** — `Piloto`
-- [ ] Casilla "Crédito fiscal" → RNC o cédula.
-- [ ] Si el cliente existe, se usa. Si no, se consulta la DGII (`/api/rnc/consulta`) y **se crea el cliente** con la razón social que devuelve, con correo y teléfono vacíos (el correo es opcional; verificar que el modelo acepte el teléfono vacío).
-- [ ] RNC no encontrado en la DGII → no se puede emitir E31; la venta puede salir como E32.
+- [x] Casilla "Crédito fiscal" → RNC o cédula. *Botón "Crédito fiscal (RNC)" en el carrito (o F4) con teclado de 9 u 11 dígitos; el cliente queda en una barra con "Quitar".*
+- [x] Si el cliente existe, se usa. Si no, se consulta la DGII (`/api/rnc/consulta`) y **se crea el cliente** con la razón social que devuelve, con correo y teléfono vacíos (el correo es opcional; verificar que el modelo acepte el teléfono vacío). *`POST /api/pos/clientes/rnc` (`src/Pos/PosCliente.php`); el modelo acepta los dos vacíos.*
+- [x] RNC no encontrado en la DGII → no se puede emitir E31; la venta puede salir como E32. *Con la consulta caída, tampoco (Q6 sigue abierta: hoy no se escribe la razón social a mano).*
+- [x] El E31 va como e-CF completo (Recepción → `trackId`); la DGII da el veredicto después, así que la venta sale `ENVIADO` con `envio_pendiente` y el reenvío de F7 la confirma por `ConsultaResultado`, sin reenviarla. Sin respuesta al enviar → `ENVIO_PENDIENTE` con el XML firmado guardado; el reenvío pregunta primero a `ConsultaTrackIds` si la DGII ya lo tiene.
 
 **F3 · E32 de RD$250,000 o más** — `Piloto`
-- [ ] Exige identificar al comprador (RNC o cédula) antes de cobrar. **Regla a confirmar en la fase 0** contra el formato e-CF. *Por ahora el POS no cobra ventas de RD$250,000 o más (`COMPRADOR_REQUERIDO`): van por app.\*.*
+- [ ] Exige identificar al comprador (RNC o cédula) antes de cobrar. **Regla a confirmar en la fase 0** contra el formato e-CF. *Por ahora el POS no cobra un E32 de RD$250,000 o más (`COMPRADOR_REQUERIDO`; el diálogo de cobro ya lo avisa y no deja cobrar): se hace como crédito fiscal (F2) o por app.\*.*
 
 **F4 · Precios con ITBIS incluido en el XML** — `Piloto` · *go/no-go en la fase 0*
-- [ ] Las ventas del POS (E32, E31 y sus E34) se emiten con **`IndicadorMontoGravado = 1`**: el precio unitario del XML es el precio final. *E32 hecho; E31 y E34 con su entrega.*
+- [ ] Las ventas del POS (E32, E31 y sus E34) se emiten con **`IndicadorMontoGravado = 1`**: el precio unitario del XML es el precio final. *E32 y E31 hechos; E34 con su entrega.*
 - [x] Total del e-CF = total del carrito, al centavo. Prueba obligatoria: **7 × RD$25 = RD$175.00**. Con el cálculo actual (`= 0`, neto + 18 % encima) ese total es imposible: da 174.99 o 175.01.
 - [x] El indicador **no** necesita columna: se lee del XML firmado. `factura_items.subtotal` sigue guardando la base **sin** ITBIS (lo que suman el reporte de ventas y el 607) e `itbis_amount` el ITBIS, repartidos para sumar exacto el encabezado. La RI y el detalle en app.\* vuelven a juntarlos (ver [§9.5](#95-emisión-post-apiposventas)). *Hecho en la fase 0: campo `precios_incluyen_itbis` de `POST /api/facturas`.*
 - [ ] **Si la DGII lo rechaza en la fase 0**, el plan B es `= 0` con el neto a 4 decimales. El total puede variar ±1 centavo respecto a la góndola, y se cobra lo que diga el e-CF. Esto se decide antes del lunes 2026-10-12.
@@ -755,6 +756,27 @@ navegador (cierre propio con faltante y nota, cierre ajeno con PIN de supervisor
 reimpresión en app.\*).
 **Falta:** E31 con RNC (F2), devoluciones E34 (D1-D5) y su efecto en el cierre, alerta de
 rechazo tardío en app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
+
+**E31 con RNC (2026-10-09):** `POST /api/pos/clientes/rnc` (`src/Pos/PosCliente.php`):
+cliente existente por RNC (con o sin guiones) o creado desde el registro de contribuyentes
+(`RNC_NO_ENCONTRADO` / `RNC_NO_DISPONIBLE`: sin crédito fiscal). `POST /api/pos/ventas`
+con `tipo_ecf: "31"` + `client_id` (`CLIENTE_REQUERIDO`, `CLIENTE_NO_EXISTE`,
+`CLIENTE_SIN_RNC`, `AUTOFACTURA`): e-CF completo con `IndicadorMontoGravado = 1`,
+`TablaFormasPago` y el descuento del cliente por línea (V5, mismo redondeo que app.\*). La
+emisión completa ahora tolera la DGII lenta como el RFCE (`ENVIO_PENDIENTE` con el XML
+firmado) y el reenvío distingue RFCE de e-CF (`ConsultaResultado` por `trackId`;
+`ConsultaTrackIds` antes de reenviar). POS: botón **Crédito fiscal (RNC)** / F4, ficha
+del cliente (nuevo, descuento, aviso si el registro no lo da como activo), barra del
+cliente en el carrito con subtotal y descuento, cobro "crédito fiscal" con su nombre,
+aviso de RD$250,000 sin comprador, y "la DGII la está validando" en lugar de "no
+respondió". El recibo lleva RNC y razón social del comprador. Pruebas:
+`tools/test_pos_e31.php` 35/35 (cliente nuevo/existente/no inscrito/servicio caído,
+validaciones, aceptado, descuento 10 %, rechazo al recibir y después, DGII lenta y caída
+con su reenvío sin duplicar), venta 48/48, cierre 44/44, POS 100/100, y en el navegador
+(E31 en efectivo → `ENVIADO` → aceptado por consulta; cliente con 10 % → 101.70; descuento
+cambiado a 15 % a mitad de venta → `TOTAL_DISTINTO` → 96.05 → cobrado con tarjeta).
+**Falta:** devoluciones E34 (D1-D5) y su efecto en el cierre, alerta de rechazo tardío en
+app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
 
 | Semana | Fechas | Qué |
 |---|---|---|

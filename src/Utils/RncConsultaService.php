@@ -41,7 +41,9 @@ class RncConsultaService
             return self::fallo(502, self::NO_DISPONIBLE);
         }
 
-        $ch = curl_init(self::URL);
+        // RNC_CONSULTA_URL: solo para pruebas locales (tools/mock_dgii_local.php).
+        $url = (string) (getenv('RNC_CONSULTA_URL') ?: ($_ENV['RNC_CONSULTA_URL'] ?? '')) ?: self::URL;
+        $ch = curl_init($url);
         curl_setopt_array($ch, [
             CURLOPT_POST => true,
             CURLOPT_POSTFIELDS => json_encode(['rnc' => $rnc]),

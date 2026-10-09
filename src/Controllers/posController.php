@@ -18,6 +18,7 @@
 //   POST   /api/pos/turno/nota -> {turno_id, nota} nota del cierre, una vez
 //   GET    /api/pos/ventas  -> ventas cobradas del turno abierto de la caja (K9)
 //   POST   /api/pos/eventos -> {tipo: cancelada|quitada, monto_centavos, lineas} (V4)
+//   POST   /api/pos/clientes/rnc -> {rnc} cliente de credito fiscal; si no existe se crea (F2)
 //
 // Errores: {status:false, error, codigo}. Codigos que cambian de pantalla:
 //   EQUIPO_NO_HABILITADO -> habilitar el equipo     SESION_REQUERIDA -> PIN
@@ -34,6 +35,7 @@ require_once __DIR__ . '/../Pos/PosPrecio.php';
 require_once __DIR__ . '/../Pos/PosVenta.php';
 require_once __DIR__ . '/../Pos/PosCierre.php';
 require_once __DIR__ . '/../Pos/PosAutorizacion.php';
+require_once __DIR__ . '/../Pos/PosCliente.php';
 
 /** Una linea de auditoria del POS. Nunca con el PIN ni tokens. */
 function posAudit(string $action, $entityId, ?array $new, string $descripcion, bool $ok = true): void
@@ -327,6 +329,13 @@ try {
                 throw new PosError('Evento no válido.', 422, 'EVENTO_INVALIDO');
             }
             posResponder(200, PosCierre::evento($pos, $caja, $sesion['empleado'], $equipo, $body));
+            break;
+
+        case 'POST clientes/rnc':
+            PosAuth::requerirSesion($pos, $equipo);
+            posCajaDelEquipo($pos, $equipo);
+            $body = InputSanitizer::jsonInput() ?? [];
+            posResponder(200, PosCliente::porRnc($pos, is_array($body) ? ($body['rnc'] ?? '') : ''));
             break;
 
         case 'POST pendientes/reenviar':

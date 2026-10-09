@@ -40,7 +40,11 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `DUPLICADO`, `NOMBRE_REQUERIDO`, `ROL_INVALIDO`, `CAMPO_INVALIDO` | 409 / 422 | Error en el formulario |
 | `POS_SIN_CONFIGURAR` | 500 | Falta `POS_PIN_PEPPER` en el server |
 | `TURNO_REQUERIDO`, `TURNO_AJENO`, `TURNO_CAJA_OCUPADA`, `TURNO_EN_OTRA_CAJA`, `FONDO_INVALIDO` | 409 / 422 | Turno (abrirlo; el de otro cajero lo cierra un supervisor) |
-| `TOTAL_DISTINTO` | 409 | Algún precio cambió: refrescar el catálogo y cobrar de nuevo (trae `total_centavos`) |
+| `TOTAL_DISTINTO` | 409 | Algún precio (o el descuento del cliente) cambió: refrescar el catálogo y cobrar de nuevo (trae `total_centavos` y, en un E31, `cliente` con el descuento de ahora) |
+| `RNC_FORMATO` | 422 | El RNC tiene 9 dígitos y la cédula 11 |
+| `RNC_NO_ENCONTRADO`, `RNC_NO_DISPONIBLE` | 404 / 502 | No inscrito, o la consulta de RNC caída: sin crédito fiscal (la venta puede salir como consumo) |
+| `CLIENTE_NO_CREADO` | 500 | No se pudo crear el cliente: reintentar |
+| `TIPO_INVALIDO`, `CLIENTE_REQUERIDO`, `CLIENTE_NO_EXISTE`, `CLIENTE_SIN_RNC`, `AUTOFACTURA` | 422 / 404 | Crédito fiscal: buscar el RNC de nuevo o quitar el cliente (nunca se cambia solo a consumo) |
 | `PRODUCTO_NO_DISPONIBLE`, `PRECIO_CERO`, `CANTIDAD_INVALIDA`, `LINEA_INVALIDA`, `VENTA_VACIA` | 409 / 422 | Corregir la venta (traen `product_id` cuando aplica) |
 | `FORMA_PAGO_INVALIDA`, `RECIBIDO_INSUFICIENTE`, `COMPRADOR_REQUERIDO` | 422 | Corregir el cobro |
 | `DGII_RECHAZO` | 422 | La DGII rechazó: no se cobró, la venta sigue en pantalla (trae `e_ncf`) |
@@ -158,11 +162,30 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 por caja y uno por empleado (K3, lo garantiza la base): `TURNO_CAJA_OCUPADA` (con
 `turno_caja`) o `TURNO_EN_OTRA_CAJA`. El cierre (K6-K8) llega aparte.
 
-**`POST /api/pos/ventas`** (con `X-POS-SESION`) — cobra y emite (§9.5). Por ahora
-**E32 a consumidor final, por debajo de RD$250,000** (va por RFCE).
+**`POST /api/pos/clientes/rnc`** (con `X-POS-SESION`) `{ "rnc": "131-00000-1" }` —
+cliente del crédito fiscal (F2). Con guiones o sin ellos; 9 dígitos (RNC) u 11 (cédula).
+Si ya es cliente de la empresa se usa ese (el de menor `id` si hay varios); si no, se
+consulta el registro de contribuyentes (`RNC_CONSULTA_URL`) y **se crea** con la razón
+social (contacto = nombre comercial si tiene; correo y teléfono vacíos; bitácora
+`POS_CLIENTE_CREADO`).
+
+```json
+{ "cliente": { "id": 14, "nombre": "COMERCIAL PRUEBA SRL", "rnc": "131000001", "descuento": 0 },
+  "nuevo": true, "estado_dgii": "ACTIVO" }
+```
+
+`estado_dgii` solo viene en un cliente nuevo (lo que dijo el registro); el POS avisa si no
+es `ACTIVO`. No inscrito → `404 RNC_NO_ENCONTRADO`; consulta caída → `502
+RNC_NO_DISPONIBLE` (no se escribe la razón social a mano, Q6).
+
+**`POST /api/pos/ventas`** (con `X-POS-SESION`) — cobra y emite (§9.5): **E32 a
+consumidor final por debajo de RD$250,000** (va por RFCE) o **E31 a un cliente con RNC o
+cédula** (e-CF completo).
 
 ```json
 {
+  "tipo_ecf": "32",
+  "client_id": null,
   "clave": "8d0c6c1e-3f0a-4b2e-9a51-0e6f3b7c9d12",
   "lineas": [{ "product_id": 12, "cantidad": 3 }, { "product_id": 18, "cantidad": 2.75 }],
   "total_centavos": 17950,
@@ -180,22 +203,33 @@ por caja y uno por empleado (K3, lo garantiza la base): `TURNO_CAJA_OCUPADA` (co
   venta** (`repetida: true`), nunca otro e-NCF; un candado de MySQL cubre el doble toque.
   El POS la conserva mientras no sabe cómo terminó el cobro (red caída) y reintenta con
   ella; después de una respuesta definitiva usa una nueva.
+- `tipo_ecf`: `"32"` (por defecto, sin cliente) o `"31"` con `client_id` de
+  `/clientes/rnc`. Con cliente se aplica su `descuento` a cada línea, redondeado como en
+  app.\* (`round(bruto × % / 100, 2)`), y `total_centavos` tiene que venir ya con el
+  descuento. Errores: `CLIENTE_REQUERIDO`, `CLIENTE_NO_EXISTE`, `CLIENTE_SIN_RNC`,
+  `AUTOFACTURA` (el RNC de la propia empresa), `TIPO_INVALIDO` (otro tipo).
 - `forma_pago`: 1 efectivo (`recibido_centavos` ≥ total; vacío en el POS = exacto),
   2 transferencia/depósito, 3 tarjeta. Va en `TablaFormasPago` del RFCE **y** del e-CF.
 - Se emite con `IndicadorMontoGravado = 1`. La venta queda a nombre del admin que habilitó
   el equipo (`user_id`, que es obligatorio) y del empleado (`pos_empleado_id`), con
   `turno_id`. Factura, movimiento de caja y salida de inventario van juntos.
 - **DGII lenta o caída** (sin respuesta en `POS_DGII_TIMEOUT` s, 5 por defecto): `201`
-  con `envio_pendiente: true` y `estado_dgii: RFCE_PENDIENTE`. Se imprime igual
-  (decisión 17) y se reenvía sola (abajo). **Rechazo:** `422 DGII_RECHAZO`; la factura
-  queda como historial, sin dinero ni inventario.
+  con `envio_pendiente: true` y `estado_dgii: RFCE_PENDIENTE` (E32) o `ENVIO_PENDIENTE`
+  (E31, con el XML firmado guardado). Se imprime igual (decisión 17) y se reenvía sola
+  (abajo). **Rechazo:** `422 DGII_RECHAZO`; la factura queda como historial, sin dinero ni
+  inventario.
+- **E31 recibido:** la DGII responde con un `trackId` y da el veredicto después, así que
+  lo normal es `201` con `estado_dgii: ENVIADO` (o `EN_PROCESO`) y `envio_pendiente: true`:
+  se imprime y el reenvío lo confirma. Si después sale rechazado, va en `rechazadas`
+  (alerta en el POS).
 
 Respuesta `201`:
 
 ```json
 {
   "venta": { "factura_id": 1402, "e_ncf": "E320000000012", "tipo_ecf": "32",
-             "estado_dgii": "RFCE_ACEPTADO", "envio_pendiente": false, "total_centavos": 24500 },
+             "estado_dgii": "RFCE_ACEPTADO", "envio_pendiente": false, "total_centavos": 24500,
+             "cliente": null },
   "cobro": { "forma_pago": 1, "forma_pago_nombre": "Efectivo", "total_centavos": 24500,
              "recibido_centavos": 50000, "devuelta_centavos": 25500 },
   "recibo": { "...": "los mismos datos de GET /api/facturas/{id}/pdf?format=datos" },
@@ -207,9 +241,11 @@ Respuesta `201`:
 reimprimir. Solo ventas del POS (`404 VENTA_NO_EXISTE` si no).
 
 **`POST /api/pos/pendientes/reenviar`** (solo `X-POS-EQUIPO`) — revisa hasta 5 ventas con
-envío pendiente. Primero **consulta** a la DGII por e-NCF + código de seguridad: si ya la
-tenía, solo actualiza el estado; si no la encuentra, reenvía el RFCE firmado que se
-guardó. Responde `{revisadas, aceptadas, rechazadas: [{factura_id, e_ncf, motivo}],
+envío pendiente. Primero **consulta** a la DGII antes de reenviar nada. E32: por e-NCF +
+código de seguridad (`ConsultaRFCE`); si ya la tenía, solo actualiza el estado; si no la
+encuentra, reenvía el RFCE firmado que se guardó. E31: con `trackId`, `ConsultaResultado`;
+sin él, `ConsultaTrackIds` por e-NCF (si la DGII ya lo tiene, toma ese `trackId`; si no,
+reenvía el XML firmado guardado; si la consulta no responde, espera a la próxima vuelta). Responde `{revisadas, aceptadas, rechazadas: [{factura_id, e_ncf, motivo}],
 pendientes}`. El POS lo llama al entrar, cada 2 minutos y después de cada venta (no hay
 cron confirmado, Q4).
 
@@ -264,7 +300,8 @@ Todo va a `audit_logs` con módulo `pos`: `POS_TRASPASO_CREADO`, `POS_CAJA_CREAD
 `POS_EQUIPO_HABILITADO` / `_REVOCADO`, `POS_SESION_ABIERTA` / `_CERRADA`,
 `POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`, `POS_TURNO_ABIERTO`, `POS_VENTA`,
 `POS_VENTA_RECHAZADA`, `POS_VENTA_ENVIADA`, `POS_VENTA_FALLIDA`, `POS_VENTA_SIN_GUARDAR`,
-`POS_TURNO_CERRADO`, `POS_AUTORIZACION` / `_FALLIDA`, `POS_VENTA_CANCELADA`, `POS_LINEA_QUITADA`. Los empleados no son usuarios del master:
+`POS_TURNO_CERRADO`, `POS_AUTORIZACION` / `_FALLIDA`, `POS_VENTA_CANCELADA`, `POS_LINEA_QUITADA`,
+`POS_CLIENTE_CREADO`. Los empleados no son usuarios del master:
 `user_id` va vacío y el nombre del empleado va en `username` (`POS · Ana`) y en los
 valores. **Nunca se registra un PIN ni un token.**
 
@@ -279,6 +316,10 @@ para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.
 e-NCF, venta en efectivo, idempotencia y candado, rechazo, DGII lenta y caída con su
 reenvío, recibo, bitácora). `tools/test_pos_cierre.php`: 44 verificaciones del cierre
 (esperado y diferencia, permiso de supervisor, PIN de cajero, conteo inválido, nota, ventas
-del turno, eventos V4, candado, lista de app.\*). Las dos emiten de verdad, así que corren contra la DGII simulada
+del turno, eventos V4, candado, lista de app.\*). `tools/test_pos_e31.php`: 35
+verificaciones del crédito fiscal (cliente nuevo, existente, no inscrito y consulta caída;
+validaciones; E31 aceptado por `ConsultaResultado`; descuento del cliente; rechazo al
+recibir y después; DGII lenta y caída sin duplicar el envío; necesita además
+`RNC_CONSULTA_URL` local). Las tres emiten de verdad, así que corren contra la DGII simulada
 `tools/mock_dgii_local.php` con un certificado autofirmado y se niega a correr si
 `DGII_ECF_BASE_URL` / `DGII_FC_BASE_URL` no son locales.

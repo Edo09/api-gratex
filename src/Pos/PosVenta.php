@@ -7,13 +7,16 @@ require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfItemMapper.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
+require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+require_once __DIR__ . '/PosCliente.php';
 
 /**
  * Cobro de una venta del POS (docs/specs/pos.md §9.5, F1, F5, F6, P1-P3) y
  * reenvio de las que quedaron pendientes (F7).
  *
- * Por ahora solo factura de consumo (E32) a consumidor final y por debajo de
- * RD$250,000, que va por RFCE. El credito fiscal (E31) llega aparte.
+ * Factura de consumo (E32) a consumidor final, por debajo de RD$250,000 (va
+ * por RFCE), y credito fiscal (E31) a un cliente con RNC o cedula (e-CF
+ * completo; ver PosCliente). Con cliente se aplica su descuento (V5).
  *
  * Reglas que no se negocian:
  *  - El navegador no manda precios: las lineas se arman aqui desde product_id
@@ -37,8 +40,12 @@ final class PosVenta
     /** E32 desde este total exige identificar al comprador (F3): no va por el POS todavia. */
     public const TOPE_CONSUMIDOR_FINAL_CENTAVOS = 25000000;
 
-    private const ACEPTADOS = ['RFCE_ACEPTADO', 'RFCE_ACEPTADO_CONDICIONAL'];
-    private const RECHAZADOS = ['RFCE_RECHAZADO'];
+    /** Comprobantes que emite el POS: consumo y credito fiscal. */
+    public const TIPOS = ['32', '31'];
+    // Veredictos de la DGII: RFCE (E32 < 250k) y e-CF completo (E31). Lo demas
+    // (sin respuesta, ENVIADO / EN_PROCESO esperando veredicto) queda pendiente.
+    private const ACEPTADOS = ['RFCE_ACEPTADO', 'RFCE_ACEPTADO_CONDICIONAL', 'ACEPTADO', 'ACEPTADO_CONDICIONAL'];
+    private const RECHAZADOS = ['RFCE_RECHAZADO', 'RECHAZADO'];
 
     /**
      * Cobra la venta. Devuelve los datos para la respuesta; lanza PosError con
@@ -120,16 +127,47 @@ final class PosVenta
             throw new PosError('No se sabe quién habilitó este equipo. Pide a un administrador que lo habilite de nuevo.', 409, 'EQUIPO_SIN_RESPONSABLE');
         }
 
+        // --- Comprobante y cliente (F1, F2) -------------------------------------
+        $tipoEcf = (string) ($body['tipo_ecf'] ?? '32');
+        if (!in_array($tipoEcf, self::TIPOS, true)) {
+            throw new PosError('Ese tipo de comprobante no se emite en el POS.', 422, 'TIPO_INVALIDO');
+        }
+        $cliente = null;
+        if ($tipoEcf === '31') {
+            $clientId = $body['client_id'] ?? null;
+            if (!is_int($clientId) || $clientId <= 0) {
+                throw new PosError('Elige el cliente del crédito fiscal (RNC o cédula).', 422, 'CLIENTE_REQUERIDO');
+            }
+            $cliente = $pos->clientePorId($clientId);
+            if ($cliente === null) {
+                throw new PosError('Ese cliente ya no existe. Búscalo de nuevo por RNC.', 404, 'CLIENTE_NO_EXISTE');
+            }
+            $rncCliente = (string) preg_replace('/\D/', '', (string) ($cliente['rnc'] ?? ''));
+            if (strlen($rncCliente) !== 9 && strlen($rncCliente) !== 11) {
+                throw new PosError('Ese cliente no tiene RNC ni cédula: no se le puede hacer crédito fiscal.', 422, 'CLIENTE_SIN_RNC');
+            }
+            $rncEmisor = (string) ((new EmisorConfigModel())->get()['rnc'] ?? '');
+            if ($rncEmisor !== '' && $rncEmisor === $rncCliente) {
+                throw new PosError('Ese RNC es el de tu propia empresa: no puedes facturarte a ti mismo.', 422, 'AUTOFACTURA');
+            }
+        }
+        // El descuento del cliente (V5) se aplica solo, sin PIN: lo configuro el admin.
+        $descuentoPct = $cliente !== null ? max(0.0, min(100.0, round((float) ($cliente['descuento'] ?? 0), 2))) : 0.0;
+
         // --- Lineas desde el catalogo -----------------------------------------
-        [$items, $totalCentavos] = self::armarLineas($pos, $body['lineas'] ?? null);
+        [$items, $totalCentavos] = self::armarLineas($pos, $body['lineas'] ?? null, $descuentoPct);
 
         $vistoPorCajero = $body['total_centavos'] ?? null;
         if (!is_int($vistoPorCajero) || $vistoPorCajero !== $totalCentavos) {
-            throw new PosError('El total cambió (algún precio se actualizó). Revisa la venta y cobra de nuevo.', 409, 'TOTAL_DISTINTO',
-                ['total_centavos' => $totalCentavos]);
+            // Con cliente va tambien su ficha: si el admin le cambio el descuento, la
+            // caja lo toma de aqui y muestra el total nuevo.
+            throw new PosError($cliente !== null
+                ? 'El total cambió (algún precio o el descuento del cliente se actualizó). Revisa la venta y cobra de nuevo.'
+                : 'El total cambió (algún precio se actualizó). Revisa la venta y cobra de nuevo.', 409, 'TOTAL_DISTINTO',
+                ['total_centavos' => $totalCentavos, 'cliente' => $cliente !== null ? PosCliente::forma($cliente) : null]);
         }
-        if ($totalCentavos >= self::TOPE_CONSUMIDOR_FINAL_CENTAVOS) {
-            throw new PosError('Las ventas de RD$250,000 o más tienen que identificar al comprador con RNC o cédula. Emítela desde FiscalPoint (Facturación).',
+        if ($tipoEcf === '32' && $totalCentavos >= self::TOPE_CONSUMIDOR_FINAL_CENTAVOS) {
+            throw new PosError('Las ventas de RD$250,000 o más tienen que identificar al comprador: hazla como crédito fiscal con su RNC o cédula.',
                 422, 'COMPRADOR_REQUERIDO');
         }
 
@@ -159,12 +197,12 @@ final class PosVenta
             throw new PosError('No se pudo cuadrar el total de la venta. Avisa a soporte.', 500, 'DESCUADRE');
         }
         $payload = [
-            'tipo_ecf' => '32',
+            'tipo_ecf' => $tipoEcf,
             'fecha_emision' => date('d-m-Y'),
             'tipo_ingresos' => '01',
             'tipo_pago' => 1,
             'indicador_monto_gravado' => '1',
-            'comprador' => [],
+            'comprador' => $cliente !== null ? PosCliente::comprador($cliente) : [],
             'items' => $itemsXml,
             'totales' => $totales,
             'formas_pago' => [['forma_pago' => $formaPago, 'monto_pago' => $total]],
@@ -199,8 +237,8 @@ final class PosVenta
         $facturaInput = [
             'no_factura' => $result['e_ncf'],
             'date' => date('Y-m-d H:i:s'),
-            'client_id' => null,
-            'client_name' => 'Consumidor Final',
+            'client_id' => $cliente !== null ? (int) $cliente['id'] : null,
+            'client_name' => $cliente !== null ? (string) ($cliente['client_name'] ?: PosCliente::forma($cliente)['nombre']) : 'Consumidor Final',
             'total' => $total,
             'tipo_pago' => 1,
             'user_id' => $userId,
@@ -255,7 +293,7 @@ final class PosVenta
         // una venta que ya existe en la DGII: queda en el log para un ajuste.
         try {
             require_once __DIR__ . '/../Models/inventoryModel.php';
-            (new inventoryModel())->registrarVenta($facturaId, $facturaInput['items'], '32', $userId);
+            (new inventoryModel())->registrarVenta($facturaId, $facturaInput['items'], $tipoEcf, $userId);
         } catch (Throwable $e) {
             error_log('[pos] inventario de la factura ' . $facturaId . ': ' . $e->getMessage());
         }
@@ -269,10 +307,11 @@ final class PosVenta
             'venta' => [
                 'factura_id' => $facturaId,
                 'e_ncf' => $result['e_ncf'],
-                'tipo_ecf' => '32',
+                'tipo_ecf' => $tipoEcf,
                 'estado_dgii' => $estado,
                 'envio_pendiente' => $pendiente,
                 'total_centavos' => $totalCentavos,
+                'cliente' => $cliente !== null ? PosCliente::forma($cliente) : null,
             ],
             'cobro' => self::cobro($formaPago, $totalCentavos, $recibidoCentavos, $devueltaCentavos),
             'recibo' => self::recibo($facturaId, $ancho),
@@ -287,8 +326,11 @@ final class PosVenta
      *
      * @return array{0: array, 1: int}
      */
-    private static function armarLineas(posModel $pos, $lineas): array
+    private static function armarLineas(posModel $pos, $lineas, float $descuentoPct = 0.0): array
     {
+        // Descuento del cliente por linea: round(bruto x % / 100, 2), igual que
+        // EcfItemMapper::aplicarDescuentoPorcentaje y que el carrito.
+        $pct100 = (int) round($descuentoPct * 100);
         if (!is_array($lineas) || $lineas === [] || count($lineas) > self::MAX_LINEAS) {
             throw new PosError('La venta no tiene productos.', 422, 'VENTA_VACIA');
         }
@@ -327,7 +369,8 @@ final class PosVenta
             }
             // round(precio x cantidad, 2) en enteros: lo mismo que el carrito y que el mapper.
             $centesimas = (int) round($cantidad * 100);
-            $total += intdiv($centavos * $centesimas + 50, 100);
+            $bruto = intdiv($centavos * $centesimas + 50, 100);
+            $total += $bruto - ($pct100 > 0 ? intdiv($bruto * $pct100 + 5000, 10000) : 0);
             $items[] = [
                 'product_id' => $id,
                 'nombre_item' => (string) $p['nombre'],
@@ -339,7 +382,11 @@ final class PosVenta
                 'unidad_medida' => (string) ($p['unidad_medida'] ?: '43'),
             ];
         }
-        return [EcfItemMapper::normalizarCantidadPrecio($items), $total];
+        $items = EcfItemMapper::normalizarCantidadPrecio($items);
+        if ($descuentoPct > 0) {
+            $items = EcfItemMapper::aplicarDescuentoPorcentaje($items, $descuentoPct);
+        }
+        return [$items, $total];
     }
 
     /** La venta ya existe con esa clave: se devuelve tal cual (nunca otro e-NCF). */
@@ -365,6 +412,8 @@ final class PosVenta
                 'estado_dgii' => $estado,
                 'envio_pendiente' => (int) $venta['envio_pendiente'] === 1,
                 'total_centavos' => $totalCentavos,
+                'cliente' => !empty($venta['client_id']) && ($c = $pos->clientePorId((int) $venta['client_id'])) !== null
+                    ? PosCliente::forma($c) : null,
             ],
             'cobro' => self::cobro($forma, $totalCentavos, $recibido, $devuelta),
             'recibo' => self::recibo($facturaId, $ancho),
@@ -399,7 +448,9 @@ final class PosVenta
             $factura = $fila[0];
             $factura['items'] = $facturas->getFacturaItems($facturaId);
             $nombre = 'Factura_' . ($factura['e_ncf'] ?? $facturaId) . RepresentacionImpresa::sufijo($ancho);
-            return RepresentacionImpresa::datosRecibo($factura, [], false, $ancho, $nombre);
+            // Credito fiscal: el recibo lleva el RNC y la razon social del comprador.
+            $cliente = !empty($factura['client_id']) ? ((new posModel())->clientePorId((int) $factura['client_id']) ?? []) : [];
+            return RepresentacionImpresa::datosRecibo($factura, $cliente, false, $ancho, $nombre);
         } catch (Throwable $e) {
             error_log('[pos] recibo de la factura ' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
             return null;
@@ -432,37 +483,35 @@ final class PosVenta
         foreach ($pos->ventasPendientes($max) as $v) {
             $revisadas++;
             $id = (int) $v['id'];
-            if (empty($v['e_ncf']) || empty($v['codigo_seguridad'])) {
-                error_log('[pos] pendiente ' . $id . ' sin e-NCF o codigo de seguridad: no se puede reenviar');
+            if (empty($v['e_ncf'])) {
+                error_log('[pos] pendiente ' . $id . ' sin e-NCF: no se puede reenviar');
                 continue;
             }
+            $esRfce = str_starts_with((string) $v['estado_dgii'], 'RFCE_');
             try {
                 $servicio = new ECFEmissionService();
-                $consulta = $servicio->consultarEstadoRFCE((string) $v['e_ncf'], (string) $v['codigo_seguridad'], $v['ambiente_dgii'] ?? null);
-                $estado = self::estadoDeConsulta($consulta['data'] ?? null);
-                $respuesta = $consulta['data'] ?? null;
-                if ($estado === 'NO_ENCONTRADO') {
-                    if (empty($v['rfce_xml'])) {
-                        error_log('[pos] pendiente ' . $id . ' sin RFCE firmado guardado: no se puede reenviar');
-                        continue;
-                    }
-                    $envio = $servicio->reenviarRFCE((string) $v['rfce_xml'], $v['ambiente_dgii'] ?? null, self::timeoutDgii());
-                    $estado = preg_replace('/^RFCE_/', '', (string) $envio['estado']);
-                    $respuesta = $envio['response'];
-                }
+                [$estado, $respuesta, $trackId] = $esRfce
+                    ? self::revisarRFCE($servicio, $v)
+                    : self::revisarECF($pos, $servicio, $v);
+                $prefijo = $esRfce ? 'RFCE_' : '';
+                $marcar = static function (string $final, bool $sigue) use ($pos, $id, $esRfce, $respuesta, $trackId): void {
+                    $esRfce
+                        ? $pos->marcarEnvio($id, $final, $respuesta, $sigue)
+                        : $pos->marcarEnvioECF($id, $final, $respuesta, $trackId, $sigue);
+                };
                 if (in_array($estado, ['ACEPTADO', 'ACEPTADO_CONDICIONAL'], true)) {
-                    $pos->marcarEnvio($id, 'RFCE_' . $estado, $respuesta, false);
+                    $marcar($prefijo . $estado, false);
                     $aceptadas++;
-                    self::audit('POS_VENTA_ENVIADA', $v['e_ncf'], ['factura_id' => $id, 'estado_dgii' => 'RFCE_' . $estado],
+                    self::audit('POS_VENTA_ENVIADA', $v['e_ncf'], ['factura_id' => $id, 'estado_dgii' => $prefijo . $estado],
                         'Venta pendiente del POS aceptada por la DGII.');
                 } elseif ($estado === 'RECHAZADO') {
-                    $pos->marcarEnvio($id, 'RFCE_RECHAZADO', $respuesta, false);
+                    $marcar($prefijo . 'RECHAZADO', false);
                     $motivo = self::motivoRechazo($respuesta);
                     $rechazadas[] = ['factura_id' => $id, 'e_ncf' => $v['e_ncf'], 'motivo' => $motivo];
                     self::audit('POS_VENTA_RECHAZADA', $v['e_ncf'], ['factura_id' => $id, 'motivo' => $motivo],
                         'La DGII rechazó una venta del POS que ya se había entregado (estaba pendiente).', false);
                 }
-                // EN_PROCESO, sin veredicto: sigue pendiente.
+                // EN_PROCESO, sin veredicto o sin saber si llego: sigue pendiente.
             } catch (Throwable $e) {
                 error_log('[pos] reenvio de la pendiente ' . $id . ': ' . get_class($e) . ': ' . $e->getMessage());
             }
@@ -473,6 +522,67 @@ final class PosVenta
             'rechazadas' => $rechazadas,
             'pendientes' => $pos->contarPendientes(),
         ];
+    }
+
+    /**
+     * RFCE pendiente: consulta por e-NCF + codigo de seguridad; si la DGII no lo
+     * tiene, reenvia el RFCE firmado que se guardo.
+     * @return array{0: ?string, 1: mixed, 2: null} [estado sin prefijo, respuesta, trackId]
+     */
+    private static function revisarRFCE(ECFEmissionService $servicio, array $v): array
+    {
+        if (empty($v['codigo_seguridad'])) {
+            error_log('[pos] pendiente ' . $v['id'] . ' sin codigo de seguridad: no se puede consultar');
+            return [null, null, null];
+        }
+        $consulta = $servicio->consultarEstadoRFCE((string) $v['e_ncf'], (string) $v['codigo_seguridad'], $v['ambiente_dgii'] ?? null);
+        $estado = self::estadoDeConsulta($consulta['data'] ?? null);
+        $respuesta = $consulta['data'] ?? null;
+        if ($estado === 'NO_ENCONTRADO') {
+            if (empty($v['rfce_xml'])) {
+                error_log('[pos] pendiente ' . $v['id'] . ' sin RFCE firmado guardado: no se puede reenviar');
+                return [null, null, null];
+            }
+            $envio = $servicio->reenviarRFCE((string) $v['rfce_xml'], $v['ambiente_dgii'] ?? null, self::timeoutDgii());
+            return [preg_replace('/^RFCE_/', '', (string) $envio['estado']), $envio['response'], null];
+        }
+        return [$estado, $respuesta, null];
+    }
+
+    /**
+     * e-CF completo (E31) pendiente. Con trackId: se pregunta el resultado
+     * (ConsultaResultado). Sin trackId (no hubo respuesta al enviar): primero
+     * ConsultaTrackIds; si la DGII lo tiene, se toma su trackId; si responde que
+     * no, se reenvia el XML firmado. Si no se puede saber, no se reenvia.
+     * @return array{0: ?string, 1: mixed, 2: ?string} [estado, respuesta, trackId]
+     */
+    private static function revisarECF(posModel $pos, ECFEmissionService $servicio, array $v): array
+    {
+        $ambiente = $v['ambiente_dgii'] ?? null;
+        $trackId = !empty($v['track_id']) ? (string) $v['track_id'] : null;
+        if ($trackId === null) {
+            $tracks = $servicio->consultarTrackIds((string) $v['e_ncf'], $ambiente);
+            if ($tracks === null) {
+                return [null, null, null];
+            }
+            if ($tracks === []) {
+                if (empty($v['xml_firmado'])) {
+                    error_log('[pos] pendiente ' . $v['id'] . ' sin XML firmado guardado: no se puede reenviar');
+                    return [null, null, null];
+                }
+                $envio = $servicio->reenviarECF((string) $v['xml_firmado'], $ambiente, self::timeoutDgii());
+                $trackId = $envio['track_id'];
+                if (in_array($envio['estado'], ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RECHAZADO'], true) || $trackId === null) {
+                    return [$envio['estado'], $envio['response'], $trackId];
+                }
+            } else {
+                $trackId = $tracks[count($tracks) - 1]['trackId'];
+            }
+            // Ya esta en la DGII: queda esperando su veredicto, con su trackId.
+            $pos->marcarEnvioECF((int) $v['id'], 'ENVIADO', null, $trackId, true);
+        }
+        $consulta = $servicio->consultarEstado($trackId, (string) $v['e_ncf'], $ambiente);
+        return [self::estadoDeConsulta($consulta['data'] ?? null), $consulta['data'] ?? null, $trackId];
     }
 
     /** Estado de una consulta DGII ({estado: "Aceptado"} o {codigo: 1}) en mayusculas, o null. */
