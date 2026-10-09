@@ -331,6 +331,183 @@ class posModel
         return $this->turnoAbiertoDeCaja($cajaId);
     }
 
+    /** Turno por id (abierto o cerrado), con el nombre de su empleado, o null. */
+    public function turnoPorId(int $turnoId): ?array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT t.*, e.nombre AS empleado_nombre, c.nombre AS caja_nombre, s.nombre AS cerrado_por_nombre
+             FROM pos_turnos t
+             JOIN pos_empleados e ON e.id = t.empleado_id
+             JOIN pos_cajas c ON c.id = t.caja_id
+             LEFT JOIN pos_empleados s ON s.id = t.cerrado_por
+             WHERE t.id = :id'
+        );
+        $stmt->execute([':id' => $turnoId]);
+        $f = $stmt->fetch();
+        return $f ? self::normalizarTurnoCompleto($f) : null;
+    }
+
+    /**
+     * Candado del turno: la venta lo toma mientras emite y el cierre antes de
+     * contar. Asi un cierre nunca deja afuera una venta que se estaba emitiendo
+     * (ni una venta entra a un turno ya cerrado).
+     */
+    public function bloquearTurno(int $turnoId, int $segundos): bool
+    {
+        $stmt = $this->conexion->prepare("SELECT GET_LOCK(CONCAT('post_', SHA1(CONCAT(DATABASE(), ':', :t))), :s)");
+        $stmt->execute([':t' => $turnoId, ':s' => $segundos]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    public function liberarTurno(int $turnoId): void
+    {
+        $stmt = $this->conexion->prepare("SELECT RELEASE_LOCK(CONCAT('post_', SHA1(CONCAT(DATABASE(), ':', :t))))");
+        $stmt->execute([':t' => $turnoId]);
+    }
+
+    /**
+     * Movimientos del turno agrupados: [tipo => [forma_pago => [cantidad, monto]]].
+     * Montos en pesos (DECIMAL). Tipos: VENTA, DEVOLUCION, CANCELADA, QUITADA.
+     */
+    public function movimientosDelTurno(int $turnoId): array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT tipo, forma_pago, COUNT(*) AS cantidad, COALESCE(SUM(monto), 0) AS monto
+             FROM pos_caja_movimientos WHERE turno_id = :t GROUP BY tipo, forma_pago'
+        );
+        $stmt->execute([':t' => $turnoId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $f) {
+            $out[$f['tipo']][(int) $f['forma_pago']] = ['cantidad' => (int) $f['cantidad'], 'monto' => (string) $f['monto']];
+        }
+        return $out;
+    }
+
+    /**
+     * Ventas cobradas del turno (las que tienen movimiento de caja), con su
+     * estado DGII: para contar comprobantes y listar pendientes y rechazadas.
+     */
+    public function ventasCobradasDelTurno(int $turnoId): array
+    {
+        $stmt = $this->conexion->prepare(
+            "SELECT f.id, f.e_ncf, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago
+             FROM pos_caja_movimientos m JOIN facturas f ON f.id = m.factura_id
+             WHERE m.turno_id = :t AND m.tipo = 'VENTA'
+             ORDER BY f.id DESC"
+        );
+        $stmt->execute([':t' => $turnoId]);
+        return $stmt->fetchAll();
+    }
+
+    /**
+     * Cierra el turno si sigue abierto (una sola vez: `abierto = 1` en el WHERE).
+     * Montos en pesos. Devuelve false si otro lo cerro antes.
+     */
+    public function cerrarTurno(int $turnoId, int $cerradoPor, array $conteo, float $contado, float $esperado, float $diferencia, array $totales): bool
+    {
+        $stmt = $this->conexion->prepare(
+            'UPDATE pos_turnos
+             SET abierto = NULL, cerrado_at = NOW(), cerrado_por = :por, conteo_json = :conteo,
+                 efectivo_contado = :contado, efectivo_esperado = :esperado, diferencia = :dif, totales_json = :tot
+             WHERE id = :id AND abierto = 1'
+        );
+        $stmt->execute([
+            ':por' => $cerradoPor,
+            ':conteo' => json_encode($conteo, JSON_UNESCAPED_UNICODE),
+            ':contado' => $contado,
+            ':esperado' => $esperado,
+            ':dif' => $diferencia,
+            ':tot' => json_encode($totales, JSON_UNESCAPED_UNICODE),
+            ':id' => $turnoId,
+        ]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Nota del cierre: una sola vez y poco despues de cerrar (K6). */
+    public function guardarNotaTurno(int $turnoId, int $cajaId, string $nota): bool
+    {
+        $stmt = $this->conexion->prepare(
+            'UPDATE pos_turnos SET nota = :n
+             WHERE id = :id AND caja_id = :c AND abierto IS NULL AND nota IS NULL
+               AND cerrado_at >= NOW() - INTERVAL 30 MINUTE'
+        );
+        $stmt->execute([':n' => $nota, ':id' => $turnoId, ':c' => $cajaId]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Venta cancelada o linea quitada del carrito (V4): no mueven dinero, pero
+     * salen en el cierre. Van en pos_caja_movimientos con forma_pago 0 y sin
+     * factura; el efectivo esperado solo suma VENTA y DEVOLUCION.
+     */
+    public function registrarEvento(int $turnoId, string $tipo, float $monto): void
+    {
+        $stmt = $this->conexion->prepare(
+            'INSERT INTO pos_caja_movimientos (turno_id, factura_id, tipo, forma_pago, monto) VALUES (:t, NULL, :tipo, 0, :m)'
+        );
+        $stmt->execute([':t' => $turnoId, ':tipo' => $tipo, ':m' => $monto]);
+    }
+
+    /**
+     * Turnos para app.* (Punto de venta -> Turnos), los mas recientes primero.
+     * Filtros opcionales: caja, empleado, desde/hasta (fecha de apertura).
+     */
+    public function listarTurnos(array $filtros, int $limite): array
+    {
+        $where = [];
+        $params = [];
+        if (!empty($filtros['caja_id'])) {
+            $where[] = 't.caja_id = :c';
+            $params[':c'] = (int) $filtros['caja_id'];
+        }
+        if (!empty($filtros['empleado_id'])) {
+            $where[] = 't.empleado_id = :e';
+            $params[':e'] = (int) $filtros['empleado_id'];
+        }
+        if (!empty($filtros['desde'])) {
+            $where[] = 't.abierto_at >= :d';
+            $params[':d'] = $filtros['desde'] . ' 00:00:00';
+        }
+        if (!empty($filtros['hasta'])) {
+            $where[] = 't.abierto_at < :h + INTERVAL 1 DAY';
+            $params[':h'] = $filtros['hasta'];
+        }
+        $stmt = $this->conexion->prepare(
+            'SELECT t.*, e.nombre AS empleado_nombre, c.nombre AS caja_nombre, s.nombre AS cerrado_por_nombre
+             FROM pos_turnos t
+             JOIN pos_empleados e ON e.id = t.empleado_id
+             JOIN pos_cajas c ON c.id = t.caja_id
+             LEFT JOIN pos_empleados s ON s.id = t.cerrado_por'
+            . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
+            . ' ORDER BY t.abierto_at DESC, t.id DESC LIMIT ' . max(1, min(200, $limite))
+        );
+        $stmt->execute($params);
+        return array_map([self::class, 'normalizarTurnoCompleto'], $stmt->fetchAll());
+    }
+
+    private static function normalizarTurnoCompleto(array $f): array
+    {
+        $num = static fn($v) => $v === null ? null : (float) $v;
+        return [
+            'id' => (int) $f['id'],
+            'caja_id' => (int) $f['caja_id'],
+            'caja_nombre' => $f['caja_nombre'] ?? null,
+            'empleado_id' => (int) $f['empleado_id'],
+            'empleado_nombre' => $f['empleado_nombre'] ?? null,
+            'abierto' => (int) ($f['abierto'] ?? 0) === 1,
+            'abierto_at' => $f['abierto_at'],
+            'cerrado_at' => $f['cerrado_at'],
+            'cerrado_por' => $f['cerrado_por'] !== null ? (int) $f['cerrado_por'] : null,
+            'cerrado_por_nombre' => $f['cerrado_por_nombre'] ?? null,
+            'fondo_inicial' => (float) $f['fondo_inicial'],
+            'efectivo_esperado' => $num($f['efectivo_esperado']),
+            'efectivo_contado' => $num($f['efectivo_contado']),
+            'diferencia' => $num($f['diferencia']),
+            'nota' => $f['nota'],
+            'reporte' => $f['totales_json'] !== null ? json_decode((string) $f['totales_json'], true) : null,
+        ];
+    }
+
     private function turnoAbierto(string $condicion, int $valor): ?array
     {
         $stmt = $this->conexion->prepare(

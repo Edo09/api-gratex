@@ -47,6 +47,12 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `EMISION_FALLIDA` | 502 | No se emitió (DGII caída antes de enviar, certificado...): reintentar o contingencia |
 | `VENTA_EN_PROCESO` | 409 | Otra petición con la misma clave está emitiendo: reintentar con la MISMA clave |
 | `GUARDADO_FALLIDO` | 500 | La DGII la recibió pero no se guardó: NO reintentar, avisar a soporte con el `e_ncf` |
+| `SIN_TURNO`, `TURNO_CAMBIO`, `TURNO_YA_CERRADO`, `TURNO_OCUPADO` | 409 | Cierre: el turno ya no es el que se contó, o hay una venta emitiéndose (esperar) |
+| `CONTEO_INVALIDO` | 422 | Denominación inexistente o cantidad negativa |
+| `PERMISO_INVALIDO` | 403 | Falta el permiso del supervisor, venció, es de otro turno/equipo o fue alterado |
+| `PIN_SIN_PERMISO` | 403 | El PIN es de un cajero, no de un supervisor (cuenta como intento, con `intentos_restantes`) |
+| `NOTA_INVALIDA`, `NOTA_NO_PERMITIDA` | 422 / 409 | La nota del cierre: una vez, hasta 255 caracteres, hasta 30 min después |
+| `EVENTO_INVALIDO` | 422 | Evento de carrito desconocido |
 
 Con `PERMISSIONS_ENFORCE=true` el gate central responde un 403 propio, sin `codigo`,
 antes que `/api/pos-admin` (para pos.\* es el mismo `SIN_PERMISO`).
@@ -207,13 +213,58 @@ guardó. Responde `{revisadas, aceptadas, rechazadas: [{factura_id, e_ncf, motiv
 pendientes}`. El POS lo llama al entrar, cada 2 minutos y después de cada venta (no hay
 cron confirmado, Q4).
 
+**`GET /api/pos/ventas`** (con `X-POS-SESION`) — `{turno_caja, ventas}`: las ventas
+cobradas del turno abierto de la caja (K9), con e-NCF, hora, total, forma de pago, estado
+DGII y `envio_pendiente`. Para reimprimir, `GET /api/pos/ventas/{id}/recibo`.
+
+**`POST /api/pos/eventos`** (con `X-POS-SESION`) `{ "tipo": "cancelada" | "quitada",
+"monto_centavos": 4500, "lineas": [{product_id, nombre, cantidad}] }` — venta cancelada o
+línea quitada del carrito (V4). Si el empleado tiene su turno abierto suma al cierre
+(`registrado: true`); siempre queda en la bitácora con las líneas.
+
+**`POST /api/pos/autorizar`** (con `X-POS-SESION`) `{ "pin": "1234", "accion":
+"cerrar_turno", "turno_id": 7 }` — PIN de supervisor en la sesión de otro empleado (S1).
+Responde `{permiso, supervisor, vence_en_segundos}`: un permiso firmado para ESA acción,
+ESE turno y ESE equipo, por 15 minutos. Los PIN equivocados y los de cajero
+(`PIN_SIN_PERMISO`) cuentan para el bloqueo del equipo, igual que en la entrada.
+
+**`POST /api/pos/turno/cerrar`** (con `X-POS-SESION`) — cierre a ciegas (K6-K8):
+
+```json
+{ "turno_id": 7,
+  "conteo": { "2000": 0, "1000": 1, "500": 1, "200": 1, "100": 0, "50": 0, "20": 1,
+              "25": 0, "10": 0, "5": 1, "1": 4, "otros_centavos": 25 },
+  "permiso": null }
+```
+
+- Cierra el turno abierto de la caja del equipo. `turno_id` tiene que ser ese (si no,
+  `TURNO_CAMBIO`). Su propio turno lo cierra el cajero; uno ajeno, un supervisor con su
+  sesión o con `permiso` de `/autorizar`. Se puede cerrar aunque la caja esté desactivada.
+- Espera a una venta que se esté emitiendo en ese turno (candado compartido). Una vez
+  cerrado no se rehace: el mismo pedido otra vez da `SIN_TURNO`.
+- Responde `{turno, reporte}`. El reporte (centavos) es la foto que queda en
+  `pos_turnos.totales_json`: ventas por forma de pago, comprobantes, devoluciones,
+  canceladas, líneas quitadas, pendientes y rechazadas de la DGII, conteo, fondo,
+  `esperado_centavos` = fondo + ventas en efectivo − devoluciones en efectivo,
+  `contado_centavos` y `diferencia_centavos` (contado − esperado: + sobra, − falta).
+
+**`POST /api/pos/turno/nota`** (con `X-POS-SESION`) `{ "turno_id": 7, "nota": "..." }` —
+una nota por cierre, desde la misma caja y hasta 30 minutos después. Devuelve el reporte
+con la nota.
+
+**`GET /api/pos-admin/turnos`** (usuario con `pos`) `?caja_id&empleado_id&desde&hasta&limite`
+— turnos, los más recientes primero, sin el reporte. **`GET /api/pos-admin/turnos/{id}`** —
+`{turno, reporte}` con la nota, para revisarlo o reimprimirlo en app.\* (`null` si sigue
+abierto).
+
 ## Bitácora
 
 Todo va a `audit_logs` con módulo `pos`: `POS_TRASPASO_CREADO`, `POS_CAJA_CREADA` /
 `_ACTUALIZADA`, `POS_EMPLEADO_CREADO` / `_ACTUALIZADO`, `POS_PIN_REGENERADO`,
 `POS_EQUIPO_HABILITADO` / `_REVOCADO`, `POS_SESION_ABIERTA` / `_CERRADA`,
 `POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`, `POS_TURNO_ABIERTO`, `POS_VENTA`,
-`POS_VENTA_RECHAZADA`, `POS_VENTA_ENVIADA`, `POS_VENTA_FALLIDA`, `POS_VENTA_SIN_GUARDAR`. Los empleados no son usuarios del master:
+`POS_VENTA_RECHAZADA`, `POS_VENTA_ENVIADA`, `POS_VENTA_FALLIDA`, `POS_VENTA_SIN_GUARDAR`,
+`POS_TURNO_CERRADO`, `POS_AUTORIZACION` / `_FALLIDA`, `POS_VENTA_CANCELADA`, `POS_LINEA_QUITADA`. Los empleados no son usuarios del master:
 `user_id` va vacío y el nombre del empleado va en `username` (`POS · Ana`) y en los
 valores. **Nunca se registra un PIN ni un token.**
 
@@ -226,6 +277,8 @@ para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.
 
 `tools/test_pos_venta.php`: 48 verificaciones del cobro (turno, validaciones sin gastar
 e-NCF, venta en efectivo, idempotencia y candado, rechazo, DGII lenta y caída con su
-reenvío, recibo, bitácora). Emite de verdad, así que corre contra la DGII simulada
+reenvío, recibo, bitácora). `tools/test_pos_cierre.php`: 44 verificaciones del cierre
+(esperado y diferencia, permiso de supervisor, PIN de cajero, conteo inválido, nota, ventas
+del turno, eventos V4, candado, lista de app.\*). Las dos emiten de verdad, así que corren contra la DGII simulada
 `tools/mock_dgii_local.php` con un certificado autofirmado y se niega a correr si
 `DGII_ECF_BASE_URL` / `DGII_FC_BASE_URL` no son locales.

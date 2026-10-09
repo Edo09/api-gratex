@@ -209,7 +209,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 **V1 · Carrito** — `Piloto`
 - [x] Agregar por toque (el escaneo llega con C5). Repetir un producto suma cantidad.
 - [x] `+` / `−` y cantidad editable con teclado en pantalla. Se admiten decimales solo si la unidad tiene `permite_decimales`, con máximo 2 (`CantidadItem` del XSD). Si no, cantidades enteras.
-- [ ] Eliminar línea. Las líneas eliminadas quedan registradas (V4).
+- [x] Eliminar línea. Las líneas eliminadas quedan registradas (V4).
 - [ ] Importe de la línea = precio final × cantidad − descuento.
 
 **V2 · Totales** — `Piloto`
@@ -222,7 +222,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **V4 · Cancelar venta** — `Piloto`
 - [x] ESC o botón, con confirmación si hay artículos. Sin PIN.
-- [ ] Ventas canceladas y líneas eliminadas quedan en la auditoría y salen en el reporte de cierre (cantidad y monto).
+- [x] Ventas canceladas y líneas eliminadas quedan en la auditoría y salen en el reporte de cierre (cantidad y monto).
 
 **V5 · Cliente** — `Piloto`
 - [ ] Buscar cliente por nombre o RNC. Opcional: sin cliente, es consumidor final.
@@ -305,7 +305,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] `--kiosk-printing` (sin diálogo) queda como opción del montaje: no cambia el código.
 
 **P5 · Reimpresión** — `Piloto`
-- [ ] Desde "Ventas del turno" (K9).
+- [x] Desde "Ventas del turno" (K9).
 
 **P6 · Impresora del equipo** — `Piloto`
 - [x] El POS tiene su propia configuración de impresora (ancho 72/76/80, **80 por defecto**, y hoja de prueba), porque la de app.\* vive en el `localStorage` de otro dominio.
@@ -328,25 +328,25 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **K4 · Turno abierto de otro empleado** — `Piloto`
 - [x] El empleado que entra **no puede vender**. Ve "Turno abierto de *María* desde las 8:05 a. m. Un supervisor debe cerrarlo".
-- [ ] Un supervisor, con su PIN, cierra ese turno con conteo a ciegas (K6). Después el nuevo empleado abre el suyo.
+- [x] Un supervisor, con su PIN, cierra ese turno con conteo a ciegas (K6). Después el nuevo empleado abre el suyo.
 
 **K5 · Turno propio de un día anterior** — `Piloto`
 - [x] Se puede seguir vendiendo, con un banner fijo: "Turno abierto desde ayer, 8:05 p. m.".
 
 **K6 · Cierre** — `Piloto`
-- [ ] **Conteo a ciegas:** se cuenta sin ver cuánto debería haber.
-- [ ] **Por denominaciones:** billetes de 2000, 1000, 500, 200, 100, 50 y 20; monedas de 25, 10, 5 y 1; y un campo "otros / centavos" en monto. El sistema suma.
-- [ ] Al confirmar el conteo se muestran el esperado y la diferencia. **El conteo no se puede editar después.**
-- [ ] La diferencia **solo se registra** (no pide supervisor). Se puede escribir una nota.
+- [x] **Conteo a ciegas:** se cuenta sin ver cuánto debería haber.
+- [x] **Por denominaciones:** billetes de 2000, 1000, 500, 200, 100, 50 y 20; monedas de 25, 10, 5 y 1; y un campo "otros / centavos" en monto. El sistema suma.
+- [x] Al confirmar el conteo se muestran el esperado y la diferencia. **El conteo no se puede editar después.**
+- [x] La diferencia **solo se registra** (no pide supervisor). Se puede escribir una nota.
 
 **K7 · Efectivo esperado** — `Piloto`
-- [ ] `esperado = fondo + ventas en efectivo − devoluciones en efectivo`.
-- [ ] Una venta con *envío pendiente* cuenta igual: el dinero ya entró.
-- [ ] Tarjeta y transferencia se muestran como totales informativos; no se cuentan.
+- [x] `esperado = fondo + ventas en efectivo − devoluciones en efectivo`.
+- [x] Una venta con *envío pendiente* cuenta igual: el dinero ya entró.
+- [x] Tarjeta y transferencia se muestran como totales informativos; no se cuentan.
 
 **K8 · Reporte de cierre** — `Piloto`
-- [ ] En tirilla al cerrar, y reimprimible desde app.\*.
-- [ ] Contenido:
+- [x] En tirilla al cerrar, y reimprimible desde app.\*.
+- [x] Contenido:
   - caja, empleado, apertura, cierre y quién cerró;
   - fondo;
   - ventas por forma de pago (cantidad y monto);
@@ -358,17 +358,17 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
   - conteo por denominación, esperado y diferencia.
 
 **K9 · Ventas del turno** — `Piloto`
-- [ ] Lista de las ventas del turno actual con hora, e-NCF, total, forma de pago y estado DGII. Permite reimprimir.
+- [x] Lista de las ventas del turno actual con hora, e-NCF, total, forma de pago y estado DGII. Permite reimprimir.
 
 ### 6.7 Autorizaciones
 
 **S1 · PIN de supervisor** — `Piloto`
-- [ ] Ventana con teclado numérico, en la sesión del cajero.
-- [ ] Solo valen los empleados activos con rol `supervisor`. Un PIN de cajero responde "Ese PIN no puede autorizar".
-- [ ] Los fallos cuentan para el bloqueo del equipo (A6).
+- [x] Ventana con teclado numérico, en la sesión del cajero.
+- [x] Solo valen los empleados activos con rol `supervisor`. Un PIN de cajero responde "Ese PIN no puede autorizar".
+- [x] Los fallos cuentan para el bloqueo del equipo (A6).
 
 **S2 · Qué pide supervisor** — K4 desde el `Piloto`; el resto desde `v1`
-- [ ] Cerrar el turno de otro empleado (K4).
+- [x] Cerrar el turno de otro empleado (K4).
 - [ ] Cambio de precio (V7), descuento (V8), "Varios" (V9) y devolución (D3).
 
 **S3 · Auditoría** — `Piloto`
@@ -412,7 +412,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 - [x] **Cajas**: crear, renombrar, desactivar.
 - [x] **Equipos**: lista de equipos habilitados (caja, fecha, quién lo habilitó, último uso, bloqueo por PIN) con opción de revocar. Revocar también sirve para quitar un bloqueo sin esperar.
 - [x] **Empleados**: crear (el PIN se muestra una vez), regenerar PIN, cambiar rol, desactivar.
-- [ ] **Turnos**: lista con filtros (caja, empleado, fecha) y el detalle del cierre (K8), reimprimible.
+- [x] **Turnos**: lista con filtros (caja, empleado, fecha) y el detalle del cierre (K8), reimprimible.
 
 **M2 · Ficha del producto** — `Piloto`
 - [ ] Códigos de barras (C6) y casilla de ITBIS incluido (C7).
@@ -732,6 +732,29 @@ reintento → misma venta, DGII lenta → pendiente → aceptada sin reenvío).
 **Falta:** cierre de turno (K6-K8) — hoy un turno no se puede cerrar —, ventas del turno y
 reimpresión (K9/P5), E31 con RNC (F2), alerta de rechazo tardío en app.\*, V4 en la
 bitácora, F9 (deshabilitar el cobro sin conexión; hoy queda "sin confirmar").
+
+**Cierre de turno (2026-10-08):** las tres decisiones por defecto de §8 confirmadas por el
+usuario (fondo como monto; cancelar y quitar líneas sin PIN pero registrado; el cajero ve
+esperado y diferencia después de confirmar). Backend: `POST /api/pos/turno/cerrar`
+(`src/Pos/PosCierre.php`) con conteo a ciegas por denominación, esperado (fondo + efectivo
+− devoluciones; la pendiente cuenta), diferencia y la foto del reporte en
+`pos_turnos.totales_json` (centavos); `POST /api/pos/autorizar` con PIN de supervisor
+(fallos al bloqueo del equipo, un PIN de cajero responde `PIN_SIN_PERMISO`) → permiso
+firmado de un solo propósito (`src/Pos/PosAutorizacion.php`, sin tabla); un supervisor con
+sesión cierra sin permiso aparte; candado `GET_LOCK` por turno compartido con la venta (un
+cierre espera a la venta en curso y una venta no entra a un turno cerrado); nota una vez,
+hasta 30 min; `GET /api/pos/ventas` (K9); `POST /api/pos/eventos` (V4: canceladas y
+líneas quitadas en `pos_caja_movimientos` con forma 0, sin migración); `GET
+/api/pos-admin/turnos` y `/{id}`. POS: botón **Turno** (ventas del turno con reimpresión,
+cerrar), conteo táctil con teclado, confirmación, resultado, nota, reporte impreso
+(`src/pos/reporteCierre.ts`, el mismo que reimprime app.\*), y al terminar el turno propio
+se bloquea la caja. app.\*: pestaña **Turnos** con filtros, diferencia resaltada y
+detalle reimprimible. Pruebas: `tools/test_pos_cierre.php` 44/44,
+`scripts/test-pos-cierre.ts` 18/18, venta 48/48, POS 100/100, y de punta a punta en el
+navegador (cierre propio con faltante y nota, cierre ajeno con PIN de supervisor, lista y
+reimpresión en app.\*).
+**Falta:** E31 con RNC (F2), devoluciones E34 (D1-D5) y su efecto en el cierre, alerta de
+rechazo tardío en app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
 
 | Semana | Fechas | Qué |
 |---|---|---|

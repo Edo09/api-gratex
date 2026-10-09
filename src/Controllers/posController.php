@@ -13,6 +13,11 @@
 //   POST   /api/pos/ventas   -> cobra y emite (§9.5); ver src/Pos/PosVenta.php
 //   GET    /api/pos/ventas/{id}/recibo?ancho=80 -> datos del recibo (reimprimir)
 //   POST   /api/pos/pendientes/reenviar -> reenvia las ventas sin respuesta DGII (F7)
+//   POST   /api/pos/autorizar -> {pin, accion, turno_id} PIN de supervisor -> permiso (S1)
+//   POST   /api/pos/turno/cerrar -> {turno_id, conteo, permiso?} cierre a ciegas (K6-K8)
+//   POST   /api/pos/turno/nota -> {turno_id, nota} nota del cierre, una vez
+//   GET    /api/pos/ventas  -> ventas cobradas del turno abierto de la caja (K9)
+//   POST   /api/pos/eventos -> {tipo: cancelada|quitada, monto_centavos, lineas} (V4)
 //
 // Errores: {status:false, error, codigo}. Codigos que cambian de pantalla:
 //   EQUIPO_NO_HABILITADO -> habilitar el equipo     SESION_REQUERIDA -> PIN
@@ -27,6 +32,8 @@ require_once __DIR__ . '/../Models/posMasterModel.php';
 require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Pos/PosPrecio.php';
 require_once __DIR__ . '/../Pos/PosVenta.php';
+require_once __DIR__ . '/../Pos/PosCierre.php';
+require_once __DIR__ . '/../Pos/PosAutorizacion.php';
 
 /** Una linea de auditoria del POS. Nunca con el PIN ni tokens. */
 function posAudit(string $action, $entityId, ?array $new, string $descripcion, bool $ok = true): void
@@ -233,6 +240,93 @@ try {
             }
             RequestContext::set('username', 'POS · ' . $sesion['empleado']['nombre']);
             posResponder(201, PosVenta::cobrar($pos, $equipo, $sesion['empleado'], $caja, $body));
+            break;
+
+        case 'POST autorizar':
+            // PIN de supervisor dentro de la sesion de otro empleado (S1). Los
+            // fallos cuentan para el bloqueo del equipo, igual que en la entrada.
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = posCajaDelEquipo($pos, $equipo);
+            if ($equipo['bloqueado']) {
+                throw new PosError('Demasiados PIN incorrectos. Espera unos minutos.', 423, 'EQUIPO_BLOQUEADO',
+                    ['bloqueo_segundos' => $equipo['bloqueo_segundos']]);
+            }
+            $body = InputSanitizer::jsonInput() ?? [];
+            $pin = is_array($body) ? ($body['pin'] ?? null) : null;
+            $accion = is_array($body) ? (string) ($body['accion'] ?? '') : '';
+            if (!in_array($accion, PosAutorizacion::ACCIONES, true)) {
+                throw new PosError('Esa acción no se autoriza con PIN.', 422, 'ACCION_INVALIDA');
+            }
+            if (!PosPin::formatoValido($pin)) {
+                throw new PosError('El PIN tiene ' . PosPin::DIGITOS . ' dígitos.', 422, 'PIN_FORMATO');
+            }
+            $turno = $pos->turnoAbiertoDeCaja($caja['id']);
+            if ($turno === null || (int) ($body['turno_id'] ?? 0) !== $turno['id']) {
+                throw new PosError('El turno de la caja cambió. Revisa y vuelve a intentarlo.', 409, 'TURNO_CAMBIO');
+            }
+            $tenantId = (int) TenantResolver::current()['id'];
+            $supervisor = $pos->empleadoPorPin(PosPin::hmac($pin, $tenantId));
+            if ($supervisor === null || $supervisor['rol'] !== 'supervisor') {
+                $fallo = $master->registrarFalloPin($equipo['id']);
+                posAudit('POS_AUTORIZACION_FALLIDA', $equipo['id'], ['caja_id' => $caja['id'], 'accion' => $accion,
+                    'pedida_por' => $sesion['empleado']['nombre']], 'PIN de supervisor rechazado en el POS.', false);
+                if ($fallo['bloqueado']) {
+                    throw new PosError('Demasiados PIN incorrectos. El equipo queda bloqueado unos minutos.', 423, 'EQUIPO_BLOQUEADO',
+                        ['bloqueo_segundos' => $fallo['bloqueo_segundos']]);
+                }
+                throw $supervisor === null
+                    ? new PosError('PIN incorrecto.', 401, 'PIN_INCORRECTO', ['intentos_restantes' => $fallo['intentos_restantes']])
+                    : new PosError('Ese PIN no puede autorizar: tiene que ser de un supervisor.', 403, 'PIN_SIN_PERMISO',
+                        ['intentos_restantes' => $fallo['intentos_restantes']]);
+            }
+            $master->reiniciarIntentos($equipo['id']);
+            posAudit('POS_AUTORIZACION', $equipo['id'], ['caja_id' => $caja['id'], 'accion' => $accion, 'turno_id' => $turno['id'],
+                'supervisor_id' => $supervisor['id'], 'supervisor' => $supervisor['nombre'], 'pedida_por' => $sesion['empleado']['nombre']],
+                'Supervisor autorizó una acción en el POS.');
+            posResponder(200, [
+                'permiso' => PosAutorizacion::emitir($supervisor, $accion, $turno['id'], $equipo['id'], $tenantId),
+                'supervisor' => ['id' => $supervisor['id'], 'nombre' => $supervisor['nombre']],
+                'vence_en_segundos' => PosAutorizacion::VIGENCIA_SEGUNDOS,
+            ]);
+            break;
+
+        case 'POST turno/cerrar':
+            // Se puede cerrar aunque la caja se haya desactivado: un turno no
+            // tiene que quedar atrapado abierto.
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = $pos->cajaPorId($equipo['caja_id']);
+            $body = InputSanitizer::jsonInput() ?? [];
+            if ($caja === null || !is_array($body)) {
+                throw new PosError('No se pudieron leer los datos del cierre.', 400, 'CUERPO_INVALIDO');
+            }
+            RequestContext::set('username', 'POS · ' . $sesion['empleado']['nombre']);
+            posResponder(200, PosCierre::cerrar($pos, $equipo, $caja, $sesion['empleado'], $body, (int) TenantResolver::current()['id']));
+            break;
+
+        case 'POST turno/nota':
+            PosAuth::requerirSesion($pos, $equipo);
+            $caja = $pos->cajaPorId($equipo['caja_id']);
+            $body = InputSanitizer::jsonInput() ?? [];
+            if ($caja === null || !is_array($body)) {
+                throw new PosError('No se pudo leer la nota.', 400, 'CUERPO_INVALIDO');
+            }
+            posResponder(200, PosCierre::nota($pos, $caja, $body));
+            break;
+
+        case 'GET ventas':
+            PosAuth::requerirSesion($pos, $equipo);
+            $caja = $pos->cajaPorId($equipo['caja_id']);
+            posResponder(200, PosCierre::ventasDelTurno($pos, $caja ?? ['id' => $equipo['caja_id']]));
+            break;
+
+        case 'POST eventos':
+            $sesion = PosAuth::requerirSesion($pos, $equipo);
+            $caja = $pos->cajaPorId($equipo['caja_id']);
+            $body = InputSanitizer::jsonInput() ?? [];
+            if ($caja === null || !is_array($body)) {
+                throw new PosError('Evento no válido.', 422, 'EVENTO_INVALIDO');
+            }
+            posResponder(200, PosCierre::evento($pos, $caja, $sesion['empleado'], $equipo, $body));
             break;
 
         case 'POST pendientes/reenviar':

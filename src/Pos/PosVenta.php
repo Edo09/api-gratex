@@ -88,6 +88,30 @@ final class PosVenta
                 409, 'TURNO_AJENO', ['turno_caja' => $turno]);
         }
 
+        // Candado del turno mientras se emite: si en este momento lo estan
+        // cerrando, la venta espera y despues ve que ya no hay turno (y un cierre
+        // que llega despues espera a que esta venta quede guardada).
+        if (!$pos->bloquearTurno($turno['id'], 45)) {
+            throw new PosError('La caja está cerrando el turno. Espera un momento.', 409, 'TURNO_OCUPADO');
+        }
+        try {
+            $sigue = $pos->turnoAbiertoDeCaja($caja['id']);
+            if ($sigue === null || $sigue['id'] !== $turno['id']) {
+                throw new PosError('El turno se cerró. Abre uno nuevo para cobrar.', 409, 'TURNO_REQUERIDO');
+            }
+            return self::emitirEnTurno($pos, $equipo, $empleado, $caja, $body, $clave, $ancho, $turno);
+        } finally {
+            try {
+                $pos->liberarTurno($turno['id']);
+            } catch (Throwable $e) {
+                // Se suelta solo al terminar el request.
+            }
+        }
+    }
+
+    private static function emitirEnTurno(posModel $pos, array $equipo, array $empleado, array $caja, array $body, string $clave, int $ancho, array $turno): array
+    {
+
         // facturas.user_id es NOT NULL: el empleado del POS no es usuario, asi
         // que la venta queda a nombre del admin que habilito esta caja (y el
         // empleado en pos_empleado_id).

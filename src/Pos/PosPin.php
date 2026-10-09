@@ -30,6 +30,16 @@ final class PosPin
         return hash_hmac('sha256', $pin, self::pepper() . '|' . $tenantId);
     }
 
+    /**
+     * Firma de los permisos de supervisor (PosAutorizacion). Misma raiz secreta
+     * que los PIN, con otro proposito en la clave: una firma de permiso no sirve
+     * como HMAC de PIN ni al reves.
+     */
+    public static function firma(string $datos): string
+    {
+        return hash_hmac('sha256', $datos, 'autorizacion|' . self::pepper());
+    }
+
     /** PIN nuevo al azar, sin los obvios (todos iguales o en escalera). */
     public static function generar(): string
     {
