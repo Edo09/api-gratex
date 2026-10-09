@@ -110,9 +110,10 @@ function posCatalogo(posModel $pos): array
         ];
     }
     $chips = [];
-    foreach ($categorias as $id => $nombre) {
+    foreach ($categorias as $id => $cat) {
         if (isset($porCategoria[$id])) {
-            $chips[] = ['id' => $id, 'nombre' => $nombre, 'productos' => $porCategoria[$id]];
+            // color: el elegido en app.* o null (el POS lo calcula del nombre).
+            $chips[] = ['id' => $id, 'nombre' => $cat['nombre'], 'color' => $cat['color'], 'productos' => $porCategoria[$id]];
         }
     }
     return ['productos' => $productos, 'categorias' => $chips, 'generado_at' => date('c')];

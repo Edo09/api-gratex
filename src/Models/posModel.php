@@ -736,12 +736,21 @@ class posModel
         )->fetchAll();
     }
 
-    /** Categorias activas: [id => nombre]. */
+    /**
+     * Categorias activas: [id => ['nombre' => ..., 'color' => '#RRGGBB'|null]].
+     * El color lo elige el dueno en app.* (migracion 034); null = el POS lo
+     * calcula del nombre. SELECT *: sin la columna (034 sin correr) la caja
+     * sigue cargando, con los colores calculados.
+     */
     public function catalogoCategorias(): array
     {
         $out = [];
-        foreach ($this->conexion->query('SELECT id, nombre FROM categories WHERE estado = 1 ORDER BY nombre')->fetchAll() as $f) {
-            $out[(int) $f['id']] = $f['nombre'];
+        foreach ($this->conexion->query('SELECT * FROM categories WHERE estado = 1 ORDER BY nombre')->fetchAll() as $f) {
+            $color = isset($f['color']) ? strtoupper(trim((string) $f['color'])) : '';
+            $out[(int) $f['id']] = [
+                'nombre' => $f['nombre'],
+                'color' => preg_match('/^#[0-9A-F]{6}$/', $color) === 1 ? $color : null,
+            ];
         }
         return $out;
     }

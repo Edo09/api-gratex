@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..033  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..034  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -55,11 +55,14 @@ CREATE TABLE IF NOT EXISTS categories (
   id INT(11) NOT NULL AUTO_INCREMENT,
   nombre VARCHAR(100) NOT NULL,
   descripcion VARCHAR(255) NULL,
+  color CHAR(7) NULL DEFAULT NULL
+    COMMENT 'Color en el POS, #RRGGBB en mayusculas; unico por categoria. NULL = calculado del nombre',
   estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_cat_nombre (nombre),
+  UNIQUE KEY uk_cat_color (color),
   KEY idx_cat_estado (estado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
