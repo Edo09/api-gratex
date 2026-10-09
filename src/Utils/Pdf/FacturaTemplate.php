@@ -91,6 +91,16 @@ abstract class FacturaTemplate
     abstract public function drawTotals($pdf, array $filas): void;
 
     /**
+     * true = en una venta a credito el motor imprime, bajo las fechas, una
+     * linea discreta con el vencimiento del pago. Una plantilla que ya lo dice
+     * a su manera (Tenant1Template, aviso del pie) la apaga.
+     */
+    public function mostrarVencimientoPago(): bool
+    {
+        return true;
+    }
+
+    /**
      * Parametros tipograficos que el motor aplica al cuerpo del documento.
      * Las subclases pueden sobreescribir entradas individuales via
      * array_merge(parent::style(), [...]).

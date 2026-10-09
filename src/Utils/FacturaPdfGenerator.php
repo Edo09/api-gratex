@@ -441,6 +441,17 @@ class FacturaPdfGenerator extends FPDF
             $this->SetX(-73);
             $this->Cell(70, 3.8, 'Fecha de Vencimiento: ' . $doc->fechaVencimiento(), 0, 1, 'L');
         }
+        // Venta a credito: cuando vence el pago, en una linea corta y gris que
+        // no compite con los datos DGII de arriba (la "Fecha de Vencimiento" es
+        // la de la secuencia, no la del pago). Gratex lo dice en su aviso del pie.
+        if ($tpl->mostrarVencimientoPago() && $doc->esCredito()) {
+            $this->SetX(-73);
+            $this->SetFont($this->fontFamily(), '', 8);
+            $this->SetTextColor(100, 100, 100);
+            $this->Cell(70, 3.8, $this->convertEncoding('Crédito · Pago vence: ' . $doc->fechaLimitePago()), 0, 1, 'L');
+            $this->SetTextColor(0, 0, 0);
+            $this->SetFont($this->fontFamily(), '', 9);
+        }
         $this->Ln(1);
         // El bloque receptor debe reflejar el e-CF emitido (ver ECFXmlBuilder::
         // requiereComprador/buildComprador):

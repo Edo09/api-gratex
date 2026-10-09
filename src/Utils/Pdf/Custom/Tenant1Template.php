@@ -19,6 +19,12 @@ class Tenant1Template extends ClasicoTemplate
      */
     private const SIN_AVISO_DE_PAGO = ['34', '41', '43', '47'];
 
+    /** El vencimiento ya lo dice el aviso del pie: sin la linea del encabezado. */
+    public function mostrarVencimientoPago(): bool
+    {
+        return false;
+    }
+
     public function drawFooter($pdf): void
     {
         parent::drawFooter($pdf);

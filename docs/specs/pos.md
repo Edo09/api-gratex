@@ -213,7 +213,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] Importe de la línea = precio final × cantidad − descuento.
 
 **V2 · Totales** — `Piloto`
-- [x] Subtotal, Descuentos, "ITBIS (incluido)" informativo y **Total**. *Subtotal y descuento salen solo cuando hay descuento (hoy, el del cliente, V5).*
+- [x] Subtotal, Descuentos, "ITBIS (incluido)" informativo y **Total**. *Desde 2026-10-09, como el recibo: **Subtotal** (sin ITBIS: gravado sin ITBIS + exento) + **ITBIS** = **Total**, siempre. El descuento del cliente (V5) se dice en su barra ("Descuento 10% · −RD$ 34.80"), porque ya va aplicado en los precios. Precios del catálogo y de la venta con "RD$".*
 - [x] Total = suma de las líneas **al centavo**. Es el mismo total que dice el e-CF (F4).
 
 **V3 · Existencia** — `Piloto`
@@ -795,6 +795,10 @@ app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
   Es preferencia del equipo (`localStorage` de pos.\*, `src/pos/catalogoVista.ts`).
 - **Categorías:** si no caben en la fila, el botón **Todas (N)** las despliega en varias
   filas; al elegir una se pliega y la elegida queda a la vista.
+- **Modo oscuro "gris"** (botón sol/luna en la barra de la caja; preferencia del equipo,
+  `src/pos/tema.ts`): gris frío (fondo `#24272d`) en vez del casi negro de app.\*, mismo azul
+  de acento y semánticos aclarados para contraste de 4.5:1 o más. Se aplica antes de pintar
+  (no destella en blanco) y los colores se funden al cambiar.
 - **Foto del producto** (una por producto, migración 032): se sube en app.\* (Productos y
   servicios) y reemplaza las iniciales en las tarjetas del POS; sin foto, o si no carga,
   siguen las iniciales. Ver [../modules/inventario.md](../modules/inventario.md).

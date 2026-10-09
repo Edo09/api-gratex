@@ -92,9 +92,15 @@ function fsResolveClientName(array $body, clientModel $clientModel): array
  * Sin cliente en ninguno de los dos no hay nada que validar: una factura a
  * nombre libre (mostrador) no tiene ficha donde consultar el permiso, y esas
  * son de contado por definicion.
+ *
+ * Tambien el plazo (dias_credito, migracion 033): un valor que no es un numero
+ * de dias se rechaza en vez de guardarse en silencio como "sin plazo".
  */
 function fsValidarCredito(array $body, clientModel $clientModel, ?array $previa = null): ?string
 {
+    if (!facturaModel::diasCreditoValido($body['dias_credito'] ?? null)) {
+        return 'El plazo de crédito no es válido. Elige 30, 45 o 60 días.';
+    }
     $clientId = $body['client_id'] ?? ($previa['client_id'] ?? null);
     if ((int) ($body['tipo_pago'] ?? 1) !== 2 || empty($clientId)) {
         return null;
@@ -217,6 +223,7 @@ function fsHandlePreview(clientModel $clientModel, facturaModel $facturaModel): 
         'tipo_ecf'     => null,                  // factura simple: nunca e-CF
         'date'         => $body['date'] ?? date('Y-m-d'),
         'tipo_pago'    => $body['tipo_pago'] ?? 1,   // fecha limite de pago del pie
+        'dias_credito' => $body['dias_credito'] ?? null,
         'total'        => round($total, 2),
         'client_id'    => $body['client_id'] ?? null,
         'client_name'  => $body['client_name'] ?? ($client['client_name'] ?? ''),

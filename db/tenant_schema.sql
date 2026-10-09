@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..032  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..033  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -273,6 +273,8 @@ CREATE TABLE IF NOT EXISTS facturas (
   total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
   tipo_pago TINYINT NOT NULL DEFAULT 1
     COMMENT '1=Contado 2=Credito 3=Gratuito 4=Permuta 5=Otros (codigos DGII)',
+  dias_credito SMALLINT       NULL DEFAULT NULL
+    COMMENT 'Plazo de credito en dias (factura simple). NULL = contado o sin plazo: 30',
   NCF          VARCHAR(50)    NULL,
   tipo_ecf     VARCHAR(2)     NULL
                  COMMENT '31, 32, 33, 34, 41, 43, 44, 45, 46, 47',

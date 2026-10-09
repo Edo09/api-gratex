@@ -80,6 +80,9 @@ Cuando un cliente pide su propio formato de factura:
      Si el pie necesita datos del comprobante, `$this->documento()` devuelve
      el `EcfDocumento` en curso (p.ej. `fechaLimitePago()`, `tipoEcf()`); ver
      `Custom/Tenant1Template.php` (Gratex: aviso de fecha límite de pago).
+   - `mostrarVencimientoPago()` — `true` por defecto: en ventas a crédito el
+     motor imprime bajo las fechas "Crédito · Pago vence: dd/mm/aaaa" (gris,
+     8 pt). Una plantilla que ya lo dice a su manera la apaga (Gratex).
    - `drawItemsTableHeader($pdf, $widths, $labels)` — banda de la tabla
      (anchos y etiquetas los fija el motor: no se puede quitar una columna).
    - `drawTotals($pdf, $filas)` — cuadro de totales (filas DGII del motor).
