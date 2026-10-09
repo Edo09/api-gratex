@@ -779,9 +779,12 @@ cambiado a 15 % a mitad de venta → `TOTAL_DISTINTO` → 96.05 → cobrado con 
 app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
 
 **Ajustes de la caja pedidos por el usuario (2026-10-09):**
-- ~~**− y papelera en la tarjeta del catálogo**~~: se probaron y se quitaron el mismo día a
-  pedido del usuario para que se vea la foto del producto. Restar y quitar se hacen en el
-  panel de la venta; la tarjeta solo agrega y muestra el contador.
+- **Tarjeta del catálogo** (después de dos vueltas el mismo día): vertical, con la foto o las
+  iniciales grande y centrada (72 % del ancho; crece con la tarjeta). Con el producto en la
+  venta, montados sobre el borde: arriba a la derecha el **−** (con 1, lo saca) y el contador;
+  arriba a la izquierda **quitar** (fuera con todas sus unidades). Las dos salidas se
+  registran como línea quitada (V4). Van como botones aparte encima de la tarjeta; tocar la
+  tarjeta agrega. La grilla deja aire entre tarjetas para que los botones no se monten.
 - **Ventas del día** (botón en la barra de arriba): `GET /api/pos/ventas/dia`, las ventas de
   hoy del cajero en esa caja, de todos sus turnos, con total, resumen por forma de pago,
   crédito fiscal con su cliente, estado DGII y reimpresión. Solo lectura.
