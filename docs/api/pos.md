@@ -138,7 +138,8 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
   "productos": [
     { "id": 12, "nombre": "Agua 500 ml", "sku": "AG-500", "category_id": 3,
       "precio_centavos": 2500, "tasa": 18, "indicador_facturacion": 1,
-      "stock": 10, "stock_minimo": 3, "unidad_medida": "43", "decimales": false }
+      "stock": 10, "stock_minimo": 3, "unidad_medida": "43", "decimales": false,
+      "imagen": "public/uploads/productos/1/0123456789abcdef0123456789abcdef.jpg" }
   ],
   "categorias": [ { "id": 3, "nombre": "Bebidas", "productos": 1 } ],
   "generado_at": "2026-10-08T21:30:00-04:00"
@@ -150,6 +151,9 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
   centavos, calculado en el servidor con aritmética entera (`src/Pos/PosPrecio.php`).
   Siempre la lista 1. El precio sin ITBIS no se manda.
 - `tasa`: 18, 16 o 0 (tasa cero y exento).
+- `imagen`: la foto del producto (migración 032), ruta relativa al API: se pinta con
+  `<base del API>/api/<imagen>`. `null` = sin foto (el POS muestra las iniciales). Ver
+  [../modules/inventario.md](../modules/inventario.md).
 - `stock: null` = servicio (sin semáforo). `decimales`: si la unidad admite cantidades
   con decimales (`unidades_medida.permite_decimales`).
 - `categorias`: solo las activas que tienen algún producto. El producto de una

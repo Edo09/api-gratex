@@ -779,10 +779,9 @@ cambiado a 15 % a mitad de venta → `TOTAL_DISTINTO` → 96.05 → cobrado con 
 app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
 
 **Ajustes de la caja pedidos por el usuario (2026-10-09):**
-- **− en la tarjeta del catálogo**, junto al contador: quita una unidad; con una sola, saca
-  el producto de la venta y queda registrado como línea quitada (V4), igual que la papelera.
-  Va como botón aparte encima de la tarjeta (un botón no puede ir dentro de otro); tocar el
-  contador sigue agregando.
+- ~~**− y papelera en la tarjeta del catálogo**~~: se probaron y se quitaron el mismo día a
+  pedido del usuario para que se vea la foto del producto. Restar y quitar se hacen en el
+  panel de la venta; la tarjeta solo agrega y muestra el contador.
 - **Ventas del día** (botón en la barra de arriba): `GET /api/pos/ventas/dia`, las ventas de
   hoy del cajero en esa caja, de todos sus turnos, con total, resumen por forma de pago,
   crédito fiscal con su cliente, estado DGII y reimpresión. Solo lectura.
@@ -793,6 +792,9 @@ app.\*, F9 sin conexión, y v1 (descuentos, cambio de precio, "Varios").
   Es preferencia del equipo (`localStorage` de pos.\*, `src/pos/catalogoVista.ts`).
 - **Categorías:** si no caben en la fila, el botón **Todas (N)** las despliega en varias
   filas; al elegir una se pliega y la elegida queda a la vista.
+- **Foto del producto** (una por producto, migración 032): se sube en app.\* (Productos y
+  servicios) y reemplaza las iniciales en las tarjetas del POS; sin foto, o si no carga,
+  siguen las iniciales. Ver [../modules/inventario.md](../modules/inventario.md).
 Pruebas: `tools/test_pos_cierre.php` 50/50 (6 nuevas de ventas del día: turnos cerrados,
 ayer no, otro cajero no, otra caja no, sin sesión 401), `scripts/test-pos-catalogo.ts`
 17/17, y en el navegador con 262 productos y 17 categorías (de prueba, borrados después).

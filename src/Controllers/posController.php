@@ -105,6 +105,8 @@ function posCatalogo(posModel $pos): array
             'stock_minimo' => $p['stock_minimo'] !== null ? (float) $p['stock_minimo'] : null,
             'unidad_medida' => (string) $p['unidad_medida'],
             'decimales' => $unidades->permiteDecimales($p['unidad_medida']),
+            // Foto (migracion 032): ruta relativa al API; null = iniciales.
+            'imagen' => isset($p['imagen_path']) && $p['imagen_path'] !== '' ? (string) $p['imagen_path'] : null,
         ];
     }
     $chips = [];

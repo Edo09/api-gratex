@@ -9,6 +9,7 @@ header('content-type: application/json; charset=utf-8');
 require_once(__DIR__ . '/../Models/productModel.php');
 require_once(__DIR__ . '/../Models/unidadMedidaModel.php');
 require_once(__DIR__ . '/../Middleware/AuthMiddleware.php');
+require_once(__DIR__ . '/../Utils/ProductImageStorage.php');
 
 $productModel = new productModel();
 $auth = new AuthMiddleware();
@@ -132,6 +133,68 @@ function validateProduct($p, ?array $actual = null): ?string
     return problemaExistencias($p, $actual);
 }
 
+// ---------------------------------------------------------------------------
+// Foto del producto (migracion 032). Una por producto.
+//   POST   /api/products/imagen  multipart: id + imagen (JPG/PNG/WebP) -> {imagen_path}
+//   DELETE /api/products/imagen  {id}                                  -> {imagen_path: null}
+// El archivo nuevo se guarda antes de tocar la fila y el viejo se borra despues:
+// si algo falla en medio, el producto nunca queda apuntando a un archivo borrado.
+// ---------------------------------------------------------------------------
+if (preg_match('#/products/imagen/?$#', (string) parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH)) === 1) {
+    $metodo = $_SERVER['REQUEST_METHOD'];
+    if ($metodo === 'OPTIONS') {
+        exit;
+    }
+    $responder = static function (int $http, array $cuerpo): void {
+        http_response_code($http);
+        echo json_encode($cuerpo);
+        exit;
+    };
+    if ($metodo !== 'POST' && $metodo !== 'DELETE') {
+        $responder(405, ['status' => false, 'error' => 'Usa POST para subir la foto o DELETE para quitarla.']);
+    }
+    $cuerpo = $metodo === 'DELETE' ? InputSanitizer::jsonInput() : null;
+    $id = $metodo === 'POST' ? ($_POST['id'] ?? null) : (is_array($cuerpo) ? ($cuerpo['id'] ?? null) : null);
+    if (!is_numeric($id) || (int) $id <= 0) {
+        $responder(422, ['status' => false, 'error' => 'No se pudo identificar el producto. Cierra la ventana y ábrelo de nuevo.']);
+    }
+    $id = (int) $id;
+    if ($productModel->getProducts($id) === []) {
+        $responder(404, ['status' => false, 'error' => 'Este producto ya no existe; puede que otra persona lo haya eliminado.']);
+    }
+
+    $nueva = null;
+    if ($metodo === 'POST') {
+        $tenant = class_exists('TenantResolver') ? TenantResolver::current() : null;
+        $guardado = ProductImageStorage::store($_FILES['imagen'] ?? [], isset($tenant['id']) ? (int) $tenant['id'] : null);
+        if (!$guardado['ok']) {
+            $responder($guardado['code'] ?? 422, ['status' => false, 'error' => $guardado['error']]);
+        }
+        $nueva = $guardado['imagen_path'];
+    }
+    try {
+        $anterior = $productModel->cambiarImagen($id, $nueva);
+    } catch (Throwable $e) {
+        error_log('[products/imagen] no se pudo guardar en la base: ' . $e->getMessage());
+        ProductImageStorage::removeFile($nueva);
+        $responder(500, ['status' => false, 'error' => 'No se pudo guardar la foto. Inténtalo de nuevo más tarde.']);
+    }
+    if ($anterior === false) {
+        ProductImageStorage::removeFile($nueva);
+        $responder(404, ['status' => false, 'error' => 'Este producto ya no existe; puede que otra persona lo haya eliminado.']);
+    }
+    if ($anterior !== null && $anterior !== $nueva) {
+        ProductImageStorage::removeFile($anterior);
+    }
+    AuditLogger::log([
+        'module' => 'products', 'action' => $nueva !== null ? 'IMAGEN_CAMBIADA' : 'IMAGEN_QUITADA',
+        'entity_type' => 'product', 'entity_id' => $id,
+        'old_values' => ['imagen_path' => $anterior], 'new_values' => ['imagen_path' => $nueva],
+        'description' => $nueva !== null ? 'Foto del producto cambiada.' : 'Foto del producto quitada.',
+    ]);
+    $responder(200, ['status' => true, 'data' => ['id' => $id, 'imagen_path' => $nueva]]);
+}
+
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
         if (isset($_GET['id'])) {
@@ -235,6 +298,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 ? ['status' => true, 'data' => $result[1]]
                 : ['status' => false, 'error' => $result[1]];
             if ($result[0] === 'success') {
+                // Producto borrado: su foto ya no la usa nadie.
+                ProductImageStorage::removeFile($oldProduct['imagen_path'] ?? null);
                 AuditLogger::log([
                     'module' => 'products', 'action' => 'DELETE',
                     'entity_type' => 'product', 'entity_id' => $_DELETE->id,

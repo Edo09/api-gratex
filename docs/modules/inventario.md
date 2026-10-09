@@ -50,12 +50,39 @@ Respuestas: `{status:true,data}` / `{status:false,error}`; listas con `paginatio
 (nombres, vía JOIN), además de los ids. Ver [../api/facturas.md](../api/facturas.md) (sección
 productos) y [../database/schema.md](../database/schema.md).
 
+### Foto del producto (migración 032)
+
+Una foto por producto, en `products.imagen_path` (ruta relativa al API; `NULL` = sin foto).
+Las listas y el detalle la devuelven con el resto de la fila; el catálogo del POS la manda en
+`imagen` (`GET /api/pos/catalogo`).
+
+- **`POST /api/products/imagen`** — multipart: `id` + `imagen` (JPG, PNG o WebP; hasta 5 MB
+  o lo que deje subir el servidor, y a lo sumo 4096 px por lado). Responde
+  `{id, imagen_path}`; si ya tenía foto, borra el archivo anterior. Errores: `422` (no es
+  una imagen que se pueda usar, demasiado grande, sin `id`), `400` (sin archivo), `404`
+  (producto que no existe).
+- **`DELETE /api/products/imagen`** `{ "id": 12 }` — la quita y borra el archivo.
+- Permiso: el módulo `products`, igual que editar el producto. Bitácora
+  `IMAGEN_CAMBIADA` / `IMAGEN_QUITADA`.
+- El archivo va a `public/uploads/productos/<tenant>/<32 hex>.<ext>`: Apache lo sirve directo
+  (el `.htaccess` deja pasar los archivos de `/api/public/`), así que se ve con un `<img>`
+  sin token. El tipo sale del contenido (`finfo` + `getimagesize`, como la landing), el
+  nombre lo genera el servidor y la ruta guardada solo puede apuntar a esa carpeta. Borrar
+  un producto borra su foto. La carpeta está en `.gitignore`: son datos de las empresas.
+- app.\* reduce la foto en el navegador (800 px por lado, JPEG) antes de subirla: pesa
+  decenas de KB, no choca con `upload_max_filesize` y se van los datos GPS del teléfono.
+  `src/lib/fotoProducto.ts` en fiscalo-react; solo pinta rutas con la forma del servidor.
+- El formulario sube la foto **después** de guardar el producto: si la foto falla, el
+  producto queda guardado y se avisa (el formulario se cierra para no crearlo dos veces).
+- Prueba: `tools/test_producto_imagen.php` (20 verificaciones, API local).
+
 ## Archivos
 `db/migrations/017_add_inventory.sql`, `db/master_migrations/004_add_inventory_permission.sql`,
 `src/Models/categoryModel.php`, `src/Models/warehouseModel.php`,
 `src/Controllers/categoryController.php`, `src/Controllers/warehouseController.php`,
 `config/permissions.php` (módulos `categories` + `warehouses`), `src/Router.php`, `src/Models/productModel.php`,
-`src/Controllers/productController.php`, `db/tenant_schema.sql`.
+`src/Controllers/productController.php`, `db/tenant_schema.sql`. Foto: `db/migrations/032_producto_imagen.sql`,
+`src/Utils/ProductImageStorage.php`, `tools/test_producto_imagen.php`.
 
 ---
 

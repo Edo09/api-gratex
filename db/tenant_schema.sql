@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..031  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..032  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -116,6 +116,9 @@ CREATE TABLE IF NOT EXISTS products (
     COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
   stock DECIMAL(15,3) NULL COMMENT 'NULL para servicios (sin inventario)',
   stock_minimo DECIMAL(15,3) NULL,
+  -- Migracion 032: foto del producto (src/Utils/ProductImageStorage.php).
+  imagen_path VARCHAR(255) NULL DEFAULT NULL
+    COMMENT 'Foto del producto: ruta relativa al API (public/uploads/productos/...). NULL = sin foto',
   activo TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

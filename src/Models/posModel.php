@@ -723,12 +723,14 @@ class posModel
     /**
      * Productos que se venden en el POS: activos y facturables. Filas crudas
      * (precio DECIMAL como texto); el precio final lo calcula PosPrecio.
+     * `p.*` y no la lista de columnas: imagen_path (migracion 032) puede no
+     * existir todavia en una base, y el POS no se puede caer por una foto.
      */
     public function catalogoProductos(): array
     {
         return $this->conexion->query(
-            'SELECT id, sku, nombre, category_id, indicador_facturacion, precio, unidad_medida, stock, stock_minimo
-             FROM products
+            'SELECT p.*
+             FROM products p
              WHERE activo = 1 AND indicador_facturacion <> 0
              ORDER BY nombre, id'
         )->fetchAll();

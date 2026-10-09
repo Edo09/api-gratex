@@ -6,3 +6,5 @@ certificados/
 *.pfx
 # XML firmados de tenants de integracion (comprobantes fiscales de clientes)
 tools/xml_integracion/
+# Fotos de productos que suben las empresas (migracion 032): datos de clientes, viven solo en el servidor
+public/uploads/productos/

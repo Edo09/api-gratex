@@ -1,7 +1,7 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 031) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 032) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
 -- creado: una columna, una tabla, un indice o el tipo o ancho nuevo de una columna.
@@ -12,7 +12,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025, la 026, la 027, la 028, la 029, la 030 y la 031 si se pueden repetir sin dano.
+-- La 025, la 026, la 027, la 028, la 029, la 030, la 031 y la 032 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -167,5 +167,10 @@ FROM (
          (SELECT COUNT(*) FROM information_schema.TABLES
           WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME IN ('conduces', 'conduce_items', 'conduce_secuencia')) = 3
+  UNION ALL
+  SELECT '032', '032_producto_imagen.sql',
+         'columna products.imagen_path',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'products' AND COLUMN_NAME = 'imagen_path') = 1
 ) m
 ORDER BY m.migracion;
