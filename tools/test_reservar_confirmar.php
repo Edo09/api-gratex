@@ -495,6 +495,117 @@ wa_chk('ncf_sequences volvio a su nombre', $hayTabla($conNcf, 'ncf_sequences') &
 wa_chk('sin rango en ese ambiente, dispense sigue devolviendo null', $ncfPrueba->dispenseNextECF('E31', 'wa_sin_rango') === null);
 
 // ---------------------------------------------------------------------------
+// Reserva del POS: las columnas de la 030, la venta repetida (1062 sobre
+// uk_facturas_pos_idem) y envio_pendiente sincronizado en confirmar e incierto
+// (Task 3 del plan POS y reenvio).
+// ---------------------------------------------------------------------------
+echo "\n== reserva del POS en {$base} ==\n";
+$pdo = wa_usar_base($base);
+$sem = wa_sembrar($pdo);
+$factura = rc_factura($sem['client_id'], [$sem['product_id']]);
+$modelo = new facturaModel();
+wa_limpiar($pdo);
+
+/** Clave de idempotencia de prueba: un UUID de 36 caracteres que cambia con $n. */
+function rc_clave(int $n): string
+{
+    return sprintf('00000000-0000-4000-8000-%012d', $n);
+}
+
+/** Las columnas del POS de una factura (y su estado). */
+function rc_pos_cols(PDO $pdo, int $id): array
+{
+    $st = $pdo->prepare(
+        'SELECT turno_id, pos_empleado_id, pos_idempotency_key, envio_pendiente, estado_dgii FROM facturas WHERE id = :id'
+    );
+    $st->execute([':id' => $id]);
+    return $st->fetch(PDO::FETCH_ASSOC) ?: [];
+}
+
+/** El bloque 'pos' de $facturaInput para la venta numero $n. */
+function rc_pos(int $n): array
+{
+    return ['turno_id' => 7, 'pos_empleado_id' => 8, 'pos_idempotency_key' => rc_clave($n)];
+}
+
+// POS 1: la reserva del POS guarda las cuatro columnas y nace con envio_pendiente = 1.
+[$r, $e] = rc_con_log(fn() => $modelo->reservarFacturaECF($factura + ['pos' => rc_pos(1)], rc_ctx('E310000009101')));
+$cols = rc_pos_cols($pdo, (int) ($r['factura_id'] ?? 0));
+wa_chk('POS: la reserva guarda turno, empleado, clave y envio_pendiente = 1 en PENDIENTE_ENVIO',
+    $e === null && (int) ($cols['turno_id'] ?? 0) === 7 && (int) ($cols['pos_empleado_id'] ?? 0) === 8
+    && ($cols['pos_idempotency_key'] ?? null) === rc_clave(1) && (int) ($cols['envio_pendiente'] ?? 9) === 1
+    && ($cols['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO', $e !== null ? rc_desc($e) : $cols);
+
+// POS 2: la reserva de la app deja las columnas del POS como estaban (NULL y 0).
+$r = $modelo->reservarFacturaECF($factura, rc_ctx('E310000009102'));
+$cols = rc_pos_cols($pdo, $r['factura_id']);
+wa_chk('app: la reserva sin pos deja turno, empleado y clave en NULL y envio_pendiente en 0',
+    $cols['turno_id'] === null && $cols['pos_empleado_id'] === null && $cols['pos_idempotency_key'] === null
+    && (int) $cols['envio_pendiente'] === 0, $cols);
+
+// POS 3: la misma clave con otro numero es una venta repetida: ninguna fila nueva y nada abierto.
+$filasAntes = (int) $pdo->query('SELECT COUNT(*) FROM facturas')->fetchColumn();
+[, $e] = rc_con_log(fn() => $modelo->reservarFacturaECF($factura + ['pos' => rc_pos(1)], rc_ctx('E310000009103')));
+wa_chk('POS repetida: EcfVentaRepetidaException con la clave y el PDOException 1062 como previa (no EcfNumeroOcupadoException)',
+    $e instanceof EcfVentaRepetidaException && $e->clave === rc_clave(1) && $e->getPrevious() instanceof PDOException
+    && (int) ($e->getPrevious()->errorInfo[1] ?? 0) === 1062, rc_desc($e));
+wa_chk('POS repetida: ninguna fila nueva y nada abierto',
+    (int) $pdo->query('SELECT COUNT(*) FROM facturas')->fetchColumn() === $filasAntes
+    && wa_filas($pdo, 'E310000009103') === [] && !$pdo->inTransaction());
+
+// POS 4: la repetida deshace tambien el archivo de la fila previa del numero nuevo.
+$eNcf = 'E310000009104';
+$previa = rc_fila_previa($pdo, $eNcf, 'RECHAZADO');
+[, $e] = rc_con_log(fn() => $modelo->reservarFacturaECF($factura + ['pos' => rc_pos(1)], rc_ctx($eNcf)));
+$filas = wa_filas($pdo, $eNcf);
+wa_chk('POS repetida con una previa RECHAZADO del numero: la previa NO queda archivada',
+    $e instanceof EcfVentaRepetidaException && count($filas) === 1 && (int) $filas[0]['id'] === $previa
+    && $filas[0]['estado_dgii'] === 'RECHAZADO' && $filas[0]['e_ncf'] === $eNcf, $e !== null ? rc_desc($e) : $filas);
+
+// POS 5: otra clave con el numero ocupado por una fila ACEPTADO: sigue siendo "ocupado".
+$eNcf = 'E310000009105';
+rc_fila_previa($pdo, $eNcf, 'ACEPTADO');
+[, $e] = rc_con_log(fn() => $modelo->reservarFacturaECF($factura + ['pos' => rc_pos(5)], rc_ctx($eNcf)));
+wa_chk('POS con el numero ocupado: EcfNumeroOcupadoException, no venta repetida',
+    $e instanceof EcfNumeroOcupadoException && !($e instanceof EcfVentaRepetidaException), rc_desc($e));
+
+// POS 6: confirmar escribe envio_pendiente en la misma sentencia que el estado, solo en filas del POS.
+$numeroConfirmar = 9200;
+$pendienteTras = static function (string $estado, bool $esPos) use ($pdo, $modelo, $factura, &$numeroConfirmar): int {
+    $numeroConfirmar++;
+    $reserva = $modelo->reservarFacturaECF(
+        $esPos ? $factura + ['pos' => rc_pos($numeroConfirmar)] : $factura,
+        rc_ctx('E31000000' . $numeroConfirmar)
+    );
+    $modelo->confirmarFacturaECF($reserva['factura_id'], rc_confirmar(['estado' => $estado]));
+    return (int) rc_pos_cols($pdo, $reserva['factura_id'])['envio_pendiente'];
+};
+$obtenido = [];
+foreach (['ACEPTADO', 'ENVIADO', 'EN_PROCESO', 'RFCE_ENVIADO', 'RFCE_EN_PROCESO', 'RECHAZADO', 'NO_ENCONTRADO', 'ERROR'] as $estado) {
+    $obtenido[$estado] = $pendienteTras($estado, true);
+}
+wa_chk('POS: confirmar deja envio_pendiente en 1 solo si el veredicto sigue abierto (ENVIADO, EN_PROCESO, RFCE_*)',
+    $obtenido === ['ACEPTADO' => 0, 'ENVIADO' => 1, 'EN_PROCESO' => 1, 'RFCE_ENVIADO' => 1, 'RFCE_EN_PROCESO' => 1,
+        'RECHAZADO' => 0, 'NO_ENCONTRADO' => 0, 'ERROR' => 0], $obtenido);
+wa_chk('app: confirmar nunca pone envio_pendiente (ENVIADO y EN_PROCESO sobre una fila sin clave del POS quedan en 0)',
+    $pendienteTras('ENVIADO', false) === 0 && $pendienteTras('EN_PROCESO', false) === 0);
+
+// POS 7: marcar incierto deja envio_pendiente en 1 en la misma sentencia; la app no lo toca.
+$eNcf = 'E310000009301';
+$reserva = $modelo->reservarFacturaECF($factura + ['pos' => rc_pos(9301)], rc_ctx($eNcf));
+$pdo->prepare('UPDATE facturas SET envio_pendiente = 0 WHERE id = :id')->execute([':id' => $reserva['factura_id']]);
+$ok = $modelo->marcarEnvioIncierto($reserva['factura_id'], rc_incierto($eNcf, $reserva));
+$cols = rc_pos_cols($pdo, $reserva['factura_id']);
+wa_chk('POS: marcar incierto deja ENVIO_INCIERTO con envio_pendiente = 1',
+    $ok === true && ($cols['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && (int) ($cols['envio_pendiente'] ?? 9) === 1, $cols);
+$eNcf = 'E310000009302';
+$reserva = $modelo->reservarFacturaECF($factura, rc_ctx($eNcf));
+$ok = $modelo->marcarEnvioIncierto($reserva['factura_id'], rc_incierto($eNcf, $reserva));
+$cols = rc_pos_cols($pdo, $reserva['factura_id']);
+wa_chk('app: marcar incierto deja ENVIO_INCIERTO y envio_pendiente en 0',
+    $ok === true && ($cols['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && (int) ($cols['envio_pendiente'] ?? 9) === 0, $cols);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_limpiar($pdo);

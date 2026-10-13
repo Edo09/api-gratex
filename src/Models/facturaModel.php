@@ -5,6 +5,7 @@ require_once(__DIR__ . '/ReporteVentasModel.php');
 require_once(__DIR__ . '/ncfModel.php');
 require_once(__DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php');
 require_once(__DIR__ . '/../Utils/FacturacionElectronica/EcfNumeroOcupadoException.php');
+require_once(__DIR__ . '/../Utils/FacturacionElectronica/EcfVentaRepetidaException.php');
 
 class facturaModel
 {
@@ -1276,13 +1277,23 @@ class facturaModel
      * 1406 sin la migracion 028, la DB caida) se relanza: no queda fila, y la
      * emision devuelve el numero a la secuencia.
      *
-     * @param array $factura {date, client_id, client_name, total, tipo_pago, user_id, informacion_referencia, items[]}
-     *                       ($facturaInput del controller; sin 'no_factura', que toma el e-NCF)
+     * Un 1062 sobre uk_facturas_pos_idem (la clave de idempotencia de la venta del
+     * POS, migracion 030) no es "numero ocupado": esa venta ya tiene factura.
+     * Sale EcfVentaRepetidaException con la clave; la transaccion se deshace
+     * entera (tambien el archivo de una fila previa del numero) y la emision
+     * devuelve el numero a la secuencia, porque ninguna fila lo ocupa.
+     *
+     * @param array $factura {date, client_id, client_name, total, tipo_pago, user_id, informacion_referencia, items[],
+     *                       pos?: {turno_id, pos_empleado_id, pos_idempotency_key}}
+     *                       ($facturaInput del controller; sin 'no_factura', que toma el e-NCF). Con 'pos' la
+     *                       fila es una venta del POS: el mismo INSERT guarda las columnas de la migracion 030
+     *                       y envio_pendiente = 1 (nace sin veredicto; el reenvio del POS la busca). Sin 'pos'
+     *                       el INSERT es el de siempre y no nombra ninguna de ellas.
      * @param array $ctx     ctx 'reservar' de ECFEmissionService::emitir: tipo_ecf, e_ncf, ambiente,
      *                       ambiente_secuencia, signed_xml, codigo_seguridad, fecha_emision_dgii, flujo,
      *                       rfce_xml, dispensado, rango_id, secuencia_valor, desde
      * @return array{factura_id:int, e_ncf:string, desde:string}
-     * @throws EcfNumeroOcupadoException|PDOException|InvalidArgumentException
+     * @throws EcfNumeroOcupadoException|EcfVentaRepetidaException|PDOException|InvalidArgumentException
      */
     public function reservarFacturaECF(array $factura, array $ctx): array
     {
@@ -1301,6 +1312,18 @@ class facturaModel
                 $eNcf, $ambiente, $ambienteSecuencia));
         }
         $nota = self::normalizarNotaReferencia($factura, (string) ($ctx['tipo_ecf'] ?? ''));
+
+        // Venta del POS: el bloque 'pos' agrega al INSERT las columnas de la migracion 030.
+        // Sin clave de idempotencia no habria idempotencia ni 1062 que distinguir: se rechaza
+        // antes de tocar la base (pos_idempotency_key es CHAR(36)).
+        $pos = is_array($factura['pos'] ?? null) ? $factura['pos'] : null;
+        $clavePos = null;
+        if ($pos !== null) {
+            $clavePos = trim((string) ($pos['pos_idempotency_key'] ?? ''));
+            if ($clavePos === '' || strlen($clavePos) > 36) {
+                throw new InvalidArgumentException('reservarFacturaECF: pos.pos_idempotency_key vacia o de mas de 36 caracteres');
+            }
+        }
 
         for ($intento = 1; ; $intento++) {
             try {
@@ -1336,13 +1359,15 @@ class facturaModel
                      tipo_ecf, e_ncf, track_id, estado_dgii, codigo_seguridad,
                      fecha_emision_dgii, ambiente_dgii, xml_firmado, respuesta_dgii,
                      rfce_xml, rfce_track_id, rfce_estado, rfce_respuesta, secuencia_utilizada,
-                     ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion)
+                     ncf_modificado, fecha_ncf_modificado, codigo_modificacion, razon_modificacion'
+                    . ($pos !== null ? ', turno_id, pos_empleado_id, pos_idempotency_key, envio_pendiente' : '') . ')
                     VALUES
                     (:no_factura, :date, :client_id, :client_name, :total, :tipo_pago, NULL, :user_id,
                      :tipo_ecf, :e_ncf, :track_id, :estado_dgii, :codigo_seguridad,
                      :fecha_emision_dgii, :ambiente_dgii, :xml_firmado, :respuesta_dgii,
                      :rfce_xml, :rfce_track_id, :rfce_estado, :rfce_respuesta, :secuencia_utilizada,
-                     :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion)');
+                     :ncf_modificado, :fecha_ncf_modificado, :codigo_modificacion, :razon_modificacion'
+                    . ($pos !== null ? ', :turno_id, :pos_empleado_id, :pos_idempotency_key, :envio_pendiente' : '') . ')');
                 $stmt->execute([
                     ':no_factura' => $eNcf,
                     ':date' => $factura['date'],
@@ -1370,7 +1395,13 @@ class facturaModel
                     ':fecha_ncf_modificado' => $nota['fecha_ncf_modificado'],
                     ':codigo_modificacion' => $nota['codigo_modificacion'],
                     ':razon_modificacion' => $nota['razon_modificacion'],
-                ]);
+                ] + ($pos === null ? [] : [
+                    ':turno_id' => isset($pos['turno_id']) ? (int) $pos['turno_id'] : null,
+                    ':pos_empleado_id' => isset($pos['pos_empleado_id']) ? (int) $pos['pos_empleado_id'] : null,
+                    ':pos_idempotency_key' => $clavePos,
+                    // La venta nace sin veredicto: el reenvio automatico del POS la busca.
+                    ':envio_pendiente' => EstadosEcf::envioPendiente(EstadosEcf::PENDIENTE_ENVIO),
+                ]));
                 $facturaId = (int) $this->conexion->lastInsertId();
 
                 $itemSql = 'INSERT INTO factura_items
@@ -1410,6 +1441,12 @@ class facturaModel
                 // Codigo del driver, no el SQLSTATE: 23000 tambien cubre 1048 y 1452.
                 $codigo = (int) ($e->errorInfo[1] ?? 0);
                 if ($codigo === 1062) {
+                    // La clave unica de la venta del POS no es "numero ocupado": esa venta
+                    // ya tiene factura. MySQL 8 nombra la clave 'facturas.uk_facturas_pos_idem',
+                    // MariaDB y MySQL 5.7 solo 'uk_facturas_pos_idem'.
+                    if ($clavePos !== null && str_contains((string) ($e->errorInfo[2] ?? $e->getMessage()), 'uk_facturas_pos_idem')) {
+                        throw new EcfVentaRepetidaException($clavePos, $e);
+                    }
                     throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'clave duplicada (1062)', $e);
                 }
                 if ($codigo === 1213 && $intento === 1) {
@@ -1477,6 +1514,13 @@ class facturaModel
      * llegaria como '' y el modo estricto lo rechaza (1366); updateECFEstado
      * castea igual.
      *
+     * En el mismo UPDATE (nunca en otro) se escribe envio_pendiente, solo en filas
+     * del POS (pos_idempotency_key NOT NULL; las de la app no lo tocan):
+     * EstadosEcf::envioPendiente del estado nuevo, o sea 1 si el veredicto sigue
+     * abierto (ENVIADO, EN_PROCESO, RFCE_ENVIADO, RFCE_EN_PROCESO) y 0 en
+     * cualquier otro. Nombra pos_idempotency_key y envio_pendiente, asi que la
+     * migracion 030 es parte de la compuerta de despliegue de este cambio.
+     *
      * Un PDOException se propaga: el servicio lo trata como fallo al confirmar.
      *
      * @param array $ctx lee estado, track_id, dgii_response, rfce_track_id, rfce_estado, rfce_response
@@ -1487,19 +1531,22 @@ class facturaModel
     {
         $recortar = static fn($cuerpo) => is_string($cuerpo) ? mb_substr($cuerpo, 0, 4000) : $cuerpo;
         $secuencia = $ctx['secuencia_utilizada'] ?? null;
+        $estado = (string) ($ctx['estado'] ?? '');
         $stmt = $this->conexion->prepare(
             'UPDATE facturas SET estado_dgii = :estado, track_id = :track_id, respuesta_dgii = :resp,
-                    secuencia_utilizada = :sec, rfce_track_id = :rtid, rfce_estado = :rest, rfce_respuesta = :rresp
+                    secuencia_utilizada = :sec, rfce_track_id = :rtid, rfce_estado = :rest, rfce_respuesta = :rresp,
+                    envio_pendiente = CASE WHEN pos_idempotency_key IS NOT NULL THEN :pend ELSE envio_pendiente END
               WHERE id = :id AND estado_dgii IN (' . EstadosEcf::sql(EstadosEcf::EN_VUELO) . ')'
         );
         $stmt->execute([
-            ':estado' => (string) ($ctx['estado'] ?? ''),
+            ':estado' => $estado,
             ':track_id' => $ctx['track_id'] ?? null,
             ':resp' => self::json($recortar($ctx['dgii_response'] ?? null)),
             ':sec' => $secuencia === null ? null : (int) $secuencia,
             ':rtid' => $ctx['rfce_track_id'] ?? null,
             ':rest' => $ctx['rfce_estado'] ?? null,
             ':rresp' => self::json($recortar($ctx['rfce_response'] ?? null)),
+            ':pend' => EstadosEcf::envioPendiente($estado),
             ':id' => $id,
         ]);
         return $stmt->rowCount() > 0;
@@ -1511,6 +1558,10 @@ class facturaModel
      * PENDIENTE_ENVIO. respuesta_dgii guarda la meta del envio y el fallo
      * (spec 6.3), nunca XML: signed_xml, rfce_xml y xml_firmado se quitan del
      * ctx por si acaso, y el error se recorta a 2000 caracteres.
+     *
+     * En el mismo UPDATE deja envio_pendiente = 1 (EstadosEcf::envioPendiente de
+     * ENVIO_INCIERTO), solo en filas del POS (pos_idempotency_key NOT NULL): el
+     * reenvio automatico del POS consulta y reenvia esa venta.
      *
      * Nunca lanza: lo llaman el catch del envio y el registro de cierre
      * (shutdown), donde una excepcion taparia el fallo original. Si no puede
@@ -1532,10 +1583,15 @@ class facturaModel
                 'intentos' => 0,
             ];
             $stmt = $this->conexion->prepare(
-                "UPDATE facturas SET estado_dgii = 'ENVIO_INCIERTO', respuesta_dgii = :json
+                "UPDATE facturas SET estado_dgii = 'ENVIO_INCIERTO', respuesta_dgii = :json,
+                        envio_pendiente = CASE WHEN pos_idempotency_key IS NOT NULL THEN :pend ELSE envio_pendiente END
                   WHERE id = :id AND estado_dgii = 'PENDIENTE_ENVIO'"
             );
-            $stmt->execute([':json' => self::json($meta), ':id' => $id]);
+            $stmt->execute([
+                ':json' => self::json($meta),
+                ':pend' => EstadosEcf::envioPendiente(EstadosEcf::ENVIO_INCIERTO),
+                ':id' => $id,
+            ]);
             return $stmt->rowCount() > 0;
         } catch (Throwable $e) {
             error_log(sprintf('[ECF e-NCF=%s factura_id=%d] marcarEnvioIncierto fallo: %s',

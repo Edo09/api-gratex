@@ -5,7 +5,7 @@
  * emision, los modelos y los reportes. Una sola copia de cada lista: antes la
  * de reintentables estaba repetida en ECFEmissionService y en facturaModel.
  *
- * Solo constantes y una funcion pura, sin dependencias: ECFEmissionService la
+ * Solo constantes y funciones puras, sin dependencias: ECFEmissionService la
  * carga tambien en tenants de integracion, que no tienen DB de tenant, y
  * tools/check_estado_dgii_ancho.php la lee para revisar el ancho de la columna.
  *
@@ -65,5 +65,17 @@ final class EstadosEcf
             }
         }
         return "'" . implode("', '", $estados) . "'";
+    }
+
+    /**
+     * Valor de facturas.envio_pendiente (migracion 030) de una venta del POS segun
+     * su estado_dgii: 1 si la app todavia no conoce un veredicto final de la DGII
+     * (en vuelo, o recibida sin veredicto: EN_VUELO y SIN_VEREDICTO), 0 en
+     * cualquier otro. El reenvio automatico del POS busca las filas en 1. ERROR y
+     * NO_ENCONTRADO dan 0: ese numero no se reenvia solo.
+     */
+    public static function envioPendiente(string $estado): int
+    {
+        return in_array($estado, self::EN_VUELO, true) || in_array($estado, self::SIN_VEREDICTO, true) ? 1 : 0;
     }
 }

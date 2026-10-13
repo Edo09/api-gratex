@@ -1221,6 +1221,141 @@ wa_chk('inventoryModel: yaMovioDocumento (write-ahead) y devolverSaldoDeFactura 
     method_exists(inventoryModel::class, 'yaMovioDocumento') && method_exists(inventoryModel::class, 'devolverSaldoDeFactura'));
 
 // ---------------------------------------------------------------------------
+// 15) POS: EstadosEcf::envioPendiente, la reserva con las columnas del POS, la
+// venta repetida y envio_pendiente sincronizado en confirmar/incierto
+// (Task 3 del plan POS y reenvio). Conexion falsa: nada toca MySQL. Reusa
+// GuionConexion, $reservar, $confirmar, $marcar y $es de las secciones 5 y 6.
+// ---------------------------------------------------------------------------
+echo "\n== 15) POS: envio_pendiente, columnas del POS en la reserva y venta repetida ==\n";
+
+$envioPendienteEsperado = [
+    // Sin veredicto de la DGII: el reenvio automatico del POS los busca.
+    'PENDIENTE_ENVIO' => 1, 'ENVIO_INCIERTO' => 1, 'ENVIADO' => 1, 'EN_PROCESO' => 1, 'RFCE_ENVIADO' => 1, 'RFCE_EN_PROCESO' => 1,
+    // Veredicto final, o un numero que no se reenvia solo (ERROR, NO_ENCONTRADO).
+    'ACEPTADO' => 0, 'ACEPTADO_CONDICIONAL' => 0, 'RECHAZADO' => 0, 'NO_ENCONTRADO' => 0, 'ERROR' => 0,
+    'RFCE_ACEPTADO' => 0, 'RFCE_RECHAZADO' => 0, 'RFCE_NO_ENCONTRADO' => 0, 'RFCE_ERROR' => 0,
+    'RECHAZADO_ARCHIVADO' => 0, '' => 0,
+];
+$envioPendienteObtenido = [];
+foreach ($envioPendienteEsperado as $estado => $_) {
+    $envioPendienteObtenido[$estado] = EstadosEcf::envioPendiente((string) $estado);
+}
+wa_chk('15: EstadosEcf::envioPendiente es 1 solo para un estado sin veredicto', $envioPendienteObtenido === $envioPendienteEsperado,
+    $envioPendienteObtenido);
+$fueraDeLista = [];
+foreach (array_merge(EstadosEcf::EN_VUELO, EstadosEcf::SIN_VEREDICTO) as $estado) {
+    if (EstadosEcf::envioPendiente($estado) !== 1) {
+        $fueraDeLista[] = $estado . '=0';
+    }
+}
+foreach (EstadosEcf::SIN_STOCK as $estado) {
+    if (EstadosEcf::envioPendiente($estado) !== 0) {
+        $fueraDeLista[] = $estado . '=1';
+    }
+}
+wa_chk('15: EstadosEcf::envioPendiente coincide con EN_VUELO, SIN_VEREDICTO y SIN_STOCK', $fueraDeLista === [], $fueraDeLista);
+
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfVentaRepetidaException.php';
+$clavePos = '4f1c2d3e-0a1b-4c5d-8e9f-0123456789ab';
+$repetida = new EcfVentaRepetidaException($clavePos, new RuntimeException('previa'));
+wa_chk('15: EcfVentaRepetidaException es RuntimeException (no EcfUsuarioException) y lleva la clave',
+    $repetida instanceof RuntimeException && !($repetida instanceof EcfUsuarioException) && $repetida->clave === $clavePos
+    && str_contains($repetida->getMessage(), $clavePos) && $repetida->getPrevious()?->getMessage() === 'previa',
+    [get_class($repetida), $repetida->getMessage()]);
+
+$pos = ['turno_id' => 3, 'pos_empleado_id' => 4, 'pos_idempotency_key' => $clavePos];
+$c = new GuionConexion();
+[$r, $e] = $reservar($c, [], ['pos' => $pos]);
+$insert = (string) $c->sql('INSERT INTO facturas');
+$fila = $c->params('INSERT INTO facturas') ?? [];
+wa_chk('15: reserva del POS: las 4 columnas de la migracion 030 van en el mismo INSERT',
+    $e === null && str_contains($insert, 'razon_modificacion, turno_id, pos_empleado_id, pos_idempotency_key, envio_pendiente)')
+    && str_contains($insert, ':razon_modificacion, :turno_id, :pos_empleado_id, :pos_idempotency_key, :envio_pendiente)'),
+    $e?->getMessage() ?? $insert);
+wa_chk('15: reserva del POS: turno, empleado, clave y envio_pendiente = 1 (nace sin veredicto)',
+    $es($fila, ':turno_id', 3) && $es($fila, ':pos_empleado_id', 4) && $es($fila, ':pos_idempotency_key', $clavePos)
+    && $es($fila, ':envio_pendiente', 1) && $es($fila, ':estado_dgii', 'PENDIENTE_ENVIO'), $fila);
+wa_chk('15: reserva del POS: devuelve las mismas tres claves de siempre',
+    $r === ['factura_id' => 41, 'e_ncf' => 'E310000000123', 'desde' => '2026-10-05 14:03:11'], $r);
+wa_chk('15: reserva del POS: una transaccion, un commit y nada abierto',
+    count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1 && $c->de('rollBack') === [] && !$c->inTransaction(),
+    $c->llamadas);
+
+$c = new GuionConexion();
+[, $e] = $reservar($c);
+$insert = (string) $c->sql('INSERT INTO facturas');
+$fila = $c->params('INSERT INTO facturas') ?? [];
+wa_chk('15: reserva de la app (sin pos): el INSERT no nombra ninguna columna del POS (es el de siempre)',
+    $e === null && !str_contains($insert, 'turno_id') && !str_contains($insert, 'pos_empleado_id')
+    && !str_contains($insert, 'pos_idempotency_key') && !str_contains($insert, 'envio_pendiente')
+    && !array_key_exists(':turno_id', $fila) && !array_key_exists(':envio_pendiente', $fila), $e?->getMessage() ?? $insert);
+
+$malos = [];
+foreach ([
+    'sin clave' => ['turno_id' => 3, 'pos_empleado_id' => 4],
+    'clave en blanco' => ['turno_id' => 3, 'pos_empleado_id' => 4, 'pos_idempotency_key' => '  '],
+    'clave de 37 caracteres' => ['turno_id' => 3, 'pos_empleado_id' => 4, 'pos_idempotency_key' => str_repeat('a', 37)],
+] as $nombre => $posMalo) {
+    $c = new GuionConexion();
+    [, $e] = $reservar($c, [], ['pos' => $posMalo]);
+    if (!($e instanceof InvalidArgumentException) || $c->llamadas !== []) {
+        $malos[$nombre] = [$e === null ? null : get_class($e), count($c->llamadas)];
+    }
+}
+wa_chk('15: pos sin clave valida: InvalidArgumentException antes de cualquier consulta', $malos === [], $malos);
+
+$c = new GuionConexion();
+$duplicadoPos = puro_pdo_error(1062, '23000', "Duplicate entry '{$clavePos}' for key 'facturas.uk_facturas_pos_idem'");
+$c->errores[] = ['INSERT INTO facturas', $duplicadoPos];
+[, $e] = $reservar($c, [], ['pos' => $pos]);
+wa_chk('15: 1062 sobre uk_facturas_pos_idem: EcfVentaRepetidaException con la clave y el PDOException como previa',
+    $e instanceof EcfVentaRepetidaException && $e->clave === $clavePos && $e->getPrevious() === $duplicadoPos,
+    $e === null ? null : get_class($e));
+wa_chk('15: venta repetida: rollBack, sin commit y nada abierto (el archivo de la fila previa tambien se deshace)',
+    count($c->de('rollBack')) === 1 && $c->de('commit') === [] && !$c->inTransaction(), $c->llamadas);
+
+$c = new GuionConexion();
+$c->errores[] = ['INSERT INTO facturas', puro_pdo_error(1062, '23000', "Duplicate entry '{$clavePos}' for key 'uk_facturas_pos_idem'")];
+[, $e] = $reservar($c, [], ['pos' => $pos]);
+wa_chk('15: el mismo 1062 con el nombre de la clave sin prefijo de tabla (MariaDB, MySQL 5.7)',
+    $e instanceof EcfVentaRepetidaException && $e->clave === $clavePos, $e === null ? null : get_class($e));
+
+$c = new GuionConexion();
+$c->errores[] = ['INSERT INTO facturas', puro_pdo_error(1062, '23000', "Duplicate entry 'E310000000123-ecf' for key 'facturas.uk_e_ncf_amb'")];
+[, $e] = $reservar($c, [], ['pos' => $pos]);
+wa_chk('15: 1062 sobre uk_e_ncf_amb en una reserva del POS: EcfNumeroOcupadoException, no venta repetida',
+    $e instanceof EcfNumeroOcupadoException && !($e instanceof EcfVentaRepetidaException), $e === null ? null : get_class($e));
+
+$c = new GuionConexion();
+$confirmar($c);
+$sql = (string) $c->sql('UPDATE facturas SET estado_dgii');
+wa_chk('15: confirmar: envio_pendiente va en el MISMO UPDATE y solo cambia en filas con pos_idempotency_key',
+    str_contains($sql, 'envio_pendiente = CASE WHEN pos_idempotency_key IS NOT NULL THEN :pend ELSE envio_pendiente END')
+    && str_contains($sql, "WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO')")
+    && count($c->de('prepare')) === 1 && $c->de('beginTransaction') === [], $sql);
+$pendEsperado = [
+    'ACEPTADO' => 0, 'ACEPTADO_CONDICIONAL' => 0, 'ENVIADO' => 1, 'EN_PROCESO' => 1, 'RFCE_ENVIADO' => 1, 'RFCE_EN_PROCESO' => 1,
+    'RFCE_ACEPTADO' => 0, 'RECHAZADO' => 0, 'RFCE_RECHAZADO' => 0, 'NO_ENCONTRADO' => 0, 'ERROR' => 0,
+];
+$pendObtenido = [];
+foreach ($pendEsperado as $estado => $_) {
+    $c = new GuionConexion();
+    $confirmar($c, ['estado' => $estado]);
+    $pendObtenido[$estado] = ($c->params('UPDATE facturas SET estado_dgii') ?? [])[':pend'] ?? 'falta';
+}
+wa_chk('15: confirmar: :pend es EstadosEcf::envioPendiente del estado nuevo (veredicto abierto = 1)',
+    $pendObtenido === $pendEsperado, $pendObtenido);
+
+$c = new GuionConexion();
+$marcar($c, puro_ctx_incierto());
+$sql = (string) $c->sql("estado_dgii = 'ENVIO_INCIERTO'");
+$p = $c->params("estado_dgii = 'ENVIO_INCIERTO'") ?? [];
+wa_chk('15: marcar incierto: envio_pendiente = 1 en el MISMO UPDATE y solo en filas del POS',
+    str_contains($sql, 'envio_pendiente = CASE WHEN pos_idempotency_key IS NOT NULL THEN :pend ELSE envio_pendiente END')
+    && str_contains($sql, "WHERE id = :id AND estado_dgii = 'PENDIENTE_ENVIO'")
+    && $es($p, ':pend', 1) && $es($p, ':id', 41) && count($c->de('prepare')) === 1, [$sql, $p]);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
