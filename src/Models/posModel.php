@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../Database.php';
 require_once __DIR__ . '/../Pos/PosError.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php';
 
 /**
  * POS en la DB del tenant (migracion 030): cajas, empleados y sesiones.
@@ -645,51 +646,94 @@ class posModel
         return $f ?: null;
     }
 
-    /** Ventas con envio pendiente a la DGII (F7), las mas viejas primero. */
-    public function ventasPendientes(int $limite): array
+    /**
+     * Una venta numerada fuera de rango (ncfModel::dispenseSinRango) guarda 'sin_rango' en la meta de
+     * respuesta_dgii (json_encode: "sin_rango":true) y sigue en PENDIENTE_ENVIO hasta que un rango autorizado la
+     * cubra. Se reconoce con el texto del JSON porque la columna es TEXT: JSON_EXTRACT fallaria con una
+     * respuesta que no es JSON (HTML de un 500 de la DGII).
+     */
+    private const SQL_SIN_RANGO = "(estado_dgii = 'PENDIENTE_ENVIO' AND COALESCE(respuesta_dgii, '') LIKE '%\"sin_rango\":true%')";
+
+    /**
+     * Ventas del POS con envio pendiente a la DGII (F7), las mas viejas primero: filas con
+     * pos_idempotency_key, e-NCF y envio_pendiente = 1 (la marca que escriben la reserva, 'confirmar' e
+     * 'incierto' con EstadosEcf::envioPendiente). $sinRango = false trae las que se pueden mandar ya;
+     * true, las numeradas fuera de rango, que PosVenta solo manda cuando un rango registrado las cubre.
+     * Incluye respuesta_dgii (de ahi sale la meta: desde, ambiente_secuencia) y pos_idempotency_key (el
+     * candado de la venta, que el reenvio respeta mientras la peticion de la venta siga viva).
+     */
+    public function ventasPendientes(int $limite, bool $sinRango = false): array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, e_ncf, tipo_ecf, estado_dgii, codigo_seguridad, ambiente_dgii, rfce_xml, track_id, xml_firmado
-             FROM facturas WHERE envio_pendiente = 1 ORDER BY id LIMIT ' . max(1, min(20, $limite))
+            'SELECT id, e_ncf, tipo_ecf, estado_dgii, codigo_seguridad, ambiente_dgii, rfce_xml, track_id, xml_firmado, respuesta_dgii,
+                    pos_idempotency_key
+             FROM facturas
+             WHERE pos_idempotency_key IS NOT NULL AND tipo_ecf IS NOT NULL AND envio_pendiente = 1
+               AND ' . ($sinRango ? '' : 'NOT ') . self::SQL_SIN_RANGO . '
+             ORDER BY id LIMIT ' . max(1, min(100, $limite))
         );
         $stmt->execute();
         return $stmt->fetchAll();
     }
 
+    /** Ventas del POS que siguen con envio pendiente (incluye las sin_rango). */
     public function contarPendientes(): int
     {
-        return (int) $this->conexion->query('SELECT COUNT(*) FROM facturas WHERE envio_pendiente = 1')->fetchColumn();
+        return (int) $this->conexion->query(
+            'SELECT COUNT(*) FROM facturas WHERE pos_idempotency_key IS NOT NULL AND tipo_ecf IS NOT NULL AND envio_pendiente = 1'
+        )->fetchColumn();
     }
 
-    /** Resultado de un reenvio o consulta: estado y, si ya es definitivo, fuera de pendientes. */
-    public function marcarEnvio(int $facturaId, string $estado, $respuesta, bool $sigue): void
+    /**
+     * Resultado de un reenvio o consulta de un RFCE (E32 < 250k), compare-and-set: solo escribe si la fila
+     * sigue en $leido, el estado con que la leyo el reenvio. Asi nunca pisa un estado que otro proceso ya fijo
+     * (la peticion de la venta, otra caja, GET /estado). envio_pendiente va en la MISMA sentencia que
+     * estado_dgii (EstadosEcf::envioPendiente del estado nuevo). Una coincidencia siempre cambia la fila
+     * ($estado es distinto de $leido), asi que rowCount(), que cuenta filas cambiadas y no encontradas, sirve
+     * para saber si se escribio.
+     *
+     * @return bool false si otro proceso ya movio la fila: no se escribio nada
+     */
+    public function marcarEnvio(int $facturaId, string $leido, string $estado, $respuesta): bool
     {
         $stmt = $this->conexion->prepare(
-            'UPDATE facturas SET estado_dgii = :e, rfce_estado = :re, rfce_respuesta = :r, envio_pendiente = :p WHERE id = :id'
+            'UPDATE facturas SET estado_dgii = :e, rfce_estado = :re, rfce_respuesta = :r, envio_pendiente = :p
+             WHERE id = :id AND estado_dgii = :leido'
         );
         $stmt->execute([
             ':e' => $estado,
             ':re' => preg_replace('/^RFCE_/', '', $estado),
             ':r' => $respuesta !== null ? json_encode($respuesta, JSON_UNESCAPED_UNICODE) : null,
-            ':p' => $sigue ? 1 : 0,
+            ':p' => EstadosEcf::envioPendiente($estado),
             ':id' => $facturaId,
+            ':leido' => $leido,
         ]);
+        return $stmt->rowCount() > 0;
     }
 
-    /** Resultado de un e-CF completo (E31): estado, respuesta y trackId; fuera de pendientes si ya es definitivo. */
-    public function marcarEnvioECF(int $facturaId, string $estado, $respuesta, ?string $trackId, bool $sigue): void
+    /**
+     * Resultado de un e-CF completo (E31 y E32 desde 250k): estado, respuesta y trackId. Mismas reglas que
+     * marcarEnvio: compare-and-set sobre $leido y envio_pendiente en la misma sentencia. El trackId nuevo no
+     * borra el que ya habia (COALESCE). Una coincidencia siempre cambia la fila: $estado es distinto de $leido,
+     * o es un ENVIADO sin trackId que pasa a ENVIADO con trackId.
+     *
+     * @return bool false si otro proceso ya movio la fila: no se escribio nada
+     */
+    public function marcarEnvioECF(int $facturaId, string $leido, string $estado, $respuesta, ?string $trackId): bool
     {
         $stmt = $this->conexion->prepare(
             'UPDATE facturas SET estado_dgii = :e, respuesta_dgii = :r, track_id = COALESCE(:t, track_id), envio_pendiente = :p
-             WHERE id = :id'
+             WHERE id = :id AND estado_dgii = :leido'
         );
         $stmt->execute([
             ':e' => $estado,
             ':r' => $respuesta !== null ? json_encode($respuesta, JSON_UNESCAPED_UNICODE) : null,
             ':t' => $trackId,
-            ':p' => $sigue ? 1 : 0,
+            ':p' => EstadosEcf::envioPendiente($estado),
             ':id' => $facturaId,
+            ':leido' => $leido,
         ]);
+        return $stmt->rowCount() > 0;
     }
 
     // ------------------------------------------------------------------

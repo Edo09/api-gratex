@@ -1416,6 +1416,41 @@ wa_chk('15b: marcar incierto de una venta fuera de rango conserva sin_rango en l
     && $meta['sin_rango'] === true && $meta['rango_id'] === null, $meta);
 
 // ---------------------------------------------------------------------------
+// 15c) POS: facturaModel::updateECFEstado (la consulta de estado de la app) deja
+// envio_pendiente en el MISMO UPDATE, solo en filas del POS (Task 8 del plan POS
+// y reenvio). Conexion falsa: nada toca MySQL. Reusa GuionConexion, puro_modelo y
+// $es de las secciones 5 y 6. El SQL real se prueba en tools/test_pos_reenvio.php (P10).
+// ---------------------------------------------------------------------------
+echo "\n== 15c) POS: updateECFEstado y envio_pendiente ==\n";
+
+$consulta = static fn(GuionConexion $c, string $estado, ?array $respuesta = ['codigo' => 1]): bool
+    => puro_modelo($c)->updateECFEstado(41, $estado, $respuesta);
+$c = new GuionConexion();
+$ok = $consulta($c, 'ACEPTADO', ['codigo' => 1, 'secuenciaUtilizada' => true]);
+$sql = (string) $c->sql('UPDATE facturas SET estado_dgii');
+$p = $c->params('UPDATE facturas SET estado_dgii') ?? [];
+wa_chk('15c: updateECFEstado: envio_pendiente en el MISMO UPDATE y solo en filas del POS; un solo UPDATE por id',
+    $ok === true && str_contains($sql, 'envio_pendiente = CASE WHEN pos_idempotency_key IS NULL THEN envio_pendiente ELSE :pend END')
+    && str_contains($sql, 'WHERE id = :id') && count($c->de('prepare')) === 1 && $c->de('beginTransaction') === [], $sql);
+wa_chk('15c: updateECFEstado: sigue escribiendo estado, respuesta, secuencia_utilizada y el id',
+    $es($p, ':estado', 'ACEPTADO') && $es($p, ':resp', json_encode(['codigo' => 1, 'secuenciaUtilizada' => true]))
+    && $es($p, ':secuencia', 1) && $es($p, ':id', 41), $p);
+$pendEsperado15c = $pendEsperado + ['PENDIENTE_ENVIO' => 1, 'ENVIO_INCIERTO' => 1];
+$pendObtenido = [];
+foreach ($pendEsperado15c as $estado => $_) {
+    $c = new GuionConexion();
+    $consulta($c, $estado);
+    $pendObtenido[$estado] = ($c->params('UPDATE facturas SET estado_dgii') ?? [])[':pend'] ?? 'falta';
+}
+wa_chk('15c: updateECFEstado: :pend es EstadosEcf::envioPendiente del estado nuevo (ERROR y NO_ENCONTRADO = 0)',
+    $pendObtenido === $pendEsperado15c && $pendObtenido['ERROR'] === 0
+    && $pendObtenido['NO_ENCONTRADO'] === 0 && $pendObtenido['ENVIADO'] === 1, $pendObtenido);
+$c = new GuionConexion();
+$c->errores[] = ['UPDATE facturas SET estado_dgii', new PDOException('se cayo la conexion')];
+wa_chk('15c: updateECFEstado: un PDOException sigue devolviendo false (la consulta de la app no cae)',
+    $consulta($c, 'ACEPTADO') === false);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

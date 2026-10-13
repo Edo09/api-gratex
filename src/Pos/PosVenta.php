@@ -12,6 +12,8 @@ require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfEnvioInciertoExcepti
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfVentaRepetidaException.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/PosCliente.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php';
+require_once __DIR__ . '/../Models/ncfModel.php';
 
 /**
  * Cobro de una venta del POS (docs/specs/pos.md §9.5, F1, F5, F6, P1-P3) y
@@ -728,10 +730,32 @@ final class PosVenta
     // ------------------------------------------------------------------
 
     /**
-     * Reenvia hasta $max ventas pendientes. Antes de reenviar CONSULTA a la DGII
-     * por e-NCF + codigo de seguridad: si ya la tenia (el timeout fue de la
-     * respuesta, no del envio), solo se actualiza el estado. Una que siga sin
-     * respuesta queda pendiente para la proxima vuelta.
+     * Una venta PENDIENTE_ENVIO mas nueva que esto sigue en curso: la peticion que la guardo todavia esta
+     * enviando (el envio dura como mucho POS_DGII_TIMEOUT segundos). El reenvio no la toca, o mandaria dos
+     * veces el mismo comprobante.
+     */
+    public const REENVIO_ESPERA_SEG = 120;
+
+    /**
+     * Candidatas que se leen por pasada y por grupo. El reenvio salta las que todavia no le toca (en curso, o
+     * sin_rango sin rango que las cubra) y no puede quedarse sin ver las que si: por eso las sin_rango se leen
+     * aparte y no entran en el LIMIT de las demas.
+     */
+    public const REENVIO_CANDIDATAS = 60;
+
+    /**
+     * Reenvia hasta $max ventas pendientes. Antes de reenviar CONSULTA a la DGII por e-NCF + codigo de
+     * seguridad (RFCE) o por e-NCF (e-CF): si ya la tenia (el timeout fue de la respuesta, no del envio), solo
+     * se actualiza el estado. Una que siga sin respuesta queda pendiente para la proxima vuelta.
+     *
+     * Reglas (spec 4.3):
+     *  - El flujo lo decide el XML guardado: RFCE si rfce_xml no es nulo, e-CF completo si no. PENDIENTE_ENVIO
+     *    y ENVIO_INCIERTO no llevan el prefijo RFCE_ del estado.
+     *  - Nunca re-firma ni devuelve numeros al contador: el numero de una venta del POS ya esta impreso.
+     *  - Una venta cuya peticion sigue viva no se toca: se salta mientras tenga tomado el candado de su clave
+     *    (el mismo de cobrar; aqui se pide sin esperar y se suelta al terminar con la fila).
+     *  - Cada escritura es compare-and-set sobre el estado que se leyo (posModel::marcarEnvio*) y pone
+     *    envio_pendiente en la misma sentencia: si otro proceso ya movio la fila, no se pisa.
      *
      * @return array{revisadas: int, aceptadas: int, rechazadas: array, pendientes: int}
      */
@@ -740,40 +764,71 @@ final class PosVenta
         $aceptadas = 0;
         $rechazadas = [];
         $revisadas = 0;
-        foreach ($pos->ventasPendientes($max) as $v) {
-            $revisadas++;
-            $id = (int) $v['id'];
-            if (empty($v['e_ncf'])) {
-                error_log('[pos] pendiente ' . $id . ' sin e-NCF: no se puede reenviar');
-                continue;
+        foreach (self::pendientesAReenviar($pos) as $v) {
+            if ($revisadas >= max(1, $max)) {
+                break;
             }
-            $esRfce = str_starts_with((string) $v['estado_dgii'], 'RFCE_');
+            $id = (int) $v['id'];
+            $clave = (string) ($v['pos_idempotency_key'] ?? '');
+            if ($clave !== '') {
+                try {
+                    if (!$pos->bloquearClave($clave, 0)) {
+                        continue;   // su venta sigue en curso (tiene el candado): no cuenta como revisada
+                    }
+                } catch (Throwable $e) {
+                    error_log('[pos] pendiente ' . $id . ': no se pudo pedir el candado de la venta: ' . get_class($e) . ': ' . $e->getMessage());
+                    continue;
+                }
+            }
+            $revisadas++;
             try {
-                $servicio = new ECFEmissionService();
+                if (empty($v['e_ncf'])) {
+                    error_log('[pos] pendiente ' . $id . ' sin e-NCF: no se puede reenviar');
+                    continue;
+                }
+                $esRfce = !empty($v['rfce_xml']);
+                $servicio = self::servicioEmision();
                 [$estado, $respuesta, $trackId] = $esRfce
                     ? self::revisarRFCE($servicio, $v)
                     : self::revisarECF($pos, $servicio, $v);
                 $prefijo = $esRfce ? 'RFCE_' : '';
-                $marcar = static function (string $final, bool $sigue) use ($pos, $id, $esRfce, $respuesta, $trackId): void {
-                    $esRfce
-                        ? $pos->marcarEnvio($id, $final, $respuesta, $sigue)
-                        : $pos->marcarEnvioECF($id, $final, $respuesta, $trackId, $sigue);
+                // El estado que la fila tiene de verdad: revisarECF actualiza $v['estado_dgii'] cuando deja la
+                // fila en ENVIADO antes de consultar, y el compare-and-set del veredicto espera ese.
+                $leido = (string) $v['estado_dgii'];
+                $marcar = static function (string $final) use ($pos, $id, $esRfce, $leido, $respuesta, $trackId): bool {
+                    $escrito = $esRfce
+                        ? $pos->marcarEnvio($id, $leido, $final, $respuesta)
+                        : $pos->marcarEnvioECF($id, $leido, $final, $respuesta, $trackId);
+                    if (!$escrito) {
+                        error_log('[pos] pendiente ' . $id . ': otro proceso ya cambio su estado; no se pisa con ' . $final);
+                    }
+                    return $escrito;
                 };
                 if (in_array($estado, ['ACEPTADO', 'ACEPTADO_CONDICIONAL'], true)) {
-                    $marcar($prefijo . $estado, false);
-                    $aceptadas++;
-                    self::audit('POS_VENTA_ENVIADA', $v['e_ncf'], ['factura_id' => $id, 'estado_dgii' => $prefijo . $estado],
-                        'Venta pendiente del POS aceptada por la DGII.');
+                    if ($marcar($prefijo . $estado)) {
+                        $aceptadas++;
+                        self::audit('POS_VENTA_ENVIADA', $v['e_ncf'], ['factura_id' => $id, 'estado_dgii' => $prefijo . $estado],
+                            'Venta pendiente del POS aceptada por la DGII.');
+                    }
                 } elseif ($estado === 'RECHAZADO') {
-                    $marcar($prefijo . 'RECHAZADO', false);
-                    $motivo = self::motivoRechazo($respuesta);
-                    $rechazadas[] = ['factura_id' => $id, 'e_ncf' => $v['e_ncf'], 'motivo' => $motivo];
-                    self::audit('POS_VENTA_RECHAZADA', $v['e_ncf'], ['factura_id' => $id, 'motivo' => $motivo],
-                        'La DGII rechazó una venta del POS que ya se había entregado (estaba pendiente).', false);
+                    if ($marcar($prefijo . 'RECHAZADO')) {
+                        $motivo = self::motivoRechazo($respuesta);
+                        $rechazadas[] = ['factura_id' => $id, 'e_ncf' => $v['e_ncf'], 'motivo' => $motivo];
+                        self::audit('POS_VENTA_RECHAZADA', $v['e_ncf'], ['factura_id' => $id, 'motivo' => $motivo],
+                            'La DGII rechazó una venta del POS que ya se había entregado (estaba pendiente).', false);
+                    }
                 }
                 // EN_PROCESO, sin veredicto o sin saber si llego: sigue pendiente.
             } catch (Throwable $e) {
                 error_log('[pos] reenvio de la pendiente ' . $id . ': ' . get_class($e) . ': ' . $e->getMessage());
+            } finally {
+                if ($clave !== '') {
+                    try {
+                        $pos->liberarClave($clave);
+                    } catch (Throwable $e) {
+                        // La conexion se cierra al terminar el request y el candado se va con ella.
+                    }
+                }
             }
         }
         return [
@@ -785,8 +840,45 @@ final class PosVenta
     }
 
     /**
-     * RFCE pendiente: consulta por e-NCF + codigo de seguridad; si la DGII no lo
-     * tiene, reenvia el RFCE firmado que se guardo.
+     * Las ventas que el reenvio puede tocar ahora, las mas viejas primero (hasta REENVIO_CANDIDATAS de cada
+     * grupo; reenviarPendientes se queda con las primeras $max cuyo candado este libre). Salta:
+     *  - PENDIENTE_ENVIO con menos de REENVIO_ESPERA_SEG segundos desde su reserva (meta 'desde'): la peticion
+     *    que la guardo sigue enviando. Sin 'desde' en la meta no hay como saber que es reciente: se revisa.
+     *    ENVIO_INCIERTO y los demas estados no se saltan: su envio ya termino.
+     *  - sin_rango (numero fuera de rango autorizado) mientras ningun rango registrado y vigente cubra su
+     *    numero (ncfModel::rangoCubre): la DGII lo rechazaria. La meta dice con que ambiente se numero.
+     *
+     * @return list<array>
+     */
+    private static function pendientesAReenviar(posModel $pos): array
+    {
+        $ahora = time();
+        $elegibles = [];
+        foreach ($pos->ventasPendientes(self::REENVIO_CANDIDATAS, false) as $v) {
+            if ((string) $v['estado_dgii'] === EstadosEcf::PENDIENTE_ENVIO) {
+                $desde = strtotime((string) (facturaModel::metaEnvio($v['respuesta_dgii'] ?? null)['desde'] ?? ''));
+                if ($desde !== false && $ahora - $desde < self::REENVIO_ESPERA_SEG) {
+                    continue;
+                }
+            }
+            $elegibles[] = $v;
+        }
+        $ncf = null;
+        foreach ($pos->ventasPendientes(self::REENVIO_CANDIDATAS, true) as $v) {
+            $meta = facturaModel::metaEnvio($v['respuesta_dgii'] ?? null);
+            $ambiente = (string) ($meta['ambiente_secuencia'] ?? $v['ambiente_dgii'] ?? '');
+            $ncf ??= new ncfModel();
+            if ($ambiente !== '' && $ncf->rangoCubre('E' . $v['tipo_ecf'], $ambiente, (int) substr((string) $v['e_ncf'], 3))) {
+                $elegibles[] = $v;
+            }
+        }
+        usort($elegibles, static fn(array $a, array $b): int => (int) $a['id'] <=> (int) $b['id']);
+        return $elegibles;
+    }
+
+    /**
+     * RFCE pendiente: consulta por e-NCF + codigo de seguridad; si la DGII no lo tiene, reenvia el RFCE firmado
+     * que se guardo.
      * @return array{0: ?string, 1: mixed, 2: null} [estado sin prefijo, respuesta, trackId]
      */
     private static function revisarRFCE(ECFEmissionService $servicio, array $v): array
@@ -810,13 +902,15 @@ final class PosVenta
     }
 
     /**
-     * e-CF completo (E31) pendiente. Con trackId: se pregunta el resultado
-     * (ConsultaResultado). Sin trackId (no hubo respuesta al enviar): primero
-     * ConsultaTrackIds; si la DGII lo tiene, se toma su trackId; si responde que
-     * no, se reenvia el XML firmado. Si no se puede saber, no se reenvia.
+     * e-CF completo (E31, o E32 desde 250k) pendiente. Con trackId: se pregunta el resultado
+     * (ConsultaResultado). Sin trackId (no hubo respuesta al enviar): primero ConsultaTrackIds; si la DGII lo
+     * tiene, se toma su trackId; si responde que no, se reenvia el XML firmado. Si no se puede saber, no se
+     * reenvia. Cuando deja la fila en ENVIADO (esperando su veredicto) actualiza $v['estado_dgii'], que es el
+     * estado que el compare-and-set del veredicto tiene que esperar.
+     *
      * @return array{0: ?string, 1: mixed, 2: ?string} [estado, respuesta, trackId]
      */
-    private static function revisarECF(posModel $pos, ECFEmissionService $servicio, array $v): array
+    private static function revisarECF(posModel $pos, ECFEmissionService $servicio, array &$v): array
     {
         $ambiente = $v['ambiente_dgii'] ?? null;
         $trackId = !empty($v['track_id']) ? (string) $v['track_id'] : null;
@@ -838,8 +932,13 @@ final class PosVenta
             } else {
                 $trackId = $tracks[count($tracks) - 1]['trackId'];
             }
-            // Ya esta en la DGII: queda esperando su veredicto, con su trackId.
-            $pos->marcarEnvioECF((int) $v['id'], 'ENVIADO', null, $trackId, true);
+            // Ya esta en la DGII: queda esperando su veredicto, con su trackId. Compare-and-set: si otro
+            // proceso ya movio la fila, no se sigue con ella.
+            if (!$pos->marcarEnvioECF((int) $v['id'], (string) $v['estado_dgii'], 'ENVIADO', null, $trackId)) {
+                error_log('[pos] pendiente ' . $v['id'] . ': otro proceso ya cambio su estado; no se pisa con ENVIADO');
+                return [null, null, null];
+            }
+            $v['estado_dgii'] = 'ENVIADO';
         }
         $consulta = $servicio->consultarEstado($trackId, (string) $v['e_ncf'], $ambiente);
         return [self::estadoDeConsulta($consulta['data'] ?? null), $consulta['data'] ?? null, $trackId];

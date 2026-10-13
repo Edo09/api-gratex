@@ -1698,6 +1698,14 @@ class facturaModel
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Estado que la consulta de la app (GET /estado) trajo de la DGII. En el MISMO UPDATE (nunca en otro)
+     * se escribe envio_pendiente, solo en filas del POS (pos_idempotency_key NOT NULL; las de la app no lo
+     * tocan): EstadosEcf::envioPendiente del estado nuevo, o sea 1 si el veredicto sigue abierto y 0 en
+     * cualquier otro (ERROR y NO_ENCONTRADO incluidos: ese numero no se reenvia solo). Asi una venta del POS
+     * que la app resuelve antes que el reenvio automatico sale de la lista de pendientes. Nombra
+     * pos_idempotency_key y envio_pendiente: la migracion 030 es parte de la compuerta de despliegue.
+     */
     public function updateECFEstado(int $facturaId, string $estado, ?array $dgiiResponse = null): bool
     {
         try {
@@ -1708,12 +1716,15 @@ class facturaModel
                 $secuenciaUtilizada = (int) filter_var($dgiiResponse['secuenciaUtilizada'], FILTER_VALIDATE_BOOLEAN);
             }
             $sql = 'UPDATE facturas SET estado_dgii = :estado, respuesta_dgii = :resp,
-                           secuencia_utilizada = :secuencia WHERE id = :id';
+                           secuencia_utilizada = :secuencia,
+                           envio_pendiente = CASE WHEN pos_idempotency_key IS NULL THEN envio_pendiente ELSE :pend END
+                    WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':estado' => $estado,
                 ':resp' => $dgiiResponse !== null ? json_encode($dgiiResponse) : null,
                 ':secuencia' => $secuenciaUtilizada,
+                ':pend' => EstadosEcf::envioPendiente($estado),
                 ':id' => $facturaId,
             ]);
             return $stmt->rowCount() > 0;
