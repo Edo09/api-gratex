@@ -606,6 +606,141 @@ wa_chk('app: marcar incierto deja ENVIO_INCIERTO y envio_pendiente en 0',
     $ok === true && ($cols['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && (int) ($cols['envio_pendiente'] ?? 9) === 0, $cols);
 
 // ---------------------------------------------------------------------------
+// ncfModel fuera de rango: dispenseSinRango, rangoCubre y registerRange sobre
+// numeros ya usados (Task 4 del plan POS y reenvio). Todo en un ambiente propio
+// (wa_sr_t4) que se borra antes y despues: no toca los rangos sembrados.
+// ---------------------------------------------------------------------------
+echo "\n== ncfModel fuera de rango en {$base} ==\n";
+$pdo = wa_usar_base($base);
+$ncf = new ncfModel();
+$ambSr = 'wa_sr_t4';
+$vencSr = date('Y-m-d', strtotime('+1 year'));
+// Vencido hace 3 dias, no ayer: CURDATE() es la fecha del servidor MySQL, que otra zona horaria
+// puede dejar un dia delante o detras de la de PHP durante unas horas; con "ayer" el rango
+// seguiria vigente en esas horas.
+$vencidoSr = date('Y-m-d', strtotime('-3 days'));
+$limpiarSr = static fn() => $pdo->prepare('DELETE FROM ncf_sequences WHERE ambiente = :a')->execute([':a' => $ambSr]);
+/** Un rango de prueba en $ambSr; devuelve su id. */
+$rangoSr = static function (string $tipo, int $desde, ?int $hasta, int $actual, ?string $venc) use ($pdo, $ambSr): int {
+    $pdo->prepare(
+        "INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, fecha_vencimiento, description, ambiente)
+         VALUES (:t, :t2, :cv, :d, :h, :v, 'WA fuera de rango', :a)"
+    )->execute([':t' => $tipo, ':t2' => $tipo, ':cv' => $actual, ':d' => $desde, ':h' => $hasta, ':v' => $venc, ':a' => $ambSr]);
+    return (int) $pdo->lastInsertId();
+};
+/** [current_value, numero_hasta] de una fila. */
+$filaSr = static function (int $id) use ($pdo): array {
+    $st = $pdo->prepare('SELECT current_value, numero_hasta FROM ncf_sequences WHERE id = :id');
+    $st->execute([':id' => $id]);
+    $f = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+    return [(int) ($f['current_value'] ?? -1), isset($f['numero_hasta']) ? (int) $f['numero_hasta'] : null];
+};
+$limpiarSr();
+try {
+    // N1 dispenseSinRango: el numero siguiente de un rango agotado, sin el tope numero_hasta.
+    $e32 = $rangoSr('E32', 1, 5, 5, $vencSr);
+    wa_chk('N1: el rango 1-5 con current_value 5 esta agotado para dispenseNextECF', $ncf->dispenseNextECF('E32', $ambSr) === null);
+    $a = $ncf->dispenseSinRango('E32', $ambSr);
+    wa_chk('N1: dispenseSinRango da E320000000006 con las claves de dispenseNextECF mas sin_rango',
+        array_keys($a ?? []) === ['e_ncf', 'valor', 'rango_id', 'fecha_vencimiento', 'numero_hasta', 'restantes', 'sin_rango']
+        && ($a['e_ncf'] ?? null) === 'E320000000006' && ($a['valor'] ?? null) === 6 && $a['rango_id'] === null
+        && $a['sin_rango'] === true && $a['numero_hasta'] === 5 && $a['restantes'] === 0 && $a['fecha_vencimiento'] === $vencSr, $a);
+    wa_chk('N1: el contador del rango paso de su numero_hasta (6 de 5) y numero_hasta no se toco', $filaSr($e32) === [6, 5], $filaSr($e32));
+    $vistos = [$a['valor']];
+    for ($i = 0; $i < 20; $i++) {
+        $vistos[] = $ncf->dispenseSinRango('E32', $ambSr)['valor'];
+    }
+    wa_chk('N2: 21 llamadas seguidas dan 6..26, cada numero una sola vez', $vistos === range(6, 26), $vistos);
+    wa_chk('N2: el contador queda en 26', $filaSr($e32) === [26, 5], $filaSr($e32));
+
+    // N3 sin filas para el tipo o con un tipo que no es e-CF: null (no hay de donde seguir).
+    wa_chk('N3: un tipo sin ninguna fila en ese ambiente da null', $ncf->dispenseSinRango('E33', $ambSr) === null);
+    wa_chk('N3: un tipo que no es E## da null', $ncf->dispenseSinRango('B01', $ambSr) === null && $ncf->dispenseSinRango('E3', $ambSr) === null);
+    wa_chk('N3: el mismo tipo en OTRO ambiente da null', $ncf->dispenseSinRango('E32', 'wa_sr_otro') === null);
+
+    // N4 con dos rangos agotados sigue el de mayor numero_desde; el otro no se toca.
+    $primero = $rangoSr('E34', 1, 10, 10, $vencSr);
+    $segundo = $rangoSr('E34', 11, 20, 20, $vencSr);
+    $n4 = [];
+    for ($i = 0; $i < 4; $i++) {
+        $n4[] = $ncf->dispenseSinRango('E34', $ambSr)['e_ncf'];
+    }
+    wa_chk('N4: con dos rangos agotados toma el de mayor numero_desde (E340000000021..24)',
+        $n4 === ['E340000000021', 'E340000000022', 'E340000000023', 'E340000000024'] && $filaSr($segundo) === [24, 20] && $filaSr($primero) === [10, 10],
+        [$n4, $filaSr($primero), $filaSr($segundo)]);
+
+    // N5 rango vencido: dispenseNextECF no da numero; dispenseSinRango sigue y trae el vencimiento del ultimo rango.
+    $vencido = $rangoSr('E41', 1, 100, 40, $vencidoSr);
+    $v = $ncf->dispenseSinRango('E41', $ambSr);
+    wa_chk('N5: rango vencido (current_value 40 de 100): dispenseNextECF null y dispenseSinRango da el 41 con el vencimiento del rango',
+        $ncf->dispenseNextECF('E41', $ambSr) === null && ($v['valor'] ?? null) === 41 && ($v['fecha_vencimiento'] ?? null) === $vencidoSr
+        && ($v['numero_hasta'] ?? null) === 100, $v);
+
+    // N6 rangoCubre.
+    $sinLimite = $rangoSr('E43', 1, null, 0, null);
+    $cubre = [
+        'E32 5 (el ultimo del rango)' => $ncf->rangoCubre('E32', $ambSr, 5),
+        'E32 6 (fuera)' => $ncf->rangoCubre('E32', $ambSr, 6),
+        'E32 1 (el primero)' => $ncf->rangoCubre('E32', $ambSr, 1),
+        'E32 0' => $ncf->rangoCubre('E32', $ambSr, 0),
+        'E34 10 y 11 (dos rangos)' => $ncf->rangoCubre('E34', $ambSr, 10) && $ncf->rangoCubre('E34', $ambSr, 11),
+        'E34 20' => $ncf->rangoCubre('E34', $ambSr, 20),
+        'E34 21 (fuera)' => $ncf->rangoCubre('E34', $ambSr, 21),
+        'E41 41 (vencido)' => $ncf->rangoCubre('E41', $ambSr, 41),
+        'E43 99999 (sin limite)' => $ncf->rangoCubre('E43', $ambSr, 99999),
+        'E31 (sin filas)' => $ncf->rangoCubre('E31', $ambSr, 1),
+        'E32 en otro ambiente' => $ncf->rangoCubre('E32', 'wa_sr_otro', 3),
+        'B01' => $ncf->rangoCubre('B01', $ambSr, 1),
+    ];
+    wa_chk('N6: rangoCubre es true solo dentro de un rango registrado y vigente (hasta NULL = sin limite)',
+        $cubre === [
+            'E32 5 (el ultimo del rango)' => true, 'E32 6 (fuera)' => false, 'E32 1 (el primero)' => true, 'E32 0' => false,
+            'E34 10 y 11 (dos rangos)' => true, 'E34 20' => true, 'E34 21 (fuera)' => false, 'E41 41 (vencido)' => false,
+            'E43 99999 (sin limite)' => true, 'E31 (sin filas)' => false, 'E32 en otro ambiente' => false, 'B01' => false,
+        ], $cubre);
+
+    // N7 registrar un rango que cubre los numeros ya usados: antes lo bloqueaba el current_value pasado del tope.
+    $res = $ncf->registerRange('E32', 6, 100, $vencSr, null, null, $ambSr);
+    $nuevo = (int) ($res[1]['id'] ?? 0);
+    wa_chk('N7: registerRange 6-100 sobre un rango 1-5 con current_value 26 se registra, con 74 restantes (100 - 26)',
+        ($res[0] ?? null) === 'success' && ($res[1]['restantes'] ?? null) === 74, $res);
+    wa_chk('N7: el rango viejo vuelve a su numero_hasta (5 de 5) y el nuevo arranca en 26 (lo usado dentro de el)',
+        $filaSr($e32) === [5, 5] && $nuevo > 0 && $filaSr($nuevo) === [26, 100], [$filaSr($e32), $filaSr($nuevo)]);
+    $sig = $ncf->dispenseNextECF('E32', $ambSr);
+    wa_chk('N7: dispenseNextECF da el 27: nunca reparte un numero ya usado (6..26)',
+        ($sig['valor'] ?? null) === 27 && ($sig['rango_id'] ?? null) === $nuevo, $sig);
+    wa_chk('N7: rangoCubre ya es true para 6, 26 y 100, y false para 101',
+        $ncf->rangoCubre('E32', $ambSr, 6) && $ncf->rangoCubre('E32', $ambSr, 26) && $ncf->rangoCubre('E32', $ambSr, 100)
+        && !$ncf->rangoCubre('E32', $ambSr, 101));
+    $solapa = $ncf->registerRange('E32', 90, 200, $vencSr, null, null, $ambSr);
+    wa_chk('N7: un rango que empieza dentro del autorizado sigue rechazado (el tope es el numero_hasta, 100)',
+        ($solapa[0] ?? null) === 'error' && str_contains((string) ($solapa[1] ?? ''), 'debe ser mayor que 100'), $solapa);
+
+    // N8 cobertura parcial: el rango nuevo empieza despues de algunos numeros usados fuera de rango.
+    $parcial = $ncf->registerRange('E34', 23, 50, $vencSr, null, null, $ambSr);
+    $nuevoParcial = (int) ($parcial[1]['id'] ?? 0);
+    wa_chk('N8: E34 usado hasta el 24 (21..24 fuera de rango): el rango 23-50 se registra con current_value 24 (26 restantes)',
+        ($parcial[0] ?? null) === 'success' && ($parcial[1]['restantes'] ?? null) === 26 && $filaSr($nuevoParcial) === [24, 50]
+        && $filaSr($segundo) === [20, 20], [$parcial, $filaSr($segundo)]);
+    wa_chk('N8: 21 y 22 quedan sin cubrir (soporte), 23 y 24 cubiertos, y el siguiente es el 25',
+        !$ncf->rangoCubre('E34', $ambSr, 21) && !$ncf->rangoCubre('E34', $ambSr, 22) && $ncf->rangoCubre('E34', $ambSr, 23)
+        && $ncf->rangoCubre('E34', $ambSr, 24) && ($ncf->dispenseNextECF('E34', $ambSr)['valor'] ?? null) === 25);
+
+    // N9 sin numeros fuera de rango registerRange se porta como siempre.
+    $r1 = $ncf->registerRange('E31', 1, 10, $vencSr, null, null, $ambSr);
+    $r2 = $ncf->registerRange('E31', 11, 20, $vencSr, null, null, $ambSr);
+    $r3 = $ncf->registerRange('E31', 5, 30, $vencSr, null, null, $ambSr);
+    wa_chk('N9: sin sobrepaso: 1-10 y 11-20 se registran con current_value en desde - 1, y 5-30 se rechaza',
+        ($r1[0] ?? null) === 'success' && ($r1[1]['restantes'] ?? null) === 10 && ($r2[0] ?? null) === 'success'
+        && ($r2[1]['restantes'] ?? null) === 10 && $filaSr((int) $r2[1]['id']) === [10, 20]
+        && ($r3[0] ?? null) === 'error' && str_contains((string) ($r3[1] ?? ''), 'debe ser mayor que 20'), [$r1, $r2, $r3]);
+} finally {
+    $limpiarSr();
+}
+wa_chk('N: el ambiente de prueba quedo vacio',
+    (int) $pdo->query("SELECT COUNT(*) FROM ncf_sequences WHERE ambiente = '{$ambSr}'")->fetchColumn() === 0);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_limpiar($pdo);

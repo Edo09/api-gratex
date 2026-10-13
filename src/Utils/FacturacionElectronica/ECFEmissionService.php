@@ -188,6 +188,21 @@ class ECFEmissionService
     /**
      * @param array $payload Required keys:
      *   tipo_ecf, comprador (assoc), items (array of assoc), totales (assoc).
+     *   Opciones del POS (todas opcionales; sin ellas la emision es la de siempre):
+     *   - dgii_timeout (segundos): espera al ENVIAR a la DGII; con
+     *       autenticar_despues_de_reservar tambien al pedir el token.
+     *   - reclamar_secuencia (bool, true): con false el numero NUNCA vuelve al
+     *       contador despues del veredicto (reclamarSecuenciaSiNoUtilizada): ya
+     *       esta impreso. Un fallo ANTES de reservar si lo devuelve: no se uso.
+     *   - autenticar_despues_de_reservar (bool; solo con gancho): el token de la
+     *       DGII se pide DESPUES de 'reservar'; la reserva usa el ambiente de
+     *       DgiiAuthService::ambienteEfectivo. Si pedir el token falla, la fila
+     *       queda ENVIO_INCIERTO (fase_fallida 'autenticar') y sale
+     *       EcfEnvioInciertoException.
+     *   - numerar_sin_rango (bool; solo con gancho): sin rango con numeros libres
+     *       se toma el numero siguiente al ultimo (ncfModel::dispenseSinRango); la
+     *       fila se reserva con la meta sin_rango y emitir() vuelve SIN llamar a
+     *       la DGII (ni para el token) con estado PENDIENTE_ENVIO y sin_rango true.
      * @param callable|null $persistencia Gancho write-ahead,
      *   fn(string $fase, array $ctx): mixed. Sin el (integracion, gastos) la
      *   emision queda como antes. Con el:
@@ -196,7 +211,8 @@ class ECFEmissionService
      *       ambiente_secuencia (el del dispensador), signed_xml, codigo_seguridad,
      *       fecha_emision_dgii (Y-m-d H:i:s), flujo (ECF|RFCE), rfce_xml (?string),
      *       dispensado (bool), rango_id (?int), secuencia_valor (?int; null con
-     *       un e_ncf override), desde (Y-m-d H:i:s del servidor).
+     *       un e_ncf override), desde (Y-m-d H:i:s del servidor); mas sin_rango
+     *       (true) solo cuando el numero salio de dispenseSinRango (rango_id null).
      *       Tiene que COMMITEAR la fila (XML e items) y devolver
      *       ['factura_id' => int, 'e_ncf' => string, 'desde' => string], sin
      *       dejar una transaccion abierta.
@@ -208,7 +224,7 @@ class ECFEmissionService
      *       ya movio la fila (CONFIRM_RACE: la secuencia no se toca).
      *   - 'incierto': lanzo el envio, el mapeo o 'confirmar', o el proceso murio
      *       con la fila en vuelo (registro de cierre). ctx: ctxSinXml(lo de
-     *       'reservar') + reserva, fase_fallida (envio|confirmar|shutdown),
+     *       'reservar') + reserva, fase_fallida (autenticar|envio|confirmar|shutdown),
      *       clase, error (<= 2000 caracteres), resultado_parcial
      *       (proyectarResultado o null; el cierre no la manda). Devuelve bool:
      *       true = la fila quedo ENVIO_INCIERTO.
@@ -239,6 +255,11 @@ class ECFEmissionService
             // Un tenant de integracion no tiene DB propia: no hay donde reservar.
             throw new InvalidArgumentException('write-ahead no aplica a integracion (sin DB de tenant)');
         }
+        // Opciones del POS (ver el docblock). Las dos de "despues de reservar" necesitan el
+        // gancho: sin fila reservada no hay nada que proteger ni que dejar pendiente.
+        $reclamarSecuencia = ($payload['reclamar_secuencia'] ?? true) !== false;
+        $autenticarDespues = $persistencia !== null && !empty($payload['autenticar_despues_de_reservar']);
+        $numerarSinRango = $persistencia !== null && !empty($payload['numerar_sin_rango']);
         if ($integration) {
             $emisor = is_array($payload['emisor'] ?? null) ? $payload['emisor'] : [];
             if (empty($emisor['rnc']) || empty($emisor['razon_social']) || empty($emisor['direccion'])) {
@@ -299,6 +320,7 @@ class ECFEmissionService
             throw new RuntimeException('Integracion: el e_ncf es requerido en el payload (no generamos secuencia).');
         }
         $rangoVencimiento = null; // vencimiento del rango autorizado que dispensa
+        $sinRango = false; // true: el numero salio de dispenseSinRango (fuera de rango)
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
                 throw new EcfUsuarioException(
@@ -317,6 +339,12 @@ class ECFEmissionService
             $intentos = 0;
             do {
                 $disp = $this->ncfModel()->dispenseNextECF('E' . $tipoEcf, $ambienteEarly);
+                if ($disp === null && $numerarSinRango) {
+                    // El POS no se detiene por la secuencia (spec 4.2.6): el numero siguiente al
+                    // ultimo usado. Esa venta se guarda y se imprime, pero NO se envia hasta que
+                    // un rango autorizado registrado la cubra (ncfModel::rangoCubre).
+                    $disp = $this->ncfModel()->dispenseSinRango('E' . $tipoEcf, (string) $ambienteEarly);
+                }
                 if ($disp === null) {
                     throw new EcfUsuarioException(
                         'Sin rango e-NCF disponible para E' . $tipoEcf . ' en ambiente ' . $ambienteEarly
@@ -345,6 +373,7 @@ class ECFEmissionService
             }
             $eNcf = $disp['e_ncf'];
             $rangoVencimiento = $disp['fecha_vencimiento'] ?? null;
+            $sinRango = !empty($disp['sin_rango']);
         }
         // Si nosotros dispensamos la secuencia (no es un e_ncf override), se puede
         // revertir cuando DGII rechace sin consumirla (secuenciaUtilizada=false).
@@ -514,18 +543,26 @@ class ECFEmissionService
                 DgiiReceptionService::assertSinCarriageReturn($signedRfce);
             }
 
+            // El token se pide DESPUES de reservar con autenticar_despues_de_reservar (POS) y con un
+            // numero fuera de rango, que nunca se envia: la reserva usa el ambiente que el token
+            // tendria (ambienteEfectivo) y el token se pide mas abajo, dentro del envio. Asi una DGII
+            // caida no detiene la venta: queda guardada y sin confirmar. Para la app todo sigue igual:
+            // sin token no se crea la factura y el numero vuelve a la secuencia.
+            $tokenDespues = $autenticarDespues || $sinRango;
             // El mismo cert firma la semilla de autenticacion DGII.
-            $tokenInfo = $this->auth->autenticar([
-                'environment' => $payload['ambiente'] ?? null,
-                'certificate_content' => $certContent,
-                'certificate_password' => $certPassword,
-            ]);
+            $tokenInfo = $tokenDespues
+                ? ['token' => null, 'ambiente' => $this->auth->ambienteEfectivo(['environment' => $payload['ambiente'] ?? null])]
+                : $this->auth->autenticar([
+                    'environment' => $payload['ambiente'] ?? null,
+                    'certificate_content' => $certContent,
+                    'certificate_password' => $certPassword,
+                ]);
             // Pre-vuelo del token. normalizeTokenResponse solo rechaza un token
             // empty(): uno de puros espacios pasaria y normalizeBearerToken lo
             // rechazaria DENTRO de recibir(), con la fila ya reservada (un envio
             // "incierto" que nunca salio). Mismo texto que normalizeBearerToken,
-            // para que los integradores lean lo de siempre.
-            if (trim((string) ($tokenInfo['token'] ?? '')) === '') {
+            // para que los integradores lean lo de siempre. Con el token diferido no hay token todavia.
+            if (!$tokenDespues && trim((string) ($tokenInfo['token'] ?? '')) === '') {
                 throw new RuntimeException('DGII bearer token is required.');
             }
             // Dentro del try: la reserva guarda $ambiente (el del token).
@@ -548,6 +585,11 @@ class ECFEmissionService
                     'secuencia_valor' => $dispensamosSecuencia ? $secuenciaValor : null,
                     'desde' => date('Y-m-d H:i:s'),
                 ];
+                if ($sinRango) {
+                    // Solo cuando es true: la fila lo guarda en su meta y el reenvio del POS la
+                    // salta hasta que un rango autorizado cubra el numero.
+                    $ctxReservar['sin_rango'] = true;
+                }
                 $reserva = $persistencia('reservar', $ctxReservar);
                 $idReserva = is_array($reserva) ? (int) ($reserva['factura_id'] ?? 0) : 0;
                 $colgada = Database::getInstance()->getConnection()->inTransaction();
@@ -558,6 +600,34 @@ class ECFEmissionService
                     throw new RuntimeException(
                         $idReserva <= 0 ? 'persistencia no devolvio factura_id' : 'persistencia dejo una transaccion abierta'
                     );
+                }
+                if ($sinRango) {
+                    // Fila guardada (PENDIENTE_ENVIO, meta sin_rango) y NINGUNA llamada a la DGII:
+                    // rechaza los numeros fuera de un rango autorizado. No se arma el registro de
+                    // cierre: no hay envio que se pueda quedar a medias.
+                    error_log(sprintf('[ECF e-NCF=%s factura_id=%d] reservado fuera de rango, sin enviar', $eNcf, $idReserva));
+                    return [
+                        'e_ncf' => $eNcf,
+                        'tipo_ecf' => $tipoEcf,
+                        'signed_xml' => $signedXml,
+                        'codigo_seguridad' => $codigoSeguridad,
+                        'track_id' => null,
+                        'estado' => EstadosEcf::PENDIENTE_ENVIO,
+                        'ambiente' => $ambiente,
+                        'fecha_emision_dgii' => $fechaEmisionDgii,
+                        'dgii_response' => null,
+                        'dgii_status_code' => null,
+                        'flujo' => $usaRFCE ? 'RFCE' : 'ECF',
+                        'factura_id' => $idReserva,
+                        'sin_rango' => true,
+                    ] + ($usaRFCE ? [
+                        'monto_total' => $montoTotal,
+                        'rfce_xml' => $signedRfce,
+                        'rfce_track_id' => null,
+                        'rfce_estado' => null,
+                        'rfce_response' => null,
+                        'rfce_status_code' => null,
+                    ] : []);
                 }
                 self::armarEnVuelo($persistencia, $reserva, $ctxReservar);
                 error_log(sprintf('[ECF e-NCF=%s factura_id=%d] reservado, enviando', $eNcf, $idReserva));
@@ -639,7 +709,29 @@ class ECFEmissionService
         // EcfEnvioInciertoException (con factura_id, para llevar al usuario a ella).
         $ctxConfirmar = null;
         $ok = true;
+        $faseEnvio = 'envio';
         try {
+            if ($tokenDespues) {
+                // Token pedido despues de reservar. Cualquier fallo (la DGII no contesta, el
+                // token viene vacio) cae al catch de abajo: la fila ya existe y queda
+                // ENVIO_INCIERTO con fase_fallida 'autenticar'; el numero no se devuelve. El
+                // POS pide el token con el mismo dgii_timeout que usa para enviar.
+                $faseEnvio = 'autenticar';
+                $opcionesToken = [
+                    'environment' => $payload['ambiente'] ?? null,
+                    'certificate_content' => $certContent,
+                    'certificate_password' => $certPassword,
+                ];
+                if ((int) ($payload['dgii_timeout'] ?? 0) > 0) {
+                    $opcionesToken['timeout'] = (int) $payload['dgii_timeout'];
+                }
+                $tokenInfo = $this->auth->autenticar($opcionesToken);
+                if (trim((string) ($tokenInfo['token'] ?? '')) === '') {
+                    throw new RuntimeException('DGII bearer token is required.');
+                }
+                $bearerToken = $tokenInfo['token'];
+                $faseEnvio = 'envio';
+            }
             if ($usaRFCE) {
                 $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, $opcionesEnvio);
 
@@ -691,7 +783,7 @@ class ECFEmissionService
             }
         } catch (Throwable $e) {
             if ($persistencia !== null && $reserva !== null) {
-                $fase = $ctxConfirmar !== null ? 'confirmar' : 'envio';
+                $fase = $ctxConfirmar !== null ? 'confirmar' : $faseEnvio;
                 $parcial = $ctxConfirmar !== null ? self::proyectarResultado($ctxConfirmar) : null;
                 $marcado = false;
                 try {
@@ -736,7 +828,7 @@ class ECFEmissionService
         }
 
         if ($usaRFCE) {
-            if ($ok) {
+            if ($ok && $reclamarSecuencia) {
                 $this->reclamarSecuenciaSiNoUtilizada(
                     $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
                     is_array($rfceReception['data'] ?? null) ? $rfceReception['data'] : [],
@@ -771,7 +863,7 @@ class ECFEmissionService
             ];
         }
 
-        if ($ok) {
+        if ($ok && $reclamarSecuencia) {
             $this->reclamarSecuenciaSiNoUtilizada(
                 $dispensamosSecuencia, $secuenciaType, $secuenciaValor, $ambienteEarly,
                 is_array($reception['data'] ?? null) ? $reception['data'] : [],

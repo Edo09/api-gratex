@@ -1467,7 +1467,7 @@ class facturaModel
     /** Meta del envio para respuesta_dgii (spec 6.3), sin XML. La lee metaEnvio(). */
     private static function metaEnVuelo(array $ctx): array
     {
-        return [
+        $meta = [
             'desde' => $ctx['desde'] ?? null,
             'flujo' => $ctx['flujo'] ?? null,
             'ambiente_secuencia' => $ctx['ambiente_secuencia'] ?? null,
@@ -1475,6 +1475,12 @@ class facturaModel
             'rango_id' => $ctx['rango_id'] ?? null,
             'secuencia_valor' => $ctx['secuencia_valor'] ?? null,
         ];
+        // Venta del POS numerada fuera de rango (ncfModel::dispenseSinRango): la marca solo
+        // existe cuando es true, asi el resto de las filas guarda la meta de siempre.
+        if (!empty($ctx['sin_rango'])) {
+            $meta['sin_rango'] = true;
+        }
+        return $meta;
     }
 
     /** JSON para respuesta_dgii / rfce_respuesta: null queda null; UTF-8 invalido se sustituye en vez de fallar. */
@@ -1836,7 +1842,9 @@ class facturaModel
     /**
      * Meta del envio que respuesta_dgii guarda mientras la fila esta en vuelo
      * (spec 6.3): fase, desde, flujo, ambiente_secuencia, dispensado, rango_id,
-     * secuencia_valor y, en ENVIO_INCIERTO, el fallo. [] si no hay meta: NULL,
+     * secuencia_valor, sin_rango (solo cuando es true: venta del POS numerada
+     * fuera de rango, sin enviar) y, en ENVIO_INCIERTO, el fallo. [] si no hay
+     * meta: NULL,
      * JSON roto o el JSON de un texto (filas ENVIADO viejas, de una DGII que
      * respondio 2xx sin JSON). Quien lea rango_id, secuencia_valor o
      * ambiente_secuencia pasa por aqui, y antes de que la confirmacion pise la

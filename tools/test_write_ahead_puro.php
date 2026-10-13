@@ -1356,6 +1356,66 @@ wa_chk('15: marcar incierto: envio_pendiente = 1 en el MISMO UPDATE y solo en fi
     && $es($p, ':pend', 1) && $es($p, ':id', 41) && count($c->de('prepare')) === 1, [$sql, $p]);
 
 // ---------------------------------------------------------------------------
+// 15b) POS: DgiiAuthService::ambienteEfectivo, la meta sin_rango y las firmas de
+// ncfModel (Task 4 del plan POS y reenvio). Conexion falsa: nada toca MySQL.
+// Reusa $reservar, $marcar y puro_ctx_incierto de las secciones 5 y 6.
+// ---------------------------------------------------------------------------
+echo "\n== 15b) POS: ambienteEfectivo, meta sin_rango y firmas de ncfModel ==\n";
+
+$authPuro = new DgiiAuthService();
+$refAmbiente = new ReflectionMethod(DgiiAuthService::class, 'ambienteEfectivo');
+wa_chk('15b: DgiiAuthService::ambienteEfectivo(array $options = []): string es publico',
+    $refAmbiente->isPublic() && !$refAmbiente->isStatic() && (string) $refAmbiente->getReturnType() === 'string'
+    && $refAmbiente->getNumberOfParameters() === 1 && $refAmbiente->getParameters()[0]->isOptional());
+$ambientesObtenidos = [
+    'cert' => $authPuro->ambienteEfectivo(['environment' => 'cert']),
+    'Certificacion con espacio' => $authPuro->ambienteEfectivo(['environment' => 'Certificacion ']),
+    'produccion' => $authPuro->ambienteEfectivo(['environment' => 'produccion']),
+    'prod' => $authPuro->ambienteEfectivo(['environment' => 'prod']),
+    'test' => $authPuro->ambienteEfectivo(['environment' => 'test']),
+    'ambiente testing' => $authPuro->ambienteEfectivo(['ambiente' => 'testing']),
+    'environment null, ambiente certecf' => $authPuro->ambienteEfectivo(['environment' => null, 'ambiente' => 'certecf']),
+    'ecf' => $authPuro->ambienteEfectivo(['environment' => 'ecf']),
+];
+wa_chk('15b: ambienteEfectivo normaliza los alias igual que autenticar() (sin llamar a la DGII)',
+    $ambientesObtenidos === [
+        'cert' => 'certecf', 'Certificacion con espacio' => 'certecf', 'produccion' => 'ecf', 'prod' => 'ecf', 'test' => 'testecf',
+        'ambiente testing' => 'testecf', 'environment null, ambiente certecf' => 'certecf', 'ecf' => 'ecf',
+    ], $ambientesObtenidos);
+
+$refSinRango = new ReflectionMethod(ncfModel::class, 'dispenseSinRango');
+$refCubre = new ReflectionMethod(ncfModel::class, 'rangoCubre');
+$firma = static fn(ReflectionMethod $m): string => implode(', ', array_map(
+    static fn(ReflectionParameter $p): string => $p->getType() . ' $' . $p->getName(), $m->getParameters()
+)) . ' -> ' . $m->getReturnType();
+wa_chk('15b: ncfModel::dispenseSinRango(string $type, string $ambiente): ?array es publico',
+    $refSinRango->isPublic() && !$refSinRango->isStatic() && $firma($refSinRango) === 'string $type, string $ambiente -> ?array',
+    $firma($refSinRango));
+wa_chk('15b: ncfModel::rangoCubre(string $type, string $ambiente, int $valor): bool es publico',
+    $refCubre->isPublic() && !$refCubre->isStatic() && $firma($refCubre) === 'string $type, string $ambiente, int $valor -> bool',
+    $firma($refCubre));
+
+$c = new GuionConexion();
+[, $e] = $reservar($c, ['sin_rango' => true, 'rango_id' => null]);
+$meta = json_decode((string) (($c->params('INSERT INTO facturas') ?? [])[':respuesta_dgii'] ?? ''), true);
+wa_chk('15b: reserva con sin_rango: la meta lo guarda al final (despues de secuencia_valor), con rango_id null',
+    $e === null && $meta === ['fase' => 'PENDIENTE_ENVIO', 'desde' => '2026-10-05 14:03:11', 'flujo' => 'ECF',
+        'ambiente_secuencia' => 'ecf', 'dispensado' => true, 'rango_id' => null, 'secuencia_valor' => 123, 'sin_rango' => true],
+    $e?->getMessage() ?? $meta);
+$c = new GuionConexion();
+[, $e] = $reservar($c, ['sin_rango' => false]);
+$meta = json_decode((string) (($c->params('INSERT INTO facturas') ?? [])[':respuesta_dgii'] ?? ''), true);
+wa_chk('15b: sin_rango false (o ausente): la meta es la de siempre, 7 claves y ninguna sin_rango',
+    $e === null && is_array($meta) && count($meta) === 7 && !array_key_exists('sin_rango', $meta), $meta);
+$c = new GuionConexion();
+$marcar($c, puro_ctx_incierto(['sin_rango' => true, 'rango_id' => null]));
+$meta = json_decode((string) (($c->params("estado_dgii = 'ENVIO_INCIERTO'") ?? [])[':json'] ?? ''), true);
+wa_chk('15b: marcar incierto de una venta fuera de rango conserva sin_rango en la meta',
+    is_array($meta) && array_keys($meta) === ['fase', 'desde', 'flujo', 'ambiente_secuencia', 'dispensado', 'rango_id',
+        'secuencia_valor', 'sin_rango', 'fase_fallida', 'clase', 'error', 'resultado_parcial', 'intentos']
+    && $meta['sin_rango'] === true && $meta['rango_id'] === null, $meta);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

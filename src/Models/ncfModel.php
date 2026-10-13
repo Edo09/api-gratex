@@ -235,6 +235,91 @@ class ncfModel
     }
 
     /**
+     * Numero SIGUIENTE al ultimo usado de un tipo y ambiente cuando ningun rango
+     * vigente tiene numeros libres (dispenseNextECF devolvio null): el POS no se
+     * detiene por la secuencia (spec 4.2.6). Incrementa de forma atomica el
+     * current_value del rango de mayor numero_desde SIN el tope numero_hasta, asi
+     * que el contador pasa del final autorizado. La DGII rechaza los numeros
+     * fuera de un rango autorizado: quien lo use guarda la venta con la meta
+     * sin_rango y NO la envia hasta que rangoCubre() sea true.
+     *
+     * Mismas claves que dispenseNextECF mas 'sin_rango' => true. rango_id es null
+     * (ningun rango autorizado es dueno del numero), numero_hasta y
+     * fecha_vencimiento son los del ultimo rango y restantes es 0. El valor se
+     * lee con LAST_INSERT_ID(expr) en la misma sentencia y conexion: dos ventas a
+     * la vez nunca reciben el mismo numero.
+     *
+     * @return array|null null si el tipo no es E\d\d o el tipo no tiene ninguna
+     *                    fila de rango en ese ambiente (no hay de donde seguir)
+     * @throws RuntimeException si ncf_sequences no se puede leer o actualizar
+     */
+    public function dispenseSinRango(string $type, string $ambiente): ?array
+    {
+        if (!preg_match('/^E\d{2}$/', $type)) {
+            return null;
+        }
+        try {
+            $sel = $this->conexion->prepare(
+                'SELECT id, numero_hasta, fecha_vencimiento FROM ncf_sequences
+                 WHERE type = :type AND ambiente = :ambiente
+                 ORDER BY numero_desde DESC LIMIT 1'
+            );
+            $sel->execute([':type' => $type, ':ambiente' => $ambiente]);
+            $rango = $sel->fetch(PDO::FETCH_ASSOC);
+            if (!$rango) {
+                return null;
+            }
+            $upd = $this->conexion->prepare(
+                'UPDATE ncf_sequences SET current_value = LAST_INSERT_ID(current_value + 1) WHERE id = :id'
+            );
+            $upd->execute([':id' => $rango['id']]);
+            $current = (int) $this->conexion->lastInsertId();
+            if ($current < 1) {
+                throw new RuntimeException('el contador no devolvio el numero nuevo');
+            }
+            return [
+                'e_ncf' => $type . str_pad((string) $current, 10, '0', STR_PAD_LEFT),
+                'valor' => $current,
+                'rango_id' => null,
+                'fecha_vencimiento' => $rango['fecha_vencimiento'] ?: null,
+                'numero_hasta' => $rango['numero_hasta'] !== null ? (int) $rango['numero_hasta'] : null,
+                'restantes' => 0,
+                'sin_rango' => true,
+            ];
+        } catch (PDOException $e) {
+            throw new RuntimeException('ncf_sequences inaccesible: ' . $e->getMessage(), 0, $e);
+        }
+    }
+
+    /**
+     * true si el numero $valor de un tipo y ambiente cae dentro de un rango
+     * autorizado registrado y vigente: numero_desde <= valor <= numero_hasta
+     * (numero_hasta NULL = sin limite) y sin vencer. Decide si una venta guardada
+     * fuera de rango (meta sin_rango) ya se puede enviar a la DGII (spec 4.3.5).
+     * Ante un fallo de la base devuelve false: con la duda no se envia.
+     */
+    public function rangoCubre(string $type, string $ambiente, int $valor): bool
+    {
+        if (!preg_match('/^E\d{2}$/', $type) || $valor < 1) {
+            return false;
+        }
+        try {
+            $st = $this->conexion->prepare(
+                'SELECT 1 FROM ncf_sequences
+                 WHERE type = :type AND ambiente = :ambiente
+                   AND numero_desde <= :desde AND (numero_hasta IS NULL OR numero_hasta >= :hasta)
+                   AND (fecha_vencimiento IS NULL OR fecha_vencimiento >= CURDATE())
+                 LIMIT 1'
+            );
+            $st->execute([':type' => $type, ':ambiente' => $ambiente, ':desde' => $valor, ':hasta' => $valor]);
+            return $st->fetchColumn() !== false;
+        } catch (PDOException $e) {
+            error_log('[NCF] rangoCubre fallo: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
      * Lista los rangos e-NCF del ambiente con uso/restantes/estado calculados.
      * estado: activo (dispensando) | pendiente (rango futuro) | agotado | vencido | sin_limite.
      */
@@ -293,6 +378,12 @@ class ncfModel
      * (los rangos DGII son consecutivos hacia adelante). Si existia una fila
      * "sin limite" (legacy, numero_hasta NULL) se CIERRA en su consumo actual
      * para que el nuevo rango pase a dispensar.
+     *
+     * Numeros usados fuera de rango (dispenseSinRango, venta del POS con el rango
+     * agotado): el contador del ultimo rango paso de su numero_hasta. Eso no
+     * cuenta como tope: el rango nuevo puede cubrirlos, arranca DESPUES del
+     * ultimo que cae dentro de el (para que dispenseNextECF no reparta un numero
+     * ya usado) y el rango viejo vuelve a su numero_hasta.
      *
      * @return array ['success', rango] | ['error', mensaje]
      */
@@ -357,7 +448,10 @@ class ncfModel
                 if ($convertir && (int) $e['id'] === (int) $sinLimite['id']) {
                     continue;
                 }
-                $tope = max($tope, (int) $e['current_value'], (int) ($e['numero_hasta'] ?? 0));
+                // Con numero_hasta manda el final autorizado: un current_value MAYOR son
+                // numeros usados fuera de rango, que el rango nuevo puede cubrir. Sin
+                // numero_hasta (legacy) manda el consumo.
+                $tope = max($tope, $e['numero_hasta'] !== null ? (int) $e['numero_hasta'] : (int) $e['current_value']);
             }
             if ($numeroDesde <= $tope) {
                 $this->conexion->rollBack();
@@ -406,6 +500,22 @@ class ncfModel
                 ]];
             }
 
+            // Numeros usados fuera de rango: el rango nuevo arranca despues del ultimo que
+            // cae dentro de el y los rangos viejos vuelven a su numero_hasta.
+            $sobrepaso = 0;
+            foreach ($existentes as $e) {
+                if ($e['numero_hasta'] !== null && (int) $e['current_value'] > (int) $e['numero_hasta']) {
+                    $sobrepaso = max($sobrepaso, (int) $e['current_value']);
+                }
+            }
+            $cvNuevo = max($numeroDesde - 1, min($sobrepaso, $numeroHasta));
+            if ($sobrepaso > 0) {
+                $this->conexion->prepare(
+                    'UPDATE ncf_sequences SET current_value = numero_hasta
+                      WHERE type = :type AND ambiente = :amb AND numero_hasta IS NOT NULL AND current_value > numero_hasta'
+                )->execute([':type' => $type, ':amb' => $amb]);
+            }
+
             // Cerrar la fila legacy sin limite en su consumo actual.
             if ($sinLimite !== null) {
                 $cerrar = $this->conexion->prepare(
@@ -424,7 +534,7 @@ class ncfModel
             $ins->execute([
                 ':type' => $type,
                 ':type2' => $type,
-                ':cv' => $numeroDesde - 1, // ultimo dispensado = ninguno aun
+                ':cv' => $cvNuevo, // ultimo dispensado: ninguno aun, o el ultimo numero fuera de rango que cae aqui
                 ':desde' => $numeroDesde,
                 ':hasta' => $numeroHasta,
                 ':venc' => $fechaVencimiento,
@@ -445,7 +555,7 @@ class ncfModel
                 'fecha_vencimiento' => $fechaVencimiento,
                 'no_solicitud' => $noSolicitud,
                 'no_autorizacion' => $noAutorizacion,
-                'restantes' => $numeroHasta - ($numeroDesde - 1),
+                'restantes' => $numeroHasta - $cvNuevo,
             ]];
         } catch (PDOException $e) {
             if ($this->conexion->inTransaction()) {

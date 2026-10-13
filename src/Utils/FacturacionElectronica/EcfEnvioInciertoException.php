@@ -14,7 +14,11 @@ class EcfEnvioInciertoException extends RuntimeException
     public readonly string $eNcf;
     public readonly int $facturaId;
     public readonly string $ambiente;
-    /** 'envio' (fallo el envio) o 'confirmar' (la DGII respondio y fallo el UPDATE). */
+    /**
+     * 'envio' (fallo el envio), 'confirmar' (la DGII respondio y fallo el UPDATE)
+     * o 'autenticar' (solo el POS, que pide el token DESPUES de reservar: fallo el
+     * token y nada salio hacia la DGII).
+     */
     public readonly string $faseFallida;
     /** Proyeccion sin XML de la respuesta (las 8 claves de proyectarResultado) o null. */
     public readonly ?array $resultadoParcial;

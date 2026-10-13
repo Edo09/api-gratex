@@ -25,6 +25,7 @@ require_once __DIR__ . '/write_ahead_test_lib.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfNumeroOcupadoException.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfEnvioInciertoException.php';
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfVentaRepetidaException.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfItemMapper.php';
 require_once __DIR__ . '/../src/Models/facturaModel.php';
 
@@ -70,14 +71,36 @@ final class Orden
     public static array $pasos = [];
 }
 
-/** Token fijo: no pide semilla ni firma nada. */
+/**
+ * Token fijo: no pide semilla ni firma nada. Los escenarios del POS (seccion 5)
+ * le piden ademas: las opciones de cada llamada, anotarse en Orden::$pasos, correr
+ * un espia al llamarlo o fallar.
+ */
 final class FakeAuth extends DgiiAuthService
 {
     public int $llamadas = 0;
+    /** @var list<array> opciones de cada llamada a autenticar (el POS pasa timeout) */
+    public array $opciones = [];
+    /** true: la llamada se anota como 'autenticar' en Orden::$pasos. */
+    public bool $anotarOrden = false;
+    /** Corre al llamarlo, antes de responder (lee la base a esa altura). */
+    public ?Closure $alLlamar = null;
+    /** Si no es null, autenticar lanza lo que devuelva: fn(): Throwable. */
+    public ?Closure $falla = null;
 
     public function autenticar(array $options = []): array
     {
         $this->llamadas++;
+        $this->opciones[] = $options;
+        if ($this->anotarOrden) {
+            Orden::$pasos[] = 'autenticar';
+        }
+        if ($this->alLlamar !== null) {
+            ($this->alLlamar)();
+        }
+        if ($this->falla !== null) {
+            throw ($this->falla)();
+        }
         return ['token' => 'tok-prueba', 'ambiente' => 'certecf'];
     }
 }
@@ -317,7 +340,8 @@ function logNuevo(): string
 /**
  * Una emision con dobles frescos. Opciones: tipo ('31'), modo (FakeReception),
  * espia, trucos (del gancho), sin_gancho, con_cr, fallo_dispense,
- * rollback_falso, payload (claves que pisan las del payload), limpiar (true).
+ * rollback_falso, payload (claves que pisan las del payload), limpiar (true),
+ * auth (fn(FakeAuth): void que configura el FakeAuth antes de emitir).
  */
 function correr(PDO $pdo, array $ids, array $op = []): array
 {
@@ -330,6 +354,9 @@ function correr(PDO $pdo, array $ids, array $op = []): array
     $antes = wa_contador($pdo, 'E' . $tipo);
     $em = emision($pdo, $ids, $tipo);
     $auth = new FakeAuth();
+    if (isset($op['auth'])) {
+        ($op['auth'])($auth);
+    }
     $signer = new FakeSigner();
     $signer->conCr = (bool) ($op['con_cr'] ?? false);
     $rec = new FakeReception($auth, $op['modo'] ?? 'acepta');
@@ -1034,6 +1061,229 @@ wa_chk('M4: recibirResumen lleva environment y timeout 5',
     $r['err'] === null && ($r['rec']->llamadas[0]['metodo'] ?? null) === 'recibirResumen'
     && ($r['rec']->opciones[0] ?? null) === ['environment' => 'certecf', 'timeout' => 5], [descErr($r['err']), $r['rec']->opciones]);
 chkComun('M4', $r);
+
+// ---------------------------------------------------------------------------
+// 5) Opciones del POS en emitir (Task 4 del plan POS y reenvio):
+// reclamar_secuencia, autenticar_despues_de_reservar y numerar_sin_rango.
+// Sin ellas todo es como antes (las secciones 1 a 4 lo prueban).
+// ---------------------------------------------------------------------------
+echo "\n== 5) Opciones del POS: reclamar_secuencia, autenticar_despues_de_reservar, numerar_sin_rango ==\n";
+
+/** Configura el FakeAuth de un escenario para anotar su llamada en Orden::$pasos. */
+$anotarAuth = static function (FakeAuth $a): void {
+    $a->anotarOrden = true;
+};
+
+// P1 reclamar_secuencia: con false el numero NO vuelve al contador tras el veredicto.
+$r = correr($pdo, $ids, ['modo' => 'rechaza', 'payload' => ['reclamar_secuencia' => true]]);
+wa_chk('P1: reclamar_secuencia true (el default): un rechazo devuelve el numero (contador sin cambio, un rollback)',
+    $r['err'] === null && $r['delta'] === 0 && count($r['ncf']->rollbacks) === 1, ['delta' => $r['delta'], 'rollbacks' => $r['ncf']->rollbacks]);
+$r = correr($pdo, $ids, ['modo' => 'rechaza', 'payload' => ['reclamar_secuencia' => false]]);
+wa_chk('P1: reclamar_secuencia false: el rechazo queda RECHAZADO y el numero NO vuelve (contador +1, ningun rollback)',
+    $r['err'] === null && ($r['res']['estado'] ?? null) === 'RECHAZADO' && ($r['filas'][0]['estado_dgii'] ?? null) === 'RECHAZADO'
+    && $r['delta'] === 1 && $r['ncf']->rollbacks === [], ['err' => descErr($r['err']), 'delta' => $r['delta'], 'rollbacks' => $r['ncf']->rollbacks]);
+wa_chk("P1: reclamar_secuencia false: ni siquiera se anota 'reclamar secuencia' en el log", !str_contains($r['log'], '[ECF] reclamar secuencia'), $r['log']);
+chkComun('P1', $r);
+$r = correr($pdo, $ids, ['tipo' => '32', 'modo' => 'rechaza', 'payload' => ['reclamar_secuencia' => false]]);
+wa_chk('P1: reclamar_secuencia false en el flujo RFCE (E32 < 250k): RFCE_RECHAZADO y el numero NO vuelve',
+    $r['err'] === null && ($r['res']['estado'] ?? null) === 'RFCE_RECHAZADO' && $r['delta'] === 1 && $r['ncf']->rollbacks === [],
+    ['err' => descErr($r['err']), 'estado' => $r['res']['estado'] ?? null, 'delta' => $r['delta']]);
+$r = correr($pdo, $ids, ['con_cr' => true, 'payload' => ['reclamar_secuencia' => false]]);
+wa_chk('P1: un fallo ANTES de reservar sigue devolviendo el numero aunque reclamar_secuencia sea false (no se uso)',
+    $r['err'] instanceof RuntimeException && $r['delta'] === 0 && count($r['ncf']->rollbacks) === 1, ['delta' => $r['delta'], 'rollbacks' => $r['ncf']->rollbacks]);
+
+// P2 autenticar_despues_de_reservar: el token se pide despues de guardar.
+$r = correr($pdo, $ids, ['auth' => $anotarAuth]);
+wa_chk('P2: sin la opcion el token se pide ANTES de reservar (la app no cambia)',
+    $r['orden'] === ['autenticar', 'reservar', 'confirmar'], $r['orden']);
+$r = correr($pdo, $ids, ['auth' => $anotarAuth, 'payload' => ['autenticar_despues_de_reservar' => true]]);
+wa_chk('P2: con la opcion el token se pide DESPUES de reservar y antes de confirmar',
+    $r['err'] === null && $r['orden'] === ['reservar', 'autenticar', 'confirmar'] && $r['auth']->llamadas === 1
+    && ($r['res']['estado'] ?? null) === 'ACEPTADO' && ($r['filas'][0]['estado_dgii'] ?? null) === 'ACEPTADO',
+    ['err' => descErr($r['err']), 'orden' => $r['orden']]);
+wa_chk('P2: el ctx reservar lleva el ambiente efectivo (el que tendria el token) y las mismas 13 claves',
+    ($r['ctxs']['reservar']['ambiente'] ?? null) === 'certecf' && array_keys($r['ctxs']['reservar'] ?? []) === CLAVES_RESERVAR,
+    $r['ctxs']['reservar'] ?? null);
+chkComun('P2', $r);
+
+// La fila ya esta guardada cuando se pide el token (con la opcion) y todavia no (sin ella).
+$filasAlPedirToken = [];
+foreach (['con' => true, 'sin' => false] as $nombre => $conOpcion) {
+    $r = correr($pdo, $ids, [
+        'payload' => $conOpcion ? ['autenticar_despues_de_reservar' => true] : [],
+        'auth' => static function (FakeAuth $a) use ($pdo, $nombre, &$filasAlPedirToken): void {
+            $a->alLlamar = static function () use ($pdo, $nombre, &$filasAlPedirToken): void {
+                $filasAlPedirToken[$nombre] = (int) $pdo->query("SELECT COUNT(*) FROM facturas WHERE estado_dgii = 'PENDIENTE_ENVIO'")->fetchColumn();
+            };
+        },
+    ]);
+}
+wa_chk('P2: cuando se pide el token la fila ya esta en PENDIENTE_ENVIO con la opcion, y todavia no existe sin ella',
+    $filasAlPedirToken === ['con' => 1, 'sin' => 0], $filasAlPedirToken);
+
+// Las opciones con las que se pidio el token, sin el certificado (no se imprime ni la clave).
+$opcionesDelToken = static fn(FakeAuth $a): array => array_map(
+    static fn(array $o): array => array_diff_key($o, ['certificate_content' => 1, 'certificate_password' => 1]),
+    $a->opciones
+);
+$r = correr($pdo, $ids, ['payload' => ['dgii_timeout' => 5, 'autenticar_despues_de_reservar' => true]]);
+wa_chk('P2: con dgii_timeout el token tambien se pide con esa espera (el POS no espera 30 s por un token)',
+    $r['auth']->llamadas === 1 && ($r['auth']->opciones[0]['timeout'] ?? null) === 5
+    && array_key_exists('certificate_content', $r['auth']->opciones[0]) && array_key_exists('certificate_password', $r['auth']->opciones[0]),
+    $opcionesDelToken($r['auth']));
+$r = correr($pdo, $ids, ['payload' => ['dgii_timeout' => 5]]);
+wa_chk('P2: sin la opcion el token se pide con la espera normal (dgii_timeout solo acorta el envio)',
+    $r['auth']->llamadas === 1 && !array_key_exists('timeout', $r['auth']->opciones[0]), $opcionesDelToken($r['auth']));
+
+// P2b el token falla despues de reservar: la fila queda ENVIO_INCIERTO, el numero no vuelve.
+$r = correr($pdo, $ids, [
+    'payload' => ['autenticar_despues_de_reservar' => true],
+    'auth' => static function (FakeAuth $a): void {
+        $a->anotarOrden = true;
+        $a->falla = static fn(): Throwable => new RuntimeException('HTTP request failed: timeout al pedir la semilla');
+    },
+]);
+$e = $r['err'];
+wa_chk('P2b: el token falla: EcfEnvioInciertoException, fase_fallida autenticar, marcado, sin resultado parcial',
+    $e instanceof EcfEnvioInciertoException && $e->faseFallida === 'autenticar' && $e->marcado === true
+    && $e->resultadoParcial === null && $e->facturaId > 0 && $e->eNcf === $r['e_ncf'], descErr($e));
+wa_chk('P2b: la fila queda ENVIO_INCIERTO y el numero NO vuelve (contador +1, ningun rollback)',
+    ($r['filas'][0]['estado_dgii'] ?? null) === 'ENVIO_INCIERTO' && $r['delta'] === 1 && $r['ncf']->rollbacks === [],
+    ['filas' => $r['filas'], 'delta' => $r['delta']]);
+wa_chk('P2b: orden reservar, autenticar, incierto; la DGII nunca recibio nada',
+    $r['orden'] === ['reservar', 'autenticar', 'incierto'] && $r['rec']->llamadas === [], ['orden' => $r['orden'], 'rec' => $r['rec']->llamadas]);
+chkEnVuelo('P2b', $r['filas'][0] ?? [], 'autenticar');
+wa_chk('P2b: el registro de cierre queda vacio al salir', enVuelo() === [], enVuelo());
+chkComun('P2b', $r);
+
+// P2c un fallo antes de reservar no pide el token y devuelve el numero.
+$r = correr($pdo, $ids, ['con_cr' => true, 'payload' => ['autenticar_despues_de_reservar' => true]]);
+wa_chk('P2c: CR en el XML con la opcion: no se autentico, el numero vuelve y no hay fila',
+    $r['err'] instanceof RuntimeException && $r['auth']->llamadas === 0 && $r['delta'] === 0 && $r['total_filas'] === 0,
+    ['auth' => $r['auth']->llamadas, 'delta' => $r['delta']]);
+// P2d sin gancho (integracion, gastos) las opciones del POS no hacen nada.
+$r = correr($pdo, $ids, ['sin_gancho' => true, 'payload' => $integracion + ['autenticar_despues_de_reservar' => true, 'numerar_sin_rango' => true]]);
+wa_chk('P2d: sin gancho se ignoran: el token se pide y el e-CF se envia como siempre',
+    $r['err'] === null && ($r['res']['estado'] ?? null) === 'ACEPTADO' && $r['auth']->llamadas === 1 && count($r['rec']->llamadas) === 1
+    && array_key_exists('factura_id', $r['res']) && $r['res']['factura_id'] === null && !array_key_exists('sin_rango', $r['res']),
+    ['err' => descErr($r['err']), 'res' => $r['res']['estado'] ?? null]);
+// P2e ambienteEfectivo: lo que la reserva guarda cuando el token se pide despues.
+$auth = new FakeAuth();
+wa_chk('P2e: ambienteEfectivo sin opciones es el del tenant o del .env (certecf) y respeta el override y los alias',
+    $auth->ambienteEfectivo() === 'certecf' && $auth->ambienteEfectivo(['environment' => 'prod']) === 'ecf'
+    && $auth->ambienteEfectivo(['environment' => null, 'ambiente' => 'test']) === 'testecf', $auth->ambienteEfectivo());
+
+// P3 numerar_sin_rango: sin rango con numeros libres, el numero siguiente; la fila se guarda y NO se envia.
+/** Deja el rango certecf de $tipo agotado en $hasta (current_value = numero_hasta). */
+$agotar = static function (PDO $c, string $tipo, int $hasta): void {
+    $c->prepare("UPDATE ncf_sequences SET numero_hasta = :h, current_value = :h WHERE type = :t AND ambiente = 'certecf'")
+        ->execute([':h' => $hasta, ':t' => $tipo]);
+};
+/** Devuelve el rango certecf de $tipo a su numero_hasta de la siembra. */
+$restaurar = static function (PDO $c, string $tipo): void {
+    $c->prepare("UPDATE ncf_sequences SET numero_hasta = 99999999 WHERE type = :t AND ambiente = 'certecf'")->execute([':t' => $tipo]);
+};
+$opcionesPos = ['numerar_sin_rango' => true, 'autenticar_despues_de_reservar' => true];
+try {
+    wa_limpiar($pdo);
+    $agotar($pdo, 'E32', 5);
+
+    $r = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false, 'auth' => $anotarAuth, 'payload' => $opcionesPos]);
+    $res = $r['res'] ?? [];
+    $fila = $r['filas'][0] ?? [];
+    $meta = facturaModel::metaEnvio($fila['respuesta_dgii'] ?? null);
+    $rango = $pdo->query("SELECT current_value, numero_hasta FROM ncf_sequences WHERE type = 'E32' AND ambiente = 'certecf'")->fetch(PDO::FETCH_ASSOC);
+    wa_chk('P3: E32 agotado: emitir devuelve PENDIENTE_ENVIO con sin_rango y el numero SIGUIENTE al ultimo (E320000000006)',
+        $r['err'] === null && ($res['estado'] ?? null) === 'PENDIENTE_ENVIO' && ($res['sin_rango'] ?? null) === true
+        && ($res['e_ncf'] ?? null) === 'E320000000006' && (int) ($res['factura_id'] ?? 0) > 0 && ($res['flujo'] ?? null) === 'RFCE',
+        ['err' => descErr($r['err']), 'res' => array_diff_key($res, ['signed_xml' => 1, 'rfce_xml' => 1])]);
+    wa_chk('P3: trae el XML firmado, el RFCE y el codigo de seguridad para imprimir',
+        is_string($res['signed_xml'] ?? null) && str_contains((string) $res['signed_xml'], '<SignatureValue>')
+        && is_string($res['rfce_xml'] ?? null) && ($res['codigo_seguridad'] ?? null) === 'QUJDRE'
+        && array_key_exists('track_id', $res) && $res['track_id'] === null && ($res['ambiente'] ?? null) === 'certecf', array_keys($res));
+    wa_chk('P3/spec 4.2.6: el XML del E32 fuera de rango no lleva FechaVencimientoSecuencia (ese tipo no la lleva)',
+        is_string($res['signed_xml'] ?? null) && !str_contains((string) $res['signed_xml'], 'FechaVencimientoSecuencia'), array_keys($res));
+    wa_chk('P3: ninguna llamada a la DGII, ni siquiera para el token',
+        $r['rec']->llamadas === [] && $r['auth']->llamadas === 0 && $r['fases'] === ['reservar'] && $r['orden'] === ['reservar'],
+        ['rec' => $r['rec']->llamadas, 'auth' => $r['auth']->llamadas, 'fases' => $r['fases']]);
+    wa_chk('P3: la fila queda PENDIENTE_ENVIO con el XML y el RFCE guardados',
+        count($r['filas']) === 1 && ($fila['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO' && (int) ($fila['tiene_xml'] ?? 0) === 1
+        && (int) ($fila['tiene_rfce'] ?? 0) === 1, $r['filas']);
+    wa_chk('P3: la meta de la fila: sin_rango true, rango_id null, dispensado y el numero usado',
+        array_keys($meta) === ['fase', 'desde', 'flujo', 'ambiente_secuencia', 'dispensado', 'rango_id', 'secuencia_valor', 'sin_rango']
+        && $meta['sin_rango'] === true && $meta['rango_id'] === null && $meta['dispensado'] === true
+        && $meta['secuencia_valor'] === 6 && $meta['ambiente_secuencia'] === 'certecf' && $meta['flujo'] === 'RFCE', $meta);
+    wa_chk('P3: el ctx reservar suma sin_rango a las 13 claves, con rango_id null',
+        array_keys($r['ctxs']['reservar'] ?? []) === array_merge(CLAVES_RESERVAR, ['sin_rango'])
+        && ($r['ctxs']['reservar']['sin_rango'] ?? null) === true
+        && array_key_exists('rango_id', $r['ctxs']['reservar'] ?? []) && $r['ctxs']['reservar']['rango_id'] === null,
+        $r['ctxs']['reservar'] ?? null);
+    wa_chk('P3: el contador pasa de numero_hasta (6 de 5) y el rango sigue autorizado hasta 5',
+        $r['delta'] === 1 && (int) $rango['current_value'] === 6 && (int) $rango['numero_hasta'] === 5 && $r['ncf']->rollbacks === [], [$rango, $r['delta']]);
+    wa_chk('P3: el registro de cierre no se armo (no hay envio que se quede a medias)', enVuelo() === [], enVuelo());
+    chkComun('P3', $r);
+
+    $r = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false, 'payload' => $opcionesPos]);
+    wa_chk('P3: la segunda venta toma el 7 (cada una su numero)',
+        ($r['res']['e_ncf'] ?? null) === 'E320000000007' && ($r['res']['sin_rango'] ?? null) === true && $r['delta'] === 1
+        && $r['total_filas'] === 2, ['res' => $r['res']['e_ncf'] ?? null, 'filas' => $r['total_filas']]);
+
+    // RF5, la mitad del servicio: con E32 agotado, E31 (que sigue teniendo rango) sale normal.
+    $r = correr($pdo, $ids, ['tipo' => '31', 'limpiar' => false, 'payload' => $opcionesPos]);
+    wa_chk('P3/RF5: E31 con rango sigue su camino normal: ACEPTADO, sin sin_rango, una llamada a la DGII',
+        $r['err'] === null && ($r['res']['estado'] ?? null) === 'ACEPTADO' && !array_key_exists('sin_rango', $r['res'] ?? [])
+        && count($r['rec']->llamadas) === 1 && array_keys($r['ctxs']['reservar'] ?? []) === CLAVES_RESERVAR,
+        ['err' => descErr($r['err']), 'estado' => $r['res']['estado'] ?? null]);
+
+    // Spec 4.2.6: el XML de un E31 fuera de rango lleva la fecha de vencimiento del ULTIMO rango conocido.
+    $agotar($pdo, 'E31', 5);
+    $r = correr($pdo, $ids, ['tipo' => '31', 'limpiar' => false, 'payload' => $opcionesPos]);
+    $vencRango = (string) $pdo->query("SELECT fecha_vencimiento FROM ncf_sequences WHERE type = 'E31' AND ambiente = 'certecf'")->fetchColumn();
+    $vencEnXml = DateTime::createFromFormat('Y-m-d', $vencRango)->format('d-m-Y');
+    wa_chk('P3/spec 4.2.6: E31 agotado: sin_rango, el numero 6 y el XML lleva la fecha de vencimiento del ultimo rango',
+        $r['err'] === null && ($r['res']['sin_rango'] ?? null) === true && ($r['res']['e_ncf'] ?? null) === 'E310000000006'
+        && str_contains((string) ($r['res']['signed_xml'] ?? ''), '<FechaVencimientoSecuencia>' . $vencEnXml . '</FechaVencimientoSecuencia>')
+        && $r['rec']->llamadas === [], ['err' => descErr($r['err']), 'esperada' => $vencEnXml, 'e_ncf' => $r['res']['e_ncf'] ?? null]);
+
+    // Sin la opcion el agotado sigue deteniendo la emision (la app no cambia).
+    $r = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false]);
+    wa_chk('P3: sin numerar_sin_rango el rango agotado sigue siendo EcfUsuarioException, sin fila ni avance del contador',
+        $r['err'] instanceof EcfUsuarioException && str_contains($r['err']->getMessage(), 'Sin rango e-NCF disponible para E32')
+        && $r['delta'] === 0 && $r['fases'] === [], ['err' => descErr($r['err']), 'delta' => $r['delta']]);
+
+    // Un fallo antes de reservar con un numero fuera de rango: el numero vuelve (rango_id null).
+    $r = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false, 'con_cr' => true, 'payload' => $opcionesPos]);
+    wa_chk('P3: el CR en el XML con un numero fuera de rango: el numero 8 vuelve al contador (rollback con rango_id null)',
+        $r['err'] instanceof RuntimeException && $r['delta'] === 0
+        && $r['ncf']->rollbacks === [['type' => 'E32', 'valor' => 8, 'ambiente' => 'certecf', 'rango_id' => null]],
+        ['delta' => $r['delta'], 'rollbacks' => $r['ncf']->rollbacks]);
+
+    // Sin ninguna fila de rango para el tipo y ambiente tampoco hay numero que dar.
+    $filasAntes = (int) $pdo->query('SELECT COUNT(*) FROM facturas')->fetchColumn();
+    $pdo->exec("UPDATE ncf_sequences SET ambiente = 'wa_fuera' WHERE type = 'E32' AND ambiente = 'certecf'");
+    try {
+        $r = correr($pdo, $ids, ['tipo' => '32', 'limpiar' => false, 'payload' => $opcionesPos]);
+    } finally {
+        $pdo->exec("UPDATE ncf_sequences SET ambiente = 'certecf' WHERE type = 'E32' AND ambiente = 'wa_fuera'");
+    }
+    wa_chk('P3: sin ninguna fila de rango la emision se detiene con la excepcion de siempre (el POS cae a factura simple)',
+        $r['err'] instanceof EcfUsuarioException && str_contains($r['err']->getMessage(), 'Sin rango e-NCF disponible para E32')
+        && $r['fases'] === [] && $r['total_filas'] === $filasAntes, ['err' => descErr($r['err']), 'filas' => $r['total_filas']]);
+} finally {
+    $restaurar($pdo, 'E32');
+    $restaurar($pdo, 'E31');
+    wa_limpiar($pdo);
+}
+
+// P4 el gancho dice "venta repetida" (1062 sobre la clave del POS): el numero esta libre y vuelve.
+$r = correr($pdo, $ids, ['trucos' => ['reservar' => function () {
+    throw new EcfVentaRepetidaException('4f1c2d3e-0a1b-4c5d-8e9f-0123456789ab');
+}]]);
+wa_chk('P4: EcfVentaRepetidaException sale tal cual y el numero vuelve a la secuencia (ninguna fila lo ocupa)',
+    $r['err'] instanceof EcfVentaRepetidaException && $r['err']->clave === '4f1c2d3e-0a1b-4c5d-8e9f-0123456789ab'
+    && $r['delta'] === 0 && count($r['ncf']->rollbacks) === 1 && $r['total_filas'] === 0, ['err' => descErr($r['err']), 'delta' => $r['delta']]);
+wa_chk('P4: la recepcion no se llamo', $r['rec']->llamadas === []);
+chkComun('P4', $r);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.

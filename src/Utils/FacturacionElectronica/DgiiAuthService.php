@@ -152,6 +152,18 @@ class DgiiAuthService
         ];
     }
 
+    /**
+     * Ambiente (testecf | certecf | ecf) con el que autenticar() pediria el token
+     * con estas mismas $options, SIN llamar a la DGII: el override de $options, el
+     * del tenant (AmbienteResolver) o el global del .env, con los alias ya
+     * normalizados. Lo usa quien necesita el ambiente antes de tener el token
+     * (la reserva del write-ahead del POS, que pide el token despues de guardar).
+     */
+    public function ambienteEfectivo(array $options = []): string
+    {
+        return $this->buildConfig($options)['environment'];
+    }
+
     private function buildConfig(array $options): array
     {
         // Sin override explicito: ambiente per-tenant (tenants.ambiente) o global.
