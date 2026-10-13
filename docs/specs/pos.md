@@ -336,7 +336,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **K6 · Cierre** — `Piloto`
 - [x] **Conteo a ciegas:** se cuenta sin ver cuánto debería haber.
-- [x] **Por denominaciones:** billetes de 2000, 1000, 500, 200, 100, 50 y 20; monedas de 25, 10, 5 y 1; y un campo "otros / centavos" en monto. El sistema suma.
+- [x] **Por denominaciones:** billetes de 2000, 1000, 500, 200, 100 y 50; monedas de 25, 10, 5 y 1; y un campo "otros / centavos" en monto. El sistema suma. *El billete de 20 salió el 2026-10-13 (no circula). Los cierres anteriores que lo contaron lo siguen mostrando al reimprimir.*
 - [x] Al confirmar el conteo se muestran el esperado y la diferencia. **El conteo no se puede editar después.**
 - [x] La diferencia **solo se registra** (no pide supervisor). Se puede escribir una nota.
 
