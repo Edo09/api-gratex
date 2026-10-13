@@ -303,6 +303,16 @@ $chk('repetir la clave de la rechazada: 201 repetida con la misma venta, sin otr
 
 // ---------------------------------------------------------------------------
 echo "\n6. DGII lenta: se imprime y se reenvia sola (F6, F7)\n";
+// El reenvio espera PosVenta::REENVIO_ESPERA_SEG (2 minutos desde la reserva) antes de tocar una venta recien
+// guardada, ENVIO_INCIERTO incluida: la DGII puede seguir procesandola y ConsultaTrackIds no devolverla todavia.
+// Esta prueba simula que pasaron: la hora de 'desde' de lo pendiente, hace 10 minutos (la pone PHP, como la
+// puso la API: no la de MySQL, que puede estar en otra zona horaria).
+$envejecer = function () use ($pdo, $dbA): void {
+    $pdo->prepare('UPDATE `' . $dbA . '`.facturas SET respuesta_dgii = JSON_SET(respuesta_dgii, \'$.desde\', ?)
+                   WHERE pos_idempotency_key IS NOT NULL AND envio_pendiente = 1 AND estado_dgii IN (\'PENDIENTE_ENVIO\', \'ENVIO_INCIERTO\')
+                     AND JSON_VALID(respuesta_dgii)')
+        ->execute([date('Y-m-d H:i:s', time() - 600)]);
+};
 $modo('lento');
 $t0 = microtime(true);
 [$h, $r] = $api('POST', '/pos/ventas', $venta([['product_id' => $arroz, 'cantidad' => 1]], 3800, 1, 5000), $ana);
@@ -317,6 +327,7 @@ $chk('guardada con envio_pendiente = 1, el RFCE firmado y su movimiento de caja'
     && (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.pos_caja_movimientos WHERE factura_id = {$filaL['id']}")->fetchColumn() === 1, $filaL);
 $modo('acepta');
 sleep(4); // que el mock termine la respuesta lenta (ya lo habia recibido)
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq1);
 $chk('reenviar: la DGII ya la tenia (la consulta la encuentra) y queda aceptada SIN reenviarla',
     $h === 200 && ($r['data']['aceptadas'] ?? 0) === 1 && ($r['data']['pendientes'] ?? -1) === 0 && $rfceRecibidos($encfLento) === 1, [$h, $r, $rfceRecibidos($encfLento)]);
@@ -327,9 +338,11 @@ $modo('caido');
 [$h, $r] = $api('POST', '/pos/ventas', $venta([['product_id' => $agua, 'cantidad' => 1]], 2500, 2), $ana);
 $encfCaido = (string) ($r['data']['venta']['e_ncf'] ?? '');
 $chk('caida (503 sin respuesta util): 201 con envio pendiente', $h === 201 && ($r['data']['venta']['envio_pendiente'] ?? false) === true, [$h, $r]);
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq1);
 $chk('sigue caida: el reenvio la deja pendiente', $h === 200 && ($r['data']['pendientes'] ?? 0) === 1 && ($r['data']['aceptadas'] ?? -1) === 0, [$h, $r]);
 $modo('acepta');
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq1);
 $chk('volvio: la consulta no la encuentra, se reenvia el RFCE guardado y queda aceptada', $h === 200 && ($r['data']['aceptadas'] ?? 0) === 1
     && ($r['data']['pendientes'] ?? -1) === 0

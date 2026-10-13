@@ -250,16 +250,28 @@ $chk('rechazado despues (ConsultaResultado): el reenvio lo reporta para la alert
 
 // ---------------------------------------------------------------------------
 echo "\n6. DGII caida o lenta con un e-CF completo (F6, F7)\n";
+// El reenvio espera PosVenta::REENVIO_ESPERA_SEG (2 minutos desde la reserva) antes de tocar una venta recien
+// guardada, ENVIO_INCIERTO incluida: la DGII puede seguir procesandola y ConsultaTrackIds no devolverla todavia.
+// Esta prueba simula que pasaron: la hora de 'desde' de lo pendiente, hace 10 minutos (la pone PHP, como la
+// puso la API: no la de MySQL, que puede estar en otra zona horaria).
+$envejecer = function () use ($pdo, $dbA): void {
+    $pdo->prepare('UPDATE `' . $dbA . '`.facturas SET respuesta_dgii = JSON_SET(respuesta_dgii, \'$.desde\', ?)
+                   WHERE pos_idempotency_key IS NOT NULL AND envio_pendiente = 1 AND estado_dgii IN (\'PENDIENTE_ENVIO\', \'ENVIO_INCIERTO\')
+                     AND JSON_VALID(respuesta_dgii)')
+        ->execute([date('Y-m-d H:i:s', time() - 600)]);
+};
 $modo('caido');
 [$h, $r] = $vender($una, 5000, $nuevo);
 $encfCaido = (string) ($r['data']['venta']['e_ncf'] ?? '');
 $fac = $encfCaido !== '' ? $factura($encfCaido) : null;
 $chk('caida: 201, ENVIO_INCIERTO, sin trackId, con el XML firmado guardado', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_INCIERTO'
     && $fac && $fac['track_id'] === null && (int) $fac['envio_pendiente'] === 1 && !empty($fac['xml_firmado']), [$h, $r]);
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('sigue caida: ConsultaTrackIds dice que no lo tiene, el reenvio falla y sigue pendiente', $h === 200 && ($r['data']['pendientes'] ?? 0) === 1
     && $factura($encfCaido)['estado_dgii'] === 'ENVIO_INCIERTO', [$h, $r]);
 $modo('acepta');
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('volvio: se reenvia, recibe trackId y en la misma vuelta queda ACEPTADO', $h === 200 && ($r['data']['aceptadas'] ?? 0) === 1
     && $factura($encfCaido)['estado_dgii'] === 'ACEPTADO' && str_starts_with((string) $factura($encfCaido)['track_id'], 'tk-'), [$h, $r]);
@@ -270,6 +282,7 @@ $encfLento = (string) ($r['data']['venta']['e_ncf'] ?? '');
 $modo('acepta');
 $chk('lenta: 201 pendiente sin trackId', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_INCIERTO', [$h, $r]);
 sleep(4);
+$envejecer();
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('ConsultaTrackIds la encuentra (la DGII la tenia): toma su trackId y queda ACEPTADA SIN reenviarla',
     $h === 200 && $factura($encfLento)['estado_dgii'] === 'ACEPTADO' && str_starts_with((string) $factura($encfLento)['track_id'], 'tk-')
