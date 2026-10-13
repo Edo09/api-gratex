@@ -48,6 +48,11 @@ wa_chk('suites: las dos APIs con /api, los tres usuarios, la clave y la carpeta 
     && $envSuites['POS_TEST_ADMIN_A'] === 'admin_pos_a' && $envSuites['POS_TEST_USER_A'] === 'user_pos_a' && $envSuites['POS_TEST_PASS'] === $s['clave_usuarios']
     && $envSuites['POS_TEST_DGII_MOCK_DIR'] === '/tmp/mock'
     && array_filter(array_merge($envApi, $envSuites), static fn($v) => preg_match('#gratex\.net|fiscalpoint\.com\.do#', (string) $v) === 1) === []);
+$envDb = pos_scratch_env_base_por_defecto($cred, 'smhynzte_wa_scratch_sin_gate');
+wa_chk('base por defecto de la API (peticion sin tenant): solo la master de prueba, con las cinco DB_*',
+    array_keys($envDb) === ['DB_HOST', 'DB_PORT', 'DB_NAME', 'DB_USER', 'DB_PASS'] && $envDb['DB_NAME'] === 'smhynzte_wa_scratch_sin_gate'
+    && $envDb['DB_HOST'] === 'db.example.com' && $envDb['DB_USER'] === 'u_prueba' && $envDb['DB_PASS'] === 'clave-de-prueba'
+    && array_intersect_key($envDb, $envApi) === []);
 $raizTmp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'wa_pos_raiz_' . getmypid();
 mkdir($raizTmp . DIRECTORY_SEPARATOR . 'tools', 0777, true);
 $sinNada = pos_scratch_revisar_raiz($raizTmp);

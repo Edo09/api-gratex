@@ -18,10 +18,18 @@ require_once __DIR__ . '/pos_scratch_prepare.php';
 const POS_SCRATCH_SUITES = ['test_pos_backend', 'test_pos_venta', 'test_pos_cierre', 'test_pos_e31', 'test_pos_write_ahead'];
 
 /**
+ * Segundos que la API espera a la DGII (POS_DGII_TIMEOUT; el minimo que acepta PosVenta es 3). La
+ * suite de venta exige que la venta con la DGII lenta responda en menos de 7,5 s: son el timeout mas lo
+ * que tarda el resto de la venta, que contra una base remota (decenas de ms por consulta) son 2 a 5 s.
+ * Con 5 el margen no alcanza y la prueba falla a ratos; con 3 si.
+ */
+const POS_SCRATCH_TIMEOUT_DGII = '3';
+
+/**
  * Entorno de la API (multi-tenant). La master es la base de prueba; los tenants
  * traen sus credenciales cifradas en la tabla tenants. Sin DB_*: con varios
- * tenants la base sale de la tabla, y una API sin tenant debe fallar, no caer
- * en otra base.
+ * tenants la base sale de la tabla. La base por defecto de una peticion sin
+ * tenant la agrega pos_scratch_main (pos_scratch_env_base_por_defecto).
  */
 function pos_scratch_env_api(array $cred, string $master, array $secretos, string $mockUrl, array $cert, bool $enforce): array
 {
@@ -33,12 +41,25 @@ function pos_scratch_env_api(array $cred, string $master, array $secretos, strin
         'MASTER_DB_USER' => $cred['user'], 'MASTER_DB_PASS' => $cred['pass'],
         'MASTER_ENCRYPTION_KEY' => $secretos['clave_maestra'],
         'POS_PIN_PEPPER' => $secretos['pepper'],
-        'POS_DGII_TIMEOUT' => '5',
+        'POS_DGII_TIMEOUT' => POS_SCRATCH_TIMEOUT_DGII,
         'DGII_ECF_ENVIRONMENT' => 'testecf',
         'DGII_ECF_BASE_URL' => $mockUrl, 'DGII_FC_BASE_URL' => $mockUrl,
         'DGII_ECF_CERT_PATH' => $cert['path'], 'DGII_ECF_CERT_PASSWORD' => $cert['password'],
         'RNC_CONSULTA_URL' => $mockUrl . '/rnc/consulta',
     ];
+}
+
+/**
+ * Base por defecto de la API: la de una peticion que no resuelve tenant (un token ajeno, una ruta
+ * sin mapear). Es la master de prueba, que ya paso la guarda. Sin ella, en sombra
+ * (PERMISSIONS_ENFORCE=false) el gate deja pasar al controller, Database no sabe a que base ir y
+ * responde 500 donde la instalacion real (con DB_* en su .env) responde 401: la suite de backend
+ * lo comprueba ("el token del equipo no abre rutas de app.*") y docs/specs/pos.md anota que da
+ * lo mismo en enforce y en sombra.
+ */
+function pos_scratch_env_base_por_defecto(array $cred, string $master): array
+{
+    return ['DB_HOST' => $cred['host'], 'DB_PORT' => $cred['port'], 'DB_NAME' => $master, 'DB_USER' => $cred['user'], 'DB_PASS' => $cred['pass']];
 }
 
 /** Entorno de las suites: a quien llaman y como entran (los nombres de la cabecera de test_pos_venta.php). */
@@ -53,7 +74,7 @@ function pos_scratch_env_suites(array $cred, string $master, array $secretos, st
         'POS_TEST_DGII_MOCK_DIR' => $mockDir,
         'DGII_ECF_BASE_URL' => $mockUrl, 'DGII_FC_BASE_URL' => $mockUrl,
         'RNC_CONSULTA_URL' => $mockUrl . '/rnc/consulta',
-        'POS_DGII_TIMEOUT' => '5',
+        'POS_DGII_TIMEOUT' => POS_SCRATCH_TIMEOUT_DGII,
     ];
 }
 
@@ -172,7 +193,10 @@ function pos_scratch_main(): never
     file_put_contents($dirMock . DIRECTORY_SEPARATOR . 'modo.txt', 'acepta');
 
     $mock = wa_servidor('pos_mock_' . $etiqueta, 'tools/mock_dgii_local.php', 8298, ['MOCK_DGII_STATE' => $dirMock], $raiz);
-    $envApi = pos_scratch_env_api($cred, $info['master'], $secretos, $mock, $cert, wa_arg('enforce') !== null);
+    $envApi = array_merge(
+        pos_scratch_env_api($cred, $info['master'], $secretos, $mock, $cert, wa_arg('enforce') !== null),
+        pos_scratch_env_base_por_defecto($cred, $info['master'])
+    );
     $api = wa_servidor('pos_api_' . $etiqueta, 'index.php', 8299, $envApi, $raiz);
     $api2 = wa_servidor('pos_api2_' . $etiqueta, 'index.php', 8297, array_merge($envApi, ['POS_DGII_TIMEOUT' => '30']), $raiz);
     $envSuites = pos_scratch_env_suites($cred, $info['master'], $secretos, $api, $api2, $mock, $dirMock);
