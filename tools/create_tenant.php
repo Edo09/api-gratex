@@ -16,7 +16,10 @@
  * Uso integracion (PowerShell):
  *   php tools/create_tenant.php --tipo=integracion `
  *     --nombre="Cliente A SRL" --rnc=131111111 `
- *     --cert-path=ruta/al/cert.p12 --cert-pass=claveCert [--ambiente=ecf]
+ *     --cert-path=ruta/al/cert.p12 --cert-pass=claveCert [--ambiente=certecf]
+ *
+ * --ambiente: certecf | ecf | testecf. Sin el flag, integracion arranca en certecf
+ * (mientras certifica) y app conserva ecf. Desde la web es obligatorio elegirlo.
  *
  * Cliente con VARIAS empresas (una sola credencial para todas, --grupo):
  *   # 1a empresa: inicia el grupo (queda agrupada consigo misma)
@@ -38,7 +41,7 @@
  *     --db-name=tenant_clienteB --db-user=clienteB_user --db-pass=secreto `
  *     --razon-social="CLIENTE B SRL" --direccion="Av. X #1" `
  *     [--admin-email=admin@b.com --admin-pass=clave1234 --admin-name="Admin B" --admin-username=admin_b] `
- *     [--cert-path=... --cert-pass=...] [--db-host=localhost] [--skip-create-db]
+ *     [--cert-path=... --cert-pass=...] [--ambiente=certecf] [--db-host=localhost] [--skip-create-db]
  *
  * MySQL admin (privilegio CREATE DATABASE, solo tipo app): ADMIN_DB_USER/PASS del
  * .env, o si faltan MASTER_DB_USER/PASS. En hosting compartido usar --skip-create-db.
@@ -102,8 +105,23 @@ if ($missing) {
 
 $nombre       = (string) $opts['nombre'];
 $rnc          = preg_replace('/\D/', '', (string) $opts['rnc']); // solo digitos
-$ambiente     = (string) ($opts['ambiente'] ?? 'ecf');
 $certPass     = isset($opts['cert-pass']) ? (string) $opts['cert-pass'] : null;
+
+// Ambiente. Sin el parametro (CLI), integracion arranca en certecf: todo tenant
+// certifica antes de producir, y un default ecf hacia que el set de pruebas DGII
+// saliera como facturas fiscales reales. App conserva su default historico (ecf).
+// La web (onboard.html) lo manda siempre: un vacio es un error, no un default.
+if (isset($opts['ambiente'])) {
+    $ambiente = strtolower(trim((string) $opts['ambiente']));
+    if ($ambiente === '') {
+        fail('Falta el ambiente: elija certecf (mientras certifica) o ecf (produccion, ya certificada).');
+    }
+} else {
+    $ambiente = $tipo === 'integracion' ? 'certecf' : 'ecf';
+}
+if (!in_array($ambiente, ['certecf', 'ecf', 'testecf'], true)) {
+    fail("Ambiente invalido: '{$ambiente}'. Use certecf, ecf o testecf.");
+}
 
 // Grupo de empresas (opcional): un cliente con varios RNC usa UNA credencial
 // para todos. Se pasa el id del tenant "cabeza" del grupo; para la primera
@@ -167,6 +185,7 @@ if ($createAdmin) {
 }
 
 echo "== Onboarding tenant ({$tipo}): {$nombre} (RNC {$rnc}) ==\n";
+echo "   ambiente: {$ambiente}" . ($ambiente === 'ecf' ? ' (PRODUCCION)' : '') . "\n";
 
 // =============================================================================
 // Pre-flight: choques contra los UNIQUE del master ANTES de crear nada. Sin
@@ -211,6 +230,13 @@ if ($grupoId !== null) {
             . " y este es '{$tipo}'. Un grupo no puede mezclar tipos.");
     }
     if ((int) ($cabeza['grupo_id'] ?? 0) !== $grupoId) {
+        // El id es de una HERMANA (ya agrupada bajo otra cabeza): se pide la
+        // cabeza. El UPDATE de abajo aqui la sacaria de su grupo y lo partiria.
+        if ($cabeza['grupo_id'] !== null) {
+            $grupoReal = (int) $cabeza['grupo_id'];
+            fail("--grupo={$grupoId}: el tenant #{$grupoId} '{$cabeza['nombre']}' pertenece al grupo #{$grupoReal}."
+                . PHP_EOL . "   Use grupo={$grupoReal} (el id de la cabeza del grupo).");
+        }
         fail("--grupo={$grupoId}: el tenant #{$grupoId} '{$cabeza['nombre']}' aun no encabeza un grupo."
             . PHP_EOL . "   Agrupalo primero:  UPDATE tenants SET grupo_id = {$grupoId} WHERE id = {$grupoId};"
             . PHP_EOL . "   (o creala con --grupo=self la proxima vez).");
@@ -293,10 +319,16 @@ if ($tipo === 'app') {
 // Certificado (.p12): requerido en integracion, opcional en app
 // =============================================================================
 $certPathRel = null;
+$certIguales = []; // tenants con el mismo .p12 (sha256); solo para avisar
 if ($certPathArg !== null && $certPathArg !== '') {
     if (!is_file($certPathArg)) {
         fail("cert-path no existe: {$certPathArg}");
     }
+    // Respaldo contra el .p12 de la empresa anterior arrastrado en el formulario:
+    // se compara contra los cert de los demas tenants ANTES de mover el archivo.
+    // Solo avisa: hay casos validos (misma persona delegada para ambos RNC).
+    $certHash = (string) hash_file('sha256', $certPathArg);
+    $certIguales = $certHash !== '' ? tenantsConMismoCert($masterPdo, $certHash) : [];
     // Carpeta raiz de certificados, relativa a la raiz del proyecto. Se puede
     // sobreescribir con CERT_DIR en el .env cuando el deploy la tiene con otro
     // nombre; lo que importa es que coincida con lo que se graba en
@@ -318,6 +350,11 @@ if ($certPathArg !== null && $certPathArg !== '') {
     }
     $certPathRel = $certDir . '/' . $rnc . '/cert.p12';
     echo "   certificado guardado en {$certPathRel}\n";
+    foreach ($certIguales as $igual) {
+        echo PHP_EOL . "!! WARNING: el .p12 es IDENTICO al del tenant #{$igual['id']} '{$igual['nombre']}' (RNC {$igual['rnc']})." . PHP_EOL;
+        echo "   Solo es valido si la misma persona esta delegada para ambos RNC en la DGII." . PHP_EOL;
+        echo "   Si no, corrija el certificado ({$certPathRel} + su clave) antes de la Fase 2." . PHP_EOL;
+    }
 }
 
 // =============================================================================
@@ -451,6 +488,7 @@ if (!$isCli && isset($_FILES['logo']) && is_array($_FILES['logo'])
 echo "\n== Tenant creado OK ==\n";
 echo "  tenant_id  : {$tenantId}\n";
 echo "  tipo       : {$tipo}\n";
+echo "  ambiente   : {$ambiente}\n";
 echo "  db_name    : " . ($tipo === 'app' ? $dbName : '(integracion: sin DB)') . "\n";
 if ($tipo === 'app') {
     echo "  admin      : " . ($createAdmin ? $adminEmail : '(sin usuario admin)') . "\n";
@@ -467,13 +505,28 @@ if ($webhookUrl !== null && $webhookUrl !== '') {
     echo "  WEBHOOK SECRET : {$webhookSecret}\n";
     echo "  >> El cliente verifica el header X-Gratex-Signature: sha256=HMAC(body, WEBHOOK SECRET).\n";
 }
-echo "  >> Entregar API KEY + API SECRET al cliente.\n";
-echo "  >> El API SECRET se muestra UNA sola vez (se guarda solo su hash).\n";
-echo "     Headers: X-API-KEY: <key>  /  X-API-SECRET: <secret>\n";
 if ($grupoId !== null && !$grupoSelf) {
-    echo "  >> Esta empresa pertenece al grupo #{$grupoId}: el cliente puede seguir usando\n";
-    echo "     la credencial del grupo y elegir esta empresa por su RNC ({$rnc}) en el payload.\n";
-    echo "     La credencial de arriba es la suya propia y tambien sirve — no hace falta entregarla.\n";
+    // Hermana: el cliente ya tiene la credencial del grupo. Este par abre TODO
+    // el grupo (switchToSibling), asi que entregarlo solo duplica la exposicion.
+    echo "  >> NO entregar esta API KEY + API SECRET al cliente. El cliente usa la credencial\n";
+    echo "     del grupo (la de la cabeza, tenant #{$grupoId}) y elige esta empresa por su RNC\n";
+    echo "     ({$rnc}) en el payload.\n";
+    echo "  >> Este par TAMBIEN abre todo el grupo. Cuando ya no haga falta, desactivelo con:\n";
+    echo "       UPDATE tenants SET api_secret_hash = '' WHERE id = {$tenantId};\n";
+    echo "     (TenantResolver rechaza un hash vacio.)\n";
+    echo "  >> El API SECRET se muestra UNA sola vez (se guarda solo su hash).\n";
+} else {
+    echo "  >> Entregar API KEY + API SECRET al cliente.\n";
+    echo "  >> El API SECRET se muestra UNA sola vez (se guarda solo su hash).\n";
+    echo "     Headers: X-API-KEY: <key>  /  X-API-SECRET: <secret>\n";
+}
+foreach ($certIguales as $igual) {
+    echo "  !! .p12 identico al del tenant #{$igual['id']} '{$igual['nombre']}' (RNC {$igual['rnc']}): ver WARNING arriba.\n";
+}
+if ($tipo === 'integracion' && $ambiente === 'ecf') {
+    echo "\n!! ATENCION: este tenant se creo directamente en PRODUCCION (ambiente ecf).\n";
+    echo "!! NO corra el set de pruebas DGII (Fase 2/3/4) para el: saldrian facturas fiscales reales.\n";
+    echo "!! Si todavia tiene que certificar: UPDATE tenants SET ambiente = 'certecf' WHERE id = {$tenantId};\n";
 }
 exit(0);
 
@@ -508,6 +561,34 @@ function runSqlFile(PDO $pdo, string $path): void
     }
     // PDO_MYSQL ejecuta multiples sentencias separadas por ';' en un exec().
     $pdo->exec($sql);
+}
+
+/**
+ * Tenants cuyo .p12 guardado es identico (sha256) al que se esta dando de alta.
+ * tenants.cert_path se resuelve igual que CertResolver::toAbsolute (absoluta tal
+ * cual, relativa desde la raiz del proyecto); los archivos que no existen se saltan.
+ * @return array<int, array{id: int|string, nombre: string, rnc: string}>
+ */
+function tenantsConMismoCert(PDO $pdo, string $hash): array
+{
+    $iguales = [];
+    $rows = $pdo->query(
+        "SELECT id, nombre, rnc, cert_path FROM tenants WHERE cert_path IS NOT NULL AND cert_path <> '' ORDER BY id"
+    );
+    foreach ($rows as $t) {
+        $path = (string) $t['cert_path'];
+        if (!preg_match('/^[A-Za-z]:[\\\\\/]/', $path) && !str_starts_with($path, '/')) {
+            $path = dirname(__DIR__) . DIRECTORY_SEPARATOR . str_replace(['/', '\\'], DIRECTORY_SEPARATOR, $path);
+        }
+        if (!is_file($path)) {
+            continue;
+        }
+        $h = @hash_file('sha256', $path);
+        if ($h !== false && hash_equals($h, $hash)) {
+            $iguales[] = ['id' => $t['id'], 'nombre' => (string) $t['nombre'], 'rnc' => (string) $t['rnc']];
+        }
+    }
+    return $iguales;
 }
 
 /**

@@ -51,6 +51,14 @@
   table { width:100%; border-collapse:collapse; font-size:12.5px; margin-top:10px; }
   th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); }
   th { color:var(--mut); font-weight:600; }
+  /* Empresa y ambiente a los que va lo que se hace en el paso (credencial de grupo). */
+  .empInfo { margin:12px 0 4px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+             background:#0b1220; font-size:13px; }
+  .empInfo.err { border-color:var(--err); background:#3f1414; }
+  .empInfo .avisoAmb { color:#fecaca; margin-top:6px; line-height:1.45; font-weight:600; }
+  .nota { margin-top:10px; padding:8px 11px; border-radius:8px; font-size:12.5px; line-height:1.45; }
+  .nota.warn { background:#3f2d12; color:var(--warn); }
+  .nota.err { background:#3f1414; color:#fecaca; }
 </style>
 </head>
 <body>
@@ -61,7 +69,7 @@
   <input id="certToken" type="password" placeholder="CERT_RUN_TOKEN" style="width:160px"
          title="Solo para correr las fases del set de pruebas">
   <select id="empresa" style="display:none;width:auto;max-width:340px"
-          title="Credencial de grupo: las consultas, la aprobación y el emisor de esta página van a nombre de esta empresa"></select>
+          title="Credencial de grupo: las consultas, la aprobación, el emisor y las fases del set de esta página van a nombre de esta empresa"></select>
 </header>
 
 <div class="layout">
@@ -98,9 +106,10 @@ function faltanCreds() {
 
 // Multi-empresa: una credencial de grupo cubre varias empresas y el RNC de cada
 // llamada elige cual. La empresa del selector va como ?rnc= en las consultas
-// (estado, bandejas, xml), como rnc_comprador al aprobar y como emisor
-// precargado al emitir y en la fase 4. Sin grupo el selector no aparece y las
-// llamadas salen igual que antes.
+// (estado, bandejas, xml), como rnc_comprador al aprobar, como emisor
+// precargado al emitir y en la fase 4, y como empresa_rnc en las fases 2/3/4 (el
+// runner no envia nada si el set es de otra empresa o no esta en certecf). Sin
+// grupo el selector no aparece y las llamadas salen igual que antes.
 let empresas = [];
 const EMPRESA_KEY = 'empresaRnc';
 /** RNC elegido, solo si la credencial cubre mas de una empresa. */
@@ -128,13 +137,124 @@ async function cargarEmpresas() {
     o.textContent = 'Empresa: ' + e.nombre + ' — ' + e.rnc + (e.ambiente ? ' (' + e.ambiente + ')' : '');
     sel.appendChild(o);
   }
-  sel.value = empresas.some(e => e.rnc === guardada) ? guardada : (empresas[0] ? empresas[0].rnc : '');
+  // Sin eleccion guardada: la primera empresa que esta certificando, no la cabeza
+  // del grupo (que suele ser la que ya esta en produccion).
+  const certificando = empresas.find(e => e.ambiente === 'certecf') || empresas[0];
+  sel.value = empresas.some(e => e.rnc === guardada) ? guardada : (certificando ? certificando.rnc : '');
   sel.style.display = empresas.length > 1 ? '' : 'none';
 }
 /** La empresa con la que se trabaja: la del selector, o la unica de la credencial. */
 async function empresaActual() {
   if (!empresas.length) await cargarEmpresas();
   return empresaSel();
+}
+/** RNC solo digitos: el server tambien normaliza asi al elegir la empresa. */
+const soloDigitos = v => String(v || '').replace(/\D/g, '');
+function empresaPorRnc(rnc) {
+  const r = soloDigitos(rnc);
+  return r ? (empresas.find(e => soloDigitos(e.rnc) === r) || null) : null;
+}
+/** Cambia la empresa del selector sin redibujar el paso (no se pierde lo escrito). */
+function seleccionarEmpresa(rnc) {
+  $('empresa').value = rnc;
+  try { sessionStorage.setItem(EMPRESA_KEY, rnc); } catch (e) { /* sin storage */ }
+  pintarEmpresaInfo();
+}
+
+/**
+ * Pinta en cada .empInfo del paso visible a que empresa va lo que se hace ahi y
+ * en que ambiente esta. Fuera de certecf todo sale como e-CF REALES: aviso en
+ * rojo. data-contexto="emision" (paso 2) sigue al RNC emisor del formulario,
+ * que es el que elige la empresa en el server.
+ */
+function pintarEmpresaInfo() {
+  document.querySelectorAll('.empInfo').forEach(el => {
+    const emision = el.dataset.contexto === 'emision';
+    const rncForm = emision && $('emRnc') ? soloDigitos($('emRnc').value) : '';
+    const emp = rncForm ? empresaPorRnc(rncForm) : empresaSel();
+    el.className = 'empInfo';
+    el.textContent = '';
+    if (!emp) {
+      el.textContent = faltanCreds()
+        ? 'Empresa: sin verificar — pon X-API-KEY y X-API-SECRET arriba.'
+        : (empresas.length
+          ? 'RNC ' + rncForm + ': no está entre las empresas de esta credencial (el server lo va a rechazar).'
+          : 'Empresa: sin verificar — GET /integracion/empresas no respondió (revisa las credenciales en el paso 1).');
+      return;
+    }
+    const amb = emp.ambiente || '';
+    const linea = document.createElement('div');
+    linea.append('Empresa: ');
+    const nombre = document.createElement('b');
+    nombre.textContent = emp.nombre;
+    linea.append(nombre, ' — RNC ' + emp.rnc + ' — ambiente ');
+    const pill = document.createElement('span');
+    pill.className = 'pill ' + (amb === 'certecf' ? 'ok' : 'err');
+    pill.style.marginLeft = '0';
+    pill.textContent = amb || 'sin ambiente';
+    linea.append(pill);
+    el.appendChild(linea);
+    if (amb !== 'certecf') {
+      el.classList.add('err');
+      const aviso = document.createElement('div');
+      aviso.className = 'avisoAmb';
+      // Solo ecf (o vacio, que el server trata como ecf) es produccion; testecf es otro ambiente de pruebas.
+      const real = amb === 'ecf' || amb === '';
+      aviso.textContent = !real
+        ? 'Esta empresa está en "' + amb + '", no en certecf: lo que se envíe va a ese ambiente de la DGII, ' +
+          'no al de certificación. ' + (emision ? 'Emitir pide confirmación.' : 'Las fases se niegan a enviar contra ella (el dry-run sí corre).')
+        : emision
+        ? 'Esta empresa NO está en certecf: lo que emitas aquí es un e-CF REAL de producción ante la DGII, ' +
+          'con una secuencia real. Emitir pide confirmación.'
+        : 'Esta empresa NO está en certecf: el set de pruebas saldría como e-CF REALES. Las fases se niegan a ' +
+          'enviar contra ella (el dry-run sí corre). Elige arriba la empresa que se está certificando.';
+      el.appendChild(aviso);
+    }
+  });
+}
+
+/**
+ * Paso 2 llama al API directo (no pasa por el pre-flight de los runners): si la
+ * empresa del emisor no esta en certecf, lo que sale es un e-CF REAL. Pide
+ * confirmacion explicita nombrando la empresa.
+ */
+async function confirmarEmisionReal(rncEmisor) {
+  if (faltanCreds()) return true; // call() avisa que faltan
+  // Lista fresca, no la de cuando se abrio la pagina: una empresa promovida a ecf
+  // mientras tanto (otra pestana, SQL) tiene que pedir confirmacion.
+  let fresca = null;
+  try {
+    const r = await call('GET', '/integracion/empresas');
+    if (r.status === 200 && r.json && Array.isArray(r.json.data)) fresca = r.json.data;
+  } catch (e) { fresca = null; }
+  if (!fresca || !fresca.length) {
+    return confirm('No se pudo verificar el ambiente de la empresa (GET /integracion/empresas no respondió).\n\n' +
+      'Si el RNC ' + (rncEmisor || '?') + ' ya está en producción (ecf), esto emitirá un e-CF REAL ante la DGII.\n\n' +
+      '¿Emitir de todos modos?');
+  }
+  empresas = fresca;
+  pintarEmpresaInfo();
+  const emp = empresaPorRnc(rncEmisor);
+  // Un RNC fuera de la credencial lo rechaza el server: no hay nada que confirmar.
+  if (!emp || emp.ambiente === 'certecf') return true;
+  if (emp.ambiente && emp.ambiente !== 'ecf') {
+    return confirm('ATENCIÓN: ' + emp.nombre + ' (RNC ' + emp.rnc + ') está en ambiente "' + emp.ambiente +
+      '", no en certecf: el e-CF va a ese ambiente de la DGII, no al de certificación.\n\n¿Emitir de todos modos?');
+  }
+  return confirm('ATENCIÓN: ' + emp.nombre + ' (RNC ' + emp.rnc + ') está en ambiente "' +
+    (emp.ambiente || 'sin ambiente') + '", no en certecf.\n\n' +
+    'Esto emitirá un e-CF REAL de producción ante la DGII, con una secuencia real de la empresa. ' +
+    'No es una prueba.\n\n¿Emitir de todos modos?');
+}
+
+/** "NOMBRE — RNC" de una respuesta de /integracion/* (estado y xml traen rnc y empresa). */
+function empresaDeRespuesta(j) {
+  return (j && j.rnc) ? ((j.empresa ? j.empresa + ' — ' : '') + j.rnc) : '';
+}
+/** Si la respuesta no dice de que empresa es: la que se pidio (selector o la de la credencial). */
+function empresaPedida() {
+  const emp = empresaSel();
+  return emp ? emp.nombre + ' — ' + emp.rnc + ' (pedida)' : '';
 }
 
 // La salida del runner es lo unico que queda de una corrida: cert_run.php borra
@@ -186,7 +306,9 @@ function pintarSalida() {
   } else if (abierta) {
     aviso = ' — INCOMPLETA: se cortó la conexión o se recargó la página antes del final.' + sigue;
   }
+  const emp = empresaDeCorrida(salida);
   $('runnerInfo').textContent = 'Última corrida: fase ' + salida.fase + (salida.dry ? ' (dry-run)' : '') +
+    (emp.rnc ? ', ' + (emp.nombre ? emp.nombre + ' — ' : '') + 'RNC ' + emp.rnc : '') +
     ', ' + new Date(salida.cuando).toLocaleString() + aviso;
   $('runnerInfo').style.color = abierta ? 'var(--warn)' : '';
   $('runnerBar').style.display = 'block';
@@ -197,6 +319,66 @@ function encfsDe(texto) {
   const vistos = new Set();
   (texto.match(/E(?:3[1-4]|4[1-7])\d{10}/g) || []).forEach(e => vistos.add(e));
   return [...vistos];
+}
+
+/**
+ * Empresa de la que es una corrida: la que imprimio el runner antes del primer
+ * caso ("==> Empresa: X — RNC Y — ambiente Z", el RNC que de verdad se envio) o,
+ * si no llego a imprimirla, la que se guardo al lanzarla. Las corridas guardadas
+ * antes de este cambio no tienen ninguna de las dos.
+ */
+function empresaDeCorrida(s) {
+  if (!s) return { rnc: '', nombre: '' };
+  const m = String(s.texto || '').match(/^==> Empresa: (.+?) — RNC (\d{9,11}) — ambiente/m);
+  if (m) return { rnc: m[2], nombre: m[1].startsWith('(') ? (s.empresa || '') : m[1] };
+  return { rnc: s.rnc || '', nombre: s.empresa || '' };
+}
+
+function mostrarNota(el, clase, texto) {
+  el.className = 'nota ' + clase;
+  el.textContent = texto;
+  el.style.display = texto ? 'block' : 'none';
+}
+
+/**
+ * Antes de tomar los e-NCF de la ultima corrida (pasos 3 y 8): se consultan con
+ * ?rnc= de la empresa del selector, asi que tienen que ser de esa empresa. Si la
+ * corrida es de otra empresa de la credencial, cambia el selector a esa y lo
+ * avisa; si no es de ninguna, avisa y devuelve false (no se mezclan empresas).
+ */
+async function alinearEmpresaConCorrida(nota) {
+  mostrarNota(nota, '', '');
+  if (!salida) return true;
+  const corrida = empresaDeCorrida(salida);
+  if (!corrida.rnc) {
+    // Corrida de antes de este cambio. Sin grupo hay una sola empresa: nada que avisar.
+    if (rncGrupo()) {
+      mostrarNota(nota, 'warn', 'La corrida guardada no dice de qué empresa es (es de antes de este cambio): ' +
+        'se consultan a nombre de la empresa elegida arriba. Verifica la columna Empresa.');
+    }
+    return true;
+  }
+  if (!empresas.length && !faltanCreds()) await cargarEmpresas();
+  if (!empresas.length) {
+    mostrarNota(nota, 'err', 'La última corrida es de RNC ' + corrida.rnc + ', pero no se pudo cargar la lista de ' +
+      'empresas de la credencial (revisa las credenciales en el paso 1). No se cargan sus e-NCF: se consultarían ' +
+      'sin saber a nombre de qué empresa.');
+    return false;
+  }
+  const actual = empresaSel();
+  if (actual && soloDigitos(actual.rnc) === corrida.rnc) return true;
+  const emp = empresaPorRnc(corrida.rnc);
+  if (emp) {
+    seleccionarEmpresa(emp.rnc);
+    mostrarNota(nota, 'warn', 'La última corrida es de ' + emp.nombre + ' (RNC ' + emp.rnc + '): el selector de ' +
+      'Empresa cambió a esa empresa para consultarla a su nombre' +
+      (actual ? ' (estaba en ' + actual.nombre + ').' : '.'));
+    return true;
+  }
+  mostrarNota(nota, 'err', 'La última corrida es de RNC ' + corrida.rnc +
+    (corrida.nombre ? ' (' + corrida.nombre + ')' : '') + ', que no está entre las empresas de esta credencial. ' +
+    'No se cargan sus e-NCF: se consultarían a nombre de otra empresa.');
+  return false;
 }
 
 async function call(method, path, body) {
@@ -274,6 +456,7 @@ const PASOS = [
     <p>El smoke real: arma el XML, lo firma con el certificado del tenant y lo manda a DGII.
     El <b>e-NCF lo pones tú</b> — tiene que estar dentro del rango que DGII autorizó.</p>
     <div class="panel">
+      <div class="empInfo" data-contexto="emision"></div>
       <div class="row">
         <div><label>Tipo e-CF</label>
           <select id="emTipo">
@@ -330,6 +513,7 @@ const PASOS = [
       <textarea id="stLista" placeholder="E310000000034&#10;E340000000002"></textarea>
       <button class="act" id="btnEstadoLista">Consultar todos</button>
       <button class="act ghost" id="btnTomarCorrida">Tomar los e-NCF de la última corrida</button>
+      <div id="stNota" class="nota" style="display:none"></div>
       <div id="outEstadoLista" style="display:none;margin-top:12px"></div>
     </div>` },
 
@@ -369,7 +553,9 @@ const PASOS = [
 
     <div class="panel">
       <h3 style="margin:0;font-size:15px">Fase 2 — set de pruebas</h3>
-      <p class="muted">Lee el xlsx de DGII y emite cada caso. El e-NCF sale del propio xlsx.</p>
+      <div class="empInfo"></div>
+      <p class="muted">Lee el xlsx de DGII y emite cada caso. El e-NCF sale del propio xlsx. Si su
+      <code>RNCEmisor</code> no es la empresa de arriba, el runner no envía nada.</p>
       <label>Archivo xlsx del set</label><input type="file" id="f2xlsx" accept=".xlsx,.xlsm">
       <label>Filtrar tipos (opcional, ej. E31,E32)</label><input type="text" id="f2filter">
       <label style="display:flex;gap:8px;align-items:center;color:var(--txt)">
@@ -389,7 +575,9 @@ const PASOS = [
 
     <div class="panel">
       <h3 style="margin:0;font-size:15px">Fase 3 — aprobaciones comerciales</h3>
-      <p class="muted">Lee la hoja ACEECF_Generadas del mismo xlsx.</p>
+      <div class="empInfo"></div>
+      <p class="muted">Lee la hoja ACEECF_Generadas del mismo xlsx. Si su <code>RNCComprador</code> no es
+      la empresa de arriba, el runner no envía nada.</p>
       <label>Archivo xlsx del set</label><input type="file" id="f3xlsx" accept=".xlsx,.xlsm">
       <button class="act" data-fase="3" data-dry="1">Dry-run</button>
       <button class="act" data-fase="3">Correr fase 3</button>
@@ -397,8 +585,9 @@ const PASOS = [
 
     <div class="panel">
       <h3 style="margin:0;font-size:15px">Fase 4 — emisión de los 10 tipos</h3>
+      <div class="empInfo"></div>
       <p class="muted">Sin xlsx: el runner genera la data y <b>asigna el e-NCF</b>, así que hay que
-      decirle desde qué número numerar y quién es el emisor.</p>
+      decirle desde qué número numerar y quién es el emisor (tiene que ser la empresa de arriba).</p>
       <div class="row">
         <div><label>encf-start (número o E31:7,E32:5)</label><input type="text" id="f4encf" value="1"></div>
         <div><label>RNC emisor <span style="color:#94a3b8">— el del tenant, no el del comprador</span></label>
@@ -464,6 +653,7 @@ const PASOS = [
       <label>e-NCF (uno por línea)</label>
       <textarea id="xmlLista" placeholder="E320000000012&#10;E320000000013"></textarea>
       <button class="act ghost" id="btnXmlTomar">Tomar los RFCE de la última corrida</button>
+      <div id="xmlNota" class="nota" style="display:none"></div>
       <label style="display:flex;gap:8px;align-items:center;color:var(--txt)">
         <input type="checkbox" id="xmlConRnc" style="width:auto">
         Anteponer el RNC al nombre del archivo (<code id="xmlEjemplo">RNCE320000000012.xml</code>)</label>
@@ -508,9 +698,13 @@ function wire(n) {
 
   if (n === 2) {
     // Prellenar emisor con la empresa elegida arriba (o la de la credencial).
+    pintarEmpresaInfo();
     empresaActual().then(emp => {
       if (emp) { $('emRnc').value = emp.rnc || ''; $('emRazon').value = emp.nombre || ''; }
-    }).catch(() => {});
+      pintarEmpresaInfo();
+    }).catch(() => pintarEmpresaInfo());
+    // El RNC emisor es el que elige la empresa en el server: el aviso lo sigue.
+    $('emRnc').addEventListener('input', pintarEmpresaInfo);
 
     $('btnEmitir').onclick = async (e) => {
       e.target.disabled = true;
@@ -526,7 +720,14 @@ function wire(n) {
           precio_unitario: parseFloat($('emPrecio').value) || 0,
         }],
       };
-      try { render('outEmitir', await call('POST', '/integracion/ecf', payload), payload.e_ncf); }
+      try {
+        if (!(await confirmarEmisionReal(payload.emisor.rnc))) {
+          $('outEmitir').style.display = 'block';
+          $('outEmitir').textContent = 'Cancelado: no se emitió nada.';
+          return;
+        }
+        render('outEmitir', await call('POST', '/integracion/ecf', payload), payload.e_ncf);
+      }
       catch (err) { $('outEmitir').style.display = 'block'; $('outEmitir').textContent = err.message; }
       finally { e.target.disabled = false; }
     };
@@ -543,8 +744,10 @@ function wire(n) {
       finally { e.target.disabled = false; }
     };
 
-    $('btnTomarCorrida').onclick = () => {
+    $('btnTomarCorrida').onclick = async () => {
       releerSalida();
+      // Se consultan con ?rnc= del selector: primero, que sea la empresa de la corrida.
+      if (!(await alinearEmpresaConCorrida($('stNota')))) { $('stLista').value = ''; return; }
       const lista = salida ? encfsDe(salida.texto) : [];
       $('stLista').value = lista.length ? lista.join('\n') : '';
       if (!lista.length) $('stLista').placeholder = 'No hay una corrida guardada en este navegador.';
@@ -563,7 +766,9 @@ function wire(n) {
       const tabla = document.createElement('table');
       // "Enviado" = el ultimo envio de ese e-NCF (el respaldo que se consulto): si
       // es de una corrida vieja, el estado tambien lo es.
-      tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Enviado</th><th>Estado DGII</th><th>Mensajes</th></tr></thead>';
+      // "Empresa" = la que respondio (rnc/empresa de la respuesta): con credencial de
+      // grupo, un NO_ENCONTRADO suele ser un e-NCF consultado a nombre de otra empresa.
+      tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Empresa</th><th>Enviado</th><th>Estado DGII</th><th>Mensajes</th></tr></thead>';
       const cuerpo = document.createElement('tbody');
       tabla.appendChild(cuerpo);
       out.appendChild(tabla);
@@ -573,11 +778,13 @@ function wire(n) {
         const fila = document.createElement('tr');
         const celda = t => { const td = document.createElement('td'); td.textContent = t; fila.appendChild(td); return td; };
         celda(lista[i]);
+        const tdEmpresa = celda(empresaPedida());
         const tdEnviado = celda('');
         let estado = '', clase = 'warn', mensajes = '';
         try {
           const r = await call('GET', '/integracion/estado?' + new URLSearchParams({ e_ncf: lista[i] }));
           const j = r.json || {};
+          if (empresaDeRespuesta(j)) tdEmpresa.textContent = empresaDeRespuesta(j);
           if (r.status === 200 && j.status === true) {
             tdEnviado.textContent = j.fecha_emision || '';
             estado = j.estado || (j.consulta && j.consulta.estado) || '?';
@@ -645,11 +852,14 @@ function wire(n) {
     // El emisor de la fase 4 es la empresa que se certifica: la elegida arriba
     // (credencial de grupo) o la de la credencial. Se rellena para no confundirlo
     // con el RNC del comprador de prueba de DGII (131880681), el error facil aqui.
+    // Cada fase muestra a que empresa va y su ambiente (fuera de certecf, en rojo).
+    pintarEmpresaInfo();
     empresaActual().then(emp => {
+      pintarEmpresaInfo();
       if (!emp) return;
       if (!$('f4rnc').value) $('f4rnc').value = emp.rnc || '';
       if (!$('f4razon').value) $('f4razon').value = emp.nombre || '';
-    }).catch(() => {});
+    }).catch(() => pintarEmpresaInfo());
 
     document.querySelectorAll('button[data-fase]').forEach(btn => {
       btn.onclick = async () => correrFase(btn);
@@ -748,8 +958,10 @@ function wireXmlIntegros() {
     if (emp && emp.rnc) $('xmlEjemplo').textContent = emp.rnc + 'E320000000012.xml';
   }).catch(() => {});
 
-  $('btnXmlTomar').onclick = () => {
+  $('btnXmlTomar').onclick = async () => {
     releerSalida();
+    // Se bajan y verifican con ?rnc= del selector: primero, que sea la empresa de la corrida.
+    if (!(await alinearEmpresaConCorrida($('xmlNota')))) { $('xmlLista').value = ''; return; }
     const lista = salida ? rfceDe(salida.texto) : [];
     $('xmlLista').value = lista.join('\n');
     if (!lista.length) {
@@ -780,7 +992,7 @@ function wireXmlIntegros() {
     const resumen = document.createElement('div');
     out.appendChild(resumen);
     const tabla = document.createElement('table');
-    tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Enviado</th><th>Código seg.</th><th>Verificación DGII</th><th></th></tr></thead>';
+    tabla.innerHTML = '<thead><tr><th>e-NCF</th><th>Empresa</th><th>Enviado</th><th>Código seg.</th><th>Verificación DGII</th><th></th></tr></thead>';
     const cuerpo = document.createElement('tbody');
     tabla.appendChild(cuerpo);
     out.appendChild(tabla);
@@ -791,6 +1003,7 @@ function wireXmlIntegros() {
       const fila = document.createElement('tr');
       const celda = t => { const td = document.createElement('td'); td.textContent = t; fila.appendChild(td); return td; };
       celda(f.encf);
+      const tdEmpresa = celda(empresaPedida());
       const tdFecha = celda('');
       const tdCodigo = celda('');
       const tdEstado = celda('');
@@ -807,6 +1020,7 @@ function wireXmlIntegros() {
       try {
         const r = await call('GET', '/integracion/xml?' + new URLSearchParams({ e_ncf: f.encf }));
         const j = r.json || {};
+        if (empresaDeRespuesta(j)) tdEmpresa.textContent = empresaDeRespuesta(j);
         if (r.status !== 200 || j.status !== true || !j.xml_firmado) {
           pill('warn', 'HTTP ' + r.status);
           tdAccion.textContent = (j && j.error) || r.txt.slice(0, 200);
@@ -892,9 +1106,21 @@ async function correrFase(btn) {
 
   corriendo = true;
   document.querySelectorAll('button[data-fase]').forEach(b => b.disabled = true);
+  // La empresa elegida va como empresa_rnc en todas las fases: el runner no envía
+  // nada si el set (RNCEmisor / RNCComprador del xlsx, o el RNC emisor de la fase 4)
+  // es de otra, y aparte verifica en /integracion/empresas que esté en certecf.
+  let emp = null;
+  try { emp = await empresaActual(); } catch (e) { emp = null; }
+  const rncEmpresa = emp ? soloDigitos(emp.rnc) : '';
+  if (rncEmpresa) fd.append('empresa_rnc', rncEmpresa);
+  // La corrida guarda de qué empresa es: los pasos 3 y 8 consultan sus e-NCF a su nombre.
   salida = { fase, dry: !!btn.dataset.dry, cuando: new Date().toISOString(), terminado: false,
              actualizado: Date.now(),
-             texto: 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') + '...\n\n' };
+             rnc: rncEmpresa || (fase === '4' ? soloDigitos($('f4rnc').value) : ''),
+             empresa: emp ? (emp.nombre || '') : '',
+             texto: 'Corriendo fase ' + fase + (btn.dataset.dry ? ' (dry-run)' : '') +
+               (emp ? ' — ' + emp.nombre + ' (RNC ' + emp.rnc + ', ' + (emp.ambiente || 'sin ambiente') + ')' : '') +
+               '...\n\n' };
   guardarSalida();
   pintarSalida();
   // Se escribe en `salida` (no solo en el <pre>): si el usuario cambia de paso
@@ -937,7 +1163,7 @@ $('empresa').addEventListener('change', () => {
 pintar();
 // Con credenciales guardadas en la sesion, el selector aparece solo si la
 // credencial cubre varias empresas; entonces se redibuja con la elegida.
-cargarEmpresas().then(() => { if (empresas.length > 1) pintar(); }).catch(() => {});
+cargarEmpresas().then(() => { if (empresas.length > 1) pintar(); else pintarEmpresaInfo(); }).catch(() => {});
 </script>
 </body>
 </html>

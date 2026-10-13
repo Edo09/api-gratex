@@ -12,9 +12,10 @@ class IntegracionStoreModel
 {
     private PDO $conexion;
 
-    public function __construct()
+    /** @param PDO|null $conexion Solo para pruebas (SQLite en memoria); en uso normal, el master. */
+    public function __construct(?PDO $conexion = null)
     {
-        $this->conexion = MasterDatabase::getInstance()->getConnection();
+        $this->conexion = $conexion ?? MasterDatabase::getInstance()->getConnection();
     }
 
     // ---------------------------------------------------------------- recibidos
@@ -35,6 +36,42 @@ class IntegracionStoreModel
         );
         $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf]);
         return $stmt->fetch() ?: null;
+    }
+
+    /**
+     * De las empresas dadas, las que tienen registrado el e-CF recibido
+     * rnc_emisor + e_ncf. Sirve para deducir cual empresa de un grupo es la
+     * compradora cuando la credencial de grupo aprueba sin mandar rnc_comprador.
+     *
+     * Solo busca entre los tenant_id de $empresas: quien llama decide el
+     * universo (las empresas del grupo), este metodo no amplia el acceso.
+     *
+     * @param array<int,array{id:int}> $empresas filas de TenantResolver::siblings()
+     * @return array las filas de $empresas que lo recibieron, en el mismo orden
+     */
+    public function empresasConRecibido(array $empresas, string $rncEmisor, string $eNcf): array
+    {
+        $porId = [];
+        foreach ($empresas as $e) {
+            $porId[(int) $e['id']] = $e;
+        }
+        if (!$porId) {
+            return [];
+        }
+        $marcas = implode(',', array_fill(0, count($porId), '?'));
+        // DISTINCT: un reenvio de DGII puede dejar mas de una fila del mismo
+        // e-CF en la misma empresa; eso no la vuelve ambigua.
+        $stmt = $this->conexion->prepare(
+            "SELECT DISTINCT tenant_id FROM ecf_recibidos
+              WHERE tenant_id IN ({$marcas}) AND rnc_emisor = ? AND e_ncf = ?"
+        );
+        $stmt->execute(array_merge(array_keys($porId), [$rncEmisor, $eNcf]));
+        $conRecibido = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+
+        return array_values(array_filter(
+            $porId,
+            fn(array $e) => in_array((int) $e['id'], $conRecibido, true)
+        ));
     }
 
     public function getRecibidoByTrackId(int $tenantId, string $trackId): ?array

@@ -140,7 +140,8 @@ empresa se elige en cada llamada por su RNC.
 | Aprobar/rechazar | `rnc_comprador` del cuerpo |
 | Bandejas (recibidos, aprobaciones) | `?rnc=<RNC>` en la URL |
 
-Donde el RNC es opcional y no lo manda, la llamada va a la empresa dueña de la credencial.
+Donde el RNC es opcional y no lo manda, la llamada va a la empresa dueña de la credencial;
+al aprobar o rechazar, a la empresa que recibió la factura, si podemos determinarla (sección 9).
 **Mándelo siempre**: así cada llamada dice explícitamente de qué empresa es.
 
 Para saber qué empresas cubre su credencial:
@@ -664,7 +665,8 @@ aviso que no traiga `X-Gratex-Signature` o cuya firma no coincida.**
   "e_ncf": "E310000000028",
   "fecha_emision": "01-08-2026",
   "monto_total": 6608.00,
-  "estado": "1"
+  "estado": "1",
+  "rnc_comprador": "131111111"
 }
 ```
 
@@ -676,14 +678,29 @@ aviso que no traiga `X-Gratex-Signature` o cuya firma no coincida.**
 | `monto_total` | Sí | Monto total del comprobante recibido, tal cual aparece en `/recibidos` |
 | `estado` | Sí | `1` = Aceptado · `2` = Rechazado |
 | `detalle_motivo` | Si `estado=2` | Motivo del rechazo |
-| `rnc_comprador` | Recomendado | Cuál de **sus** empresas recibió la factura. Sin él, se usa la empresa dueña de la credencial |
+| `rnc_comprador` | Sí, si administra varias empresas | Cuál de **sus** empresas recibió la factura. Si su credencial cubre una sola empresa puede omitirlo |
 
 No envíe otros campos; en particular, no envíe `ambiente`: la aprobación o el rechazo se envían
 automáticamente al mismo ambiente en que se recibió la factura.
 
-**Respuesta.** `{ "status": true, "data": { rnc_emisor, e_ncf, estado_aprobacion, track_id,
-estado_dgii, codigo_seguridad, ambiente, fecha_envio, dgii_response } }`. `estado_aprobacion`
-es la decisión que usted envió (`1` o `2`).
+**Si administra varias empresas, mande siempre `rnc_comprador`.** Con él, la decisión sale a
+nombre de esa empresa y firmada con su certificado. Si lo omite, buscamos la factura
+(`rnc_emisor` + `e_ncf`) entre las recibidas por todas sus empresas: si la recibió exactamente
+una, se aprueba o rechaza por ella; si no, la llamada responde `422` y no se envía nada a la
+DGII:
+
+- Ninguna de sus empresas la tiene: `No hay un e-CF recibido <e_ncf> de <rnc_emisor> en ninguna
+  empresa del grupo; mande rnc_comprador con el RNC de la empresa que lo recibio.`
+- La tienen varias: `El e-CF <e_ncf> de <rnc_emisor> lo recibieron varias empresas del grupo
+  (<RNC>, <RNC>); mande rnc_comprador con el RNC de la empresa que aprueba.`
+
+En los dos casos, repita la llamada con `rnc_comprador`. Un `rnc_comprador` que no sea de una de
+sus empresas también responde `422`.
+
+**Respuesta.** `{ "status": true, "data": { rnc_emisor, e_ncf, rnc_comprador, empresa,
+estado_aprobacion, track_id, estado_dgii, codigo_seguridad, ambiente, fecha_envio,
+dgii_response } }`. `rnc_comprador` y `empresa` indican la empresa por la que se envió la
+decisión. `estado_aprobacion` es la decisión que usted envió (`1` o `2`).
 
 **Cómo saber si la DGII registró su decisión.** Mire el código HTTP y `dgii_response.codigo`:
 
@@ -710,7 +727,7 @@ sistema el resultado de cada envío.
 | `403` | Endpoint no corresponde a su tipo de cuenta | Contáctenos |
 | `404` | La ruta no existe. En `GET /estado` sin `track_id` ni `codigo_seguridad`: no tenemos registro de ese e-NCF para esa empresa, o es un E32 menor de RD$250,000. En `GET /xml`: no hay ningún envío de ese e-NCF para esa empresa | Revise la URL, el `e_ncf` y el `rnc`. En `/estado`, envíe el `track_id`, o el `codigo_seguridad` si es un E32 menor de RD$250,000 |
 | `405` | Método HTTP incorrecto | Emisión y aprobación son POST; lo demás, GET |
-| `422` | Emisión: falta `e_ncf` o `emisor.rnc`. Aprobación: falta un campo obligatorio, `estado` no es `1` ni `2`, o `estado=2` sin `detalle_motivo`. Estado y XML: falta `e_ncf` (en XML, también si está mal formado). En cualquier llamada: el RNC indicado no es de ninguna de sus empresas | El campo `error` dice qué falta; corrija y repita |
+| `422` | Emisión: falta `e_ncf` o `emisor.rnc`. Aprobación: falta un campo obligatorio, `estado` no es `1` ni `2`, o `estado=2` sin `detalle_motivo`; o, con varias empresas y sin `rnc_comprador`, la factura no aparece en ninguna de ellas o aparece en más de una (sección 9). Estado y XML: falta `e_ncf` (en XML, también si está mal formado). En cualquier llamada: el RNC indicado no es de ninguna de sus empresas | El campo `error` dice qué falta; corrija y repita |
 | `502` | No se pudo completar la operación. En la emisión puede ser un dato del cuerpo que no pasó la validación (`tipo_ecf` inválido, `emisor` sin `razon_social` o `direccion`, `e_ncf` que no corresponde al `tipo_ecf`, E31 sin RNC del comprador, nota sin `informacion_referencia`, fecha inválida) o una falla de comunicación con la DGII | Lea el campo `error` y siga la nota de abajo |
 
 **Sobre los reintentos de una emisión con `502`:**
@@ -755,7 +772,7 @@ mezclan los dos ambientes.
 
 ### Lista de verificación antes de salir a producción
 
-- [ ] Cada llamada lleva el RNC de la empresa: `emisor.rnc` al emitir, `?rnc=` al consultar, `rnc_comprador` al aprobar
+- [ ] Cada llamada lleva el RNC de la empresa: `emisor.rnc` al emitir, `?rnc=` al consultar, `rnc_comprador` al aprobar (con varias empresas, siempre: sin él la aprobación puede responder `422`)
 - [ ] El `e_ncf` se genera desde un contador propio **por empresa y por tipo**, dentro del rango autorizado, sin repetir
 - [ ] `fecha_vencimiento_secuencia` se envía en todos los tipos salvo E32/E34 y corresponde al rango autorizado en **producción**
 - [ ] Las fechas van como `DD-MM-AAAA`, con guiones

@@ -48,6 +48,11 @@
  * tools/xml_integracion): es la unica copia a mano, y para los E32 <250k es el
  * XML integro que hay que subir al portal DGII.
  *
+ * Antes de enviar nada verifica la empresa (cert_empresa_preflight.php): el
+ * --emisor-rnc tiene que ser igual a --empresa-rnc si vino (la empresa elegida
+ * en integracion.html) y estar en ambiente 'certecf' segun /integracion/empresas.
+ * --permitir-produccion (solo por CLI) deja pasar otro ambiente.
+ *
  *   # Enviar E34 creando los E31 en la misma corrida:
  *   php tools/send_fase4_simulation.php ... \
  *       --counts=E31:2,E32_gte_250k:0,E32_lt_250k:0,E33:0,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0 \
@@ -60,6 +65,8 @@
  * Para reenviar solo E33/E34 contra E31 ya aceptados:
  *   --refs-e31-file=tools/fase4_no_notes_estados.json --refs-date=27-05-2026
  */
+
+require_once __DIR__ . '/cert_empresa_preflight.php';
 
 const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_CLIENT_ID = 3511;
@@ -170,6 +177,22 @@ function main(array $argv): int
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
     if ($preloadedE31Refs !== []) {
         fwrite(STDOUT, "==> " . count($preloadedE31Refs) . " referencias E31 precargadas\n");
+    }
+
+    // Integracion: el --emisor-rnc elige la empresa del grupo que emite, y cada
+    // empresa tiene su propio ambiente. Antes de enviar nada: que sea la elegida
+    // y que este en certecf.
+    if ($integracion && !certEmpresaPreflightCli([
+        'api' => $apiBase,
+        'api_key' => $apiKey,
+        'api_secret' => $apiSecret,
+        'rncs' => [$emisor['rnc'] ?? ''],
+        'origen' => '--emisor-rnc',
+        'distinto' => '--emisor-rnc %1$s no coincide con la empresa elegida %2$s.'
+            . ' Corrige el RNC emisor o elige esa empresa en integracion.html',
+        'dry_run' => $dryRun,
+    ] + certEmpresaOpciones($opts))) {
+        return 2;
     }
 
     $results = [];

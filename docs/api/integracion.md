@@ -51,7 +51,7 @@ ellos actúa por sus hermanos** y el RNC del payload elige la empresa.
 | Llamada | Selector de empresa | Si se omite |
 |---|---|---|
 | `POST /ecf` | `emisor.rnc` | (obligatorio) |
-| `POST /aprobacion-comercial` | `rnc_comprador` | la dueña de la credencial |
+| `POST /aprobacion-comercial` | `rnc_comprador` | la empresa del grupo que recibió ese e-CF (`422` si ninguna o varias; ver la sección de aprobación) |
 | `GET /recibidos` · `/aprobaciones` | `?rnc=` | la dueña de la credencial |
 
 El salto lo hace `TenantResolver::switchToSibling()`, que deniega salvo que: haya tenant
@@ -181,7 +181,7 @@ Formato de error: `{ "status": false, "error": "<mensaje>" }`.
 ## POST `/api/integracion/aprobacion-comercial` — Aprobar/rechazar
 
 Como comprador, el tenant acepta o rechaza un e-CF que le emitieron. Se arma y firma el
-ACECF con su certificado y se envía a DGII.
+ACECF con el certificado de la empresa compradora y se envía a DGII.
 
 ```json
 {
@@ -190,7 +190,8 @@ ACECF con su certificado y se envía a DGII.
   "fecha_emision": "01-08-2026",
   "monto_total": 6608.00,
   "estado": "1",
-  "detalle_motivo": null
+  "detalle_motivo": null,
+  "rnc_comprador": "131111111"
 }
 ```
 
@@ -202,12 +203,39 @@ ACECF con su certificado y se envía a DGII.
 | `monto_total` | sí | |
 | `estado` | sí | `1` = Aceptado, `2` = Rechazado |
 | `detalle_motivo` | si `estado=2` | Obligatorio al rechazar |
-| `ambiente` | no | Override. Si se omite, usa el ambiente en que se recibió el e-CF; si no lo encuentra, el del tenant |
+| `rnc_comprador` | recomendado (con grupo: mandarlo siempre) | Elige la empresa compradora. Ver tabla de abajo |
 
-`rnc_comprador` **no se envía** — se toma del tenant autenticado.
+**Qué empresa aprueba.** De ella salen el `RNCComprador` del ACECF, el `.p12` que lo firma,
+el ambiente y el `tenant_id` donde se guarda la decisión. El servidor siempre fija
+`rnc_comprador` al RNC de esa empresa; el valor del cliente solo sirve para elegirla.
 
-Respuesta: `{status, data:{rnc_emisor, e_ncf, estado_aprobacion, track_id, estado_dgii,
-codigo_seguridad, ambiente, fecha_envio, dgii_response}}`.
+| `rnc_comprador` | Credencial | Empresa que aprueba |
+|---|---|---|
+| enviado | cualquiera | Esa empresa, si es la dueña de la credencial o una de su grupo; si no, `422` |
+| omitido | con grupo | La **única** empresa activa del grupo que tiene ese e-CF (`rnc_emisor` + `e_ncf`) en `master.ecf_recibidos`. Ninguna → `422`; más de una → `422` con los RNC candidatos |
+| omitido | sin grupo | La dueña de la credencial (como siempre) |
+
+La deducción con grupo busca en todas las empresas tipo `integracion` activas del grupo
+(`TenantResolver::siblings()`), sin filtrar por ambiente, y el salto pasa igual por
+`switchToSibling()`. Un e-CF que no esté en nuestros recibidos (llegó antes del alta o por
+otro canal) no se puede deducir: hay que mandar `rnc_comprador`.
+
+**Ambiente: lo pone el servidor, no el cliente** (un `ambiente` en el body se ignora). Se usa
+el `ambiente` del registro del e-CF en `ecf_recibidos` de la empresa compradora (el ambiente
+en que llegó, para que DGII lo encuentre y no responda `02`); si no hay registro o no tiene
+ambiente, `tenants.ambiente` de esa empresa (y `ecf` si está vacío).
+
+Respuesta: `{status, data:{rnc_emisor, e_ncf, rnc_comprador, empresa, estado_aprobacion,
+track_id, estado_dgii, codigo_seguridad, ambiente, fecha_envio, dgii_response}}`.
+`rnc_comprador` y `empresa` (su `nombre`) dicen por qué empresa se aprobó — útil cuando se
+dedujo.
+
+La decisión se guarda en la fila de `ecf_recibidos` de esa empresa. Si no hay fila (el e-CF no
+está en sus recibidos) no se guarda nada y queda en el `error_log` un
+`[integracionAprobacion] AVISO: decision sin persistir, 0 filas en ecf_recibidos (tenant_id=…,
+rnc_emisor=…, e_ncf=…)`; la respuesta HTTP no cambia. (MySQL cuenta filas *cambiadas*: repetir
+la misma decisión, con la misma respuesta de DGII, dentro del mismo segundo también da 0 y
+dispara el aviso.)
 
 > **Leer bien la respuesta de DGII:** `dgii_response.codigo` = `1`/`01` significa que DGII
 > **procesó** el envío; `2`/`02` = no procesada (factura no encontrada, error técnico, o
@@ -215,8 +243,15 @@ codigo_seguridad, ambiente, fecha_envio, dgii_response}}`.
 > significa que DGII rechazó **procesar el envío**, no que el rechazo comercial quedó
 > registrado. La decisión se persiste igual en éxito y en error (con `procesada=0`).
 
-Errores: `422` (campo faltante, `estado` distinto de 1/2, o `detalle_motivo` vacío con
-`estado=2`), `502` (falló el envío a DGII).
+Errores:
+
+| Código | Cuándo |
+|---|---|
+| `422` | Campo faltante, `estado` distinto de 1/2, o `detalle_motivo` vacío con `estado=2` |
+| `422` | `rnc_comprador (<rnc>) no corresponde a la credencial usada ni a una empresa de su grupo.` |
+| `422` | Con grupo y sin `rnc_comprador`, ninguna empresa lo tiene: `No hay un e-CF recibido <e_ncf> de <rnc_emisor> en ninguna empresa del grupo; mande rnc_comprador con el RNC de la empresa que lo recibio.` |
+| `422` | Con grupo y sin `rnc_comprador`, varias lo tienen: `El e-CF <e_ncf> de <rnc_emisor> lo recibieron varias empresas del grupo (<rnc>, <rnc>); mande rnc_comprador con el RNC de la empresa que aprueba.` |
+| `502` | Falló el envío a DGII |
 
 ---
 

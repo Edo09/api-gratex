@@ -88,8 +88,9 @@ HostGator/cPanel → MySQL Databases:
 | token | `ONBOARD_TOKEN` |
 | nombre, rnc | Identidad del tenant |
 | razon-social, direccion | Para `emisor_config` |
-| ambiente | **`certecf`** si va a certificar (default `ecf`) |
-| db-name, db-user, db-pass, db-host, db-port | Los del paso 1 (host default `localhost`) |
+| ambiente | **Obligatorio elegirlo** (el select arranca en "— elegir —", sin default): **`certecf`** si va a certificar, `ecf` si ya está certificado, `testecf` para demo. Por CLI sin `--ambiente`, app queda en `ecf` |
+| db-name, db-user, db-pass | Los del paso 1. El formulario usa host `localhost` y puerto `3306` (por CLI: `--db-host`, `--db-port`) |
+| La DB ya existe (`skip-create-db`) | Marcado por defecto: la DB se crea en cPanel (paso 1), el handler no la crea |
 | cert (.p12) + cert-pass | Se guarda en `<CERT_DIR>/<rnc>/cert.p12` (default `certificado_dgii/`), pass cifrada AES-256-GCM |
 | logo | Opcional; va a `logos/<tenant_id>.<ext>` + `tenants.logo_path` (sale en la Representación Impresa) |
 | admin-email, admin-pass, admin-name, admin-username | Usuario admin inicial (los 4 o ninguno). **email y username son UNIQUE globales** — no se pueden repetir con los de otro tenant |
@@ -137,14 +138,16 @@ prueba DGII recién creados).
 |---|---|
 | token | `ONBOARD_TOKEN` |
 | nombre, rnc | Identidad del tenant |
-| ambiente | **`certecf`** mientras certifica; `ecf` al terminar |
-| cert (.p12) + cert-pass | **Obligatorio** (firma sus e-CF y acuses) |
-| webhook-url | Opcional: push de e-CF/aprobaciones entrantes |
-| webhook-secret | Opcional; si das URL sin secret se genera uno |
+| ambiente | **Obligatorio elegirlo** (el select arranca en "— elegir —", sin default): **`certecf`** mientras certifica; `ecf` solo si ya está certificada. Si se crea en `ecf`, el resumen avisa que está en PRODUCCIÓN y que NO se corre el set de pruebas. Por CLI sin `--ambiente`, integración queda en `certecf` |
+| cert (.p12) + cert-pass | **Obligatorio** (firma sus e-CF y acuses). Si el `.p12` es idéntico al de otro tenant, el resumen imprime un WARNING (no bloquea): solo vale si la misma persona está delegada para ambos RNC en DGII; si no, corregir el cert antes de la Fase 2 |
+| logo | Opcional (Representación Impresa) |
+| grupo | Opcional. Vacío = tenant aislado (lo normal) · `self` = inicia un grupo (esta empresa es la cabeza) · número = id de la cabeza del grupo al que se une. Ver [Cliente con varias empresas](#cliente-con-varias-empresas-una-sola-credencial) |
+| webhook-url | Opcional: push de e-CF/aprobaciones entrantes. El formulario no pide secret: se genera uno y sale una sola vez en el resumen (por CLI: `--webhook-secret`) |
 
 No se crea DB ni usuario: el handler registra el tenant y entrega
 **`api_key` + `api_secret`** (el secret se muestra UNA sola vez — el master
-solo guarda su hash sha256). Entregarlos al cliente por canal seguro.
+solo guarda su hash sha256). Entregarlos al cliente por canal seguro — salvo
+las empresas que se unen a un grupo (abajo): esas no se entregan.
 
 #### Cliente con varias empresas (una sola credencial)
 
@@ -153,6 +156,23 @@ credenciales. Se dan de alta como tenants agrupados (`grupo_id`) y una sola cred
 sirve para todos; el RNC del payload elige la empresa. Requiere la migración master
 **008**. Detalle del contrato y del límite de seguridad en
 [../api/integracion.md](../api/integracion.md#multi-empresa--una-credencial-varios-rnc).
+
+**Por la web (`onboard.html`)**, una empresa por envío:
+
+1. **Cabeza:** tipo Integración, ambiente `certecf`, su `.p12`, **grupo = `self`**. Si el
+   alta sale bien, el formulario vacía los campos de la empresa (nombre, RNC, razón social,
+   dirección, `.p12`, clave, logo, webhook, admin/DB; el ambiente vuelve a "— elegir —"),
+   conserva token y tipo, y deja en **grupo** el `tenant_id` recién creado con la nota
+   "La siguiente empresa se unirá al grupo #N". El resultado queda visible: copiar la
+   credencial de la cabeza antes de seguir (el secret sale una sola vez).
+2. **Hermanas:** cargar los datos de cada una con **su** `.p12`, su clave y su ambiente,
+   dejando grupo = N. Para dar de alta después un tenant aislado, vaciar el campo grupo.
+3. Si un alta falla, el formulario no borra nada: corregir y reenviar.
+
+Si en grupo se pone el id de una hermana en vez del de la cabeza, el alta falla indicando a
+qué grupo pertenece (`use grupo=G`).
+
+**Por CLI:**
 
 ```powershell
 # 1a empresa: inicia el grupo. Su tenant_id pasa a ser el grupo_id.
@@ -170,6 +190,15 @@ php tools/create_tenant.php --tipo=integracion --grupo=7 `
 Cada empresa sigue necesitando **su propio `.p12` y su propia certificación DGII** — el
 grupo agrupa el acceso, no la identidad fiscal. Cada una avanza a `ecf` por separado, y con
 la misma credencial pueden convivir en ambientes distintos.
+
+**Credenciales:** al cliente se le entrega **solo la de la cabeza**. El alta de cada hermana
+también imprime un par propio, y ese par abre todo el grupo; por eso el resumen dice que
+NO se entrega. Cuando ya no haga falta, se desactiva (`TenantResolver` rechaza un hash
+vacío; la empresa sigue accesible con la credencial del grupo):
+
+```sql
+UPDATE tenants SET api_secret_hash = '' WHERE id = <id_hermana>;
+```
 
 > Agrupar SOLO empresas del mismo cliente: comparten credencial, así que un secret
 > filtrado las expone a todas.
@@ -426,6 +455,6 @@ sigue requiriendo `X-API-KEY`.
 
 ### Flujo típico (tenant integración)
 
-1. `onboard.html` (tipo Integración): RNC + cert `.p12` + (opcional) webhook → entrega **api_key + api_secret**.
+1. `onboard.html` (tipo Integración): RNC + ambiente `certecf` + cert `.p12` + (opcional) webhook/grupo → entrega **api_key + api_secret** (en un grupo, solo la de la cabeza).
 2. El cliente consume `POST /api/integracion/ecf` con sus headers.
 3. Recibe e-CF/aprobaciones por `GET /api/integracion/recibidos|aprobaciones` o webhook.
