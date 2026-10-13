@@ -1,7 +1,7 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 034) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 035) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
 -- creado: una columna, una tabla, un indice o el tipo o ancho nuevo de una columna.
@@ -12,7 +12,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025, la 026, la 027, la 028, la 029, la 030, la 031, la 032, la 033 y la 034 si se pueden repetir sin dano.
+-- La 025, la 026, la 027, la 028, la 029, la 030, la 031, la 032, la 033, la 034 y la 035 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -182,5 +182,11 @@ FROM (
          'columna categories.color + indice unico uk_cat_color',
          (SELECT COUNT(*) FROM information_schema.STATISTICS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'categories' AND INDEX_NAME = 'uk_cat_color') > 0
+  UNION ALL
+  SELECT '035', '035_clients_credito_por_defecto.sql',
+         'DEFAULT 1 en clients.permitir_credito',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'permitir_credito'
+            AND TRIM(BOTH '''' FROM COLUMN_DEFAULT) = '1') = 1
 ) m
 ORDER BY m.migracion;

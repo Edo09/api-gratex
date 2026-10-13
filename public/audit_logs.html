@@ -59,6 +59,7 @@
   .badge { display:inline-block; padding:2px 8px; border-radius:99px; font-size:11px; font-weight:600; border:1px solid; }
   .badge.ok { color:var(--ok); border-color:var(--ok); }
   .badge.err { color:var(--err); border-color:var(--err); }
+  .badge.mod { color:var(--accent); border-color:var(--accent); }
   .empty { padding:28px; text-align:center; color:var(--mut); white-space:normal; }
   /* detalle */
   .detail-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:14px; }
@@ -67,11 +68,42 @@
   .kv span { display:block; color:var(--mut); font-size:12px; margin-bottom:2px; }
   .kv b { font-weight:500; word-break:break-word; }
   h3 { font-size:13px; color:var(--accent); margin:20px 0 8px; }
-  table.diff td { white-space:pre-wrap; word-break:break-word; vertical-align:top; }
-  table.diff td.k { color:var(--mut); width:22%; }
-  table.diff tr.changed td { background:rgba(56,189,248,.10); }
   pre { background:var(--field); border:1px solid var(--line); border-radius:8px; padding:12px;
         white-space:pre-wrap; word-break:break-word; font-size:12px; margin:0 0 8px; max-height:320px; overflow:auto; }
+  /* cambios: lo que cambio a la vista, lo que no detras del interruptor */
+  .chg-summary { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:0 0 10px; font-size:13px; }
+  .chg-summary .lbl { margin-left:6px; }
+  .pill { display:inline-block; padding:2px 9px; border-radius:99px; font-size:12px; border:1px solid var(--line); color:var(--mut); }
+  .pill.mod { color:var(--accent); border-color:var(--accent); }
+  .pill.add { color:var(--ok); border-color:var(--ok); }
+  .pill.del { color:var(--err); border-color:var(--err); }
+  label.toggle { display:inline-flex; align-items:center; gap:6px; margin:0 0 10px; cursor:pointer; }
+  label.toggle input { width:auto; margin:0; }
+  .diffbox:not(.show-all) .unchanged { display:none; }
+  table.diff td, table.grid td { white-space:normal; word-break:break-word; vertical-align:top; }
+  table.diff td.k { color:var(--mut); width:22%; }
+  table.diff tr.unchanged td { color:var(--mut); }
+  table.lines td.n { width:1%; white-space:nowrap; }
+  table.lines td.line { width:30%; }
+  .val { display:inline-block; padding:0 5px; border-radius:4px; }
+  .val.old { color:#fca5a5; background:rgba(239,68,68,.14); text-decoration:line-through; text-decoration-color:rgba(252,165,165,.7); }
+  .val.new { color:#86efac; background:rgba(34,197,94,.14); }
+  .arrow { color:var(--mut); margin:0 6px; }
+  .chg + .chg { margin-top:3px; }
+  .line-sub { color:var(--mut); font-size:12px; margin-top:2px; }
+  .fields { display:flex; flex-wrap:wrap; gap:2px 14px; }
+  .fields.gone { text-decoration:line-through; text-decoration-color:rgba(252,165,165,.6); }
+  .block { margin-top:16px; }
+  .block h4 { font-size:13px; font-weight:600; margin:0 0 6px; }
+  .set > div + div { margin-top:6px; }
+  .set .val { margin:2px 4px 2px 0; border:1px solid var(--line); }
+  details.long summary { cursor:pointer; }
+  details.long pre { margin-top:6px; }
+  details.raw { margin-top:18px; }
+  details.raw > summary { cursor:pointer; color:var(--mut); font-size:13px; }
+  .raw-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:8px; }
+  .raw-grid.one { grid-template-columns:1fr; }
+  @media (max-width: 800px) { .raw-grid { grid-template-columns:1fr; } }
   @media (max-width: 640px) {
     body { padding:16px; }
     .presets { margin-left:0; }
@@ -366,7 +398,7 @@ function showDetail(r, tr) {
   errBox.replaceChildren();
   if (!blank(r.error_message)) errBox.append(el('h3', {}, 'Error'), el('pre', {}, r.error_message));
 
-  $('detailDiff').replaceChildren(renderDiff(r.old_values, r.new_values));
+  $('detailDiff').replaceChildren(renderChanges(r.old_values, r.new_values));
   $('detailCard').classList.remove('hidden');
   $('detailCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -377,48 +409,447 @@ function closeDetail() {
 }
 $('btnCloseDetail').addEventListener('click', closeDetail);
 
-const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 function fmt(v) {
   if (v === null) return 'null';
   return typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v);
 }
 
-// Tabla campo | antes | despues; resalta lo que cambio cuando hay ambos lados.
-function renderDiff(oldV, newV) {
+// ---- Diff: comparacion (sin DOM) ----------------------------------------------
+// old_values suele ser la fila de la DB (decimales "18000.0000", tinyint 1, con
+// id, fechas y totales calculados) y new_values el cuerpo que mando el front
+// (numeros JSON, solo lo que el formulario edita). Comparar el JSON tal cual
+// marca todo como cambiado: aqui se compara por valor, campo por campo, y los
+// arreglos de objetos (items) linea por linea.
+const REDACTED = '***REDACTED***';
+const NUM_RE = /^-?(0|[1-9]\d*)(\.\d+)?$/;            // sin ceros a la izquierda: "001" es un codigo
+const MIDNIGHT_RE = /^(\d{4}-\d{2}-\d{2})[ T]00:00:00(\.0+)?$/;
+
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isScalar = (v) => v === null || typeof v !== 'object';
+const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+// PHP guarda un objeto vacio como [] (json_encode de un array vacio).
+const isEmptyBox = (v) => (Array.isArray(v) && v.length === 0) || (isPlainObject(v) && Object.keys(v).length === 0);
+const isVoid = (v) => blank(v) || isEmptyBox(v);
+const isNumeric = (v) => (typeof v === 'number' && Number.isFinite(v)) || (typeof v === 'string' && NUM_RE.test(v));
+const isZeroish = (v) => isVoid(v) || v === false || (isNumeric(v) && Number(v) === 0);
+
+// Forma corta de un numero: "18000.0000" -> "18000", "8.500" -> "8.5".
+function numText(v) {
+  const s = String(v);
+  if (s === '-0') return '0';
+  if (!s.includes('.') || /e/i.test(s)) return s;
+  const t = s.replace(/0+$/, '').replace(/\.$/, '');
+  return t === '-0' ? '0' : t;
+}
+
+function scalarKey(v) {
+  if (isNumeric(v)) return numText(v);
+  if (typeof v === 'string') {
+    const m = MIDNIGHT_RE.exec(v); // DATE contra DATETIME de medianoche
+    return m ? m[1] : v;
+  }
+  return String(v);
+}
+
+// Booleano contra numero: activo true == 1, y retencion_isr true == "150.00"
+// (la DB guarda el monto; el front manda si aplica).
+function asBool(v) {
+  if (typeof v === 'boolean') return v;
+  if (isVoid(v)) return false;
+  if (isNumeric(v)) return Number(v) !== 0;
+  if (v === 'true' || v === 'false') return v === 'true';
+  return null;
+}
+
+// a = antes, b = despues. Una clave que no trae b no cuenta (el cuerpo de un PUT
+// suele traer solo parte de la fila); una que no tiene a cuenta si b trae algo.
+function sameValue(a, b) {
+  if (isVoid(a) && isVoid(b)) return true;
+  if (typeof a === 'boolean' || typeof b === 'boolean') {
+    const x = asBool(a), y = asBool(b);
+    return x !== null && x === y;
+  }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+  }
+  if ((isPlainObject(a) || isEmptyBox(a)) && (isPlainObject(b) || isEmptyBox(b))) {
+    const o = isPlainObject(a) ? a : {}, n = isPlainObject(b) ? b : {};
+    return Object.keys(n).every(k => own(o, k) ? sameValue(o[k], n[k]) : isZeroish(n[k]));
+  }
+  if (!isScalar(a) || !isScalar(b) || a === null || b === null) return false;
+  return scalarKey(a) === scalarKey(b);
+}
+
+// Clave de lo enviado -> clave de la fila de antes cuando se llaman distinto
+// (branding: el PUT manda la columna pdf_template; la fila de antes, template).
+const KEY_ALIAS = { pdf_template: 'template', pdf_accent_color: 'accent_color' };
+
+// Entradas del diff, en el orden de las claves:
+//   {kind:'field', path, old, new, status: changed|added|same|notsent, noOld?, alias?}
+//   {kind:'rows',  path, rows, counts, oldCount, newCount, status}   arreglo de objetos
+//   {kind:'set',   path, added, removed, same, status}              arreglo de escalares
+function diffValues(oldV, newV) {
+  const out = [];
+  diffValue('', oldV, newV, out, null);
+  return out;
+}
+
+function diffObject(o, n, prefix, out) {
+  const aliasOf = {};
+  for (const k of Object.keys(n)) {
+    const a = KEY_ALIAS[k];
+    if (a && !own(o, k) && own(o, a) && !own(n, a)) aliasOf[k] = a;
+  }
+  const consumed = new Set(Object.values(aliasOf));
+  for (const k of new Set([...Object.keys(o), ...Object.keys(n)])) {
+    if (consumed.has(k)) continue;
+    const path = prefix ? prefix + '.' + k : k;
+    const from = aliasOf[k] || k;
+    if (!own(n, k)) {
+      out.push({ kind: 'field', path, old: o[k], status: 'notsent' });
+    } else if (!own(o, from)) {
+      // Sin valor anterior: un 0/false/vacio es lo mismo que no tenerlo (p. ej. los
+      // ajustes de Ferreteria en cero, que la fila de antes ni lista).
+      out.push({ kind: 'field', path, new: n[k], noOld: true, status: isZeroish(n[k]) ? 'same' : 'added' });
+    } else {
+      diffValue(path, o[from], n[k], out, from !== k ? from : null);
+    }
+  }
+}
+
+function diffValue(path, a, b, out, alias) {
+  const boxy = (v) => isPlainObject(v) || isEmptyBox(v);
+  if (!(isVoid(a) && isVoid(b))) {
+    if (boxy(a) && boxy(b)) {
+      diffObject(isPlainObject(a) ? a : {}, isPlainObject(b) ? b : {}, path, out);
+      return;
+    }
+    if (Array.isArray(a) && Array.isArray(b)) {
+      const all = a.concat(b);
+      if (all.every(isPlainObject)) { out.push(diffRows(path, a, b)); return; }
+      if (all.every(isScalar)) { out.push(diffSet(path, a, b)); return; }
+    }
+  }
+  out.push({ kind: 'field', path, old: a, new: b, alias, status: sameValue(a, b) ? 'same' : 'changed' });
+}
+
+// Arreglo de escalares (permissions): como conjunto, el orden no cuenta.
+function diffSet(path, a, b) {
+  const pool = b.map(v => ({ v, key: scalarKey(v), used: false }));
+  const removed = [], same = [];
+  for (const v of a) {
+    const hit = pool.find(p => !p.used && p.key === scalarKey(v));
+    if (hit) { hit.used = true; same.push(v); } else removed.push(v);
+  }
+  const added = pool.filter(p => !p.used).map(p => p.v);
+  return { kind: 'set', path, added, removed, same, status: added.length || removed.length ? 'changed' : 'same' };
+}
+
+// Las lineas no tienen id estable: cada guardado las borra y las vuelve a
+// insertar, y el cuerpo del PUT no lo trae. Se alinean por producto (o por
+// descripcion si es una linea libre) respetando el orden (LCS). Una linea suelta
+// que aparece en otro lugar es una linea movida; el resto, entre dos lineas
+// alineadas, se empareja por posicion: una linea a la que le cambiaron el
+// producto o el texto.
+const ROW_KEYS = ['product_id', 'producto_id', 'sku', 'codigo', 'code', 'description', 'descripcion', 'nombre', 'name'];
+const ROW_SKIP = new Set(['id']); // id de la linea en la DB: cambia en cada guardado
+
+function rowKey(r) {
+  for (const k of ROW_KEYS) {
+    const v = r[k];
+    if (!blank(v) && isScalar(v)) return k + ':' + scalarKey(v).toLowerCase().replace(/\s+/g, ' ').trim();
+  }
+  return null;
+}
+
+function diffRows(path, a, b) {
+  const ka = a.map(rowKey), kb = b.map(rowKey);
+  const n = a.length, m = b.length;
+  const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      L[i][j] = ka[i] !== null && ka[i] === kb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    }
+  }
+  const anchors = [];
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (ka[i] !== null && ka[i] === kb[j]) anchors.push([i++, j++]);
+    else if (L[i][j + 1] >= L[i + 1][j]) j++;
+    else i++;
+  }
+  const anchoredA = new Set(anchors.map(p => p[0])), anchoredB = new Set(anchors.map(p => p[1]));
+  const movedFrom = new Map(), movedA = new Set(); // linea nueva -> linea vieja
+  for (let j = 0; j < m; j++) {
+    if (anchoredB.has(j) || kb[j] === null) continue;
+    for (let i = 0; i < n; i++) {
+      if (!anchoredA.has(i) && !movedA.has(i) && ka[i] === kb[j]) { movedFrom.set(j, i); movedA.add(i); break; }
+    }
+  }
+  const rows = [];
+  let pi = -1, pj = -1;
+  for (const [ai, aj] of [...anchors, [n, m]]) {
+    const gapA = [];
+    for (let i = pi + 1; i < ai; i++) if (!movedA.has(i)) gapA.push(i);
+    let k = 0;
+    for (let j = pj + 1; j < aj; j++) {
+      if (movedFrom.has(j)) rows.push(pairRows(a, b, movedFrom.get(j), j, true));
+      else if (k < gapA.length) rows.push(pairRows(a, b, gapA[k++], j));
+      else rows.push({ status: 'added', newIndex: j, new: b[j] });
+    }
+    for (; k < gapA.length; k++) rows.push({ status: 'removed', oldIndex: gapA[k], old: a[gapA[k]] });
+    if (ai < n && aj < m) rows.push(pairRows(a, b, ai, aj));
+    pi = ai; pj = aj;
+  }
+  const counts = { modified: 0, added: 0, removed: 0, same: 0 };
+  for (const r of rows) counts[r.status]++;
+  const status = counts.modified || counts.added || counts.removed ? 'changed' : 'same';
+  return { kind: 'rows', path, rows, counts, oldCount: n, newCount: m, status };
+}
+
+function pairRows(a, b, i, j, moved) {
+  const o = a[i], n = b[j], changes = [];
+  if (moved) changes.push({ key: 'posición', old: '#' + (i + 1), new: '#' + (j + 1) });
+  for (const k of Object.keys(n)) {
+    if (ROW_SKIP.has(k)) continue;
+    if (!own(o, k)) {
+      if (!isZeroish(n[k])) changes.push({ key: k, new: n[k], noOld: true });
+    } else if (!sameValue(o[k], n[k])) {
+      changes.push({ key: k, old: o[k], new: n[k] });
+    }
+  }
+  return { status: changes.length ? 'modified' : 'same', oldIndex: i, newIndex: j, old: o, new: n, changes };
+}
+
+// ---- Diff: vista --------------------------------------------------------------
+const LONG_TEXT = 160; // mas largo que esto (xml_firmado, logo_data_uri) va plegado
+const NOT_SENT_HINT = 'Lo enviado no trae este campo. Según el módulo, quedó igual o se vació.';
+const ROW_NAME_KEYS = ['description', 'descripcion', 'nombre', 'name', 'concepto', 'valor'];
+const ROW_REF_KEYS = [['product_id', 'producto #'], ['producto_id', 'producto #'], ['sku', 'SKU '], ['codigo', 'código '], ['code', 'código ']];
+const ROW_STATUS = { modified: ['mod', 'Modificada'], added: ['ok', 'Agregada'], removed: ['err', 'Quitada'], same: ['', 'Sin cambios'] };
+
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+const pathLabel = (path) => path || 'valores';
+const pill = (cls, text) => el('span', { class: 'pill ' + cls }, text);
+const thead = (cols) => el('thead', {}, el('tr', {}, ...cols.map(c => el('th', {}, c))));
+
+function longText(text) {
+  let full = text;
+  if (/^\s*[[{]/.test(text)) {
+    try { full = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { /* recortado: va tal cual */ }
+  }
+  return el('details', { class: 'long' },
+    el('summary', {}, text.slice(0, 80).replace(/\s+/g, ' ') + '… (' + text.length.toLocaleString('es-DO') + ' caracteres)'),
+    el('pre', {}, full));
+}
+
+// Un valor de la bitacora, legible y siempre como texto.
+function show(v) {
+  if (v === undefined) return dim('—');
+  if (v === null || v === '' || isEmptyBox(v)) return dim('vacío');
+  if (v === REDACTED) return dim('(oculto)');
+  if (isNumeric(v)) return numText(v);
+  let text;
+  if (Array.isArray(v) && v.every(isScalar)) text = v.map(x => (x === null ? 'null' : String(x))).join(', ');
+  else text = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  return text.length > LONG_TEXT ? longText(text) : text;
+}
+const mark = (v, cls) => el('span', { class: 'val ' + cls }, show(v));
+
+function renderChanges(oldV, newV) {
   const hasOld = !blank(oldV), hasNew = !blank(newV);
   if (!hasOld && !hasNew) {
     return el('div', { class: 'hint' }, 'Este evento no guarda valores anteriores ni nuevos.');
   }
-  if ((hasOld && !isPlainObject(oldV)) || (hasNew && !isPlainObject(newV))) {
-    const box = el('div');
-    if (hasOld) box.append(el('div', { class: 'hint' }, 'Antes'), el('pre', {}, fmt(oldV)));
-    if (hasNew) box.append(el('div', { class: 'hint' }, 'Después'), el('pre', {}, fmt(newV)));
-    return box;
+  const structured = (v) => isPlainObject(v) || Array.isArray(v);
+  const okOld = hasOld && structured(oldV), okNew = hasNew && structured(newV);
+  const box = el('div');
+  if (okOld && okNew) {
+    box.append(renderComparison(oldV, newV));
+  } else if (okOld || okNew) {
+    const broken = hasOld && !okOld ? oldV : hasNew && !okNew ? newV : undefined;
+    let note = okNew ? 'Este evento solo guarda los valores nuevos.' : 'Este evento solo guarda los valores anteriores (p. ej. lo que se eliminó).';
+    if (broken !== undefined) {
+      note = 'Los valores ' + (okNew ? 'anteriores' : 'nuevos') + ' no se pueden comparar: no son JSON completo'
+        + (typeof broken === 'string' && /^\s*[[{]/.test(broken) ? ' (la bitácora los recorta a 100.000 caracteres)' : '')
+        + '. Están tal cual en «Ver JSON original».';
+    }
+    box.append(el('div', { class: 'hint', style: 'margin:0 0 8px' }, note), renderSnapshot(okNew ? newV : oldV));
   }
-  const o = hasOld ? oldV : {}, n = hasNew ? newV : {};
-  const keys = [...new Set([...Object.keys(o), ...Object.keys(n)])];
+  const raw = rawDetails(oldV, newV, hasOld, hasNew);
+  if (!okOld && !okNew) raw.setAttribute('open', '');
+  box.append(raw);
+  return box;
+}
+
+// Antes y despues: arriba lo que cambio; lo que no, detras del interruptor.
+function renderComparison(oldV, newV) {
+  const entries = diffValues(oldV, newV);
+  const box = el('div', { class: 'diffbox' });
+  box.append(changeSummary(entries));
+
+  let quiet = 0;
+  for (const e of entries) {
+    if (e.kind === 'field') quiet += e.status === 'same' || e.status === 'notsent' ? 1 : 0;
+    else if (e.kind === 'rows') quiet += e.counts.same;
+    else quiet += e.same.length;
+  }
+  if (quiet) {
+    const cb = el('input', { type: 'checkbox' });
+    cb.addEventListener('change', () => box.classList.toggle('show-all', cb.checked));
+    box.append(el('label', { class: 'toggle' }, cb, 'Mostrar también lo que no cambió (' + quiet + ')'));
+  }
+
+  const fields = entries.filter(e => e.kind === 'field');
+  if (fields.length) box.append(fieldsTable(fields));
+  for (const e of entries) {
+    if (e.kind === 'rows') box.append(rowsBlock(e));
+    else if (e.kind === 'set') box.append(setBlock(e));
+  }
+  return box;
+}
+
+function changeSummary(entries) {
+  const box = el('div', { class: 'chg-summary' });
+  const fields = entries.filter(e => e.kind === 'field' && (e.status === 'changed' || e.status === 'added')).length;
+  if (fields) box.append(pill('mod', plural(fields, 'campo cambió', 'campos cambiaron')));
+  for (const e of entries) {
+    if (e.kind === 'field' || e.status !== 'changed') continue;
+    box.append(el('span', { class: 'mono lbl' }, pathLabel(e.path) + ':'));
+    if (e.kind === 'rows') {
+      const c = e.counts;
+      if (c.modified) box.append(pill('mod', plural(c.modified, 'línea modificada', 'líneas modificadas')));
+      if (c.added) box.append(pill('add', plural(c.added, 'línea agregada', 'líneas agregadas')));
+      if (c.removed) box.append(pill('del', plural(c.removed, 'línea quitada', 'líneas quitadas')));
+    } else {
+      if (e.added.length) box.append(pill('add', plural(e.added.length, 'agregado', 'agregados')));
+      if (e.removed.length) box.append(pill('del', plural(e.removed.length, 'quitado', 'quitados')));
+    }
+  }
+  if (!box.childNodes.length) {
+    box.append(el('span', {}, 'Ningún valor registrado cambió.'),
+      dim('Las contraseñas y demás datos sensibles no se guardan en la bitácora: un cambio de clave se ve así.'));
+  }
+  return box;
+}
+
+function fieldsTable(fields) {
   const tbody = el('tbody');
   let changed = 0;
-  for (const k of keys) {
-    const inO = Object.prototype.hasOwnProperty.call(o, k);
-    const inN = Object.prototype.hasOwnProperty.call(n, k);
-    const a = inO ? fmt(o[k]) : null, b = inN ? fmt(n[k]) : null;
-    const isChanged = hasOld && hasNew && a !== b;
-    if (isChanged) changed++;
-    tbody.append(el('tr', { class: isChanged ? 'changed' : '' },
-      el('td', { class: 'k mono' }, k),
-      el('td', { class: 'mono' }, a ?? dim('—')),
-      el('td', { class: 'mono' }, b ?? dim('—'))));
+  for (const f of fields) {
+    const isChange = f.status === 'changed' || f.status === 'added';
+    if (isChange) changed++;
+    let before, after;
+    if (f.status === 'notsent') {
+      before = show(f.old);
+      after = el('span', { class: 'dim', title: NOT_SENT_HINT }, 'no enviado');
+    } else if (f.noOld) {
+      before = dim('sin valor anterior');
+      after = isChange ? mark(f.new, 'new') : show(f.new);
+    } else if (isChange) {
+      before = mark(f.old, 'old');
+      after = mark(f.new, 'new');
+    } else {
+      before = show(f.old);
+      after = show(f.new);
+    }
+    const key = el('td', { class: 'k mono' }, pathLabel(f.path));
+    if (f.alias) key.append(el('div', { class: 'line-sub' }, 'antes: ' + f.alias));
+    tbody.append(el('tr', { class: isChange ? '' : 'unchanged' }, key, el('td', {}, before), el('td', {}, after)));
   }
-  const note = hasOld && hasNew
-    ? (changed ? changed + (changed === 1 ? ' campo cambió (resaltado).' : ' campos cambiaron (resaltados).') : 'Ningún campo cambió.')
-    : (hasNew ? 'Solo valores nuevos (creación).' : 'Solo valores anteriores (eliminación).');
-  return el('div', {},
-    el('div', { class: 'hint', style: 'margin:0 0 8px' }, note),
+  return el('div', { class: 'table-wrap' + (changed ? '' : ' unchanged') },
+    el('table', { class: 'diff' }, thead(['Campo', 'Antes', 'Después']), tbody));
+}
+
+function rowLabel(row) {
+  const name = ROW_NAME_KEYS.map(k => row[k]).find(v => !blank(v) && isScalar(v));
+  const refs = ROW_REF_KEYS.filter(([k]) => !blank(row[k]) && isScalar(row[k])).map(([k, p]) => p + row[k]);
+  if (name !== undefined) return [String(name), refs.join(' · ')];
+  return refs.length ? [refs.join(' · '), ''] : [dim('(sin descripción)'), ''];
+}
+
+// Los campos de una linea agregada, quitada o sin cambios (sin los del titulo).
+function rowFields(row, gone) {
+  const skip = new Set([...ROW_SKIP, ...ROW_NAME_KEYS, ...ROW_REF_KEYS.map(([k]) => k)]);
+  const box = el('div', { class: 'fields' + (gone ? ' gone' : '') });
+  for (const [k, v] of Object.entries(row)) {
+    if (!skip.has(k) && !isVoid(v)) box.append(el('span', {}, el('span', { class: 'mono dim' }, k + ' '), show(v)));
+  }
+  return box;
+}
+
+function rowsBlock(e) {
+  const tbody = el('tbody');
+  for (const r of e.rows) {
+    const row = r.status === 'removed' ? r.old : r.new;
+    const [title, sub] = rowLabel(row);
+    const [cls, text] = ROW_STATUS[r.status];
+    const detail = r.status === 'modified'
+      ? el('div', {}, ...r.changes.map(c => el('div', { class: 'chg' },
+          el('span', { class: 'mono dim' }, c.key + ' '),
+          c.noOld ? dim('sin valor anterior') : mark(c.old, 'old'),
+          el('span', { class: 'arrow' }, '→'),
+          mark(c.new, 'new'))))
+      : rowFields(row, r.status === 'removed');
+    tbody.append(el('tr', { class: r.status === 'same' ? 'unchanged' : '' },
+      el('td', { class: 'n mono' }, r.status === 'removed' ? dim('antes #' + (r.oldIndex + 1)) : '#' + (r.newIndex + 1)),
+      el('td', { class: 'line' }, el('div', {}, title), sub ? el('div', { class: 'line-sub' }, sub) : null),
+      el('td', {}, el('span', { class: 'badge ' + cls }, text)),
+      el('td', {}, detail)));
+  }
+  return el('div', { class: 'block' + (e.status === 'same' ? ' unchanged' : '') },
+    el('h4', {}, el('span', { class: 'mono' }, pathLabel(e.path)),
+      dim(' · ' + plural(e.oldCount, 'línea', 'líneas') + ' antes, ' + e.newCount + ' después')),
     el('div', { class: 'table-wrap' },
-      el('table', { class: 'diff' },
-        el('thead', {}, el('tr', {}, el('th', {}, 'Campo'), el('th', {}, 'Antes'), el('th', {}, 'Después'))),
-        tbody)));
+      el('table', { class: 'diff lines' }, thead(['#', 'Línea', 'Estado', 'Detalle']), tbody)));
+}
+
+function setBlock(e) {
+  const chips = (vals, cls) => vals.map(v => el('span', { class: 'val ' + cls }, show(v)));
+  const body = el('div', { class: 'set' });
+  if (e.added.length) body.append(el('div', {}, dim('Agregados: '), ...chips(e.added, 'new')));
+  if (e.removed.length) body.append(el('div', {}, dim('Quitados: '), ...chips(e.removed, 'old')));
+  if (e.same.length) body.append(el('div', { class: 'unchanged' }, dim('Sin cambios: '), ...chips(e.same, '')));
+  return el('div', { class: 'block' + (e.status === 'same' ? ' unchanged' : '') },
+    el('h4', {}, el('span', { class: 'mono' }, pathLabel(e.path))), body);
+}
+
+// Un solo lado (creacion, eliminacion, eventos): campo | valor, con los objetos
+// anidados aplanados (dgii_response.codigo) y los arreglos de objetos en tabla.
+function renderSnapshot(v) {
+  const fields = [], tables = [];
+  (function walk(x, path) {
+    if (isPlainObject(x) && Object.keys(x).length) {
+      for (const [k, val] of Object.entries(x)) walk(val, path ? path + '.' + k : k);
+    } else if (Array.isArray(x) && x.length && x.every(isPlainObject)) {
+      tables.push({ path, rows: x });
+    } else {
+      fields.push({ path, value: x });
+    }
+  })(v, '');
+  const box = el('div');
+  if (fields.length) {
+    box.append(el('div', { class: 'table-wrap' }, el('table', { class: 'diff' }, thead(['Campo', 'Valor']),
+      el('tbody', {}, ...fields.map(f => el('tr', {},
+        el('td', { class: 'k mono' }, pathLabel(f.path)), el('td', {}, show(f.value))))))));
+  }
+  for (const t of tables) {
+    const cols = [...new Set(t.rows.flatMap(r => Object.keys(r)))];
+    box.append(el('div', { class: 'block' },
+      el('h4', {}, el('span', { class: 'mono' }, pathLabel(t.path)), dim(' · ' + plural(t.rows.length, 'línea', 'líneas'))),
+      el('div', { class: 'table-wrap' }, el('table', { class: 'grid' }, thead(['#', ...cols]),
+        el('tbody', {}, ...t.rows.map((r, i) => el('tr', {},
+          el('td', { class: 'mono dim' }, String(i + 1)),
+          ...cols.map(c => el('td', {}, own(r, c) ? show(r[c]) : dim('—'))))))))));
+  }
+  return box;
+}
+
+function rawDetails(oldV, newV, hasOld, hasNew) {
+  const pane = (title, v) => el('div', {}, el('div', { class: 'hint' }, title), el('pre', {}, fmt(v)));
+  const grid = el('div', { class: 'raw-grid' + (hasOld && hasNew ? '' : ' one') });
+  if (hasOld) grid.append(pane('Antes', oldV));
+  if (hasNew) grid.append(pane('Después', newV));
+  return el('details', { class: 'raw' }, el('summary', {}, 'Ver JSON original'), grid);
 }
 </script>
 </body>
