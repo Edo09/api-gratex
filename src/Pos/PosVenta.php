@@ -7,6 +7,8 @@ require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfItemMapper.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfEnvioInciertoException.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfVentaRepetidaException.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
 require_once __DIR__ . '/PosCliente.php';
 
@@ -24,11 +26,12 @@ require_once __DIR__ . '/PosCliente.php';
  *    viaja solo para comparar: si no coincide, no se emite (TOTAL_DISTINTO).
  *  - Una clave por intento de venta (idempotencia): la misma clave nunca saca
  *    otro e-NCF. Un candado de MySQL cubre el doble toque concurrente.
- *  - Factura, movimiento de caja y salida de inventario van juntos; si la DGII
- *    rechaza, la factura queda como historial pero sin dinero ni inventario.
- *  - Sin respuesta de la DGII en POS_DGII_TIMEOUT segundos: la venta queda
- *    firmada y guardada con envio pendiente, se imprime y se reenvia sola
- *    (decision 17; el contador lo valida en Q1).
+ *  - La factura se guarda ANTES de enviarse (gancho write-ahead de emitir). Desde
+ *    ahi la venta existe y se entrega (caja, inventario y recibo) pase lo que
+ *    pase con el envio: aceptada, rechazada o sin respuesta. El cajero no espera
+ *    a la DGII ni la ve; lo que quede abierto lo cierra reenviarPendientes.
+ *  - Entregar es una sola funcion idempotente (entregarVenta): repetir la clave
+ *    devuelve la misma venta y completa lo que haya quedado sin hacer.
  */
 final class PosVenta
 {
@@ -42,10 +45,16 @@ final class PosVenta
 
     /** Comprobantes que emite el POS: consumo y credito fiscal. */
     public const TIPOS = ['32', '31'];
-    // Veredictos de la DGII: RFCE (E32 < 250k) y e-CF completo (E31). Lo demas
-    // (sin respuesta, ENVIADO / EN_PROCESO esperando veredicto) queda pendiente.
-    private const ACEPTADOS = ['RFCE_ACEPTADO', 'RFCE_ACEPTADO_CONDICIONAL', 'ACEPTADO', 'ACEPTADO_CONDICIONAL'];
+    // Rechazos de la DGII: RFCE (E32 < 250k) y e-CF completo (E31). Solo sirven
+    // para la bitacora: una venta rechazada se entrega igual.
     private const RECHAZADOS = ['RFCE_RECHAZADO', 'RECHAZADO'];
+
+    /**
+     * Fabrica del servicio de emision. Solo las pruebas (tools/test_pos_cobrar_wa.php)
+     * la cambian, para inyectarle una DGII falsa; en produccion es null y se usa
+     * el servicio de verdad.
+     */
+    public static ?Closure $fabricaServicio = null;
 
     /**
      * Cobra la venta. Devuelve los datos para la respuesta; lanza PosError con
@@ -71,7 +80,7 @@ final class PosVenta
         try {
             $previa = $pos->ventaPorClave($clave);
             if ($previa !== null) {
-                return self::respuestaDeVentaExistente($pos, $previa, $ancho);
+                return self::respuestaDeVentaExistente($pos, $previa, $ancho, $body);
             }
             return self::emitirNueva($pos, $equipo, $empleado, $caja, $body, $clave, $ancho);
         } finally {
@@ -172,19 +181,8 @@ final class PosVenta
         }
 
         // --- Forma de pago (P1-P3) ---------------------------------------------
-        $formaPago = (int) ($body['forma_pago'] ?? 0);
-        if (!isset(self::FORMAS_PAGO[$formaPago])) {
-            throw new PosError('Elige la forma de pago.', 422, 'FORMA_PAGO_INVALIDA');
-        }
-        $recibidoCentavos = null;
-        $devueltaCentavos = null;
-        if ($formaPago === 1) {
-            $recibidoCentavos = $body['recibido_centavos'] ?? null;
-            if (!is_int($recibidoCentavos) || $recibidoCentavos < $totalCentavos || $recibidoCentavos > 100000000) {
-                throw new PosError('El efectivo recibido no alcanza para el total.', 422, 'RECIBIDO_INSUFICIENTE');
-            }
-            $devueltaCentavos = $recibidoCentavos - $totalCentavos;
-        }
+        $cobro = self::leerCobro($body, $totalCentavos, (int) $turno['id']);
+        $formaPago = $cobro['forma_pago'];
         $total = $totalCentavos / 100;
 
         // --- Emision -----------------------------------------------------------
@@ -209,33 +207,25 @@ final class PosVenta
             'informacion_referencia' => null,
             'strict_input' => false,
             'dgii_timeout' => self::timeoutDgii(),
-            'tolerar_fallo_envio' => true,
+            // Opciones de la emision solo para el POS (la app no las pasa y se porta
+            // como siempre). El numero de una venta ya sale impreso, asi que NUNCA
+            // vuelve al contador, ni aunque la DGII lo rechace. Y el token de la DGII
+            // se pide DESPUES de guardar: si la DGII no contesta, la venta queda
+            // guardada y sin confirmar en vez de fallar.
+            'reclamar_secuencia' => false,
+            'autenticar_despues_de_reservar' => true,
         ];
 
         $auditBase = [
             'pos_empleado_id' => $empleado['id'], 'empleado' => $empleado['nombre'],
             'caja_id' => $caja['id'], 'turno_id' => $turno['id'], 'total' => $total, 'forma_pago' => $formaPago,
         ];
-        try {
-            $result = (new ECFEmissionService())->emitir($payload);
-        } catch (Throwable $e) {
-            error_log('[pos] fallo en emision: ' . get_class($e) . ': ' . $e->getMessage());
-            self::audit('POS_VENTA_FALLIDA', null, $auditBase, 'No se pudo emitir la venta del POS: ' . $e->getMessage(), false);
-            throw new PosError($e instanceof EcfUsuarioException
-                ? $e->getMensajeUsuario()
-                : 'No se pudo emitir en la DGII. Inténtalo de nuevo en un momento; si sigue fallando, usa el procedimiento de contingencia.',
-                502, 'EMISION_FALLIDA');
-        }
 
-        $estado = (string) ($result['estado'] ?? '');
-        $rechazada = in_array($estado, self::RECHAZADOS, true);
-        // Todo lo que no es un veredicto (sin respuesta, en proceso, una
-        // respuesta rara) queda pendiente: el reenvio consulta primero.
-        $pendiente = !$rechazada && !in_array($estado, self::ACEPTADOS, true);
-        $iniciadaAt = self::iniciadaAt($body['iniciada_ms'] ?? null);
-
+        // Write-ahead: la factura se arma ANTES de emitir y el servicio la guarda
+        // (gancho 'reservar') antes de mandar nada a la DGII. Sin 'no_factura': la
+        // reserva lo llena con el e-NCF. 'pos' trae las columnas del POS: la reserva
+        // las escribe y deja envio_pendiente = 1.
         $facturaInput = [
-            'no_factura' => $result['e_ncf'],
             'date' => date('Y-m-d H:i:s'),
             'client_id' => $cliente !== null ? (int) $cliente['id'] : null,
             'client_name' => $cliente !== null ? (string) ($cliente['client_name'] ?: PosCliente::forma($cliente)['nombre']) : 'Consumidor Final',
@@ -262,61 +252,191 @@ final class PosVenta
                 'turno_id' => $turno['id'],
                 'pos_empleado_id' => $empleado['id'],
                 'pos_idempotency_key' => $clave,
-                'envio_pendiente' => $pendiente,
             ],
         ];
-        // El dinero entra a la caja en la misma transaccion que la factura.
-        $movimiento = $rechazada ? null : static function (int $facturaId) use ($pos, $turno, $formaPago, $total, $recibidoCentavos, $devueltaCentavos, $iniciadaAt): void {
-            $pos->registrarMovimiento($turno['id'], $facturaId, 'VENTA', $formaPago, $total,
-                $recibidoCentavos !== null ? $recibidoCentavos / 100 : null,
-                $devueltaCentavos !== null ? $devueltaCentavos / 100 : null,
-                $iniciadaAt);
-        };
+
+        // Mismo gancho que facturaController::emitirFacturaEcf: 'reservar' guarda la
+        // fila, 'confirmar' le pone la respuesta de la DGII e 'incierto' la deja
+        // ENVIO_INCIERTO si el envio o la confirmacion fallan.
         $facturas = new facturaModel();
-        $saved = $facturas->saveFacturaConECF($facturaInput, $result, $movimiento);
-        if ($saved[0] !== 'success') {
-            self::audit('POS_VENTA_SIN_GUARDAR', $result['e_ncf'] ?? null, $auditBase + ['estado_dgii' => $estado],
-                'Venta del POS emitida pero no guardada: ' . ($saved[2] ?? $saved[1]), false);
-            throw new PosError($saved[1], 500, 'GUARDADO_FALLIDO', ['e_ncf' => $result['e_ncf'] ?? null]);
-        }
-        $facturaId = (int) $saved[1]['factura_id'];
+        $reserva = null;
+        $persistencia = static function (string $fase, array $ctx) use ($facturas, $facturaInput, &$reserva) {
+            switch ($fase) {
+                case 'reservar':  return $reserva = $facturas->reservarFacturaECF($facturaInput, $ctx);
+                case 'confirmar': return $facturas->confirmarFacturaECF((int) $reserva['factura_id'], $ctx);
+                case 'incierto':  return $facturas->marcarEnvioIncierto((int) $reserva['factura_id'], $ctx);
+            }
+            return null;
+        };
 
-        if ($rechazada) {
-            $motivo = self::motivoRechazo($result['rfce_response'] ?? $result['dgii_response'] ?? null);
-            self::audit('POS_VENTA_RECHAZADA', $result['e_ncf'], $auditBase + ['factura_id' => $facturaId, 'motivo' => $motivo],
-                'La DGII rechazó la venta del POS.', false);
-            throw new PosError('La DGII rechazó la venta: ' . $motivo . ' No se cobró nada; la venta sigue en pantalla.', 422, 'DGII_RECHAZO',
-                ['e_ncf' => $result['e_ncf']]);
-        }
-
-        // Inventario: despues de guardar, como en app.*. Un fallo aqui no tumba
-        // una venta que ya existe en la DGII: queda en el log para un ajuste.
+        $repetida = false;
+        $claveGuardada = $clave;
+        $fallo = null;
         try {
-            require_once __DIR__ . '/../Models/inventoryModel.php';
-            (new inventoryModel())->registrarVenta($facturaId, $facturaInput['items'], $tipoEcf, $userId);
+            self::servicioEmision()->emitir($payload, $persistencia);
+        } catch (EcfVentaRepetidaException $e) {
+            // Otra peticion con esta clave ya guardo la venta (el candado de la clave
+            // lo hace muy raro). El servicio ya devolvio el numero que habia tomado.
+            $repetida = true;
+            $claveGuardada = $e->clave;
         } catch (Throwable $e) {
-            error_log('[pos] inventario de la factura ' . $facturaId . ': ' . $e->getMessage());
+            $fallo = $e;
         }
 
-        self::audit('POS_VENTA', $result['e_ncf'], $auditBase + [
-            'factura_id' => $facturaId, 'estado_dgii' => $estado, 'envio_pendiente' => $pendiente,
-            'recibido' => $recibidoCentavos !== null ? $recibidoCentavos / 100 : null,
-        ], $pendiente ? 'Venta del POS emitida; la DGII no respondió a tiempo y se reenviará.' : 'Venta del POS emitida.');
+        // Quien dice si la venta existe es la base, no la excepcion: una falla despues
+        // de guardar (envio sin respuesta, un gancho que dejo la transaccion abierta)
+        // deja la fila en pie, y esa venta se entrega.
+        $fila = $pos->ventaPorClave($claveGuardada);
+        if ($fila === null) {
+            // Nada quedo guardado: la venta no se emitio y el numero volvio al contador.
+            $causa = $fallo ?? new RuntimeException('la emision termino sin guardar la venta');
+            error_log('[pos] fallo antes de guardar la venta: ' . get_class($causa) . ': ' . $causa->getMessage());
+            self::audit('POS_VENTA_FALLIDA', null, $auditBase, 'No se pudo emitir la venta del POS: ' . $causa->getMessage(), false);
+            throw new PosError('No se pudo registrar la venta. Inténtalo de nuevo en un momento; si sigue fallando, avisa a soporte.',
+                502, 'EMISION_FALLIDA');
+        }
+        if ($repetida) {
+            return self::respuestaDeVentaExistente($pos, $fila, $ancho, $body);
+        }
+        if ($fallo !== null && !($fallo instanceof EcfEnvioInciertoException)) {
+            error_log('[pos] falla despues de guardar la venta ' . (int) $fila['id'] . ', se entrega igual: '
+                . get_class($fallo) . ': ' . $fallo->getMessage());
+        }
+
+        $facturaId = (int) $fila['id'];
+        $estado = (string) $fila['estado_dgii'];
+        $pendiente = (int) $fila['envio_pendiente'] === 1;
+        $eNcf = $fila['e_ncf'];
+        self::entregarVenta($pos, $facturaId, $facturaInput['items'], $tipoEcf, $userId, $cobro, [
+            'accion' => 'POS_VENTA',
+            'entidad' => $eNcf,
+            'valores' => $auditBase + [
+                'factura_id' => $facturaId, 'estado_dgii' => $estado, 'envio_pendiente' => $pendiente,
+                'recibido' => $cobro['recibido_centavos'] !== null ? $cobro['recibido_centavos'] / 100 : null,
+            ],
+            'descripcion' => $pendiente ? 'Venta del POS entregada; el envío sigue pendiente y se completa solo.' : 'Venta del POS entregada.',
+        ]);
+        if (in_array($estado, self::RECHAZADOS, true)) {
+            $resp = json_decode((string) ($fila['rfce_respuesta'] ?? $fila['respuesta_dgii'] ?? ''), true);
+            self::audit('POS_VENTA_RECHAZADA', $eNcf, $auditBase + ['factura_id' => $facturaId, 'motivo' => self::motivoRechazo($resp)],
+                'La DGII rechazó la venta del POS al cobrar; la venta ya estaba entregada.', false);
+        }
 
         return [
             'venta' => [
                 'factura_id' => $facturaId,
-                'e_ncf' => $result['e_ncf'],
+                'e_ncf' => $eNcf,
                 'tipo_ecf' => $tipoEcf,
                 'estado_dgii' => $estado,
                 'envio_pendiente' => $pendiente,
                 'total_centavos' => $totalCentavos,
                 'cliente' => $cliente !== null ? PosCliente::forma($cliente) : null,
             ],
-            'cobro' => self::cobro($formaPago, $totalCentavos, $recibidoCentavos, $devueltaCentavos),
+            'cobro' => self::cobro($formaPago, $totalCentavos, $cobro['recibido_centavos'], $cobro['devuelta_centavos']),
             'recibo' => self::recibo($facturaId, $ancho),
             'repetida' => false,
         ];
+    }
+
+    /** El servicio de emision: el de verdad, o el que inyecta una prueba (PosVenta::$fabricaServicio). */
+    private static function servicioEmision(): ECFEmissionService
+    {
+        return self::$fabricaServicio !== null ? (self::$fabricaServicio)() : new ECFEmissionService();
+    }
+
+    /**
+     * Forma de pago y efectivo recibido (P1-P3), validados contra el total: lo
+     * que se va a registrar en la caja. Lo usa la venta nueva y el reintento que
+     * tiene que completar un cobro que quedo sin registrar.
+     *
+     * @return array{turno_id: int, forma_pago: int, total_centavos: int, recibido_centavos: ?int, devuelta_centavos: ?int, iniciada_at: ?string}
+     * @throws PosError FORMA_PAGO_INVALIDA | RECIBIDO_INSUFICIENTE
+     */
+    private static function leerCobro(array $body, int $totalCentavos, int $turnoId): array
+    {
+        $formaPago = (int) ($body['forma_pago'] ?? 0);
+        if (!isset(self::FORMAS_PAGO[$formaPago])) {
+            throw new PosError('Elige la forma de pago.', 422, 'FORMA_PAGO_INVALIDA');
+        }
+        $recibidoCentavos = null;
+        $devueltaCentavos = null;
+        if ($formaPago === 1) {
+            $recibidoCentavos = $body['recibido_centavos'] ?? null;
+            if (!is_int($recibidoCentavos) || $recibidoCentavos < $totalCentavos || $recibidoCentavos > 100000000) {
+                throw new PosError('El efectivo recibido no alcanza para el total.', 422, 'RECIBIDO_INSUFICIENTE');
+            }
+            $devueltaCentavos = $recibidoCentavos - $totalCentavos;
+        }
+        return [
+            'turno_id' => $turnoId,
+            'forma_pago' => $formaPago,
+            'total_centavos' => $totalCentavos,
+            'recibido_centavos' => $recibidoCentavos,
+            'devuelta_centavos' => $devueltaCentavos,
+            'iniciada_at' => self::iniciadaAt($body['iniciada_ms'] ?? null),
+        ];
+    }
+
+    /**
+     * El cobro de una venta cuyo movimiento de caja ya existe, con la misma
+     * forma que leerCobro. No se vuelve a escribir: solo arma la respuesta.
+     *
+     * @param array $mov fila de posModel::movimientoDeFactura
+     */
+    private static function cobroDeMovimiento(array $mov, int $turnoId, int $totalCentavos): array
+    {
+        return [
+            'turno_id' => $turnoId,
+            'forma_pago' => (int) ($mov['forma_pago'] ?? 1),
+            'total_centavos' => $totalCentavos,
+            'recibido_centavos' => isset($mov['monto_recibido']) ? (int) round(((float) $mov['monto_recibido']) * 100) : null,
+            'devuelta_centavos' => isset($mov['devuelta']) ? (int) round(((float) $mov['devuelta']) * 100) : null,
+            'iniciada_at' => null,
+        ];
+    }
+
+    /**
+     * Entrega una venta ya guardada: movimiento de caja, salida de inventario y
+     * bitacora. Es idempotente. La llaman la venta nueva y el reintento de una
+     * venta que ya existe, siempre con el candado de la clave tomado, y cada parte
+     * se hace solo si falta: una caida a medias se completa en el reintento sin
+     * duplicar nada.
+     *  1. Caja, solo si la factura no tiene movimiento. Va primero: es el dinero.
+     *     Si falla, el error sube y el reintento con la misma clave lo completa.
+     *  2. Inventario, solo si yaMovioDocumento('factura', id) es false. Un fallo
+     *     aqui no tumba una venta que ya existe: queda en el log para un ajuste.
+     *  3. Bitacora, solo si esta llamada registro la caja (la primera entrega).
+     *
+     * @param array $items  lineas de la factura (product_id, quantity)
+     * @param array $cobro  forma de leerCobro (turno_id, forma_pago, total_centavos, recibido_centavos, devuelta_centavos, iniciada_at)
+     * @param array $auditCtx {accion: string, entidad: ?string, valores: array, descripcion: string}
+     */
+    private static function entregarVenta(posModel $pos, int $facturaId, array $items, ?string $tipoEcf, int $userId, array $cobro, array $auditCtx): void
+    {
+        $registroCaja = false;
+        if ($pos->movimientoDeFactura($facturaId) === null) {
+            $pos->registrarMovimiento(
+                (int) $cobro['turno_id'], $facturaId, 'VENTA', (int) $cobro['forma_pago'], $cobro['total_centavos'] / 100,
+                $cobro['recibido_centavos'] !== null ? $cobro['recibido_centavos'] / 100 : null,
+                $cobro['devuelta_centavos'] !== null ? $cobro['devuelta_centavos'] / 100 : null,
+                $cobro['iniciada_at']
+            );
+            $registroCaja = true;
+        }
+
+        try {
+            require_once __DIR__ . '/../Models/inventoryModel.php';
+            $inventario = new inventoryModel();
+            if (!$inventario->yaMovioDocumento('factura', $facturaId)) {
+                $inventario->registrarVenta($facturaId, $items, $tipoEcf, $userId > 0 ? $userId : null);
+            }
+        } catch (Throwable $e) {
+            error_log('[pos] inventario de la factura ' . $facturaId . ': ' . $e->getMessage());
+        }
+
+        if ($registroCaja) {
+            self::audit($auditCtx['accion'], $auditCtx['entidad'], $auditCtx['valores'], $auditCtx['descripcion']);
+        }
     }
 
     /**
@@ -389,33 +509,48 @@ final class PosVenta
         return [$items, $total];
     }
 
-    /** La venta ya existe con esa clave: se devuelve tal cual (nunca otro e-NCF). */
-    private static function respuestaDeVentaExistente(posModel $pos, array $venta, int $ancho): array
+    /**
+     * La venta ya existe con esa clave: se devuelve la misma (nunca otro e-NCF),
+     * este como este su envio (aceptada, rechazada, sin confirmar). Siempre
+     * responde como venta repetida y completa lo que le falte a la entrega.
+     *
+     * Sin movimiento de caja, el servidor cayo (o fallo la base) entre guardar la
+     * venta y registrar el cobro. El reintento trae el mismo cuerpo, y de ahi salen
+     * la forma de pago y el efectivo recibido; si ese cuerpo no los trae validos
+     * responde 422 como una venta nueva. El movimiento queda en el turno de la
+     * venta, aunque ese turno ya se haya cerrado.
+     */
+    private static function respuestaDeVentaExistente(posModel $pos, array $venta, int $ancho, array $body): array
     {
-        $estado = (string) $venta['estado_dgii'];
-        if (in_array($estado, self::RECHAZADOS, true) || str_ends_with($estado, '_ARCHIVADO')) {
-            $resp = json_decode((string) ($venta['rfce_respuesta'] ?? $venta['respuesta_dgii'] ?? ''), true);
-            throw new PosError('La DGII rechazó esta venta: ' . self::motivoRechazo($resp) . ' No se cobró nada.', 422, 'DGII_RECHAZO',
-                ['e_ncf' => $venta['e_ncf']]);
-        }
         $facturaId = (int) $venta['id'];
+        $turnoId = (int) ($venta['turno_id'] ?? 0);
         $totalCentavos = (int) round(((float) $venta['total']) * 100);
         $mov = $pos->movimientoDeFactura($facturaId);
-        $forma = (int) ($mov['forma_pago'] ?? 1);
-        $recibido = isset($mov['monto_recibido']) ? (int) round(((float) $mov['monto_recibido']) * 100) : null;
-        $devuelta = isset($mov['devuelta']) ? (int) round(((float) $mov['devuelta']) * 100) : null;
+        $cobro = $mov !== null
+            ? self::cobroDeMovimiento($mov, $turnoId, $totalCentavos)
+            : self::leerCobro($body, $totalCentavos, $turnoId);
+        $tipoEcf = $venta['tipo_ecf'] !== null ? (string) $venta['tipo_ecf'] : null;
+        self::entregarVenta($pos, $facturaId, (new facturaModel())->getFacturaItems($facturaId), $tipoEcf, (int) ($venta['user_id'] ?? 0), $cobro, [
+            'accion' => 'POS_VENTA',
+            'entidad' => $venta['e_ncf'] ?? null,
+            'valores' => [
+                'factura_id' => $facturaId, 'turno_id' => $turnoId, 'estado_dgii' => (string) $venta['estado_dgii'],
+                'envio_pendiente' => (int) $venta['envio_pendiente'] === 1, 'completada_en_reintento' => true,
+            ],
+            'descripcion' => 'Venta del POS completada en un reintento: faltaba registrar el cobro.',
+        ]);
         return [
             'venta' => [
                 'factura_id' => $facturaId,
                 'e_ncf' => $venta['e_ncf'],
-                'tipo_ecf' => (string) $venta['tipo_ecf'],
-                'estado_dgii' => $estado,
+                'tipo_ecf' => $tipoEcf,
+                'estado_dgii' => (string) $venta['estado_dgii'],
                 'envio_pendiente' => (int) $venta['envio_pendiente'] === 1,
                 'total_centavos' => $totalCentavos,
                 'cliente' => !empty($venta['client_id']) && ($c = $pos->clientePorId((int) $venta['client_id'])) !== null
                     ? PosCliente::forma($c) : null,
             ],
-            'cobro' => self::cobro($forma, $totalCentavos, $recibido, $devuelta),
+            'cobro' => self::cobro($cobro['forma_pago'], $totalCentavos, $cobro['recibido_centavos'], $cobro['devuelta_centavos']),
             'recibo' => self::recibo($facturaId, $ancho),
             'repetida' => true,
         ];
