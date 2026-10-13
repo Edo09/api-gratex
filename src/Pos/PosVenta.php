@@ -219,6 +219,10 @@ final class PosVenta
             // guardada y sin confirmar en vez de fallar.
             'reclamar_secuencia' => false,
             'autenticar_despues_de_reservar' => true,
+            // Rango agotado o vencido: la venta toma el numero siguiente al ultimo, se guarda y se
+            // imprime, y NO se envia (la DGII rechaza numeros fuera de un rango autorizado). La envia
+            // el reenvio automatico cuando un rango registrado lo cubre (spec 2026-10-12, 4.2.6).
+            'numerar_sin_rango' => true,
             // Un certificado vencido firma igual, pero la DGII rechazaria el comprobante: se revisa
             // ANTES de reservar, y la venta sale como factura simple en vez de quedar rechazada.
             'validar_vigencia_certificado' => true,

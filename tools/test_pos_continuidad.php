@@ -638,6 +638,113 @@ wa_chk('si la factura simple no se puede guardar: 500 VENTA_NO_GUARDADA (el POS 
     $r === ['codigo' => 'VENTA_NO_GUARDADA', 'http' => 500] && count(pc_audit($pdo, 'POS_VENTA_FALLIDA')) === 1
     && pc_n($pdo, 'SELECT COUNT(*) FROM facturas') === 1, $r);
 
+// ---------------------------------------------------------------------------
+// S7) E32 agotada con E31 vigente (RF5, parte del POS): solo las ventas E32
+// toman el numero siguiente, se guardan y se imprimen, y no se envian.
+// ---------------------------------------------------------------------------
+echo "S7) secuencia E32 agotada: numero siguiente, guardada y sin enviar\n";
+$esc = pc_reiniciar($pdo, $mock);
+$prodId = (int) $esc['ids']['product_id'];
+$stock0 = pc_stock($pdo, $prodId);
+$cuerpoA = pc_cuerpo($esc);
+$a = pc_cobrar($esc, $cuerpoA);
+wa_chk('A: el primer E32 sale normal (numero 1, aceptado) y la DGII lo recibe',
+    pc_ok($a) && ($a['venta']['e_ncf'] ?? null) === 'E320000000001' && pc_recepciones($mock) === 1, $a['venta'] ?? $a);
+// El rango de E32 se agota: current_value llega a numero_hasta.
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = current_value WHERE type = 'E32' AND ambiente = 'certecf'");
+$logAntes = pc_log_pos();
+$cuerpoB = pc_cuerpo($esc);
+$b = pc_cobrar($esc, $cuerpoB);
+$fb = pc_fila($pdo, $cuerpoB['clave']);
+$idB = (int) ($fb['id'] ?? 0);
+$metaB = facturaModel::metaEnvio($fb['respuesta_dgii'] ?? null);
+wa_chk('B (E32 agotada): la venta se entrega y toma el numero siguiente al ultimo (E320000000002)',
+    pc_ok($b) && ($b['repetida'] ?? null) === false && ($fb['e_ncf'] ?? null) === 'E320000000002' && ($fb['tipo_ecf'] ?? null) === '32', [$b, $fb['e_ncf'] ?? null]);
+wa_chk('B: queda guardada PENDIENTE_ENVIO con envio_pendiente 1 y la marca sin_rango en su meta',
+    ($fb['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO' && (int) ($fb['envio_pendiente'] ?? 0) === 1 && ($metaB['sin_rango'] ?? null) === true
+    && !empty($fb['xml_firmado']) && !empty($fb['rfce_xml']) && !empty($fb['codigo_seguridad']), [$fb['estado_dgii'] ?? null, $metaB]);
+wa_chk('B: no se envia al momento de vender (la DGII no recibio nada mas)', pc_recepciones($mock) === 1, pc_recepciones($mock));
+wa_chk('B: el XML de una E32 no lleva fecha de vencimiento de secuencia',
+    !str_contains((string) ($fb['xml_firmado'] ?? ''), 'FechaVencimientoSecuencia'));
+wa_chk('B: caja e inventario se entregaron una vez (un movimiento de caja, un movimiento de inventario, stock -4 con A)',
+    count(pc_caja($pdo, $idB)) === 1 && wa_movimientos($pdo, $idB) === 1 && pc_stock($pdo, $prodId) === $stock0 - 4,
+    [count(pc_caja($pdo, $idB)), wa_movimientos($pdo, $idB), pc_stock($pdo, $prodId)]);
+wa_chk('B: la respuesta dice que quedo pendiente de envio y trae el numero',
+    ($b['venta']['e_ncf'] ?? null) === 'E320000000002' && ($b['venta']['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO'
+    && ($b['venta']['envio_pendiente'] ?? null) === true && ($b['venta']['tipo_ecf'] ?? null) === '32', $b['venta'] ?? $b);
+$recibo = $b['recibo'] ?? null;
+wa_chk('B: el recibo se imprime como un e-CF normal (con su timbre), sin enterarse de que falta enviarlo',
+    is_array($recibo) && str_contains((string) ($recibo['titulo'] ?? ''), 'FACTURA DE CONSUMO') && !empty($recibo['timbre']), $recibo['titulo'] ?? $recibo);
+wa_chk('B: el contador de E32 avanzo al 2, mas alla del rango agotado', wa_contador($pdo, 'E32') === 2, wa_contador($pdo, 'E32'));
+$sinDefinir = pc_sin_definir($logAntes);
+wa_chk('B: el codigo no leyo claves que la venta sin rango no trae (sin "Undefined" en el log de PHP)', $sinDefinir === [], $sinDefinir);
+
+$cuerpoC = pc_cuerpo($esc, 1, '31');
+$c = pc_cobrar($esc, $cuerpoC);
+$fc = pc_fila($pdo, $cuerpoC['clave']);
+wa_chk('C (E31 con rango vigente): sigue siendo e-CF, se envia y queda aceptado',
+    pc_ok($c) && ($fc['e_ncf'] ?? null) === 'E310000000001' && ($fc['estado_dgii'] ?? null) === 'ACEPTADO' && (int) ($fc['envio_pendiente'] ?? 1) === 0
+    && pc_recepciones($mock) === 2, [$fc['e_ncf'] ?? null, $fc['estado_dgii'] ?? null, pc_recepciones($mock)]);
+
+$cuerpoD = pc_cuerpo($esc);
+$d = pc_cobrar($esc, $cuerpoD);
+$fd = pc_fila($pdo, $cuerpoD['clave']);
+wa_chk('D (otra E32): toma el numero que sigue (E320000000003), tambien PENDIENTE_ENVIO y sin enviar',
+    pc_ok($d) && ($fd['e_ncf'] ?? null) === 'E320000000003' && ($fd['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO'
+    && (int) ($fd['envio_pendiente'] ?? 0) === 1 && pc_recepciones($mock) === 2 && wa_contador($pdo, 'E32') === 3,
+    [$fd['e_ncf'] ?? null, $fd['estado_dgii'] ?? null, pc_recepciones($mock), wa_contador($pdo, 'E32')]);
+
+$b2 = pc_cobrar($esc, $cuerpoB);
+wa_chk('B repetida: 201 repetida con la misma factura, una sola caja y un solo movimiento, y sigue sin enviarse',
+    pc_ok($b2) && ($b2['repetida'] ?? null) === true && ($b2['venta']['factura_id'] ?? null) === $idB
+    && count(pc_caja($pdo, $idB)) === 1 && wa_movimientos($pdo, $idB) === 1 && pc_recepciones($mock) === 2
+    && ($b2['venta']['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO', $b2['venta'] ?? $b2);
+
+// ---------------------------------------------------------------------------
+// S8) E31 agotada: el XML lleva la fecha de vencimiento del ultimo rango.
+// ---------------------------------------------------------------------------
+echo "S8) secuencia E31 agotada: el XML lleva la fecha del ultimo rango\n";
+$esc = pc_reiniciar($pdo, $mock);
+pc_cobrar($esc, pc_cuerpo($esc, 1, '31'));
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = current_value WHERE type = 'E31' AND ambiente = 'certecf'");
+$vence = (string) $pdo->query("SELECT fecha_vencimiento FROM ncf_sequences WHERE type = 'E31' AND ambiente = 'certecf' ORDER BY numero_desde DESC LIMIT 1")->fetchColumn();
+$cuerpoB = pc_cuerpo($esc, 1, '31');
+$b = pc_cobrar($esc, $cuerpoB);
+$fb = pc_fila($pdo, $cuerpoB['clave']);
+wa_chk('la E31 toma el numero siguiente (E310000000002), queda PENDIENTE_ENVIO y no se envia',
+    pc_ok($b) && ($fb['e_ncf'] ?? null) === 'E310000000002' && ($fb['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO'
+    && (int) ($fb['envio_pendiente'] ?? 0) === 1 && pc_recepciones($mock) === 1, [$fb['e_ncf'] ?? null, $fb['estado_dgii'] ?? null, pc_recepciones($mock)]);
+wa_chk('el XML trae la fecha de vencimiento del ultimo rango conocido',
+    $vence !== '' && str_contains((string) ($fb['xml_firmado'] ?? ''),
+        '<FechaVencimientoSecuencia>' . date('d-m-Y', strtotime($vence)) . '</FechaVencimientoSecuencia>'), $vence);
+
+// ---------------------------------------------------------------------------
+// S9) Rango vencido (no agotado): el numero tambien es el siguiente, sin enviar.
+// ---------------------------------------------------------------------------
+echo "S9) rango E32 vencido: numero siguiente y sin enviar\n";
+$esc = pc_reiniciar($pdo, $mock);
+$pdo->exec("UPDATE ncf_sequences SET fecha_vencimiento = CURDATE() - INTERVAL 1 DAY WHERE type = 'E32' AND ambiente = 'certecf'");
+$cuerpo = pc_cuerpo($esc);
+$r = pc_cobrar($esc, $cuerpo);
+$f = pc_fila($pdo, $cuerpo['clave']);
+wa_chk('con el unico rango vencido la venta toma el numero 1, queda PENDIENTE_ENVIO y no se envia',
+    pc_ok($r) && ($f['e_ncf'] ?? null) === 'E320000000001' && ($f['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO'
+    && (int) ($f['envio_pendiente'] ?? 0) === 1 && pc_recepciones($mock) === 0, [$f['e_ncf'] ?? null, $f['estado_dgii'] ?? null, pc_recepciones($mock)]);
+
+// ---------------------------------------------------------------------------
+// S10) Ningun rango registrado para el tipo: no hay a que numero seguir, asi
+// que la venta sale como factura simple (la venta no se detiene).
+// ---------------------------------------------------------------------------
+echo "S10) sin ningun rango de E32: factura simple\n";
+$esc = pc_reiniciar($pdo, $mock);
+$pdo->exec("DELETE FROM ncf_sequences WHERE type = 'E32' AND ambiente = 'certecf'");
+$cuerpo = pc_cuerpo($esc);
+$r = pc_cobrar($esc, $cuerpo);
+$f = pc_fila($pdo, $cuerpo['clave']);
+wa_chk('sin rango alguno la venta sale como factura simple, con caja, y no se envia',
+    pc_ok($r) && $f !== [] && $f['tipo_ecf'] === null && (int) $f['envio_pendiente'] === 0 && count(pc_caja($pdo, (int) $f['id'])) === 1
+    && pc_recepciones($mock) === 0, [$r, pc_recepciones($mock)]);
+
 // Deja la base como la espera la siguiente suite: sin ventas, caja ni turnos, con los rangos y el emisor sembrados.
 pc_vaciar($pdo);
 
