@@ -958,15 +958,24 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
             if (($estadoNuevo === 'RECHAZADO' || $estadoNuevo === 'NO_ENCONTRADO') && 
                 ($estadoAnterior !== 'RECHAZADO' && $estadoAnterior !== 'NO_ENCONTRADO')) {
                 if ($secuenciaUtilizada === false) {
-                    $ncfModel = new ncfModel();
-                    $tipoEcf = 'E' . $ecf['tipo_ecf'];
-                    $valor = (int) substr($ecf['e_ncf'], 3);
-                    
-                    $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
-                    error_log(sprintf(
-                        '[ECF] consulta estado rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
-                        $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
-                    ));
+                    if (!empty($ecf['pos_idempotency_key'])) {
+                        // Venta del POS: su e-NCF ya esta impreso en el recibo y NUNCA vuelve al
+                        // contador (spec 4.2.10). Se guarda el veredicto y el numero se queda.
+                        error_log(sprintf(
+                            '[ECF] consulta estado: factura_id=%d e_ncf=%s estado=%s: es una venta del POS, el numero no vuelve al contador',
+                            $facturaId, $ecf['e_ncf'], $estadoNuevo
+                        ));
+                    } else {
+                        $ncfModel = new ncfModel();
+                        $tipoEcf = 'E' . $ecf['tipo_ecf'];
+                        $valor = (int) substr($ecf['e_ncf'], 3);
+
+                        $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
+                        error_log(sprintf(
+                            '[ECF] consulta estado rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
+                            $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
+                        ));
+                    }
                 }
             }
         }
@@ -1038,15 +1047,24 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
             if (($estadoNuevo === 'RFCE_RECHAZADO' || $estadoNuevo === 'RFCE_NO_ENCONTRADO') && 
                 ($estadoAnterior !== 'RFCE_RECHAZADO' && $estadoAnterior !== 'RFCE_NO_ENCONTRADO')) {
                 if ($secuenciaUtilizada === false) {
-                    $ncfModel = new ncfModel();
-                    $tipoEcf = 'E' . $ecf['tipo_ecf'];
-                    $valor = (int) substr($ecf['e_ncf'], 3);
-                    
-                    $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
-                    error_log(sprintf(
-                        '[ECF] consulta RFCE rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
-                        $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
-                    ));
+                    if (!empty($ecf['pos_idempotency_key'])) {
+                        // Venta del POS: su e-NCF ya esta impreso en el recibo y NUNCA vuelve al
+                        // contador (spec 4.2.10). Se guarda el veredicto y el numero se queda.
+                        error_log(sprintf(
+                            '[ECF] consulta RFCE: factura_id=%d e_ncf=%s estado=%s: es una venta del POS, el numero no vuelve al contador',
+                            $facturaId, $ecf['e_ncf'], $estadoNuevo
+                        ));
+                    } else {
+                        $ncfModel = new ncfModel();
+                        $tipoEcf = 'E' . $ecf['tipo_ecf'];
+                        $valor = (int) substr($ecf['e_ncf'], 3);
+
+                        $resultado = $ncfModel->rollbackECFSequence($tipoEcf, $valor, $ecf['ambiente_dgii'] ?? null);
+                        error_log(sprintf(
+                            '[ECF] consulta RFCE rollback: factura_id=%d e_ncf=%s estado=%s -> %s',
+                            $facturaId, $ecf['e_ncf'], $estadoNuevo, $resultado ? 'revertido' : 'rollback_sin_coincidencia'
+                        ));
+                    }
                 }
             }
         }

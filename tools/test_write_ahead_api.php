@@ -812,5 +812,71 @@ wa_chk('500 con status false y el texto exacto, sin detalle de la base',
 $r = wa_get($srv, '/api/facturas/avisos');
 wa_chk('con la tabla de vuelta la ruta responde otra vez', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
 
+// ===========================================================================
+// Final fix wave F1: GET /api/facturas/{id}/estado de una fila del POS nunca
+// devuelve su e-NCF al contador (spec 4.2.10: el numero ya esta impreso en el
+// recibo). Con veredicto RECHAZADO / NO_ENCONTRADO y secuenciaUtilizada=false,
+// una fila de la app si lo devuelve (Release 1); una del POS no.
+// ===========================================================================
+
+/** Fila sembrada del POS: como wa_fila_sembrada, con la clave de idempotencia del POS y su envio pendiente. */
+function wa_fila_pos_sembrada(PDO $pdo, array $ids, string $eNcf, string $estado, ?string $trackId, int $n): int
+{
+    $id = wa_fila_sembrada($pdo, $ids, $eNcf, $estado, $trackId);
+    $pdo->prepare('UPDATE facturas SET pos_idempotency_key = :k, envio_pendiente = 1 WHERE id = :id')
+        ->execute([':k' => sprintf('00000000-0000-4000-8000-%012d', $n), ':id' => $id]);
+    return $id;
+}
+
+/** Deja el contador del tipo en $valor (el numero de la fila sembrada es el ultimo entregado). */
+function wa_fijar_contador(PDO $pdo, string $tipo, int $valor): void
+{
+    $pdo->prepare("UPDATE ncf_sequences SET current_value = :v WHERE type = :t AND ambiente = 'certecf'")
+        ->execute([':v' => $valor, ':t' => $tipo]);
+}
+
+echo "F1a) GET /estado de una E31 del POS ENVIADO que la DGII rechaza sin consumir el numero: el contador no baja\n";
+$ids = wa_reiniciar($pdo, $srv, 'trackids_rechazado');
+$f1Pos = wa_fila_pos_sembrada($pdo, $ids, 'E310000000007', 'ENVIADO', 'track-E310000000007', 71);
+wa_fijar_contador($pdo, 'E31', 7);
+$r = wa_get($srv, "/api/facturas/{$f1Pos}/estado");
+wa_chk('200 y la fila quedo RECHAZADO (el veredicto se guarda igual)',
+    $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RECHAZADO'
+    && (wa_filas($pdo, 'E310000000007')[0]['estado_dgii'] ?? null) === 'RECHAZADO', $r);
+wa_chk('el contador sigue en 7: el numero impreso no vuelve', wa_contador($pdo, 'E31') === 7, wa_contador($pdo, 'E31'));
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+wa_chk('la venta siguiente toma el 8, no el 7 (y la fila del POS no se archiva)',
+    $r['status'] === 200 && ($r['json']['data']['e_ncf'] ?? null) === 'E310000000008'
+    && (wa_filas($pdo, 'E310000000007')[0]['estado_dgii'] ?? null) === 'RECHAZADO' && count(wa_filas($pdo, 'E310000000007')) === 1, $r);
+$ids = wa_reiniciar($pdo, $srv, 'trackids_rechazado');
+$f1App = wa_fila_sembrada($pdo, $ids, 'E310000000007', 'ENVIADO', 'track-E310000000007');
+wa_fijar_contador($pdo, 'E31', 7);
+$r = wa_get($srv, "/api/facturas/{$f1App}/estado");
+wa_chk('control, una fila de la app: RECHAZADO y el contador baja a 6 (Release 1)',
+    $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RECHAZADO' && wa_contador($pdo, 'E31') === 6, [$r['status'], wa_contador($pdo, 'E31')]);
+
+echo "F1b) GET /estado de una E32 (RFCE) del POS que la DGII no encuentra o rechaza: el contador no baja\n";
+$ids = wa_reiniciar($pdo, $srv, 'trackids_rechazado');
+$f1Pos = wa_fila_pos_sembrada($pdo, $ids, 'E320000000007', 'RFCE_ENVIADO', null, 72);
+wa_fijar_contador($pdo, 'E32', 7);
+$r = wa_get($srv, "/api/facturas/{$f1Pos}/estado");
+wa_chk('200 y la fila quedo RFCE_RECHAZADO',
+    $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RFCE_RECHAZADO'
+    && (wa_filas($pdo, 'E320000000007')[0]['estado_dgii'] ?? null) === 'RFCE_RECHAZADO', $r);
+wa_chk('el contador sigue en 7', wa_contador($pdo, 'E32') === 7, wa_contador($pdo, 'E32'));
+wa_mock_modo($srv['mock'], 'trackids_vacio');
+$pdo->prepare("UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = :id")->execute([':id' => $f1Pos]);
+$r = wa_get($srv, "/api/facturas/{$f1Pos}/estado");
+wa_chk('y con el veredicto NO_ENCONTRADO (RFCE_NO_ENCONTRADO) tampoco baja',
+    $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RFCE_NO_ENCONTRADO' && wa_contador($pdo, 'E32') === 7,
+    [$r['status'], $r['json']['data']['estado_dgii'] ?? null, wa_contador($pdo, 'E32')]);
+$ids = wa_reiniciar($pdo, $srv, 'trackids_rechazado');
+$f1App = wa_fila_sembrada($pdo, $ids, 'E320000000007', 'RFCE_ENVIADO', null);
+wa_fijar_contador($pdo, 'E32', 7);
+$r = wa_get($srv, "/api/facturas/{$f1App}/estado");
+wa_chk('control, una fila de la app: RFCE_RECHAZADO y el contador baja a 6',
+    $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RFCE_RECHAZADO' && wa_contador($pdo, 'E32') === 6, [$r['status'], wa_contador($pdo, 'E32')]);
+wa_limpiar($pdo);
+
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();

@@ -1955,8 +1955,11 @@ class facturaModel
     public function getECFData(int $facturaId): ?array
     {
         try {
+            // pos_idempotency_key: las consultas de estado no devuelven al contador el
+            // numero de una venta del POS (ya esta impreso en su recibo).
             $sql = 'SELECT id, no_factura, tipo_ecf, e_ncf, track_id, rfce_track_id, estado_dgii,
-                           secuencia_utilizada, codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii
+                           secuencia_utilizada, codigo_seguridad, fecha_emision_dgii, ambiente_dgii, respuesta_dgii,
+                           pos_idempotency_key
                     FROM facturas WHERE id = :id';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([':id' => $facturaId]);
