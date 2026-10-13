@@ -203,6 +203,11 @@ class ECFEmissionService
      *       se toma el numero siguiente al ultimo (ncfModel::dispenseSinRango); la
      *       fila se reserva con la meta sin_rango y emitir() vuelve SIN llamar a
      *       la DGII (ni para el token) con estado PENDIENTE_ENVIO y sin_rango true.
+     *   - validar_vigencia_certificado (bool, false): antes de firmar, o sea antes de
+     *       reservar, se lee el .p12 y, si su vigencia ya paso, sale EcfUsuarioException:
+     *       un fallo previo a la reserva (el numero vuelve al contador). Solo lo pide el
+     *       POS, para que la venta salga como factura simple en vez de un comprobante que
+     *       la DGII rechazaria; la app y la integracion no lo pasan y firman como siempre.
      * @param callable|null $persistencia Gancho write-ahead,
      *   fn(string $fase, array $ctx): mixed. Sin el (integracion, gastos) la
      *   emision queda como antes. Con el:
@@ -490,6 +495,10 @@ class ECFEmissionService
                     'Password del certificado no configurado (DGII_ECF_CERT_PASSWORD o cert del tenant).',
                     'El certificado digital de tu empresa no está configurado, así que no se puede firmar el comprobante. Avisa a soporte.'
                 );
+            }
+
+            if (!empty($payload['validar_vigencia_certificado'])) {
+                self::exigirCertificadoVigente($certContent, $certPassword);
             }
 
             $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
@@ -1061,6 +1070,35 @@ class ECFEmissionService
             default => 1,
         };
         return $bytes > 0 ? (string) ($bytes + 64 * 1048576) : null;
+    }
+
+    /**
+     * Falla con EcfUsuarioException si el certificado ya vencio (validTo del X509 del .p12).
+     * Un .p12 que no se puede leer (clave incorrecta, formato legacy) no se juzga aqui: el
+     * firmador lo dice con su propio texto. Texto tecnico para integradores y logs (sin la
+     * ruta ni la clave); el segundo, para el usuario.
+     */
+    private static function exigirCertificadoVigente(string $certContent, string $certPassword): void
+    {
+        if (!function_exists('openssl_pkcs12_read')) {
+            return;
+        }
+        $certs = [];
+        $leido = openssl_pkcs12_read($certContent, $certs, $certPassword);
+        // La cola de errores de OpenSSL se vacia: el firmador lee la suya para armar su mensaje.
+        while (openssl_error_string() !== false) {
+            // sigue vaciando
+        }
+        if (!$leido || empty($certs['cert'])) {
+            return;
+        }
+        $hasta = (openssl_x509_parse($certs['cert']) ?: [])['validTo_time_t'] ?? null;
+        if (is_int($hasta) && $hasta < time()) {
+            throw new EcfUsuarioException(
+                'El certificado digital vencio el ' . date('Y-m-d H:i:s', $hasta) . '.',
+                'El certificado digital de tu empresa está vencido, así que no se puede firmar el comprobante. Avisa a soporte.'
+            );
+        }
     }
 
     /**

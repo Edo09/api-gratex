@@ -580,7 +580,7 @@ class posModel
     public function ventaPorClave(string $clave): ?array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, e_ncf, tipo_ecf, estado_dgii, total, envio_pendiente, turno_id, client_id, user_id, respuesta_dgii, rfce_respuesta
+            'SELECT id, e_ncf, no_factura, tipo_ecf, estado_dgii, total, envio_pendiente, turno_id, client_id, user_id, respuesta_dgii, rfce_respuesta
              FROM facturas WHERE pos_idempotency_key = :k LIMIT 1'
         );
         $stmt->execute([':k' => $clave]);

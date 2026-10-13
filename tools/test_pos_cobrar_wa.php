@@ -512,8 +512,9 @@ wa_chk('S6: la fila queda ENVIO_INCIERTO con envio_pendiente 1 y su XML guardado
 wa_chk('S6: nada llego a la DGII', $r['rec']->llamadas === []);
 wa_chk('S6: caja e inventario quedan', cajaDe($pdo, $idS6)['n'] === 1 && wa_movimientos($pdo, $idS6) === 1);
 
-// S7) Falla antes de guardar: sin fila, sin caja, sin inventario, y el numero vuelve.
-echo "S7) Falla antes de guardar (certificado): nada queda y el numero vuelve\n";
+// S7) Falla antes de guardar (certificado ausente): la venta no se detiene. Sale como factura
+// simple (sin e-NCF), con su caja y su inventario, y el numero que se habia tomado vuelve al contador.
+echo "S7) Falla antes de guardar (certificado): la venta sale como factura simple y el numero vuelve\n";
 reiniciar($pdo);
 $antes = wa_contador($pdo, 'E32');
 $certOk = (string) $_ENV['DGII_ECF_CERT_PATH'];
@@ -522,15 +523,25 @@ $_ENV['DGII_ECF_CERT_PATH'] = $certOk . '.no-existe';
 $r = venta($pdo, $f);
 putenv('DGII_ECF_CERT_PATH=' . $certOk);
 $_ENV['DGII_ECF_CERT_PATH'] = $certOk;
-wa_chk('S7: cobrar responde EMISION_FALLIDA',
-    $r['err'] instanceof PosError && $r['err']->codigo() === 'EMISION_FALLIDA' && $r['err']->http() === 502, descErr($r['err']));
-wa_chk('S7: el texto al cajero no menciona a la DGII',
-    $r['err'] instanceof PosError && stripos($r['err']->getMessage(), 'dgii') === false, descErr($r['err']));
-wa_chk('S7: no queda fila de esa clave', filaPorClave($pdo, $r['cuerpo']['clave']) === null);
-wa_chk('S7: el numero volvio al contador', wa_contador($pdo, 'E32') === $antes, wa_contador($pdo, 'E32') - $antes);
-wa_chk('S7: sin caja y sin inventario', totalCaja($pdo) === 0 && (int) $pdo->query('SELECT COUNT(*) FROM inventory_movements')->fetchColumn() === 0);
-wa_chk('S7: nada llego a la DGII y la bitacora anota POS_VENTA_FALLIDA',
-    $r['rec']->llamadas === [] && (acciones($pdo)['POS_VENTA_FALLIDA'] ?? 0) === 1, acciones($pdo));
+$v = $r['res'];
+$idS7 = (int) ($v['venta']['factura_id'] ?? 0);
+$filaS7 = filaPorClave($pdo, $r['cuerpo']['clave']) ?? [];
+wa_chk('S7: cobrar entrega la venta (201, sin error) y no es repetida',
+    $r['err'] === null && $idS7 > 0 && ($v['repetida'] ?? null) === false, descErr($r['err']));
+wa_chk('S7: la fila es una factura simple (tipo_ecf y e_ncf NULL, sin envio pendiente) con la clave, el turno y el empleado del POS',
+    (int) ($filaS7['id'] ?? 0) === $idS7 && $filaS7['tipo_ecf'] === null && $filaS7['e_ncf'] === null && (int) $filaS7['envio_pendiente'] === 0
+    && (int) $filaS7['turno_id'] === $turnoId && (int) $filaS7['pos_empleado_id'] === $empleadoId, $filaS7);
+wa_chk('S7: el numero volvio al contador y no se creo ningun e-CF',
+    wa_contador($pdo, 'E32') === $antes && totalFacturas($pdo, '32') === 0, wa_contador($pdo, 'E32') - $antes);
+wa_chk('S7: caja de RD$ 1,180 en efectivo e inventario (un movimiento)',
+    cajaDe($pdo, $idS7) === ['n' => 1, 'monto' => 1180.0, 'recibido' => 1500.0, 'devuelta' => 320.0, 'forma' => 1] && wa_movimientos($pdo, $idS7) === 1,
+    cajaDe($pdo, $idS7));
+wa_chk('S7: la respuesta trae el recibo y el numero interno, sin tipo de e-CF',
+    is_array($v['recibo'] ?? null) && array_key_exists('tipo_ecf', $v['venta'] ?? []) && $v['venta']['tipo_ecf'] === null
+    && (string) ($v['venta']['e_ncf'] ?? '') !== '', $v['venta'] ?? null);
+wa_chk('S7: nada llego a la DGII y la bitacora anota POS_VENTA_FACTURA_SIMPLE (ni POS_VENTA ni POS_VENTA_FALLIDA)',
+    $r['rec']->llamadas === [] && (acciones($pdo)['POS_VENTA_FACTURA_SIMPLE'] ?? 0) === 1
+    && !isset(acciones($pdo)['POS_VENTA']) && !isset(acciones($pdo)['POS_VENTA_FALLIDA']), acciones($pdo));
 
 // S8) Otra peticion ya guardo la clave (carrera sin candado): se responde como repetida y el numero vuelve.
 echo "S8) La clave ya estaba guardada por otra peticion: venta repetida, sin otro e-NCF\n";

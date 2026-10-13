@@ -205,7 +205,9 @@ final class PosCierre
         $pendientes = [];
         $rechazadas = [];
         foreach ($pos->ventasCobradasDelTurno($turno['id']) as $v) {
-            $tipo = 'E' . $v['tipo_ecf'];
+            // La venta que salio como factura simple (tipo_ecf NULL) se cuenta como 'Simple': el reporte
+            // nunca lleva una llave vacia.
+            $tipo = $v['tipo_ecf'] === null ? 'Simple' : 'E' . $v['tipo_ecf'];
             $comprobantes[$tipo] = ($comprobantes[$tipo] ?? 0) + 1;
             $item = ['e_ncf' => $v['e_ncf'], 'total_centavos' => $centavos($v['total'])];
             if (str_contains((string) $v['estado_dgii'], 'RECHAZADO')) {

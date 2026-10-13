@@ -595,6 +595,87 @@ class facturaModel
         }
     }
 
+    /**
+     * Factura simple de una venta del POS cuyo e-CF no se pudo generar (spec
+     * 2026-10-12, 4.2.5): la misma factura interna de createFacturaSimple
+     * (tipo_ecf NULL, sin e-NCF, sin ITBIS, sin DGII) con las columnas del POS
+     * (turno, empleado y la clave de idempotencia) escritas en el MISMO INSERT.
+     * Una venta repetida con esa clave nunca crea una segunda factura, y factura
+     * y lineas van en una transaccion: no puede quedar una fila a medias.
+     *
+     * @param array $input {date, client_id, client_name, total, user_id, items[],
+     *                      pos: {turno_id, pos_empleado_id, pos_idempotency_key}}.
+     *                     items: description, amount (el precio FINAL, con ITBIS:
+     *                     la factura simple no desglosa impuestos), quantity,
+     *                     descuento_monto, product_id, unidad_medida,
+     *                     indicador_bien_servicio.
+     * @return int id de la factura (tipo_ecf NULL, envio_pendiente 0, estado_dgii con su default 'PENDIENTE')
+     * @throws EcfVentaRepetidaException la clave ya tiene factura (1062 en uk_facturas_pos_idem)
+     * @throws InvalidArgumentException sin lineas o sin los datos del POS
+     * @throws RuntimeException la base no pudo guardarla (el detalle va a error_log)
+     */
+    public function crearFacturaSimplePos(array $input): int
+    {
+        $pos = is_array($input['pos'] ?? null) ? $input['pos'] : [];
+        $clave = (string) ($pos['pos_idempotency_key'] ?? '');
+        if ($clave === '' || empty($pos['turno_id']) || empty($pos['pos_empleado_id'])) {
+            throw new InvalidArgumentException('crearFacturaSimplePos: faltan turno_id, pos_empleado_id o pos_idempotency_key');
+        }
+        $items = $this->normalizeSimpleItems($input['items'] ?? []);
+        if ($items === []) {
+            throw new InvalidArgumentException('crearFacturaSimplePos: la venta no tiene lineas');
+        }
+        $total = isset($input['total']) && $input['total'] !== ''
+            ? round((float) $input['total'], 2)
+            : $this->sumSimpleTotal($items);
+
+        $lock = $this->tomarLockSecuenciaSimple();
+        try {
+            $this->conexion->beginTransaction();
+            $stmt = $this->conexion->prepare(
+                'INSERT INTO facturas
+                    (no_factura, date, client_id, client_name, user_id, total, tipo_pago, NCF, tipo_ecf,
+                     turno_id, pos_empleado_id, pos_idempotency_key, envio_pendiente)
+                 VALUES
+                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, 1, NULL, NULL,
+                     :turno_id, :pos_empleado_id, :pos_idempotency_key, 0)'
+            );
+            $stmt->execute([
+                // Dentro del candado Y de la transaccion, como createFacturaSimple.
+                ':no_factura' => $this->nextSimpleFacturaNumber(),
+                ':date' => ($input['date'] ?? '') !== '' ? $input['date'] : date('Y-m-d H:i:s'),
+                ':client_id' => $input['client_id'] ?? null,
+                // facturas.client_name es VARCHAR(100): una razon social larga no puede tumbar la venta.
+                ':client_name' => mb_substr((string) ($input['client_name'] ?? ''), 0, 100),
+                ':user_id' => $input['user_id'] ?? null,
+                ':total' => $total,
+                ':turno_id' => (int) $pos['turno_id'],
+                ':pos_empleado_id' => (int) $pos['pos_empleado_id'],
+                ':pos_idempotency_key' => $clave,
+            ]);
+            $facturaId = (int) $this->conexion->lastInsertId();
+            $this->insertSimpleItems($facturaId, $items);
+            $this->conexion->commit();
+            return $facturaId;
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            // Codigo del driver, no el SQLSTATE: 23000 cubre tambien otras claves. MySQL 8 nombra la
+            // clave 'facturas.uk_facturas_pos_idem'; MariaDB y MySQL 5.7 solo 'uk_facturas_pos_idem'.
+            if ((int) ($e->errorInfo[1] ?? 0) === 1062 && str_contains((string) ($e->errorInfo[2] ?? $e->getMessage()), 'uk_facturas_pos_idem')) {
+                throw new EcfVentaRepetidaException($clave);
+            }
+            // El texto de PDO (SQL, tablas) solo al log.
+            error_log('[facturas] no se pudo crear la factura simple del POS: ' . $e->getMessage());
+            throw new RuntimeException('No se pudo guardar la venta como factura simple.', 0, $e);
+        } finally {
+            if ($lock) {
+                $this->soltarLockSecuenciaSimple();
+            }
+        }
+    }
+
     /** Nombre del candado, por base de datos: un tenant no serializa a otro. */
     private const LOCK_SECUENCIA_SIMPLE = "CONCAT(DATABASE(), ':factura_simple_seq')";
 

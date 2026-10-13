@@ -7,6 +7,7 @@ require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfItemMapper.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfNumeroOcupadoException.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfEnvioInciertoException.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfVentaRepetidaException.php';
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
@@ -32,6 +33,10 @@ require_once __DIR__ . '/PosCliente.php';
  *    a la DGII ni la ve; lo que quede abierto lo cierra reenviarPendientes.
  *  - Entregar es una sola funcion idempotente (entregarVenta): repetir la clave
  *    devuelve la misma venta y completa lo que haya quedado sin hacer.
+ *  - Si el e-CF no se puede generar ANTES de guardarse (certificado ausente,
+ *    vencido o con otra clave, firma, datos del emisor, sin rango...), la venta
+ *    no se detiene: sale como factura simple (ventaComoFacturaSimple), con la
+ *    misma entrega y el mismo recibo. Lo unico que la detiene es la base.
  */
 final class PosVenta
 {
@@ -214,6 +219,9 @@ final class PosVenta
             // guardada y sin confirmar en vez de fallar.
             'reclamar_secuencia' => false,
             'autenticar_despues_de_reservar' => true,
+            // Un certificado vencido firma igual, pero la DGII rechazaria el comprobante: se revisa
+            // ANTES de reservar, y la venta sale como factura simple en vez de quedar rechazada.
+            'validar_vigencia_certificado' => true,
         ];
 
         $auditBase = [
@@ -273,7 +281,7 @@ final class PosVenta
         $claveGuardada = $clave;
         $fallo = null;
         try {
-            self::servicioEmision()->emitir($payload, $persistencia);
+            self::emitirConReintento(self::servicioEmision(), $payload, $persistencia);
         } catch (EcfVentaRepetidaException $e) {
             // Otra peticion con esta clave ya guardo la venta (el candado de la clave
             // lo hace muy raro). El servicio ya devolvio el numero que habia tomado.
@@ -288,12 +296,11 @@ final class PosVenta
         // deja la fila en pie, y esa venta se entrega.
         $fila = $pos->ventaPorClave($claveGuardada);
         if ($fila === null) {
-            // Nada quedo guardado: la venta no se emitio y el numero volvio al contador.
+            // Nada quedo guardado ni llego a la DGII (el numero ya volvio al contador): la venta no
+            // se detiene (spec 2026-10-12, 4.2.5). Sale como factura simple y se entrega igual.
             $causa = $fallo ?? new RuntimeException('la emision termino sin guardar la venta');
             error_log('[pos] fallo antes de guardar la venta: ' . get_class($causa) . ': ' . $causa->getMessage());
-            self::audit('POS_VENTA_FALLIDA', null, $auditBase, 'No se pudo emitir la venta del POS: ' . $causa->getMessage(), false);
-            throw new PosError('No se pudo registrar la venta. Inténtalo de nuevo en un momento; si sigue fallando, avisa a soporte.',
-                502, 'EMISION_FALLIDA');
+            return self::ventaComoFacturaSimple($pos, $empleado, $turno, $clave, $ancho, $userId, $cliente, $tipoEcf, $items, $cobro, $auditBase, $causa);
         }
         if ($repetida) {
             return self::respuestaDeVentaExistente($pos, $fila, $ancho, $body);
@@ -542,7 +549,7 @@ final class PosVenta
         return [
             'venta' => [
                 'factura_id' => $facturaId,
-                'e_ncf' => $venta['e_ncf'],
+                'e_ncf' => self::numeroDeVenta($venta),
                 'tipo_ecf' => $tipoEcf,
                 'estado_dgii' => (string) $venta['estado_dgii'],
                 'envio_pendiente' => (int) $venta['envio_pendiente'] === 1,
@@ -582,14 +589,128 @@ final class PosVenta
             }
             $factura = $fila[0];
             $factura['items'] = $facturas->getFacturaItems($facturaId);
-            $nombre = 'Factura_' . ($factura['e_ncf'] ?? $facturaId) . RepresentacionImpresa::sufijo($ancho);
+            // Factura simple (tipo_ecf NULL): se imprime como cualquier factura, con su numero interno y sin timbre.
+            $simple = ($factura['tipo_ecf'] ?? null) === null;
+            $nombre = 'Factura_' . ($simple ? ($factura['no_factura'] ?? $facturaId) : ($factura['e_ncf'] ?? $facturaId)) . RepresentacionImpresa::sufijo($ancho);
             // Credito fiscal: el recibo lleva el RNC y la razon social del comprador.
             $cliente = !empty($factura['client_id']) ? ((new posModel())->clientePorId((int) $factura['client_id']) ?? []) : [];
-            return RepresentacionImpresa::datosRecibo($factura, $cliente, false, $ancho, $nombre);
+            return RepresentacionImpresa::datosRecibo($factura, $cliente, $simple, $ancho, $nombre);
         } catch (Throwable $e) {
             error_log('[pos] recibo de la factura ' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * emitir con UN reintento cuando otra fila ya tenia el numero
+     * (EcfNumeroOcupadoException): el contador ya avanzo, asi que el segundo
+     * intento toma el siguiente. Un segundo choque sale tal cual y la venta
+     * sigue como factura simple (ventaComoFacturaSimple). Cualquier otra
+     * excepcion sale sin reintentar: repetir un envio incierto duplicaria la venta.
+     */
+    private static function emitirConReintento(ECFEmissionService $servicio, array $payload, ?callable $persistencia = null): array
+    {
+        try {
+            return $servicio->emitir($payload, $persistencia);
+        } catch (EcfNumeroOcupadoException $e) {
+            error_log('[pos] e-NCF ocupado al reservar; se reintenta con el siguiente: ' . $e->getMessage());
+            return $servicio->emitir($payload, $persistencia);
+        }
+    }
+
+    /**
+     * El e-CF no se pudo generar (certificado ausente, vencido o con otra clave,
+     * fallo de firma, datos del emisor incompletos, sin rango...): nada llego a
+     * la DGII y el contador ya recupero su numero. La venta NO se detiene (spec
+     * 2026-10-12, 4.2.5; U8/U9): sale como factura simple, sin e-NCF, sin ITBIS y
+     * sin envio, con las mismas lineas, el mismo total y las columnas del POS, asi
+     * que la clave de idempotencia sigue valiendo. La entrega (caja, inventario,
+     * auditoria) es la de cualquier venta (entregarVenta) y el cajero no ve nada
+     * distinto: 201 con su recibo.
+     *
+     * Nunca arma una segunda factura para una venta que ya tiene fila: con
+     * EcfEnvioInciertoException o EcfVentaRepetidaException hay un e-CF guardado
+     * con esta clave y la excepcion se relanza.
+     *
+     * @param array $items lineas de armarLineas (nombre_item, cantidad, precio_unitario final...)
+     * @param array $cobro el de leerCobro (turno_id, forma_pago, total_centavos, recibido_centavos, devuelta_centavos, iniciada_at)
+     * @return array 201: {venta, cobro, recibo, repetida: false}
+     */
+    private static function ventaComoFacturaSimple(
+        posModel $pos, array $empleado, array $turno, string $clave, int $ancho, int $userId, ?array $cliente,
+        string $tipoEcfPedido, array $items, array $cobro, array $auditBase, Throwable $causa
+    ): array {
+        if ($causa instanceof EcfEnvioInciertoException || $causa instanceof EcfVentaRepetidaException) {
+            throw $causa;
+        }
+        // El texto del fallo ya quedo en el log (lo escribio quien llama).
+        error_log('[pos] la venta sale como factura simple: ' . get_class($causa));
+
+        $facturas = new facturaModel();
+        try {
+            $facturaId = $facturas->crearFacturaSimplePos([
+                'date' => date('Y-m-d H:i:s'),
+                'client_id' => $cliente !== null ? (int) $cliente['id'] : null,
+                'client_name' => $cliente !== null ? (string) ($cliente['client_name'] ?: PosCliente::forma($cliente)['nombre']) : 'Consumidor Final',
+                'total' => $cobro['total_centavos'] / 100,
+                'user_id' => $userId,
+                // El precio final (con ITBIS) de cada linea: la factura simple no desglosa impuestos.
+                'items' => array_map(static function (array $it): array {
+                    return [
+                        'product_id' => $it['product_id'] ?? null,
+                        'description' => (string) ($it['nombre_item'] ?? ''),
+                        'amount' => $it['precio_unitario'] ?? 0,
+                        'quantity' => $it['cantidad'] ?? 1,
+                        'descuento_monto' => $it['descuento_monto'] ?? 0,
+                        'indicador_bien_servicio' => $it['indicador_bien_servicio'] ?? 1,
+                        'unidad_medida' => $it['unidad_medida'] ?? '43',
+                    ];
+                }, $items),
+                'pos' => ['turno_id' => $turno['id'], 'pos_empleado_id' => $empleado['id'], 'pos_idempotency_key' => $clave],
+            ]);
+        } catch (EcfVentaRepetidaException $e) {
+            // Otra peticion dejo una fila con esta clave entre tanto: el reintento
+            // del cajero (misma clave) la encuentra y la entrega, sin duplicarla.
+            throw new PosError('Esta venta todavía se está procesando. Espera un momento y vuelve a intentarlo.', 409, 'VENTA_EN_PROCESO');
+        } catch (Throwable $e) {
+            // Sin base no hay donde guardar la venta: lo unico que detiene el POS.
+            error_log('[pos] factura simple de la venta: ' . get_class($e) . ': ' . $e->getMessage());
+            self::audit('POS_VENTA_FALLIDA', null, $auditBase + ['causa' => get_class($causa)], 'No se pudo guardar la venta del POS.', false);
+            throw new PosError('No se pudo guardar la venta en este momento.', 500, 'VENTA_NO_GUARDADA');
+        }
+
+        $guardada = $facturas->getFacturaSimple($facturaId) ?? [];
+        $numero = (string) ($guardada['no_factura'] ?? '');
+        // Un solo evento, el de entregarVenta. Solo la clase del fallo: el mensaje puede traer rutas del servidor.
+        self::entregarVenta($pos, $facturaId, $facturas->getFacturaItems($facturaId), null, $userId, $cobro, [
+            'accion' => 'POS_VENTA_FACTURA_SIMPLE',
+            'entidad' => $numero,
+            'valores' => $auditBase + ['factura_id' => $facturaId, 'tipo_ecf_pedido' => $tipoEcfPedido, 'causa' => get_class($causa)],
+            'descripcion' => 'La venta del POS salió como factura simple: no se pudo generar el comprobante electrónico.',
+        ]);
+
+        return [
+            'venta' => [
+                'factura_id' => $facturaId,
+                'e_ncf' => $numero,
+                'tipo_ecf' => null,
+                // El default de la columna en toda factura simple: no es un estado de la DGII.
+                'estado_dgii' => (string) ($guardada['estado_dgii'] ?? ''),
+                'envio_pendiente' => false,
+                'total_centavos' => $cobro['total_centavos'],
+                'cliente' => $cliente !== null ? PosCliente::forma($cliente) : null,
+            ],
+            'cobro' => self::cobro($cobro['forma_pago'], $cobro['total_centavos'], $cobro['recibido_centavos'], $cobro['devuelta_centavos']),
+            'recibo' => self::recibo($facturaId, $ancho),
+            'repetida' => false,
+        ];
+    }
+
+    /** Numero que imprime la venta: el e-NCF o, en una factura simple, su numero interno. */
+    private static function numeroDeVenta(array $fila): string
+    {
+        $eNcf = trim((string) ($fila['e_ncf'] ?? ''));
+        return $eNcf !== '' ? $eNcf : trim((string) ($fila['no_factura'] ?? ''));
     }
 
     public static function ancho($valor): int
