@@ -1571,6 +1571,72 @@ wa_chk('facturaController: GET avisos se despacha antes del listado',
     $avPosDespacho !== false && $avPosListado !== false && $avPosDespacho < $avPosListado, [$avPosDespacho, $avPosListado]);
 
 // ---------------------------------------------------------------------------
+// 16) Documentacion de la venta del POS y de «Reenviar a la DGII» (Task 15).
+// ---------------------------------------------------------------------------
+echo "\n== 16) Documentacion del POS y de Reenviar a la DGII ==\n";
+$s16Leer = static fn(string $ruta): string
+    => str_replace("\r\n", "\n", (string) @file_get_contents(dirname(__DIR__) . '/' . $ruta));
+// Sin saltos de linea ni espacios repetidos: los parrafos de CLAUDE.md y del runbook parten las lineas.
+$s16Plano = static fn(string $texto): string => preg_replace('/\s+/', ' ', $texto);
+$s16Pos = $s16Leer('docs/integrations/pos-write-ahead.md');
+wa_chk('pos-write-ahead.md: describe lo que hace el codigo (entrega, factura simple, sin_rango, opciones del POS, reenvio)',
+    str_contains($s16Pos, 'entregarVenta') && str_contains($s16Pos, '## 4. Fallo antes de guardar: factura simple')
+    && str_contains($s16Pos, '`sin_rango`') && str_contains($s16Pos, '`reclamar_secuencia`') && str_contains($s16Pos, 'compare-and-set')
+    && str_contains($s16Pos, 'GET /api/facturas/avisos') && str_contains($s16Pos, '«Reenviar a la DGII»'));
+wa_chk('pos-write-ahead.md: ya no es la nota "lo que tiene que respetar"',
+    !str_contains($s16Pos, 'tiene que respetar') && !str_contains($s16Pos, 'Hoy `reservarFacturaECF` no escribe'));
+wa_chk('pos-write-ahead.md: ERROR y NO_ENCONTRADO conservan envio_pendiente = 0, RFCE_NO_ENCONTRADO es de soporte y el punto abierto de las facturas simples',
+    str_contains($s16Plano($s16Pos), 'conservan `envio_pendiente = 0`') && str_contains($s16Pos, '`RFCE_NO_ENCONTRADO`')
+    && str_contains($s16Pos, 'Punto abierto') && str_contains($s16Pos, 'Facturas simples'));
+$s16ApiPos = $s16Leer('docs/api/pos.md');
+wa_chk('api/pos.md: la venta ya no tiene DGII_RECHAZO, EMISION_FALLIDA ni GUARDADO_FALLIDO en la tabla de errores',
+    !str_contains($s16ApiPos, '| `DGII_RECHAZO` |') && !str_contains($s16ApiPos, '| `EMISION_FALLIDA` |') && !str_contains($s16ApiPos, '| `GUARDADO_FALLIDO` |')
+    && str_contains($s16ApiPos, '| `VENTA_EN_PROCESO` |') && str_contains($s16ApiPos, '| `VENTA_NO_GUARDADA` |'));
+wa_chk('api/pos.md: ENVIO_INCIERTO, sin_rango, el reenvio con compare-and-set y la auditoria de la factura simple',
+    str_contains($s16ApiPos, 'estado_dgii: ENVIO_INCIERTO') && str_contains($s16ApiPos, '`sin_rango`')
+    && str_contains($s16ApiPos, 'compare-and-set') && str_contains($s16ApiPos, 'POS_VENTA_FACTURA_SIMPLE'));
+wa_chk('api/pos.md: la bitacora nombra lo que el codigo escribe (POS_VENTA_FALLIDA si, POS_VENTA_SIN_GUARDAR no)',
+    str_contains($s16ApiPos, '`POS_VENTA_FALLIDA`') && !str_contains($s16ApiPos, 'POS_VENTA_SIN_GUARDAR')
+    && wa_grep(['src'], 'POS_VENTA_SIN_GUARDAR') === []);
+wa_chk('api/pos.md: el corredor de pruebas scratch y las suites nuevas',
+    str_contains($s16ApiPos, 'tools/test_pos_scratch.php') && str_contains($s16ApiPos, 'tools/test_pos_write_ahead.php')
+    && str_contains($s16ApiPos, 'tools/test_pos_cobrar_wa.php') && str_contains($s16ApiPos, 'tools/test_pos_continuidad.php')
+    && str_contains($s16ApiPos, 'tools/test_pos_reenvio.php'));
+$s16SpecPos = $s16Leer('docs/specs/pos.md');
+wa_chk('specs/pos.md: decisiones 38 y 39, F6 sin "rechazada -> no hay recibo" y la entrega idempotente en 9.5',
+    str_contains($s16SpecPos, '| 38 | La venta no se detiene |') && str_contains($s16SpecPos, '| 39 | Secuencia agotada |')
+    && !str_contains($s16SpecPos, 'Respuesta **rechazada** → no hay recibo') && str_contains($s16SpecPos, 'PosVenta::entregarVenta'));
+wa_chk('specs/pos.md: el POS no promete ninguna alerta de rechazo (D-C): el rechazo se ve solo en app.*',
+    !str_contains($s16Plano($s16SpecPos), 'se muestra una alerta persistente en el POS') && !str_contains($s16SpecPos, 'franja roja hasta'));
+$s16Dgii = $s16Leer('docs/integrations/dgii-ecf.md');
+wa_chk('dgii-ecf.md: la app nunca reenvia una factura sin confirmar y si reemite una rechazada',
+    str_contains($s16Dgii, 'nunca reenvía una factura sin confirmar') && str_contains($s16Dgii, '### Reenviar a la DGII una factura rechazada')
+    && str_contains($s16Dgii, 'tomarLockReenvio') && str_contains($s16Dgii, 'devolverSaldoDeFactura'));
+$s16Fact = $s16Leer('docs/api/facturas.md');
+wa_chk('facturas.md: GET /avisos y POST /reenviar documentados, con el 409 de las facturas sin confirmar',
+    str_contains($s16Fact, '### Avisos del e-CF — `GET /api/facturas/avisos`')
+    && str_contains($s16Fact, '### Reenviar a la DGII — `POST /api/facturas/{id}/reenviar`') && str_contains($s16Fact, 'incluida toda factura sin confirmar'));
+wa_chk('facturas.md: ya no dice que /reenviar responde 501',
+    !str_contains($s16Fact, 'sigue respondiendo `501`') && !str_contains($s16Fact, 'responde `501`'));
+wa_chk('facturas.md: un rango nuevo puede cubrir los numeros que el POS uso fuera de rango',
+    !str_contains($s16Plano($s16Fact), 'debe ser **mayor** que todo número ya usado/autorizado')
+    && str_contains($s16Plano($s16Fact), 'Los números que una venta del POS usó fuera de rango no cuentan como tope'));
+foreach (['RFCE_PENDIENTE', 'ENVIO_PENDIENTE', 'tolerar_fallo_envio'] as $s16Viejo) {
+    wa_chk("nada en src ni docs nombra {$s16Viejo}", wa_grep(['src', 'docs'], $s16Viejo) === [], wa_grep(['src', 'docs'], $s16Viejo));
+}
+$s16Claude = $s16Leer('CLAUDE.md');
+wa_chk('CLAUDE.md no afirma nada falso sobre el reenvio (sin 501 ni "no se reenv")',
+    !str_contains($s16Claude, '501') && !str_contains($s16Claude, 'no se reenv'));
+wa_chk('CLAUDE.md: la compuerta del write-ahead es 027, 028 y 030, en todo tenant',
+    str_contains($s16Plano($s16Claude), '027 (`uk_e_ncf_amb`), 028 (`estado_dgii` VARCHAR(40)) and 030 (')
+    && str_contains($s16Plano($s16Claude), 'all three must say `APLICADA`') && !str_contains($s16Plano($s16Claude), 'both must say'));
+$s16Runbook = $s16Plano($s16Leer('docs/integrations/alta-tenant-runbook.md'));
+wa_chk('runbook: la 030 es obligatoria en todas las DBs de tenant y parte de la compuerta del write-ahead',
+    str_contains($s16Runbook, 'La 030 es **obligatoria en todas las DBs de tenant**')
+    && str_contains($s16Runbook, 'La 027, la 028 y la 030 son además la compuerta del write-ahead del e-CF')
+    && !str_contains($s16Runbook, 'y es obligatoria donde sí se use'));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

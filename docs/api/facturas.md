@@ -224,9 +224,11 @@ una nota. Nunca responde `422` para una factura que existe.
   `ENVIADO` sin `track_id`, con esta nota: "La DGII recibió este comprobante, pero no
   devolvió su número de seguimiento y por eso no se puede consultar su estado desde
   aquí. Si necesitas confirmarlo, avisa a soporte con el número E310000000123."
-- No hay campo ni endpoint de reenvío: la app nunca reenvía un e-CF y
-  `POST /api/facturas/{id}/reenviar` sigue respondiendo `501`. Soporte resuelve la
-  fila ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md), "Resolver una
+- Ninguna respuesta trae un campo que diga si se puede reenviar: el front decide por `estado_dgii`.
+  La app **nunca reenvía una factura sin confirmar**: `POST /api/facturas/{id}/reenviar` responde
+  `409` sobre `PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `EN_PROCESO`, `RFCE_ENVIADO` y
+  `RFCE_EN_PROCESO`; solo una **rechazada** se reemite (sección «Reenviar a la DGII»). Soporte
+  resuelve la fila ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md), "Resolver una
   factura sin confirmar").
 - Cuando la consulta normal pasa una factura a `ACEPTADO`/`ACEPTADO_CONDICIONAL` (o
   sus `RFCE_`) desde un estado sin aceptar, mueve el inventario de esa venta, una
@@ -318,6 +320,42 @@ X-API-KEY: <key>
 | `secuencias[].total_emitidos` | Facturas guardadas en DB para ese tipo (filas: cuenta también las en vuelo) |
 
 ---
+
+### Avisos del e-CF — `GET /api/facturas/avisos`
+
+Lo que el admin ve en el panel de e-CF de app.\* (nunca en la caja del POS), autenticado como el resto
+de `/api/facturas`.
+
+```json
+{ "status": true, "data": {
+    "certificado_fallo": { "ventas_hoy": 3 },
+    "secuencias": [ { "tipo": "E32", "ambiente": "certecf", "restantes": 12, "estado": "pocos" } ],
+    "sin_rango": { "ventas": 2 } } }
+```
+
+- `certificado_fallo.ventas_hoy`: ventas del POS que **hoy** salieron como factura simple porque no se
+  pudo generar el e-CF («El certificado falló: N ventas del POS salieron como factura simple»). El día
+  es el del servidor.
+- `secuencias[]`: solo el **ambiente activo** y un renglón por tipo con **50 o menos** números libres
+  (`estado: "pocos"`; se suman los rangos vigentes con límite y los vencidos no cuentan) o sin ninguno
+  (`"agotada"`, si el tipo ya usó algún número). `restantes` es un entero. Un tipo con un rango sin
+  límite no avisa.
+- `sin_rango.ventas`: ventas del POS con un número fuera de rango que siguen sin enviarse
+  (`PENDIENTE_ENVIO` con `sin_rango` en su meta); salen solas al registrar un rango autorizado que las
+  incluya.
+- Sin token responde `401`. Si la base no responde, `500` (`No se pudieron cargar los avisos del
+  e-CF…`) y la pantalla simplemente no muestra avisos.
+
+### Reenviar a la DGII — `POST /api/facturas/{id}/reenviar`
+
+Reemite una factura **rechazada** con el mismo e-NCF y los datos de la rechazada (por ejemplo, tras
+corregir un dato del cliente). Sin cuerpo. Sale por la misma emisión write-ahead que
+`POST /api/facturas` y responde igual: `200` con `data`, `422` si la DGII la rechaza otra vez, `502`
+con `data.factura_id` si queda sin confirmar. Otros códigos: `404` (no existe); `409` (ya se está
+reenviando, ya se reenvió, no está rechazada, **incluida toda factura sin confirmar**, la DGII consumió
+el e-NCF o se envió en otro ambiente); `422` (no es electrónica, no tiene líneas o no guarda su
+e-NCF). Cuando la nueva se guarda, la rechazada queda archivada (`..._ARCHIVADO`), su inventario se
+devuelve y el número no vuelve al contador (lo usa la nueva).
 
 ### Facturas que una nota puede modificar — `GET /api/facturas/modificables`
 
@@ -419,9 +457,14 @@ rango aprobado. El `FechaVencimientoSecuencia` del XML sale del rango que dispen
 }
 ```
 
-Validaciones: `numero_desde` debe ser **mayor** que todo número ya usado/autorizado
-del tipo en el ambiente (422 si no). Si existía una fila legacy "sin límite", se
-cierra en su consumo actual y el rango nuevo pasa a dispensar al agotarse el activo.
+Validaciones: `numero_desde` debe ser **mayor** que el final autorizado (`numero_hasta`) de todo
+rango del tipo en el ambiente (422 si no), y que lo consumido por una fila legacy "sin límite". Los
+números que una venta del POS usó fuera de rango no cuentan como tope: con la secuencia agotada el POS
+sigue vendiendo con el número siguiente al último y no los envía (`sin_rango`), y un rango nuevo puede
+empezar dentro de ellos para cubrirlos. Arranca a dispensar después del último que caiga dentro de él
+(nunca reparte dos veces un número ya usado), y el reenvío automático del POS envía esas ventas en su
+siguiente vuelta. Si existía una fila legacy "sin límite", se cierra en su consumo actual y el rango
+nuevo pasa a dispensar al agotarse el activo.
 
 > `GET /api/facturas/stats` y `/api/gastos/stats` ahora incluyen por secuencia
 > `restantes` (capacidad vigente; `null` = sin rango con límite) y `vencimiento`.
@@ -1104,8 +1147,8 @@ eso se pudo escribir, y la respuesta trae `data`:
 - `422` `'No se pudo calcular el total de la factura. Revisa las líneas e inténtalo de
   nuevo.'`: un `strict_input` cuyo `totales` no trae un `monto_total` numérico. Se
   corta antes de tomar el número.
-- La app no reenvía un e-CF: `POST /api/facturas/{id}/reenviar` responde `501`. Las
-  facturas sin confirmar las resuelve soporte
+- La app no reenvía una factura sin confirmar: `POST /api/facturas/{id}/reenviar` responde
+  `409`. Las facturas sin confirmar las resuelve soporte
   ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md)).
 
 ---

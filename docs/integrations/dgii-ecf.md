@@ -146,7 +146,8 @@ motivó: E34 aceptado el 2026-10-05 cuyo INSERT falló por la clave `uk_e_ncf` v
 `POST /api/facturas` guarda la fila **antes** de enviar el e-CF a la DGII. Si el
 envío o la confirmación fallan, la factura queda en `ENVIO_INCIERTO` (o en
 `PENDIENTE_ENVIO` si el proceso murió) con su e-NCF, el XML firmado, el
-`codigo_seguridad` y las líneas. La app nunca la reenvía: la resuelve soporte.
+`codigo_seguridad` y las líneas. La app **nunca reenvía una factura sin confirmar**: la resuelve soporte. (Una **rechazada** sí se
+reemite desde la app: ver «Reenviar a la DGII una factura rechazada».)
 Mientras la fila está en vuelo, `GET /api/facturas/{id}/estado` (lo que consulta la
 app al abrir la factura) **no llama a la DGII**: devuelve el estado guardado y una
 nota que manda a soporte (lo mismo con una fila `ENVIADO` sin `track_id`). El
@@ -241,6 +242,28 @@ procedimiento es un `UPDATE` de la fila, y lo que pasa después depende del caso
      UPDATE ncf_sequences SET current_value = current_value - 1
       WHERE id = 7 AND current_value = 123;
      ```
+
+### Reenviar a la DGII una factura rechazada
+
+Decisión 7 de Release 1, redefinida el 2026-10-12: la app **nunca** reenvía una factura *sin confirmar*
+(`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO` sin veredicto, `EN_PROCESO`): eso lo resuelve soporte
+(procedimiento de arriba) y, en las ventas del POS, el reenvío automático
+(`docs/integrations/pos-write-ahead.md`). Una **rechazada** sí se reemite con **«Reenviar a la DGII»**
+(`POST /api/facturas/{id}/reenviar`): se pidió porque una factura se rechazó por una fecha mal escrita.
+
+- **Cuándo:** solo e-CF en `RECHAZADO`, `RFCE_RECHAZADO` o `NO_ENCONTRADO`, no archivados, con
+  `secuencia_utilizada` distinto de `1`, del mismo ambiente que el activo y con líneas guardadas
+  (`RFCE_NO_ENCONTRADO` no entra: la resuelve soporte). Un candado por factura (`tomarLockReenvio`)
+  corta el doble clic.
+- **Cómo:** sale por la misma emisión write-ahead de la app (guardar, enviar, anotar) con `e_ncf` = el
+  de la rechazada: el mismo número. La reserva archiva la rechazada (regla de los estados
+  reintentables, `..._ARCHIVADO`); `archivarRechazoReenviado` queda como respaldo.
+- **Inventario:** la nueva se descuenta según las reglas de Release 1 y `devolverSaldoDeFactura`
+  devuelve lo que la vieja haya movido (una venta del POS rechazada sí lo había descontado).
+- **Sobre una factura sin confirmar responde `409`:** si la DGII ya la tiene, reenviar duplicaría el
+  comprobante.
+- **QR de una reemisión del POS:** el papel original tiene el código de seguridad de la primera firma y
+  no validará en la DGII; si el cliente necesita el comprobante válido, se reimprime desde la app.
 
 ---
 

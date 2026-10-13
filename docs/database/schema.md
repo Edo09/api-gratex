@@ -219,7 +219,7 @@ Columnas base + tracking e-CF (migraciones 001/003/005/006).
 | `fecha_emision_dgii` | datetime | debe coincidir con `FechaHoraFirma` del XML |
 | `ambiente_dgii` | varchar(20) | testecf/certecf/ecf |
 | `xml_firmado` | mediumtext | XML firmado enviado |
-| `respuesta_dgii` | text | última respuesta DGII (JSON). Mientras la fila está en vuelo guarda la meta del envío (nunca XML): `fase`, `desde`, `flujo`, `ambiente_secuencia`, `dispensado`, `rango_id`, `secuencia_valor` y, en `ENVIO_INCIERTO`, además `fase_fallida`, `clase`, `error`, `resultado_parcial`, `intentos`. Se lee con `facturaModel::metaEnvio()` |
+| `respuesta_dgii` | text | última respuesta DGII (JSON). Mientras la fila está en vuelo guarda la meta del envío (nunca XML): `fase`, `desde`, `flujo`, `ambiente_secuencia`, `dispensado`, `rango_id`, `secuencia_valor`, `sin_rango` (solo ventas del POS que tomaron un número fuera de rango) y, en `ENVIO_INCIERTO`, además `fase_fallida`, `clase`, `error`, `resultado_parcial`, `intentos`. Se lee con `facturaModel::metaEnvio()` |
 | **RFCE (003)** | | E32 < 250k |
 | `rfce_xml` / `rfce_track_id` / `rfce_estado` / `rfce_respuesta` | | resumen |
 | **Estado (005)** | | |
@@ -261,8 +261,9 @@ Cada fila representa **un rango autorizado** por DGII para un tipo y ambiente.
 | `created_at` / `updated_at` | datetime | |
 
 La emisión dispensa del rango ACTIVO (con capacidad y no vencido); al agotarse, falla con
-error claro hasta registrar el siguiente rango. Ver `POST /api/ncf/rangos` en
-[../api/facturas.md](../api/facturas.md).
+error claro hasta registrar el siguiente rango (en el POS no falla: la venta toma el número siguiente
+y espera ese rango, ver [../integrations/pos-write-ahead.md](../integrations/pos-write-ahead.md)).
+Ver `POST /api/ncf/rangos` en [../api/facturas.md](../api/facturas.md).
 
 Tipos B (legacy): `B01` Crédito Fiscal, `B02` Consumidor Final, `B14` Reg. Especiales, `B15` Gubernamental.
 Tipos e-NCF: `E31` Crédito Fiscal, `E32` Consumo, `E33` Nota Débito, `E34` Nota Crédito,

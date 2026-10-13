@@ -1,87 +1,192 @@
-# POS y write-ahead del e-CF: lo que `POST /api/pos/ventas` tiene que respetar
+# La venta del POS sobre el write-ahead del e-CF
 
-Nota para quien construye la venta del POS (`docs/specs/pos.md` §9.4-9.6). Desde el
-write-ahead (rama `feat/ecf-write-ahead`), la factura e-CF se **guarda antes** de enviarla a
-la DGII. Así ya no se puede repetir lo del 2026-10-05: la DGII aceptó la nota de crédito
-E340000000001 y la factura nunca quedó en la base, porque se guardaba **después** del envío.
-El POS no debe volver a ese patrón.
+Cómo quedó construido `POST /api/pos/ventas` sobre el write-ahead (rama `feat/ecf-write-ahead`).
+La intención está en la spec `docs/superpowers/specs/2026-10-12-pos-y-reenvio-sobre-write-ahead-design.md`
+(repo del front `fiscalo`); el comportamiento, en el código y en las pruebas de la sección 9.
 
-## 1. Reservar la fila antes de enviar a la DGII
+Dos garantías:
 
-La spec del POS (§9.4, paso 7) guarda la factura **después** de `ECFEmissionService::emitir`.
-Ese orden es el que perdió el E34. La venta tiene que pasarle a `emitir` el gancho de
-persistencia, igual que `handleEmisionECF` en `src/Controllers/facturaController.php`:
+- **Toda factura se guarda antes de enviarse a la DGII.** Ningún camino guarda después de enviar
+  (así se perdió la E34 del 2026-10-05).
+- **Una venta del POS no se detiene por la DGII, el certificado ni la secuencia.** Solo la frenan las
+  validaciones del carrito (los `4xx` de `docs/api/pos.md`) y que el servidor o la base no estén
+  disponibles, porque entonces no hay dónde guardarla.
 
-```php
-$reserva = null;
-$persistencia = function (string $fase, array $ctx) use ($facturaModel, $facturaInput, &$reserva) {
-    switch ($fase) {
-        case 'reservar':  return $reserva = $facturaModel->reservarFacturaECF($facturaInput, $ctx);
-        case 'confirmar': return $facturaModel->confirmarFacturaECF((int) $reserva['factura_id'], $ctx);
-        case 'incierto':  return $facturaModel->marcarEnvioIncierto((int) $reserva['factura_id'], $ctx);
-    }
-    return null;
-};
-$result = (new ECFEmissionService())->emitir($payload, $persistencia);
-```
+## 1. La venta (`PosVenta::cobrar`)
 
-- `'reservar'` guarda la fila (XML firmado, código de seguridad y líneas) en
-  `PENDIENTE_ENVIO`, **antes** de cualquier llamada a la DGII.
-- `'confirmar'` le escribe la respuesta de la DGII.
-- `'incierto'` la deja en `ENVIO_INCIERTO` si el envío o la confirmación fallan.
-- `$facturaInput` lleva `{date, client_id, client_name, total, tipo_pago, user_id,
-  informacion_referencia, items[]}`.
-- `user_id` es obligatorio: `facturas.user_id` es `NOT NULL` en la base de Gratex.
-- Sin el gancho (como integración), `emitir` se comporta como antes y **no** protege la venta.
+1. **Validaciones, clave e idempotencia** (sin cambios): candado de la clave, búsqueda por
+   `pos_idempotency_key`, candado del turno, líneas armadas en el servidor y total comparado.
+2. **Emisión con el gancho** `reservar` / `confirmar` / `incierto`, igual que `handleEmisionECF`.
+   `reservarFacturaECF` guarda la fila en `PENDIENTE_ENVIO` **antes** de llamar a la DGII y, si la
+   factura trae `pos`, escribe en el mismo `INSERT` `pos_idempotency_key`, `turno_id`,
+   `pos_empleado_id` y `envio_pendiente = 1`. Un `1062` sobre `uk_facturas_pos_idem` es una venta
+   repetida (`EcfVentaRepetidaException`): se relee por clave. Un `1062` sobre el e-NCF sigue siendo
+   `EcfNumeroOcupadoException`: la venta lo reintenta una vez con el número siguiente.
+3. **Cualquier resultado después de guardar se entrega** (`201` con el recibo): aceptada, rechazada,
+   `ERROR`, `NO_ENCONTRADO`, en proceso o sin respuesta (`EcfEnvioInciertoException`).
+4. **Fallo antes de guardar:** factura simple (sección 4). **Sin rango libre:** número siguiente
+   sin enviar (sección 5).
 
-**El timeout de 5 s del POS** termina en `EcfEnvioInciertoException`. Esa excepción trae
-`facturaId`, `eNcf`, `faseFallida` y `marcado`. La fila ya existe (en `ENVIO_INCIERTO`, o en
-`PENDIENTE_ENVIO` si no se pudo marcar), así que el POS puede imprimir el recibo con esa
-factura. **No** se emite otra.
+Opciones del payload solo para el POS (la app y las integraciones conservan el valor de siempre):
 
-## 2. Guardar la clave de idempotencia y el turno en la reserva
+| Opción | En el POS | Efecto |
+|---|---|---|
+| `dgii_timeout` | `POS_DGII_TIMEOUT` (5 s) | Espera máxima al pedir el token y al enviar |
+| `formas_pago` | la elegida | `TablaFormasPago` del RFCE y del e-CF |
+| `reclamar_secuencia` | `false` | El número de una venta del POS nunca vuelve al contador: ya está impreso |
+| `autenticar_despues_de_reservar` | `true` | El token se pide después de guardar; si la DGII no responde, la venta queda `ENVIO_INCIERTO` (fase `autenticar`) |
+| `numerar_sin_rango` | `true` | Sin rango libre se usa el número siguiente al último (sección 5) |
+| `validar_vigencia_certificado` | `true` | Antes de reservar se lee el `.p12`: un certificado vencido falla antes de guardar y la venta sale como factura simple (sección 4) |
 
-- `pos_idempotency_key`, `turno_id` y `pos_empleado_id` tienen que entrar en el **INSERT de la
-  reserva**, no en un UPDATE posterior.
-- Si van después, una venta reintentada mientras la primera sigue en vuelo no encuentra la
-  fila por la clave y gasta otro e-NCF. Eso es justo lo que F5 quiere evitar.
-- Hoy `reservarFacturaECF` no escribe esas tres columnas, y en la reserva quedan en
-  NULL/0. Hay que extenderla para que acepte esas tres claves opcionales en `$factura` y
-  las agregue al INSERT. No hace falta migración.
-- Antes de reservar, buscar la venta por `pos_idempotency_key` y, si ya existe, devolver esa
-  factura tal cual (F5).
+## 2. `envio_pendiente`
 
-## 3. Una sola fuente de verdad para "envío pendiente"
+Se escribe en la **misma sentencia** que `estado_dgii` y solo en filas del POS, con
+`EstadosEcf::envioPendiente`: `1` en la reserva, `1` en `confirmar` si el veredicto sigue abierto
+(`ENVIADO`, `EN_PROCESO`, `RFCE_ENVIADO`, `RFCE_EN_PROCESO`), `0` en cualquier otro estado y `1` en
+`incierto`. También lo escribe así `updateECFEstado` (la consulta de la app, `GET
+/api/facturas/{id}/estado`), para que una venta que la app resuelve antes que el reenvío automático
+salga de la lista de pendientes. El POS ya no tiene estados «pendientes» propios: un envío sin
+respuesta es `ENVIO_INCIERTO` y una venta sin enviar es `PENDIENTE_ENVIO`, como en la app.
 
-- `facturas.envio_pendiente` (migración 030) dice lo mismo que `estado_dgii IN
-  ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO')`, que el write-ahead ya mantiene y que la app muestra
-  en el filtro **Pendientes** y en el indicador **Sin confirmar**.
-- Lo mejor es sacar el "envío pendiente" de `estado_dgii` (`EstadosEcf::EN_VUELO`).
-- Si el POS necesita la columna, debe escribirla en el **mismo UPDATE** que cambia
-  `estado_dgii`, nunca por separado. Dos marcas que se actualizan por separado terminan
-  diciendo cosas distintas.
+Las filas del POS que terminan en `ERROR` o `NO_ENCONTRADO` conservan `envio_pendiente = 0`: ese
+número no se reenvía solo y el reenvío automático no las toca. `NO_ENCONTRADO` se reemite con
+«Reenviar a la DGII» (sección 7); `ERROR` es de soporte (ese número se quema a propósito).
+`RFCE_NO_ENCONTRADO` tampoco entra en «Reenviar a la DGII» (solo `RECHAZADO`, `RFCE_RECHAZADO` y
+`NO_ENCONTRADO`): la resuelve soporte. El reenvío del POS nunca la escribe, porque ante un RFCE que
+la DGII no encuentra reenvía el RFCE guardado.
 
-## 4. Reenvío automático (F7): decisión del 2026-10-08
+## 3. Entrega (`PosVenta::entregarVenta`)
 
-El usuario autorizó que el POS reenvíe solo sus ventas pendientes, en segundo plano (cron o
-el propio POS), con estas condiciones:
+Una sola función idempotente, bajo el candado de la clave, tras cualquier resultado guardado y en
+una venta repetida que encuentre algo sin hacer: el movimiento de caja (si `posModel` no tiene uno
+para la factura), el inventario una sola vez (`yaMovioDocumento('factura', id)` y `registrarVenta`) y
+la auditoría, solo si esta llamada registró la caja (`POS_VENTA`, o `POS_VENTA_FACTURA_SIMPLE` en una
+factura simple). Un fallo del inventario no tumba la venta: queda en el log para un ajuste.
 
-- **Primero consultar** a la DGII (`consultarEstado` / `consultarEstadoRFCE` o
-  `ConsultaTrackIds`). Si el e-CF llegó, se confirma la fila y no se reenvía.
-- **Reenviar el XML ya firmado y guardado** (`facturas.xml_firmado` / `rfce_xml`).
-  Nunca se vuelve a firmar ni se arma de nuevo: cambiarían la fecha de firma y el código de
-  seguridad.
-- **Un solo proceso a la vez por factura** (bloqueo), y las mismas reglas de orden del
-  write-ahead: primero la fila y después el contador. El número nunca se devuelve mientras
-  una fila sea dueña de él.
-- **El cajero nunca ve un botón de reenviar.** Para las facturas de la app sigue la
-  decisión 7: no se reenvía desde la app, solo soporte.
-- Es el mismo mecanismo que el Release 2 del write-ahead deja para soporte
-  (`EcfReconciliador`, `tools/ecf_en_vuelo.php`). Conviene construirlo una sola vez y
-  usarlo desde los dos lados.
+Repetir la clave devuelve la misma venta (`repetida: true`, siempre `201`, también si la DGII la
+rechazó) y completa lo que falte: por ejemplo, si el servidor cayó entre guardar la respuesta y
+registrar la caja, la caja sale con la `forma_pago` y el `recibido_centavos` del reintento (si ya
+existe el movimiento, se usan los suyos). El recibo usa `RepresentacionImpresa::datosRecibo`, que no
+lee `estado_dgii`.
 
-Referencias:
-- spec del write-ahead: `docs/superpowers/specs/2026-10-05-ecf-write-ahead-design.md`, en el
-  repo del front `fiscalo`;
-- resolución manual: `docs/integrations/dgii-ecf.md`, procedimiento 10.2;
-- estados: `src/Utils/FacturacionElectronica/EstadosEcf.php`.
+Una venta rechazada, al cobrar o más tarde, conserva su caja y su inventario, no devuelve el número,
+el cierre la lista como rechazada y en app.\* aparece «Rechazada» con «Reenviar a la DGII». Al cobrar
+quedan `POS_VENTA` y `POS_VENTA_RECHAZADA` en la bitácora.
+
+## 4. Fallo antes de guardar: factura simple
+
+Si el e-CF no se puede generar (certificado ausente, vencido o con clave incorrecta, fallo de firma,
+`emisor_config` incompleto, número ocupado tras un reintento o cualquier excepción antes de la reserva,
+que ya devuelve el número al contador), la venta se guarda como **factura simple** (`tipo_ecf` nulo, sin
+e-NCF, sin ITBIS, sin envío) con las mismas líneas, el mismo total y las columnas del POS: la
+idempotencia no cambia (`facturaModel::crearFacturaSimplePos`).
+
+- La entrega es la misma (sección 3) y la respuesta es `201` con el recibo de factura simple (título
+  «Factura», sin timbre), `venta.tipo_ecf: null`, el número de la factura en `venta.e_ncf` y
+  `envio_pendiente: false`. Queda `POS_VENTA_FACTURA_SIMPLE` en la bitácora, con la clase del fallo y
+  sin secretos (con `success` verdadero: la venta salió).
+- El cierre y las listas identifican la venta con el número de su factura (`no_factura`), y el reporte
+  la cuenta como `Simple`.
+- Las validaciones del carrito siguen respondiendo `4xx`: son errores de captura, no de emisión.
+- Si ni la factura simple se puede guardar (la base no responde), la venta sí se detiene:
+  `500 VENTA_NO_GUARDADA` y `POS_VENTA_FALLIDA` en la bitácora; el cajero reintenta con la misma
+  clave. Si otra petición con esa clave dejó una fila entre tanto, `409 VENTA_EN_PROCESO`.
+- El aviso al admin (sección 8) sale de contar estas filas, no de la bitácora.
+
+La factura simple no es un comprobante fiscal: no lleva ITBIS ni entra en el 607. Falta confirmar con
+el contador cómo regularizar las que salgan así.
+
+**Punto abierto (para decidir):** las facturas simples del POS aparecen en la lista «Facturas simples»
+de app.\*, y `updateFacturaSimple` / `deleteFacturaSimple` no distinguen las del POS (solo piden
+`tipo_ecf` nulo). Editar o borrar una desde ahí descuadraría la caja, el inventario y la clave de
+idempotencia de la venta. Hace falta una guarda (por ejemplo, rechazar el cambio si la fila tiene
+`pos_idempotency_key`) o aceptar el riesgo; hoy no hay ninguna.
+
+## 5. Secuencia agotada o vencida: `sin_rango`
+
+Solo en el POS, cuando `ncfModel::dispenseNextECF` devuelve `null`:
+
+- `ncfModel::dispenseSinRango` toma el **número siguiente al último usado** y avanza el contador del
+  rango con el `numero_desde` más alto **sin** el tope de `numero_hasta`.
+- La venta se firma, se guarda y se imprime normal, marcada `sin_rango` en la meta de la fila
+  (`respuesta_dgii`), y **no se envía** (ni siquiera se pide el token): la DGII rechaza los números
+  fuera de un rango autorizado. Queda `PENDIENTE_ENVIO` con `envio_pendiente = 1`.
+- Solo el tipo agotado se ve afectado: con E32 agotada, las E31 siguen su curso.
+- **E32:** el XML no lleva fecha de vencimiento de la secuencia, así que queda listo para enviarse.
+  **E31:** lleva la fecha del último rango conocido; si la DGII la rechaza, se reemite con «Reenviar a
+  la DGII» (sección 7).
+- La envía el reenvío automático cuando `ncfModel::rangoCubre(tipo, ambiente, número)` es cierto: hay
+  un rango registrado con `numero_desde <= número <= numero_hasta` (o sin `numero_hasta`) y no vencido.
+  Si la DGII autoriza un rango que **no** incluye esos números, esas ventas no salen solas: quedan en el
+  aviso de la sección 8 para soporte.
+- `POST /api/ncf/rangos` acepta un rango que empieza dentro de los números usados `sin_rango`: arranca
+  a dispensar después del último que caiga dentro de él, y la emisión normal salta los números que ya
+  usa una fila (`eNcfYaUsado`), así que nunca reparte dos veces un número ya usado.
+
+## 6. Reenvío automático (`PosVenta::reenviarPendientes`)
+
+`POST /api/pos/pendientes/reenviar` (solo `X-POS-EQUIPO`), disparado por la pantalla del POS al abrir,
+cada 2 minutos y tras cada venta, en silencio. Revisa hasta 5 ventas por llamada. Consulta primero,
+reenvía el XML guardado, no re-firma y no devuelve números.
+
+- **Flujo por XML guardado:** RFCE si `rfce_xml` no es nulo; e-CF completo si no.
+- **Selección:** filas del POS que son e-CF (no las facturas simples) con `envio_pendiente = 1`, salvo las `PENDIENTE_ENVIO` de menos
+  de 2 minutos (la petición original todavía las está enviando), las ventas cuya petición sigue viva
+  (el reenvío pide sin esperar el candado de su clave y salta la fila si está tomado) y las
+  `sin_rango` mientras `rangoCubre` sea falso.
+- **Escrituras con compare-and-set** (`UPDATE ... WHERE id = :id AND estado_dgii = :leido`), con
+  `envio_pendiente` en la misma sentencia: nunca pisa un estado final escrito por otro proceso.
+- **Respuesta:** `{revisadas, aceptadas, rechazadas, pendientes}`. Bitácora: `POS_VENTA_ENVIADA` y
+  `POS_VENTA_RECHAZADA`.
+- En `certecf` no existe `ConsultaTrackIds`: una E31 sin `trackId` queda pendiente para soporte. Las RFCE sí
+  se consultan.
+
+## 7. «Reenviar a la DGII» (rechazadas)
+
+`POST /api/facturas/{id}/reenviar` (`handleReenviar`): solo e-CF en `RECHAZADO`, `RFCE_RECHAZADO` o
+`NO_ENCONTRADO`, no archivado, con `secuencia_utilizada` distinto de `1`, del mismo ambiente, con líneas
+y un candado por factura (`tomarLockReenvio`). Reemite por `emitirFacturaEcf` con `$input['e_ncf']` = el
+e-NCF de la rechazada y `$reenvioDe` = su id: la reserva archiva la rechazada, `archivarRechazoReenviado`
+queda de respaldo y `devolverSaldoDeFactura` devuelve el inventario que la vieja haya movido. El XML
+nuevo lleva el vencimiento de la secuencia del rango vigente que cubre el número
+(`vencimientoDeLaSecuencia`), para no repetir un rechazo por esa fecha.
+
+Una factura sin confirmar (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`, `ENVIADO`, `EN_PROCESO`) responde `409`:
+la app nunca la reenvía. En una venta del POS reemitida con el mismo número, el QR del papel original
+tiene el código de seguridad de la primera firma y no validará en la DGII; si el cliente necesita el
+comprobante válido, se reimprime desde la app.
+
+Una venta del POS reemitida así sigue siendo una sola venta: la fila archivada conserva la caja, el
+inventario que movió se devuelve y la nueva lo descuenta cuando la DGII la acepta; el cierre la cuenta
+pero ya no la lista en `rechazadas`, y repetir la clave original devuelve la misma venta (`201`,
+`repetida: true`).
+
+## 8. Avisos al admin (solo en la app, nunca en la caja)
+
+`GET /api/facturas/avisos` (ver `docs/api/facturas.md`) alimenta el panel e-CF de app.\*: **«El certificado
+falló: N ventas del POS salieron como factura simple»** (las de hoy), **«Quedan pocos números»** (50 o menos
+en el rango vigente) o **«Secuencia agotada»** (solo el ambiente activo, un aviso por tipo), y **«N ventas
+esperando un rango autorizado»**.
+
+## 9. Pruebas
+
+`tools/test_pos_scratch.php` prepara el master multi-tenant de las bases scratch, levanta la DGII
+simulada y dos instancias de la API y corre en serie `test_pos_backend.php`, `test_pos_venta.php`,
+`test_pos_cierre.php`, `test_pos_e31.php` y `test_pos_write_ahead.php` (RF1 a RF5, factura simple, sin rango,
+«Reenviar a la DGII» y el cierre). `tools/pos_scratch_guard.php` las niega contra cualquier base que no sea
+`*wa_scratch` / `*wa_scratch_sin_gate` marcada, salvo un MySQL local. En proceso, sin servidor HTTP:
+`test_pos_cobrar_wa.php` (la venta y RF1/RF2), `test_pos_continuidad.php` (certificado, factura simple y
+sin rango) y `test_pos_reenvio.php` (el reenvío automático), con `--tenant-db=wa_scratch`. Las de Release 1
+siguen en `tools/test_write_ahead_*.php` (la guarda de texto de esta documentación, en
+`tools/test_write_ahead_puro.php`, sin base).
+
+## 10. Antes de desplegar
+
+La migración 030 tiene que estar en **todas** las DBs de tenant, aunque no usen el POS: los `UPDATE` que
+anotan la respuesta de la DGII en toda factura e-CF nombran `pos_idempotency_key` y `envio_pendiente`
+(`CLAUDE.md` y `docs/integrations/alta-tenant-runbook.md`). Junto con la 027 y la 028 es la compuerta del
+write-ahead.
+
+Referencias: la spec de esta entrega y la del write-ahead (`2026-10-05-ecf-write-ahead-design.md`), en
+`fiscalo`; `docs/integrations/dgii-ecf.md` (procedimiento 10.2 y «Reenviar a la DGII una factura
+rechazada»); `docs/api/pos.md`; `docs/specs/pos.md`; `EstadosEcf.php`.

@@ -32,8 +32,10 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
 - **Tenant migrations go first.** Every `db/migrations` file a change depends on must run in
   **every** tenant DB before the code that needs it is deployed. Check each DB with
   `tools/verificar_migraciones_tenant.sql` (its `base` column must show that tenant's DB; the DB list
-  comes from `tools/verificar_migraciones_master.sql`). 027 (`uk_e_ncf_amb`) and 028
-  (`estado_dgii` VARCHAR(40)) are the release gate of the e-CF write-ahead: both must say `APLICADA`.
+  comes from `tools/verificar_migraciones_master.sql`). 027 (`uk_e_ncf_amb`), 028
+  (`estado_dgii` VARCHAR(40)) and 030 (`facturas.pos_idempotency_key` and the other POS columns: the
+  confirm and incierto UPDATEs of every e-CF name them) are the release gate of the e-CF write-ahead: all three
+  must say `APLICADA` in **every** tenant DB, whether it uses the POS or not.
 
 ## Key architecture
 

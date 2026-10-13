@@ -158,9 +158,13 @@ verificadores otra vez, con la 012 del master y la 027 a la 031 del tenant en `A
 entonces desplegar `api-gratex` y después `fiscalo` (la lista completa, con el respaldo y las
 pruebas de humo, está en
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#despliegue-de-los-conduces)).
-La 030 se corre en todas las DBs de tenant aunque su cabecera solo la pide donde se vaya a usar el
-POS: es inofensiva donde no (solo agrega tablas y columnas), deja el verificador entero en
-`APLICADA` y los esquemas iguales, y es obligatoria donde sí se use.
+La 030 es **obligatoria en todas las DBs de tenant**, se use o no el POS (su cabecera dice que solo
+hace falta donde se vaya a usar: ya no es así). Desde el write-ahead, los `UPDATE` con que toda
+factura e-CF anota la respuesta de la DGII (y el de `GET /api/facturas/{id}/estado`) nombran
+`pos_idempotency_key` y `envio_pendiente`, dos columnas que agrega la 030: sin ella la factura se
+guarda y se envía, pero la respuesta no se anota (queda `PENDIENTE_ENVIO`) y la consulta de estado no
+actualiza la fila. Donde no hay POS es inofensiva (solo agrega tablas y columnas) y deja el
+verificador entero en `APLICADA` y los esquemas iguales.
 Con `gratex` no hay conduces: el menú no sale y la API responde `422`. Detalle:
 [../api/conduces.md](../api/conduces.md).
 
@@ -179,11 +183,12 @@ curl -X POST https://<server>/api/auth/login -H "Content-Type: application/json"
 3. **Migraciones** (antes de emitir nada: las migraciones del tenant van primero): en
    phpMyAdmin, entra a la base nueva y corre `tools/verificar_migraciones_tenant.sql`. La
    columna `base` debe mostrar la base del tenant (si dice `information_schema` u otra,
-   selecciónala y córrelo otra vez) y **todas** las filas deben decir `APLICADA`. La 027 y
-   la 028 son además la compuerta del write-ahead del e-CF: sin la 028, un RFCE (E32 por
+   selecciónala y córrelo otra vez) y **todas** las filas deben decir `APLICADA`. La 027, la 028 y la 030 son
+   además la compuerta del write-ahead del e-CF: sin la 028, un RFCE (E32 por
    debajo de 250,000) llega a la DGII pero su estado no cabe en la columna ("Data too
    long") y la fila queda `ENVIO_INCIERTO`; sin la 027, toda emisión responde "No se pudo
-   asignar el número de comprobante…". Si falta alguna migración, aplícala y repite el
+   asignar el número de comprobante…"; sin la 030, la respuesta de la DGII no se anota y la
+   factura queda `PENDIENTE_ENVIO` aunque la DGII ya la recibió. Si falta alguna migración, aplícala y repite el
    verificador antes de seguir con la emisión de prueba.
 4. **Emisión:** crear una factura de prueba y confirmar que el PDF trae los datos del
    cliente (no los de Gratex) y que DGII la acepta.
@@ -247,6 +252,7 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | La cotización sale con la cuenta bancaria y los textos de Gratex | El tenant sigue en `cotizacion_formato = 'gratex'` (el default) | Activar su formato (Fase 4) o quitar el módulo `cotizaciones` de sus roles |
 | Al guardar una cotización: "La pantalla de cotizaciones está desactualizada…" (`409`) | Se cambió `cotizacion_formato` con la pantalla abierta, o el navegador tiene el front de antes | Recargar la página |
 | Toda emisión responde "No se pudo asignar el número de comprobante. Inténtalo de nuevo." | Falta la migración 027 en la base del tenant: la clave vieja `uk_e_ncf` choca con el mismo número de otro ambiente y cada intento se salta un número | Correr `tools/verificar_migraciones_tenant.sql` en esa base y aplicar `db/migrations/027_e_ncf_unico_por_ambiente.sql` (se puede repetir) |
+| Toda emisión de e-CF responde `502` con la factura guardada sin confirmar (`PENDIENTE_ENVIO`), y en el `error_log` aparece `ENVIO_INCIERTO fase=confirmar marcado=no` con `Unknown column` | Falta la migración 030 en la base del tenant: los `UPDATE` que anotan la respuesta de la DGII nombran `pos_idempotency_key` y `envio_pendiente`, columnas que agrega ella | Correr `tools/verificar_migraciones_tenant.sql` en esa base y aplicar `db/migrations/030_pos.sql`; las facturas que ya quedaron en `PENDIENTE_ENVIO` se resuelven con el procedimiento de [dgii-ecf.md](dgii-ecf.md) (la DGII sí las recibió) |
 | `Los conduces no están disponibles para tu empresa.` (`422`) | El tenant no está en `cotizacion_formato = 'ferreteria'`: los conduces son solo de ese formato | Si el cliente es Ferretería, activar su formato (Fase 4); si no, es lo esperado (recargar el front: el menú Conduces no debe salir) |
 | Conduces: `500` al listar o guardar, y en el log `[conduces] … Table '….conduces' doesn't exist` | La DB del tenant no tiene la migración 031 | Correr `db/migrations/031_conduces.sql` en esa DB y revisar su fila final (`todo_ok` = `SI`) |
 

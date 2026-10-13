@@ -106,7 +106,7 @@ entran a app.\* y no ocupan un `users.email`/`username` del master (ambos son
 ### Casos límite
 - Como cajero, si llego y **la caja tiene un turno abierto de otro cajero**, quiero que me diga de quién es y que necesito un supervisor.
 - Como cajero, si **mi turno quedó abierto desde ayer**, quiero seguir vendiendo, pero con un aviso visible.
-- Como cajero, si **la DGII rechaza la venta**, quiero ver el motivo con el carrito intacto, y que no salga ningún recibo.
+- Como cajero, quiero que **la venta salga siempre**: si la DGII la rechaza o no responde, la venta se entrega igual (recibo, caja e inventario) y el rechazo lo atiende el administrador en app.\* (decisiones 38 y 39, 2026-10-12).
 - Como supervisor, si **alguien prueba PINs al azar**, quiero que el equipo se bloquee.
 
 ---
@@ -252,7 +252,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] Casilla "Crédito fiscal" → RNC o cédula. *Botón "Crédito fiscal (RNC)" en el carrito (o F4) con teclado de 9 u 11 dígitos; el cliente queda en una barra con "Quitar".*
 - [x] Si el cliente existe, se usa. Si no, se consulta la DGII (`/api/rnc/consulta`) y **se crea el cliente** con la razón social que devuelve, con correo y teléfono vacíos (el correo es opcional; verificar que el modelo acepte el teléfono vacío). *`POST /api/pos/clientes/rnc` (`src/Pos/PosCliente.php`); el modelo acepta los dos vacíos.*
 - [x] RNC no encontrado en la DGII → no se puede emitir E31; la venta puede salir como E32. *Con la consulta caída, tampoco (Q6 sigue abierta: hoy no se escribe la razón social a mano).*
-- [x] El E31 va como e-CF completo (Recepción → `trackId`); la DGII da el veredicto después, así que la venta sale `ENVIADO` con `envio_pendiente` y el reenvío de F7 la confirma por `ConsultaResultado`, sin reenviarla. Sin respuesta al enviar → `ENVIO_PENDIENTE` con el XML firmado guardado; el reenvío pregunta primero a `ConsultaTrackIds` si la DGII ya lo tiene.
+- [x] El E31 va como e-CF completo (Recepción → `trackId`); la DGII da el veredicto después, así que la venta sale `ENVIADO` con `envio_pendiente` y el reenvío de F7 la confirma por `ConsultaResultado`, sin reenviarla. Sin respuesta al enviar → `ENVIO_INCIERTO` (la fila ya estaba guardada con el XML firmado); el reenvío pregunta primero a `ConsultaTrackIds` si la DGII ya lo tiene.
 
 **F3 · E32 de RD$250,000 o más** — `Piloto`
 - [ ] Exige identificar al comprador (RNC o cédula) antes de cobrar. **Regla a confirmar en la fase 0** contra el formato e-CF. *Por ahora el POS no cobra un E32 de RD$250,000 o más (`COMPRADOR_REQUERIDO`; el diálogo de cobro ya lo avisa y no deja cobrar): se hace como crédito fiscal (F2) o por app.\*.*
@@ -270,13 +270,16 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **F6 · DGII lenta** — `Piloto` · *requiere el visto bueno del contador (Q1)*
 - [x] Espera máxima a la DGII en ventas POS: **5 s** (configurable, `POS_DGII_TIMEOUT`). El resto del sistema sigue en 30 s.
-- [x] Respuesta **aceptada** → recibo.
-- [x] Respuesta **rechazada** → no hay recibo. Se muestra el motivo y el carrito queda intacto. (El e-NCF se puede reutilizar, ya lo maneja la emisión.)
-- [x] **Sin respuesta en 5 s o fallo de transporte** → la venta queda firmada y guardada como *envío pendiente*, se imprime el recibo y el envío se reintenta solo (F7).
+- [x] La factura se **guarda antes** de enviarla (write-ahead): la DGII nunca decide si hay venta (spec `2026-10-12-pos-y-reenvio-sobre-write-ahead-design.md`, U3 y U8).
+- [x] Respuesta **aceptada**, **rechazada**, de error o **sin respuesta en 5 s** → la venta se entrega igual: caja, inventario y recibo, como una factura normal. Lo no confirmado queda como *envío pendiente* (`ENVIO_INCIERTO`) y el reenvío automático lo resuelve (F7). El cajero no ve nada de la DGII.
+- [x] Un **rechazo** no devuelve el número al contador (ya está impreso): el cierre la lista como rechazada y en app.\* aparece «Rechazada» con «Reenviar a la DGII».
+- [x] **Sin certificado** (o cualquier fallo antes de guardar el e-CF) → la venta sale como **factura simple**, con su clave, turno, caja e inventario, y el admin ve un aviso en app.\* (decisión 38).
+- [x] **Secuencia agotada o vencida** → número siguiente al último: se guarda y se imprime, y **no se envía** hasta que un rango autorizado registrado lo incluya (decisión 39).
 
 **F7 · Reintento de envíos pendientes** — `Piloto`
-- [x] Un proceso reenvía las ventas con *envío pendiente* hasta tener respuesta: cron de cPanel, o el propio POS cuando está libre si no hay cron (Q4).
-- [ ] Si después llega un **rechazo**, se muestra una alerta persistente en el POS (al supervisor) y en app.\*, con la venta y el motivo. *En el POS ya sale (franja roja hasta "Entendido"); en app.\* falta.*
+- [x] Un proceso reenvía las ventas con *envío pendiente* hasta tener respuesta: cron de cPanel, o el propio POS cuando está libre si no hay cron (Q4). *Hoy lo dispara el POS: al abrir, cada 2 minutos y tras cada venta.*
+- [x] Consulta primero, reenvía el XML guardado (nunca re-firma) y no devuelve números. Salta las `PENDIENTE_ENVIO` de menos de 2 minutos y las `sin_rango` hasta que un rango autorizado las cubra; escribe con compare-and-set.
+- [x] Si después llega un **rechazo**, el POS no muestra nada (el cajero no ve la DGII): se ve solo en app.\*, donde la factura aparece «Rechazada» con «Reenviar a la DGII» en su detalle, y el reporte del cierre la lista en `rechazadas`.
 
 **F8 · Corregir el aviso de "carga manual"** — `Piloto`
 - [ ] Quitar el aviso *"La factura íntegra debe cargarse manualmente al portal DGII"* de `ECFEmissionService` y corregir el comentario de `RFCEXmlBuilder`. En producción basta el RFCE.
@@ -466,7 +469,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 14 | Cobro | Una forma de pago por venta + devuelta. Sin referencia de tarjeta |
 | 15 | Lanzamiento | `pos_enabled` por tenant; piloto con Gratex |
 | 16 | E32 de menos de RD$250k | En producción basta el RFCE; el aviso de "carga manual" se corrige |
-| 17 | DGII lenta | Esperar ~5 s; después imprimir y reintentar solo |
+| 17 | DGII lenta | Esperar ~5 s; después imprimir y reintentar solo. Desde 2026-10-12 la venta se guarda antes de enviar y se entrega pase lo que pase con la DGII (decisiones 38 y 39) |
 | 18 | Centavos | `IndicadorMontoGravado = 1` en las ventas POS |
 | 19 | RNC nuevo | Se crea el cliente con los datos de la DGII |
 | 20 | Plazo de devolución | 30 días |
@@ -487,6 +490,8 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 35 | Imágenes | No en v1 (iniciales + color) |
 | 36 | Precio en la ficha | Hoy se escribe sin ITBIS. Se agrega una casilla y se guarda el neto a 4 decimales |
 | 37 | Piloto | Gratex, térmica de 80 mm, menos de 500 productos, 4 semanas |
+| 38 | La venta no se detiene | Si falla el certificado, o cualquier cosa impide generar el e-CF, la venta sale como factura simple: sin e-NCF, sin ITBIS y sin envío a la DGII. El cajero no ve nada; el admin ve un aviso en app.\* (2026-10-12) |
+| 39 | Secuencia agotada | Número siguiente al último: se guarda y se imprime, y no se envía hasta que un rango autorizado registrado lo incluya. La app avisa cuando quedan pocos números y cuando se agotan (2026-10-12) |
 
 ## 8. Decisiones por defecto — revisar
 
@@ -609,8 +614,8 @@ El recibo sale de los endpoints que ya existen: `GET /api/facturas/{id}/pdf?form
 
    Hoy `EcfItemMapper::totales` solo sabe calcular sobre el neto, y el builder solo respeta `indicador_monto_gravado` con `strict_input`. Hay que agregar el modo "precios con ITBIS" sin tocar la ruta de app.\*. El RFCE (`RFCEXmlBuilder`) recibe los mismos totales.
 5. `TablaFormasPago` con la forma elegida y el monto total.
-6. Llama a `ECFEmissionService::emitir` con un timeout de DGII de 5 s.
-7. Guarda la factura (`turno_id`, `pos_empleado_id`, `indicador_monto_gravado = 1`, `envio_pendiente` si hubo timeout), el movimiento de caja y la salida de inventario (ya existe), y escribe la auditoría.
+6. Llama a `ECFEmissionService::emitir` con el gancho write-ahead (`reservar` / `confirmar` / `incierto`), un timeout de DGII de 5 s y las opciones del POS: `reclamar_secuencia = false` (el número impreso nunca vuelve al contador), `autenticar_despues_de_reservar = true`, `numerar_sin_rango = true` y `validar_vigencia_certificado = true` (un certificado vencido sale como factura simple). La factura se guarda **antes** de enviarla, con `pos_idempotency_key`, `turno_id`, `pos_empleado_id`, `indicador_monto_gravado = 1` y `envio_pendiente = 1`; una reserva con la misma clave es una venta repetida.
+7. **Entrega** (`PosVenta::entregarVenta`, idempotente bajo el candado de la clave): el movimiento de caja si la factura aún no tiene uno, la salida de inventario una sola vez y la auditoría `POS_VENTA`, tras cualquier resultado guardado (aceptada, rechazada o sin respuesta). Si el e-CF no se pudo generar antes de guardar, la misma entrega sobre una factura simple.
 8. Responde con la factura y los datos del recibo (`ReciboDatos`) **en la misma respuesta**, para imprimir sin otra petición.
 
 **Lo que lee precios de `factura_items`** (revisado en la fase 0, V-3): `ReporteVentasModel` y `Reporte607Model` suman `subtotal` como base e `itbis_amount` aparte, así que funcionan sin cambios porque `subtotal` sigue siendo neto. `EcfDocumento` (RI carta, tirilla y recibo web) y el detalle del front (`InvoiceDetailView`) muestran como valor de la línea `subtotal + itbis_amount` cuando el XML dice `IndicadorMontoGravado = 1`. `facturaSimpleController` y `FerreteriaFormato` no tocan e-CF. Las notas de crédito de app.\* no copian las líneas de la original.
@@ -618,8 +623,9 @@ El recibo sale de los endpoints que ya existen: `GET /api/facturas/{id}/pdf?form
 ### 9.6 Reintentos
 
 - Si cPanel tiene cron: `tools/pos_reenviar_pendientes.php` cada 5 min, para todos los tenants con `pos_enabled`.
-- Si no: el POS llama a `/api/pos/pendientes/reenviar` cada 2 min mientras está abierto y sin venta en curso.
-- Usa `consultarEstadoRFCE` / `consultarEstado`, que ya existen, antes de reenviar, para no duplicar un envío que sí llegó.
+- Si no: el POS llama a `/api/pos/pendientes/reenviar` al abrir, cada 2 min mientras está abierto y tras cada venta (es lo que hay hoy).
+- Usa `consultarEstadoRFCE` / `consultarEstado` / `consultarTrackIds`, que ya existen, antes de reenviar, para no duplicar un envío que sí llegó, y reenvía el XML ya firmado: el RFCE si hay `rfce_xml`, el e-CF completo si no.
+- Elige las ventas del POS con `envio_pendiente = 1`, salta las `PENDIENTE_ENVIO` de menos de 2 minutos, las ventas cuya petición sigue viva y las `sin_rango` sin un rango que las cubra, y escribe con compare-and-set (detalle en `docs/integrations/pos-write-ahead.md` del API).
 
 ### 9.7 Auditoría
 
@@ -718,10 +724,11 @@ registrar en la bitácora las ventas canceladas y las líneas quitadas (V4).
 ajeno bloquea el cobro, K4; banner de turno de ayer, K5) y `POST /api/pos/ventas`
 (`src/Pos/PosVenta.php`): E32 a consumidor final < RD$250k, líneas armadas en el
 servidor, clave de idempotencia + candado `GET_LOCK`, `TablaFormasPago` en RFCE **y**
-e-CF, factura + movimiento de caja en una transacción (así salió el 10-08; el write-ahead lo reemplazó, ver `docs/integrations/pos-write-ahead.md`;
-las columnas POS solo se escriben en ventas POS, app.\* intacto), venta a nombre del admin
+e-CF, factura reservada antes de enviarla (`reservarFacturaECF` con el gancho write-ahead; el 10-08 salió como factura + caja en una transacción, ver `docs/integrations/pos-write-ahead.md`;
+las columnas POS solo se escriben en ventas POS, app.\* intacto) y caja entregada de forma
+idempotente, venta a nombre del admin
 que habilitó la caja (`facturas.user_id` es NOT NULL). DGII sin respuesta en
-`POS_DGII_TIMEOUT` → `RFCE_PENDIENTE` impreso y reenviado por
+`POS_DGII_TIMEOUT` → `ENVIO_INCIERTO` impreso y reenviado por
 `/api/pos/pendientes/reenviar` (consulta antes de reenviar). En el POS: diálogo de cobro
 (efectivo con devuelta y billetes, tarjeta, transferencia; F9/F2/F3), impresión del
 recibo de app.\* (`reciboHtml` + `printHtml`), cobro "sin confirmar" que congela el
@@ -763,8 +770,8 @@ cliente existente por RNC (con o sin guiones) o creado desde el registro de cont
 con `tipo_ecf: "31"` + `client_id` (`CLIENTE_REQUERIDO`, `CLIENTE_NO_EXISTE`,
 `CLIENTE_SIN_RNC`, `AUTOFACTURA`): e-CF completo con `IndicadorMontoGravado = 1`,
 `TablaFormasPago` y el descuento del cliente por línea (V5, mismo redondeo que app.\*). La
-emisión completa ahora tolera la DGII lenta como el RFCE (`ENVIO_PENDIENTE` con el XML
-firmado) y el reenvío distingue RFCE de e-CF (`ConsultaResultado` por `trackId`;
+emisión completa también tolera la DGII lenta (`ENVIO_INCIERTO`, con el XML ya
+firmado y guardado) y el reenvío distingue RFCE de e-CF (`ConsultaResultado` por `trackId`;
 `ConsultaTrackIds` antes de reenviar). POS: botón **Crédito fiscal (RNC)** / F4, ficha
 del cliente (nuevo, descuento, aviso si el registro no lo da como activo), barra del
 cliente en el carrito con subtotal y descuento, cobro "crédito fiscal" con su nombre,
