@@ -706,17 +706,22 @@ wa_chk('B repetida: 201 repetida con la misma factura, una sola caja y un solo m
 echo "S8) secuencia E31 agotada: el XML lleva la fecha del ultimo rango\n";
 $esc = pc_reiniciar($pdo, $mock);
 pc_cobrar($esc, pc_cuerpo($esc, 1, '31'));
-$pdo->exec("UPDATE ncf_sequences SET numero_hasta = current_value WHERE type = 'E31' AND ambiente = 'certecf'");
+// wa_sembrar da al rango y a emisor_config la misma fecha (+1 anio): si el XML la tomara del emisor, la prueba
+// no lo notaria. El rango pasa a otra fecha (+200 dias) para que cada origen deje una fecha distinta en el XML.
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = current_value, fecha_vencimiento = CURDATE() + INTERVAL 200 DAY WHERE type = 'E31' AND ambiente = 'certecf'");
 $vence = (string) $pdo->query("SELECT fecha_vencimiento FROM ncf_sequences WHERE type = 'E31' AND ambiente = 'certecf' ORDER BY numero_desde DESC LIMIT 1")->fetchColumn();
+$venceEmisor = (string) $pdo->query('SELECT fecha_vencimiento_secuencia FROM emisor_config WHERE id = 1')->fetchColumn();
 $cuerpoB = pc_cuerpo($esc, 1, '31');
 $b = pc_cobrar($esc, $cuerpoB);
 $fb = pc_fila($pdo, $cuerpoB['clave']);
 wa_chk('la E31 toma el numero siguiente (E310000000002), queda PENDIENTE_ENVIO y no se envia',
     pc_ok($b) && ($fb['e_ncf'] ?? null) === 'E310000000002' && ($fb['estado_dgii'] ?? null) === 'PENDIENTE_ENVIO'
     && (int) ($fb['envio_pendiente'] ?? 0) === 1 && pc_recepciones($mock) === 1, [$fb['e_ncf'] ?? null, $fb['estado_dgii'] ?? null, pc_recepciones($mock)]);
-wa_chk('el XML trae la fecha de vencimiento del ultimo rango conocido',
-    $vence !== '' && str_contains((string) ($fb['xml_firmado'] ?? ''),
-        '<FechaVencimientoSecuencia>' . date('d-m-Y', strtotime($vence)) . '</FechaVencimientoSecuencia>'), $vence);
+preg_match('#<FechaVencimientoSecuencia>([^<]*)</FechaVencimientoSecuencia>#', (string) ($fb['xml_firmado'] ?? ''), $mFecha);
+$fechaXml = $mFecha[1] ?? null;
+wa_chk('el XML trae la fecha de vencimiento del ultimo rango conocido (no la de emisor_config, que es otra)',
+    $vence !== '' && $venceEmisor !== '' && $vence !== $venceEmisor && $fechaXml === date('d-m-Y', strtotime($vence))
+    && $fechaXml !== date('d-m-Y', strtotime($venceEmisor)), ['rango' => $vence, 'emisor' => $venceEmisor, 'xml' => $fechaXml]);
 
 // ---------------------------------------------------------------------------
 // S9) Rango vencido (no agotado): el numero tambien es el siguiente, sin enviar.
