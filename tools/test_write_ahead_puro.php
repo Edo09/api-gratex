@@ -1495,6 +1495,82 @@ wa_chk('el controlador sigue sin saveFacturaConECF', !str_contains($t9Ctl, 'save
 wa_chk('emitirFacturaEcf emite una sola vez: el reenvio no reintenta por su cuenta', substr_count($t9Emitir, '->emitir(') === 1);
 
 // ---------------------------------------------------------------------------
+// AV) Avisos al admin (Task 10, spec 4.6). La clasificacion de las secuencias
+// es pura (sin base ni red) y el cableado de GET /api/facturas/avisos se prueba
+// sobre el texto del controller. La parte con base de datos esta en
+// tools/test_write_ahead_api.php (escenarios AV1-AV6).
+// ---------------------------------------------------------------------------
+echo "\n== AV) Avisos al admin ==\n";
+require_once __DIR__ . '/../src/Models/facturaModel.php';
+
+wa_chk('umbral de "quedan pocos": 50 numeros',
+    defined('facturaModel::AVISO_SECUENCIA_POCOS') && facturaModel::AVISO_SECUENCIA_POCOS === 50);
+$avTiene = method_exists(facturaModel::class, 'clasificarSecuencias');
+wa_chk('facturaModel::clasificarSecuencias existe', $avTiene);
+wa_chk('facturaModel::getAvisosEcf existe', method_exists(facturaModel::class, 'getAvisosEcf'));
+if ($avTiene) {
+    $avRango = static fn(string $tipo, int $desde, ?int $hasta, int $actual, ?string $vence = '2099-12-31'): array => [
+        'type' => $tipo, 'numero_desde' => $desde, 'numero_hasta' => $hasta,
+        'current_value' => $actual, 'fecha_vencimiento' => $vence,
+    ];
+    $avAviso = static fn(string $tipo, int $restantes, string $estado): array
+        => ['tipo' => $tipo, 'ambiente' => 'certecf', 'restantes' => $restantes, 'estado' => $estado];
+    $avClasificar = static fn(array $rangos): array => facturaModel::clasificarSecuencias($rangos, 'certecf', '2026-10-12');
+
+    wa_chk('50 libres: pocos; 51 libres: sin aviso',
+        $avClasificar([$avRango('E31', 1, 100, 50)]) === [$avAviso('E31', 50, 'pocos')]
+        && $avClasificar([$avRango('E31', 1, 100, 49)]) === []);
+    wa_chk('un solo numero libre: pocos con 1',
+        $avClasificar([$avRango('E31', 1, 100, 99)]) === [$avAviso('E31', 1, 'pocos')]);
+    wa_chk('rango consumido: agotada con 0 libres',
+        $avClasificar([$avRango('E32', 1, 100, 100)]) === [$avAviso('E32', 0, 'agotada')]);
+    wa_chk('numeros usados fuera de rango (current_value > numero_hasta): agotada, nunca negativo',
+        $avClasificar([$avRango('E32', 1, 100, 103)]) === [$avAviso('E32', 0, 'agotada')]);
+    wa_chk('rango sin limite (legacy, numero_hasta NULL): nunca avisa',
+        $avClasificar([$avRango('E33', 1, null, 5000)]) === []);
+    wa_chk('rango vencido que se uso: agotada',
+        $avClasificar([$avRango('E41', 1, 100, 10, '2026-10-11')]) === [$avAviso('E41', 0, 'agotada')]);
+    wa_chk('rango vencido que nunca se uso: sin aviso (el tipo no se usa)',
+        $avClasificar([$avRango('E43', 1, 100, 0, '2026-10-11')]) === []);
+    wa_chk('vence hoy: todavia dispensa (igual que dispenseNextECF)',
+        $avClasificar([$avRango('E44', 1, 100, 60, '2026-10-12')]) === [$avAviso('E44', 40, 'pocos')]);
+    wa_chk('sin fecha de vencimiento (NULL): no vence',
+        $avClasificar([$avRango('E44', 1, 100, 60, null)]) === [$avAviso('E44', 40, 'pocos')]);
+    wa_chk('dos rangos: los libres se suman (100 libres: sin aviso)',
+        $avClasificar([$avRango('E45', 1, 100, 100), $avRango('E45', 101, 200, 100)]) === []);
+    wa_chk('dos rangos, el siguiente casi vacio: pocos con la suma',
+        $avClasificar([$avRango('E45', 1, 100, 100), $avRango('E45', 101, 130, 100)]) === [$avAviso('E45', 30, 'pocos')]);
+    wa_chk('un rango sin limite junto a uno agotado: sin aviso',
+        $avClasificar([$avRango('E46', 1, 100, 100), $avRango('E46', 101, null, 100)]) === []);
+    wa_chk('salen ordenados por tipo',
+        $avClasificar([$avRango('E34', 1, 100, 90), $avRango('E31', 1, 100, 90)])
+            === [$avAviso('E31', 10, 'pocos'), $avAviso('E34', 10, 'pocos')]);
+    wa_chk('sin rangos: sin avisos', $avClasificar([]) === []);
+    $avVarios = $avClasificar([
+        $avRango('E31', 1, 100, 100), $avRango('E31', 101, 200, 180), $avRango('E31', 201, 230, 200),
+        $avRango('E32', 1, 100, 100), $avRango('E32', 101, 200, 200),
+    ]);
+    $avTipos = array_column($avVarios, 'tipo');
+    wa_chk('a lo mas un aviso por tipo, aunque el tipo tenga varios rangos (la pantalla no repite alertas)',
+        $avTipos === array_values(array_unique($avTipos)) && $avVarios === [$avAviso('E31', 50, 'pocos'), $avAviso('E32', 0, 'agotada')], $avVarios);
+    $avUno = facturaModel::clasificarSecuencias([$avRango('E31', 1, 100, 99)], 'ecf', '2026-10-12')[0] ?? [];
+    $avClavesUno = array_keys($avUno);
+    sort($avClavesUno);
+    wa_chk('cada aviso trae exactamente tipo, ambiente, restantes y estado, y el ambiente es el que se pidio',
+        $avClavesUno === ['ambiente', 'estado', 'restantes', 'tipo'] && ($avUno['ambiente'] ?? null) === 'ecf', $avUno);
+}
+
+$avCtl = (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php');
+wa_chk('facturaController: ruta $isAvisosRequest, manejador handleAvisosEcf y su 500',
+    str_contains($avCtl, '$isAvisosRequest = preg_match(')
+    && str_contains($avCtl, 'function handleAvisosEcf(facturaModel $facturaModel): void')
+    && str_contains($avCtl, 'No se pudieron cargar los avisos del e-CF. Inténtalo de nuevo.'));
+$avPosDespacho = strpos($avCtl, 'handleAvisosEcf($facturaModel);');
+$avPosListado = strpos($avCtl, "isset(\$_GET['id'])");
+wa_chk('facturaController: GET avisos se despacha antes del listado',
+    $avPosDespacho !== false && $avPosListado !== false && $avPosDespacho < $avPosListado, [$avPosDespacho, $avPosListado]);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

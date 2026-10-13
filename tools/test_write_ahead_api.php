@@ -660,5 +660,157 @@ wa_chk('200: RFCE_ACEPTADO con el mismo e-NCF, reenvio_de y la rechazada archiva
     && ($d2['reenvio_de'] ?? null) === ($d1['factura_id'] ?? 0)
     && (wa_filas($pdo, (string) ($d1['e_ncf'] ?? ''))[0]['estado_dgii'] ?? null) === 'RFCE_RECHAZADO_ARCHIVADO', [$r, wa_filas($pdo, (string) ($d1['e_ncf'] ?? ''))]);
 
+// ===========================================================================
+// Task 10: GET /api/facturas/avisos (avisos al admin, spec 4.6). Las filas del
+// POS se siembran a mano: la venta real por el POS (certificado que falla,
+// secuencia agotada) la prueban las Tasks 6, 7 y 14; aqui se prueba lo que el
+// panel cuenta.
+// ===========================================================================
+
+/**
+ * Una fila del POS sembrada a mano. $tipo null = factura simple de respaldo
+ * (sin e-NCF ni ambiente, estado PENDIENTE como createFacturaSimple); con $tipo
+ * es un e-CF del POS. $n distingue la clave de idempotencia y el e-NCF.
+ */
+function wa_aviso_fila(PDO $pdo, int $n, ?string $tipo, string $estado, string $fecha, ?string $respuesta = null, string $ambiente = 'certecf'): int
+{
+    $eNcf = $tipo === null ? null : sprintf('E%s%010d', $tipo, 900000 + $n);
+    $pdo->prepare(
+        "INSERT INTO facturas (no_factura, date, client_name, total, tipo_pago, tipo_ecf, e_ncf, estado_dgii, ambiente_dgii,
+                               respuesta_dgii, pos_idempotency_key, envio_pendiente)
+         VALUES (:nf, :fecha, 'Consumidor Final', 118.00, 1, :tipo, :encf, :estado, :amb, :resp, :clave, :pend)"
+    )->execute([
+        ':nf' => $eNcf ?? sprintf('%04d-%s', $n, date('dmy')), ':fecha' => $fecha, ':tipo' => $tipo, ':encf' => $eNcf,
+        ':estado' => $estado, ':amb' => $tipo === null ? null : $ambiente, ':resp' => $respuesta,
+        ':clave' => sprintf('00000000-0000-4000-8000-%012d', $n), ':pend' => $estado === 'PENDIENTE_ENVIO' ? 1 : 0,
+    ]);
+    return (int) $pdo->lastInsertId();
+}
+
+echo "AV1) Sin avisos en una base limpia\n";
+$ids = wa_reiniciar($pdo, $srv);
+$r = wa_get($srv, '/api/facturas/avisos');
+$d = $r['json']['data'] ?? [];
+wa_chk('200 con status true', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
+wa_chk('data trae exactamente certificado_fallo, secuencias y sin_rango',
+    wa_claves($d) === ['certificado_fallo', 'secuencias', 'sin_rango'], wa_claves($d));
+wa_chk('todo en cero y sin secuencias que avisen (los rangos de prueba llegan a 99999999)',
+    ($d['certificado_fallo'] ?? null) === ['ventas_hoy' => 0] && ($d['secuencias'] ?? null) === []
+    && ($d['sin_rango'] ?? null) === ['ventas' => 0], $d);
+$sinToken = wa_http('GET', $srv['api'] . '/api/facturas/avisos');
+wa_chk('sin token: 401, como el resto de /api/facturas', $sinToken['status'] === 401, $sinToken);
+
+echo "AV2) Certificado: solo cuentan las facturas simples del POS de hoy (RF4)\n";
+$ids = wa_reiniciar($pdo, $srv);
+$avHoy = date('Y-m-d H:i:s');
+$avAyer = date('Y-m-d 12:00:00', strtotime('-1 day'));
+wa_aviso_fila($pdo, 1, null, 'PENDIENTE', $avHoy);          // respaldo de hoy
+wa_aviso_fila($pdo, 2, null, 'PENDIENTE', $avHoy);          // respaldo de hoy
+wa_aviso_fila($pdo, 3, null, 'PENDIENTE', $avAyer);         // respaldo de ayer: no cuenta
+wa_aviso_fila($pdo, 4, '32', 'RFCE_ACEPTADO', $avHoy);      // el certificado volvio: e-CF normal, no cuenta
+$pdo->prepare("INSERT INTO facturas (no_factura, date, client_name, total, tipo_pago) VALUES ('0001-WA', :f, 'WA simple de la app', 100.00, 1)")
+    ->execute([':f' => $avHoy]);                            // simple de la app (sin clave del POS): no cuenta
+$r = wa_get($srv, '/api/facturas/avisos');
+$d = $r['json']['data'] ?? [];
+wa_chk('ventas_hoy = 2: las del POS de hoy, sin ayer, sin e-CF y sin las simples de la app',
+    ($d['certificado_fallo'] ?? null) === ['ventas_hoy' => 2], $d);
+wa_chk('las otras dos secciones siguen en cero',
+    ($d['secuencias'] ?? null) === [] && ($d['sin_rango'] ?? null) === ['ventas' => 0], $d);
+
+echo "AV3) Secuencias: pocos numeros y agotadas\n";
+$ids = wa_reiniciar($pdo, $srv);
+// Vencido hace 3 dias: el vencimiento lo decide el CURDATE() de la base, y su reloj
+// no es exactamente el de PHP; con 3 dias de margen la prueba no depende de la hora.
+$avVencido = date('Y-m-d', strtotime('-3 days'));
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = 100, current_value = 60 WHERE type = 'E31' AND ambiente = 'certecf'");   // 40 libres
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = 100, current_value = 103 WHERE type = 'E32' AND ambiente = 'certecf'");  // 3 numeros usados fuera de rango
+$pdo->prepare("UPDATE ncf_sequences SET current_value = 10, fecha_vencimiento = :v WHERE type = 'E33' AND ambiente = 'certecf'")
+    ->execute([':v' => $avVencido]);                                                                                          // vencido y usado
+$r = wa_get($srv, '/api/facturas/avisos');
+wa_chk('E31 pocos (40), E32 y E33 agotadas; E34, con su rango amplio, no avisa',
+    ($r['json']['data']['secuencias'] ?? null) === [
+        ['tipo' => 'E31', 'ambiente' => 'certecf', 'restantes' => 40, 'estado' => 'pocos'],
+        ['tipo' => 'E32', 'ambiente' => 'certecf', 'restantes' => 0, 'estado' => 'agotada'],
+        ['tipo' => 'E33', 'ambiente' => 'certecf', 'restantes' => 0, 'estado' => 'agotada'],
+    ], $r['json']['data']['secuencias'] ?? null);
+wa_sembrar($pdo);   // devuelve numero_hasta y vencimiento de E31-E34
+wa_limpiar($pdo);   // y los contadores al inicio
+$r = wa_get($srv, '/api/facturas/avisos');
+wa_chk('con los rangos restaurados no hay avisos de secuencia', ($r['json']['data']['secuencias'] ?? null) === [], $r['json']['data'] ?? null);
+
+echo "AV4) Ventas esperando un rango autorizado (sin_rango)\n";
+$ids = wa_reiniciar($pdo, $srv);
+$avHoy = date('Y-m-d H:i:s');
+$avSinRango = json_encode(['fase' => 'PENDIENTE_ENVIO', 'sin_rango' => true]);
+$avIdEspera = wa_aviso_fila($pdo, 11, '32', 'PENDIENTE_ENVIO', $avHoy, $avSinRango);                                        // cuenta
+wa_aviso_fila($pdo, 12, '32', 'PENDIENTE_ENVIO', $avHoy, json_encode(['fase' => 'PENDIENTE_ENVIO']));                        // venta en curso, con rango: no
+wa_aviso_fila($pdo, 13, '32', 'RFCE_ACEPTADO', $avHoy, $avSinRango);                                                         // ya enviada: no
+wa_aviso_fila($pdo, 14, '32', 'PENDIENTE_ENVIO', $avHoy, $avSinRango, 'ecf');                                                // otro ambiente: no
+$pdo->prepare(
+    "INSERT INTO facturas (no_factura, date, client_name, total, tipo_pago, tipo_ecf, e_ncf, estado_dgii, ambiente_dgii, respuesta_dgii)
+     VALUES ('E320000000777', :f, 'WA factura de la app', 100.00, 1, '32', 'E320000000777', 'PENDIENTE_ENVIO', 'certecf', :m)"
+)->execute([':f' => $avHoy, ':m' => $avSinRango]);                                                                           // sin clave del POS: no
+$r = wa_get($srv, '/api/facturas/avisos');
+$d = $r['json']['data'] ?? [];
+wa_chk('sin_rango.ventas = 1: solo la PENDIENTE_ENVIO del POS, del ambiente activo y con sin_rango en su meta',
+    ($d['sin_rango'] ?? null) === ['ventas' => 1], $d);
+wa_chk('certificado_fallo sigue en cero', ($d['certificado_fallo'] ?? null) === ['ventas_hoy' => 0], $d);
+$pdo->prepare("UPDATE facturas SET estado_dgii = 'ENVIADO', envio_pendiente = 1 WHERE id = :id")->execute([':id' => $avIdEspera]);
+$r = wa_get($srv, '/api/facturas/avisos');
+wa_chk('cuando el reenvio la envia (sale de PENDIENTE_ENVIO) deja de esperar',
+    ($r['json']['data']['sin_rango'] ?? null) === ['ventas' => 0], $r['json']['data'] ?? null);
+wa_limpiar($pdo);
+
+echo "AV5) Secuencias: solo el ambiente activo y un aviso por tipo\n";
+$ids = wa_reiniciar($pdo, $srv);
+// Filas propias de este escenario: un segundo rango de E31 en el ambiente activo y
+// rangos agotados en los otros ambientes del tenant. Se identifican por su
+// numero_desde (101 y 5001), asi que se borran sin tocar los rangos sembrados.
+$avLimpiarRangos = static function () use ($pdo): void {
+    $pdo->exec("DELETE FROM ncf_sequences WHERE (type = 'E31' AND ambiente = 'certecf' AND numero_desde = 101)
+                OR (type IN ('E31', 'E32') AND ambiente IN ('ecf', 'testecf') AND numero_desde = 5001)");
+};
+$avLimpiarRangos();
+$avVence = date('Y-m-d', strtotime('+1 year'));
+$avRango = $pdo->prepare(
+    "INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, fecha_vencimiento, description, ambiente)
+     VALUES (:t, :t2, :actual, :desde, :hasta, :venc, 'WA avisos', :amb)"
+);
+$avInsertar = static function (string $tipo, string $amb, int $desde, int $hasta, int $actual) use ($avRango, $avVence): void {
+    $avRango->execute([':t' => $tipo, ':t2' => $tipo, ':actual' => $actual, ':desde' => $desde, ':hasta' => $hasta, ':venc' => $avVence, ':amb' => $amb]);
+};
+$pdo->exec("UPDATE ncf_sequences SET numero_hasta = 100, current_value = 80 WHERE type = 'E31' AND ambiente = 'certecf' AND numero_desde = 1");   // 20 libres
+$avInsertar('E31', 'certecf', 101, 130, 100);                                                                                                  // 30 libres, mismo tipo y ambiente
+$avInsertar('E31', 'ecf', 5001, 5010, 5010);                                                                                                   // agotado, pero en otro ambiente
+$avInsertar('E32', 'testecf', 5001, 5010, 5010);                                                                                               // agotado, pero en otro ambiente
+$r = wa_get($srv, '/api/facturas/avisos');
+$avSecuencias = $r['json']['data']['secuencias'] ?? null;
+wa_chk('solo E31 del ambiente activo, con una sola entrada que suma sus dos rangos (20 + 30)',
+    $avSecuencias === [['tipo' => 'E31', 'ambiente' => 'certecf', 'restantes' => 50, 'estado' => 'pocos']], $avSecuencias);
+wa_chk('el ambiente de cada entrada es el activo y ningun tipo sale dos veces',
+    is_array($avSecuencias) && array_unique(array_column($avSecuencias, 'ambiente')) === ['certecf']
+    && array_column($avSecuencias, 'tipo') === array_values(array_unique(array_column($avSecuencias, 'tipo'))), $avSecuencias);
+$avLimpiarRangos();
+wa_sembrar($pdo);
+wa_limpiar($pdo);
+$r = wa_get($srv, '/api/facturas/avisos');
+wa_chk('con los rangos propios borrados y los sembrados restaurados no hay avisos de secuencia',
+    ($r['json']['data']['secuencias'] ?? null) === [], $r['json']['data'] ?? null);
+
+echo "AV6) Base que no responde: 500 con texto claro\n";
+$ids = wa_reiniciar($pdo, $srv);
+try {
+    $pdo->exec('RENAME TABLE ncf_sequences TO ncf_sequences_wa_off');
+    $r = wa_get($srv, '/api/facturas/avisos');
+} finally {
+    $pdo->exec('RENAME TABLE ncf_sequences_wa_off TO ncf_sequences');
+}
+wa_chk('500 con status false y el texto exacto, sin detalle de la base',
+    $r['status'] === 500 && ($r['json']['status'] ?? null) === false
+    && ($r['json']['error'] ?? null) === 'No se pudieron cargar los avisos del e-CF. Inténtalo de nuevo.'
+    && !array_key_exists('data', $r['json'] ?? []), $r);
+$r = wa_get($srv, '/api/facturas/avisos');
+wa_chk('con la tabla de vuelta la ruta responde otra vez', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
+
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();

@@ -64,11 +64,16 @@ $isXmlRequest = preg_match('/\/api\/facturas\/(\d+)\/xml/', $endpoint, $xmlMatch
 $isPreviewRequest = preg_match('/\/api\/facturas\/preview$/', $endpoint);
 $isStatsRequest = preg_match('/\/api\/facturas\/stats/', $endpoint);
 $isModificablesRequest = preg_match('/\/api\/facturas\/modificables\/?$/', $endpoint);
+$isAvisosRequest = preg_match('/\/api\/facturas\/avisos\/?$/', $endpoint);
 
 switch ($_SERVER['REQUEST_METHOD']) {
     case 'GET':
         if ($isStatsRequest) {
             handleECFStats($facturaModel);
+            break;
+        }
+        if ($isAvisosRequest) {
+            handleAvisosEcf($facturaModel);
             break;
         }
         if ($isModificablesRequest) {
@@ -1660,6 +1665,25 @@ function normalizeSecuenciaUtilizada($value): ?bool
         return null;
     }
     return (bool) filter_var($value, FILTER_VALIDATE_BOOLEAN);
+}
+
+/**
+ * GET /api/facturas/avisos: los avisos del e-CF para quien administra (spec 4.6).
+ * Solo lectura. {certificado_fallo:{ventas_hoy}, secuencias:[{tipo, ambiente,
+ * restantes, estado}], sin_rango:{ventas}}: ver facturaModel::getAvisosEcf. Si
+ * la base no responde, 500 con un texto claro; la pantalla simplemente no
+ * muestra avisos y el panel sigue funcionando.
+ */
+function handleAvisosEcf(facturaModel $facturaModel): void
+{
+    try {
+        $avisos = $facturaModel->getAvisosEcf();
+    } catch (Throwable $e) {
+        error_log('[facturas] avisos del e-CF: ' . get_class($e) . ': ' . $e->getMessage());
+        respond(false, 'No se pudieron cargar los avisos del e-CF. Inténtalo de nuevo.', 500);
+        return;
+    }
+    echo json_encode(['status' => true, 'data' => $avisos]);
 }
 
 function handleECFStats(facturaModel $facturaModel): void

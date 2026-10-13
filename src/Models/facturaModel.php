@@ -1967,6 +1967,127 @@ class facturaModel
         }
     }
 
+    /** Umbral de "quedan pocos numeros" de un tipo de e-CF (spec 4.6). */
+    public const AVISO_SECUENCIA_POCOS = 50;
+
+    /**
+     * Avisos para quien administra el e-CF (spec 4.6, GET /api/facturas/avisos).
+     * Solo lectura: no cambia nada ni llama a la DGII.
+     *
+     *  - certificado_fallo.ventas_hoy: ventas del POS de hoy que salieron como
+     *    factura simple porque el e-CF no se pudo generar (tipo_ecf NULL con la
+     *    clave de idempotencia del POS). "Hoy" es el dia de este servidor PHP,
+     *    el mismo reloj que escribe facturas.date (date('Y-m-d H:i:s')).
+     *  - secuencias: tipos del ambiente activo con pocos numeros o agotados
+     *    (clasificarSecuencias). El vencimiento de un rango se compara con
+     *    CURDATE() de la base, como dispenseNextECF y GET /api/facturas/stats.
+     *  - sin_rango.ventas: ventas del POS que usaron el numero siguiente al
+     *    ultimo de su rango y esperan un rango autorizado: PENDIENTE_ENVIO con
+     *    'sin_rango' en la meta de respuesta_dgii, en el ambiente activo. La
+     *    meta se decodifica en PHP (respuesta_dgii es TEXT); el LIKE solo
+     *    descarta de antemano las filas que no la traen.
+     *
+     * @return array{certificado_fallo: array{ventas_hoy: int}, secuencias: array, sin_rango: array{ventas: int}}
+     * @throws PDOException si la base no responde: el controller responde 500 y la
+     *                      pantalla simplemente no muestra avisos.
+     */
+    public function getAvisosEcf(): array
+    {
+        $ambiente = $this->resolveActiveAmbiente() ?? 'certecf';
+
+        $simples = $this->conexion->prepare(
+            'SELECT COUNT(*) FROM facturas
+              WHERE tipo_ecf IS NULL AND pos_idempotency_key IS NOT NULL AND date >= :desde'
+        );
+        $simples->execute([':desde' => date('Y-m-d') . ' 00:00:00']);
+        $ventasHoy = (int) $simples->fetchColumn();
+
+        $enEspera = $this->conexion->prepare(
+            "SELECT respuesta_dgii FROM facturas
+              WHERE pos_idempotency_key IS NOT NULL AND tipo_ecf IS NOT NULL
+                AND estado_dgii = :estado AND ambiente_dgii = :amb
+                AND respuesta_dgii LIKE '%sin_rango%'"
+        );
+        $enEspera->execute([':estado' => EstadosEcf::PENDIENTE_ENVIO, ':amb' => $ambiente]);
+        $sinRango = 0;
+        foreach ($enEspera->fetchAll(PDO::FETCH_COLUMN) as $respuesta) {
+            $meta = self::metaEnvio($respuesta === null ? null : (string) $respuesta);
+            if (($meta['sin_rango'] ?? null) === true) {
+                $sinRango++;
+            }
+        }
+
+        $rangos = $this->conexion->prepare(
+            "SELECT type, numero_desde, numero_hasta, current_value, fecha_vencimiento FROM ncf_sequences
+              WHERE type LIKE 'E%' AND ambiente = :amb ORDER BY type, numero_desde"
+        );
+        $rangos->execute([':amb' => $ambiente]);
+        $hoyBase = (string) $this->conexion->query('SELECT CURDATE()')->fetchColumn();
+
+        return [
+            'certificado_fallo' => ['ventas_hoy' => $ventasHoy],
+            'secuencias' => self::clasificarSecuencias($rangos->fetchAll(PDO::FETCH_ASSOC), $ambiente, $hoyBase),
+            'sin_rango' => ['ventas' => $sinRango],
+        ];
+    }
+
+    /**
+     * Que tipos de e-CF avisan por su secuencia (spec 4.6). Pura: no toca la base.
+     *
+     * Por tipo se suman los numeros libres de los rangos NO vencidos que tienen
+     * limite (el mismo "restantes" de GET /api/facturas/stats), asi que un rango
+     * en cola cuenta. Un rango vigente sin limite (numero_hasta NULL) significa
+     * que nunca se agota y el tipo no avisa. "Vencido" es fecha_vencimiento < hoy,
+     * el mismo criterio de ncfModel::dispenseNextECF.
+     *  - 1..$umbral libres: 'pocos'.
+     *  - 0 libres: 'agotada', pero solo si el tipo ya uso algun numero. Un rango
+     *    registrado y vencido sin usar no avisa: ese tipo no se usa.
+     *
+     * Un current_value por encima de numero_hasta (ventas del POS que tomaron el
+     * numero siguiente al ultimo) no resta: los libres nunca son negativos.
+     *
+     * @param array  $rangos filas de ncf_sequences: type, numero_desde, numero_hasta, current_value, fecha_vencimiento
+     * @param string $hoy    'Y-m-d'
+     * @return array lista de ['tipo' => 'E31', 'ambiente' => ..., 'restantes' => int, 'estado' => 'pocos'|'agotada'], por tipo
+     */
+    public static function clasificarSecuencias(array $rangos, string $ambiente, string $hoy, int $umbral = self::AVISO_SECUENCIA_POCOS): array
+    {
+        $porTipo = [];
+        foreach ($rangos as $r) {
+            $porTipo[(string) $r['type']][] = $r;
+        }
+        ksort($porTipo);
+
+        $avisos = [];
+        foreach ($porTipo as $tipo => $filas) {
+            $restantes = 0;
+            $usados = 0;
+            $sinLimite = false;
+            foreach ($filas as $r) {
+                $actual = (int) $r['current_value'];
+                $usados += max(0, $actual - ((int) $r['numero_desde'] - 1));
+                $vence = $r['fecha_vencimiento'] ?? null;
+                if ($vence !== null && (string) $vence < $hoy) {
+                    continue;
+                }
+                if ($r['numero_hasta'] === null) {
+                    $sinLimite = true;
+                    continue;
+                }
+                $restantes += max(0, (int) $r['numero_hasta'] - $actual);
+            }
+            if ($sinLimite) {
+                continue;
+            }
+            if ($restantes === 0 && $usados > 0) {
+                $avisos[] = ['tipo' => (string) $tipo, 'ambiente' => $ambiente, 'restantes' => 0, 'estado' => 'agotada'];
+            } elseif ($restantes > 0 && $restantes <= $umbral) {
+                $avisos[] = ['tipo' => (string) $tipo, 'ambiente' => $ambiente, 'restantes' => $restantes, 'estado' => 'pocos'];
+            }
+        }
+        return $avisos;
+    }
+
     /** Estados en que la DGII acepto el e-CF: los unicos que una nota puede modificar. */
     public const ESTADOS_MODIFICABLES = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO'];
 
