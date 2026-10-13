@@ -80,7 +80,7 @@
   label.toggle { display:inline-flex; align-items:center; gap:6px; margin:0 0 10px; cursor:pointer; }
   label.toggle input { width:auto; margin:0; }
   .diffbox:not(.show-all) .unchanged { display:none; }
-  table.diff td, table.grid td { white-space:normal; word-break:break-word; vertical-align:top; }
+  table.diff td, table.grid td { white-space:pre-wrap; word-break:break-word; vertical-align:top; }
   table.diff td.k { color:var(--mut); width:22%; }
   table.diff tr.unchanged td { color:var(--mut); }
   table.lines td.n { width:1%; white-space:nowrap; }
@@ -88,6 +88,13 @@
   .val { display:inline-block; padding:0 5px; border-radius:4px; }
   .val.old { color:#fca5a5; background:rgba(239,68,68,.14); text-decoration:line-through; text-decoration-color:rgba(252,165,165,.7); }
   .val.new { color:#86efac; background:rgba(34,197,94,.14); }
+  /* texto largo cambiado: solo el tramo distinto va marcado */
+  .val.txt { color:var(--txt); }
+  .val.txt.old { text-decoration:none; }
+  .val.txt .hl { border-radius:3px; padding:0 1px; }
+  .val.txt.old .hl { color:#fecaca; background:rgba(239,68,68,.40); text-decoration:line-through; }
+  .val.txt.new .hl { color:#dcfce7; background:rgba(34,197,94,.40); }
+  .val.txt .hl.gap { display:inline-block; width:3px; height:1em; vertical-align:text-bottom; padding:0; }
   .arrow { color:var(--mut); margin:0 6px; }
   .chg + .chg { margin-top:3px; }
   .line-sub { color:var(--mut); font-size:12px; margin-top:2px; }
@@ -398,7 +405,7 @@ function showDetail(r, tr) {
   errBox.replaceChildren();
   if (!blank(r.error_message)) errBox.append(el('h3', {}, 'Error'), el('pre', {}, r.error_message));
 
-  $('detailDiff').replaceChildren(renderChanges(r.old_values, r.new_values));
+  $('detailDiff').replaceChildren(renderChanges(r.old_values, r.new_values, { module: r.module, action: r.action }));
   $('detailCard').classList.remove('hidden');
   $('detailCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -423,6 +430,12 @@ function fmt(v) {
 const REDACTED = '***REDACTED***';
 const NUM_RE = /^-?(0|[1-9]\d*)(\.\d+)?$/;            // sin ceros a la izquierda: "001" es un codigo
 const MIDNIGHT_RE = /^(\d{4}-\d{2}-\d{2})[ T]00:00:00(\.0+)?$/;
+// Campos de texto o codigo: se comparan y se muestran tal cual. "2.10" y "2.1"
+// son dos SKU distintos aunque parezcan el mismo numero.
+const TEXT_WORDS = new Set(['sku', 'codigo', 'code', 'description', 'descripcion', 'nombre', 'name', 'concepto',
+  'rnc', 'cedula', 'ncf', 'encf', 'telefono', 'phone', 'celular', 'email', 'correo', 'direccion', 'referencia',
+  'nota', 'notas', 'razon', 'track', 'username']);
+const isTextKey = (key) => !!key && String(key).toLowerCase().split('_').some(w => TEXT_WORDS.has(w));
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isScalar = (v) => v === null || typeof v !== 'object';
@@ -442,7 +455,8 @@ function numText(v) {
   return t === '-0' ? '0' : t;
 }
 
-function scalarKey(v) {
+function scalarKey(v, key) {
+  if (isTextKey(key)) return String(v);
   if (isNumeric(v)) return numText(v);
   if (typeof v === 'string') {
     const m = MIDNIGHT_RE.exec(v); // DATE contra DATETIME de medianoche
@@ -461,23 +475,24 @@ function asBool(v) {
   return null;
 }
 
-// a = antes, b = despues. Una clave que no trae b no cuenta (el cuerpo de un PUT
-// suele traer solo parte de la fila); una que no tiene a cuenta si b trae algo.
-function sameValue(a, b) {
+// a = antes, b = despues, key = el nombre del campo. Dentro de un objeto, la
+// clave que falta de un lado vale vacio (0/false/null cuentan como vacio).
+function sameValue(a, b, key) {
   if (isVoid(a) && isVoid(b)) return true;
   if (typeof a === 'boolean' || typeof b === 'boolean') {
     const x = asBool(a), y = asBool(b);
     return x !== null && x === y;
   }
   if (Array.isArray(a) && Array.isArray(b)) {
-    return a.length === b.length && a.every((x, i) => sameValue(x, b[i]));
+    return a.length === b.length && a.every((x, i) => sameValue(x, b[i], key));
   }
   if ((isPlainObject(a) || isEmptyBox(a)) && (isPlainObject(b) || isEmptyBox(b))) {
     const o = isPlainObject(a) ? a : {}, n = isPlainObject(b) ? b : {};
-    return Object.keys(n).every(k => own(o, k) ? sameValue(o[k], n[k]) : isZeroish(n[k]));
+    return Object.keys(n).every(k => own(o, k) ? sameValue(o[k], n[k], k) : isZeroish(n[k]))
+      && Object.keys(o).every(k => own(n, k) || isZeroish(o[k]));
   }
   if (!isScalar(a) || !isScalar(b) || a === null || b === null) return false;
-  return scalarKey(a) === scalarKey(b);
+  return scalarKey(a, key) === scalarKey(b, key);
 }
 
 // Clave de lo enviado -> clave de la fila de antes cuando se llaman distinto
@@ -485,16 +500,33 @@ function sameValue(a, b) {
 const KEY_ALIAS = { pdf_template: 'template', pdf_accent_color: 'accent_color' };
 
 // Entradas del diff, en el orden de las claves:
-//   {kind:'field', path, old, new, status: changed|added|same|notsent, noOld?, alias?}
+//   {kind:'field', path, key, old, new, status: changed|added|same|notsent, noOld?, alias?}
 //   {kind:'rows',  path, rows, counts, oldCount, newCount, status}   arreglo de objetos
-//   {kind:'set',   path, added, removed, same, status}              arreglo de escalares
-function diffValues(oldV, newV) {
+//   {kind:'set',   path, key, added, removed, same, status}         arreglo de escalares
+// ctx = {module, action} de la fila de la bitacora.
+function diffValues(oldV, newV, ctx) {
+  const omitted = ctx && ctx.action === 'UPDATE' ? OMITTED_BECOMES[ctx.module] || null : null;
   const out = [];
-  diffValue('', oldV, newV, out, null);
+  diffValue('', '', oldV, newV, out, null, omitted);
   return out;
 }
 
-function diffObject(o, n, prefix, out) {
+// Lo que el UPDATE escribe en una columna que el cuerpo no trae (bindParams de
+// cada modelo): ahi "no enviado" no es "quedo igual". El formulario no manda los
+// campos que el usuario dejo en blanco, asi que borrar el telefono de un
+// proveedor llega como un PUT sin telefono. clients usa COALESCE (lo que no
+// viene se conserva) y no esta en la lista.
+const OMITTED_BECOMES = {
+  products: { sku: null, descripcion: null, category_id: null, indicador_bien_servicio: 1, indicador_facturacion: 1,
+    precio: 0, precio_2: null, precio_3: null, precio_4: null, costo: 0, unidad_medida: '43',
+    stock: null, stock_minimo: null, activo: 1 },
+  proveedores: { rnc: null, contacto: null, telefono: null, correo: null, direccion: null, notas: null, activo: 1 },
+  categories: { descripcion: null, estado: 1 },
+  warehouses: { descripcion: null, estado: 1 },
+  cotizaciones: { ajustes: null }, // Ferreteria: un PUT sin ajustes los quita todos
+};
+
+function diffObject(o, n, prefix, out, omitted) {
   const aliasOf = {};
   for (const k of Object.keys(n)) {
     const a = KEY_ALIAS[k];
@@ -506,99 +538,185 @@ function diffObject(o, n, prefix, out) {
     const path = prefix ? prefix + '.' + k : k;
     const from = aliasOf[k] || k;
     if (!own(n, k)) {
-      out.push({ kind: 'field', path, old: o[k], status: 'notsent' });
+      if (prefix) {
+        // Dentro de un objeto que si vino (ajustes), lo que falta vale vacio: el
+        // PUT reemplaza el objeto entero.
+        out.push({ kind: 'field', path, key: k, old: o[k], new: null, absent: true, status: isZeroish(o[k]) ? 'same' : 'changed' });
+      } else if (omitted && own(omitted, k)) {
+        out.push({ kind: 'field', path, key: k, old: o[k], new: omitted[k], absent: true,
+          status: sameValue(o[k], omitted[k], k) ? 'same' : 'changed' });
+      } else {
+        out.push({ kind: 'field', path, key: k, old: o[k], status: 'notsent' });
+      }
     } else if (!own(o, from)) {
       // Sin valor anterior: un 0/false/vacio es lo mismo que no tenerlo (p. ej. los
       // ajustes de Ferreteria en cero, que la fila de antes ni lista).
-      out.push({ kind: 'field', path, new: n[k], noOld: true, status: isZeroish(n[k]) ? 'same' : 'added' });
+      out.push({ kind: 'field', path, key: k, new: n[k], noOld: true, status: isZeroish(n[k]) ? 'same' : 'added' });
     } else {
-      diffValue(path, o[from], n[k], out, from !== k ? from : null);
+      diffValue(path, k, o[from], n[k], out, from !== k ? from : null);
     }
   }
 }
 
-function diffValue(path, a, b, out, alias) {
+function diffValue(path, key, a, b, out, alias, omitted) {
   const boxy = (v) => isPlainObject(v) || isEmptyBox(v);
   if (!(isVoid(a) && isVoid(b))) {
     if (boxy(a) && boxy(b)) {
-      diffObject(isPlainObject(a) ? a : {}, isPlainObject(b) ? b : {}, path, out);
+      diffObject(isPlainObject(a) ? a : {}, isPlainObject(b) ? b : {}, path, out, path === '' ? omitted : null);
       return;
     }
     if (Array.isArray(a) && Array.isArray(b)) {
       const all = a.concat(b);
       if (all.every(isPlainObject)) { out.push(diffRows(path, a, b)); return; }
-      if (all.every(isScalar)) { out.push(diffSet(path, a, b)); return; }
+      if (all.every(isScalar)) { out.push(diffSet(path, key, a, b)); return; }
     }
   }
-  out.push({ kind: 'field', path, old: a, new: b, alias, status: sameValue(a, b) ? 'same' : 'changed' });
+  out.push({ kind: 'field', path, key, old: a, new: b, alias, status: sameValue(a, b, key) ? 'same' : 'changed' });
 }
 
 // Arreglo de escalares (permissions): como conjunto, el orden no cuenta.
-function diffSet(path, a, b) {
-  const pool = b.map(v => ({ v, key: scalarKey(v), used: false }));
+function diffSet(path, key, a, b) {
+  const pool = b.map(v => ({ v, key: scalarKey(v, key), used: false }));
   const removed = [], same = [];
   for (const v of a) {
-    const hit = pool.find(p => !p.used && p.key === scalarKey(v));
+    const hit = pool.find(p => !p.used && p.key === scalarKey(v, key));
     if (hit) { hit.used = true; same.push(v); } else removed.push(v);
   }
   const added = pool.filter(p => !p.used).map(p => p.v);
-  return { kind: 'set', path, added, removed, same, status: added.length || removed.length ? 'changed' : 'same' };
+  return { kind: 'set', path, key, added, removed, same, status: added.length || removed.length ? 'changed' : 'same' };
 }
 
 // Las lineas no tienen id estable: cada guardado las borra y las vuelve a
-// insertar, y el cuerpo del PUT no lo trae. Se alinean por producto (o por
-// descripcion si es una linea libre) respetando el orden (LCS). Una linea suelta
-// que aparece en otro lugar es una linea movida; el resto, entre dos lineas
-// alineadas, se empareja por posicion: una linea a la que le cambiaron el
-// producto o el texto.
+// insertar, y el cuerpo del PUT no lo trae. Se alinean en una sola pasada, sin
+// cruces (respeta el orden): primero las que casan por producto (o por
+// descripcion si es una linea libre) y, entre alineaciones con tantas de esas,
+// la que empareja lineas mas parecidas; una linea suelta se empareja con otra
+// si se parecen al menos a medias (una linea a la que le editaron el texto o le
+// cambiaron el producto). La que tiene su producto en otro lugar es una linea
+// movida; lo que sobra es agregado o quitado.
 const ROW_KEYS = ['product_id', 'producto_id', 'sku', 'codigo', 'code', 'description', 'descripcion', 'nombre', 'name'];
 const ROW_SKIP = new Set(['id']); // id de la linea en la DB: cambia en cada guardado
+const LINE_TEXT = new Set(['description', 'descripcion', 'nombre', 'name']);
+const LINE_REF = new Set(['product_id', 'producto_id', 'sku', 'codigo', 'code']);
 
 function rowKey(r) {
   for (const k of ROW_KEYS) {
     const v = r[k];
-    if (!blank(v) && isScalar(v)) return k + ':' + scalarKey(v).toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!blank(v) && isScalar(v)) return k + ':' + scalarKey(v, k).toLowerCase().replace(/\s+/g, ' ').trim();
   }
   return null;
+}
+
+// Lo que cambio de la linea o a la linea n (las claves que n no trae no cuentan).
+function rowChanges(o, n) {
+  const changes = [];
+  for (const k of Object.keys(n)) {
+    if (ROW_SKIP.has(k)) continue;
+    if (!own(o, k)) {
+      if (!isZeroish(n[k])) changes.push({ key: k, new: n[k], noOld: true });
+    } else if (!sameValue(o[k], n[k], k)) {
+      changes.push({ key: k, old: o[k], new: n[k] });
+    }
+  }
+  return changes;
+}
+
+// Palabras en comun (Dice): "Mano de obra" y "Mano de obra e instalacion", 0.75.
+function textSimilarity(a, b) {
+  const words = (s) => new Set(String(s).toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(Boolean));
+  const x = words(a), y = words(b);
+  if (!x.size && !y.size) return 1;
+  let common = 0;
+  for (const w of x) if (y.has(w)) common++;
+  return (2 * common) / (x.size + y.size);
+}
+
+// Que tan parecidas son dos lineas, de 0 a 1, sobre los campos de n que o
+// tambien tiene. Descripcion y producto pesan triple: unidad e indicadores son
+// iguales en casi todas las lineas y no dicen cual es cual.
+function rowSimilarity(o, n) {
+  let got = 0, total = 0;
+  for (const k of Object.keys(n)) {
+    if (ROW_SKIP.has(k) || !own(o, k)) continue;
+    const equal = sameValue(o[k], n[k], k);
+    const weight = (LINE_TEXT.has(k) || LINE_REF.has(k)) && !(isVoid(o[k]) && isVoid(n[k])) ? 3 : 1;
+    const score = !equal && LINE_TEXT.has(k) && typeof o[k] === 'string' && typeof n[k] === 'string'
+      ? textSimilarity(o[k], n[k]) : (equal ? 1 : 0);
+    got += weight * score;
+    total += weight;
+  }
+  return total ? got / total : 0;
+}
+
+// Pares [i, j] que maximizan la suma de weight(i, j) sin cruzarse (weight 0 = no
+// se pueden emparejar). Pesos enteros: el recorrido compara sumas exactas.
+function alignRows(n, m, weight) {
+  const W = Array.from({ length: n }, (_, i) => Array.from({ length: m }, (_, j) => weight(i, j)));
+  const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      L[i][j] = Math.max(L[i + 1][j], L[i][j + 1], W[i][j] ? L[i + 1][j + 1] + W[i][j] : 0);
+    }
+  }
+  const pairs = [];
+  for (let i = 0, j = 0; i < n && j < m;) {
+    if (W[i][j] && L[i][j] === L[i + 1][j + 1] + W[i][j]) pairs.push([i++, j++]);
+    else if (L[i][j + 1] >= L[i + 1][j]) j++;
+    else i++;
+  }
+  return pairs;
 }
 
 function diffRows(path, a, b) {
   const ka = a.map(rowKey), kb = b.map(rowKey);
   const n = a.length, m = b.length;
-  const L = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      L[i][j] = ka[i] !== null && ka[i] === kb[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const keyHit = (i, j) => ka[i] !== null && ka[i] === kb[j];
+  // Con listas enormes, solo por clave: la similitud compara n x m lineas.
+  const fuzzy = n * m <= 40000;
+  const sim = Array.from({ length: n }, (_, i) => Array.from({ length: m }, (_, j) =>
+    fuzzy || keyHit(i, j) ? rowSimilarity(a[i], b[j]) : 0));
+  // TIER vale mas que todos los desempates juntos: primero cuantas casan por clave.
+  const TIER = (Math.min(n, m) + 1) * 1002;
+  // Con claves repetidas (el mismo producto o texto en varias lineas), casar
+  // primero las lineas identicas: si no, quitar una corre los valores de las demas
+  // y lineas que nadie toco salen con cantidades cambiadas.
+  const repeated = new Set([ka, kb].flatMap(ks => ks.filter((k, x) => k !== null && ks.indexOf(k) !== x)));
+  const EXACT = (Math.min(n, m) + 1) * (TIER + 1002);
+  const pairs = alignRows(n, m, (i, j) => {
+    if (keyHit(i, j)) {
+      const exact = repeated.has(ka[i]) && !rowChanges(a[i], b[j]).length;
+      return (exact ? EXACT : 0) + TIER + Math.round(1000 * sim[i][j]) + 1;
     }
-  }
-  const anchors = [];
-  for (let i = 0, j = 0; i < n && j < m;) {
-    if (ka[i] !== null && ka[i] === kb[j]) anchors.push([i++, j++]);
-    else if (L[i][j + 1] >= L[i + 1][j]) j++;
-    else i++;
-  }
-  const anchoredA = new Set(anchors.map(p => p[0])), anchoredB = new Set(anchors.map(p => p[1]));
-  const movedFrom = new Map(), movedA = new Set(); // linea nueva -> linea vieja
+    return fuzzy && sim[i][j] >= 0.5 ? Math.round(1000 * (sim[i][j] - 0.5)) + 1 : 0;
+  });
+  const oldOf = new Map(pairs.map(([i, j]) => [j, i]));
+  const usedA = new Set(pairs.map(p => p[0]));
+  const moved = new Map(); // linea nueva -> linea vieja con su producto, en otro lugar
   for (let j = 0; j < m; j++) {
-    if (anchoredB.has(j) || kb[j] === null) continue;
+    if (oldOf.has(j) || kb[j] === null) continue;
+    let best = -1;
     for (let i = 0; i < n; i++) {
-      if (!anchoredA.has(i) && !movedA.has(i) && ka[i] === kb[j]) { movedFrom.set(j, i); movedA.add(i); break; }
+      if (!usedA.has(i) && keyHit(i, j) && (best < 0 || sim[i][j] > sim[best][j])) best = i;
     }
+    if (best >= 0) { moved.set(j, best); usedA.add(best); }
+  }
+  // Una linea quitada va despues de la ultima emparejada que estaba antes que ella.
+  const removedAfter = new Map();
+  for (let i = 0; i < n; i++) {
+    if (usedA.has(i)) continue;
+    let after = -1;
+    for (const [pi, pj] of pairs) if (pi < i) after = pj;
+    if (!removedAfter.has(after)) removedAfter.set(after, []);
+    removedAfter.get(after).push(i);
   }
   const rows = [];
-  let pi = -1, pj = -1;
-  for (const [ai, aj] of [...anchors, [n, m]]) {
-    const gapA = [];
-    for (let i = pi + 1; i < ai; i++) if (!movedA.has(i)) gapA.push(i);
-    let k = 0;
-    for (let j = pj + 1; j < aj; j++) {
-      if (movedFrom.has(j)) rows.push(pairRows(a, b, movedFrom.get(j), j, true));
-      else if (k < gapA.length) rows.push(pairRows(a, b, gapA[k++], j));
-      else rows.push({ status: 'added', newIndex: j, new: b[j] });
-    }
-    for (; k < gapA.length; k++) rows.push({ status: 'removed', oldIndex: gapA[k], old: a[gapA[k]] });
-    if (ai < n && aj < m) rows.push(pairRows(a, b, ai, aj));
-    pi = ai; pj = aj;
+  const pushRemoved = (j) => (removedAfter.get(j) || []).forEach(i => rows.push({ status: 'removed', oldIndex: i, old: a[i] }));
+  pushRemoved(-1);
+  for (let j = 0; j < m; j++) {
+    if (oldOf.has(j)) rows.push(pairRows(a, b, oldOf.get(j), j, false));
+    else if (moved.has(j)) rows.push(pairRows(a, b, moved.get(j), j, true));
+    else rows.push({ status: 'added', newIndex: j, new: b[j] });
+    pushRemoved(j);
   }
   const counts = { modified: 0, added: 0, removed: 0, same: 0 };
   for (const r of rows) counts[r.status]++;
@@ -607,22 +725,17 @@ function diffRows(path, a, b) {
 }
 
 function pairRows(a, b, i, j, moved) {
-  const o = a[i], n = b[j], changes = [];
-  if (moved) changes.push({ key: 'posición', old: '#' + (i + 1), new: '#' + (j + 1) });
-  for (const k of Object.keys(n)) {
-    if (ROW_SKIP.has(k)) continue;
-    if (!own(o, k)) {
-      if (!isZeroish(n[k])) changes.push({ key: k, new: n[k], noOld: true });
-    } else if (!sameValue(o[k], n[k])) {
-      changes.push({ key: k, old: o[k], new: n[k] });
-    }
-  }
-  return { status: changes.length ? 'modified' : 'same', oldIndex: i, newIndex: j, old: o, new: n, changes };
+  const changes = rowChanges(a[i], b[j]);
+  if (moved && i !== j) changes.unshift({ key: 'posición', old: '#' + (i + 1), new: '#' + (j + 1) });
+  return { status: changes.length ? 'modified' : 'same', oldIndex: i, newIndex: j, old: a[i], new: b[j], changes };
 }
 
 // ---- Diff: vista --------------------------------------------------------------
-const LONG_TEXT = 160; // mas largo que esto (xml_firmado, logo_data_uri) va plegado
-const NOT_SENT_HINT = 'Lo enviado no trae este campo. Según el módulo, quedó igual o se vació.';
+const LONG_TEXT = 1000; // mas largo que esto (xml_firmado, logo_data_uri) va plegado
+const SHORT_TEXT = 24;  // un texto cambiado mas largo que esto resalta solo el tramo distinto
+const CONTEXT = 50;     // caracteres iguales que se dejan a cada lado de ese tramo
+const NOT_SENT_HINT = 'No viene en lo enviado, así que la bitácora no guarda su valor después: '
+  + 'pudo quedar igual, vaciarse o recalcularlo el servidor (p. ej. total, updated_at).';
 const ROW_NAME_KEYS = ['description', 'descripcion', 'nombre', 'name', 'concepto', 'valor'];
 const ROW_REF_KEYS = [['product_id', 'producto #'], ['producto_id', 'producto #'], ['sku', 'SKU '], ['codigo', 'código '], ['code', 'código ']];
 const ROW_STATUS = { modified: ['mod', 'Modificada'], added: ['ok', 'Agregada'], removed: ['err', 'Quitada'], same: ['', 'Sin cambios'] };
@@ -638,24 +751,77 @@ function longText(text) {
     try { full = JSON.stringify(JSON.parse(text), null, 2); } catch (_) { /* recortado: va tal cual */ }
   }
   return el('details', { class: 'long' },
-    el('summary', {}, text.slice(0, 80).replace(/\s+/g, ' ') + '… (' + text.length.toLocaleString('es-DO') + ' caracteres)'),
+    el('summary', {}, wholeEnd(text.slice(0, 80)).replace(/\s+/g, ' ') + '… (' + text.length.toLocaleString('es-DO') + ' caracteres)'),
     el('pre', {}, full));
 }
 
-// Un valor de la bitacora, legible y siempre como texto.
-function show(v) {
+// Un recorte que no deje medio emoji en el borde.
+const wholeStart = (s) => s.replace(/^[\uDC00-\uDFFF]/, '');
+const wholeEnd = (s) => s.replace(/[\uD800-\uDBFF]$/, '');
+
+// Un valor de la bitacora, legible y siempre como texto. key = el nombre del
+// campo: los de texto/codigo (sku "2.10") se muestran tal cual.
+function show(v, key) {
   if (v === undefined) return dim('—');
   if (v === null || v === '' || isEmptyBox(v)) return dim('vacío');
   if (v === REDACTED) return dim('(oculto)');
-  if (isNumeric(v)) return numText(v);
+  if (isNumeric(v) && !isTextKey(key)) return numText(v);
   let text;
   if (Array.isArray(v) && v.every(isScalar)) text = v.map(x => (x === null ? 'null' : String(x))).join(', ');
   else text = typeof v === 'object' ? JSON.stringify(v) : String(v);
   return text.length > LONG_TEXT ? longText(text) : text;
 }
-const mark = (v, cls) => el('span', { class: 'val ' + cls }, show(v));
+const mark = (v, cls, key) => el('span', { class: 'val ' + cls }, show(v, key));
 
-function renderChanges(oldV, newV) {
+// Largo del principio y del final que dos textos tienen en comun (sin partir un
+// emoji por la mitad).
+function commonEnds(a, b) {
+  const max = Math.min(a.length, b.length);
+  let p = 0;
+  while (p < max && a[p] === b[p]) p++;
+  if (p > 0 && /[\uD800-\uDBFF]/.test(a[p - 1])) p--;
+  let s = 0;
+  while (s < max - p && a[a.length - 1 - s] === b[b.length - 1 - s]) s++;
+  if (s > 0 && /[\uDC00-\uDFFF]/.test(a[a.length - s])) s--;
+  return [p, s];
+}
+
+// El texto con el tramo distinto resaltado y lo comun recortado a CONTEXT por
+// lado. Un cambio que solo toca espacios o saltos de linea se hace visible.
+function textDiff(text, p, s, cls) {
+  const head = text.slice(0, p), tail = text.slice(text.length - s);
+  let mid = text.slice(p, text.length - s);
+  if (mid !== '' && mid.trim() === '') {
+    mid = mid.replace(/\r/g, '␍').replace(/\n/g, '↵\n').replace(/\t/g, '⇥').replace(/ /g, '·').replace(/[^\S\n]/g, '⍽');
+  }
+  return el('span', { class: 'val txt ' + cls },
+    head.length > CONTEXT ? '…' + wholeStart(head.slice(-CONTEXT)) : head,
+    el('span', { class: 'hl' + (mid === '' ? ' gap' : '') }, mid),
+    tail.length > CONTEXT ? wholeEnd(tail.slice(0, CONTEXT)) + '…' : tail);
+}
+
+// Antes y despues de un valor que cambio. Dos textos largos con partes en comun
+// resaltan solo lo distinto: si no, una descripcion de 200 caracteres a la que le
+// cambiaron una palabra se ve igual de los dos lados. Si lo distinto son solo
+// espacios o saltos de linea (\r\n de antes del saneo), se resalta aunque sea corto.
+function markPair(a, b, key) {
+  const plain = (v) => typeof v === 'string' && v !== REDACTED && (isTextKey(key) || !isNumeric(v));
+  if (plain(a) && plain(b)) {
+    const [p, s] = commonEnds(a, b);
+    const onlySpace = a.slice(p, a.length - s).trim() === '' && b.slice(p, b.length - s).trim() === '';
+    const long = Math.max(a.length, b.length) > SHORT_TEXT;
+    if ((onlySpace || (long && (p || s))) && Math.max(a.length, b.length) - p - s <= LONG_TEXT) {
+      return [textDiff(a, p, s, 'old'), textDiff(b, p, s, 'new')];
+    }
+  }
+  return [mark(a, 'old', key), mark(b, 'new', key)];
+}
+
+const looksLikeJson = (v) => typeof v === 'string' && /^\s*[[{]/.test(v);
+
+// ctx = {module, action} de la fila: el diff sabe que columnas vacia cada UPDATE
+// cuando no vienen (OMITTED_BECOMES).
+function renderChanges(oldV, newV, ctx) {
   const hasOld = !blank(oldV), hasNew = !blank(newV);
   if (!hasOld && !hasNew) {
     return el('div', { class: 'hint' }, 'Este evento no guarda valores anteriores ni nuevos.');
@@ -663,17 +829,28 @@ function renderChanges(oldV, newV) {
   const structured = (v) => isPlainObject(v) || Array.isArray(v);
   const okOld = hasOld && structured(oldV), okNew = hasNew && structured(newV);
   const box = el('div');
+  // Un lado que no es JSON completo (recortado a 100.000 caracteres, o un valor
+  // suelto) no se compara: se avisa siempre, haya o no otro lado.
+  const broken = [];
+  if (hasOld && !okOld) broken.push('anteriores');
+  if (hasNew && !okNew) broken.push('nuevos');
+  if (broken.length) {
+    const cut = (hasOld && !okOld && looksLikeJson(oldV)) || (hasNew && !okNew && looksLikeJson(newV));
+    box.append(el('div', { class: 'hint', style: 'margin:0 0 8px' },
+      'Los valores ' + broken.join(' y ') + ' no se pueden comparar: no son JSON completo'
+      + (cut ? ' (la bitácora recorta los valores a 100.000 caracteres, así que ese texto está incompleto)' : '')
+      + '. Van tal cual en «Ver JSON original».'
+      + (okOld || okNew ? ' Abajo, los valores ' + (okNew ? 'nuevos' : 'anteriores') + '.' : '')));
+  }
   if (okOld && okNew) {
-    box.append(renderComparison(oldV, newV));
+    box.append(renderComparison(oldV, newV, ctx));
   } else if (okOld || okNew) {
-    const broken = hasOld && !okOld ? oldV : hasNew && !okNew ? newV : undefined;
-    let note = okNew ? 'Este evento solo guarda los valores nuevos.' : 'Este evento solo guarda los valores anteriores (p. ej. lo que se eliminó).';
-    if (broken !== undefined) {
-      note = 'Los valores ' + (okNew ? 'anteriores' : 'nuevos') + ' no se pueden comparar: no son JSON completo'
-        + (typeof broken === 'string' && /^\s*[[{]/.test(broken) ? ' (la bitácora los recorta a 100.000 caracteres)' : '')
-        + '. Están tal cual en «Ver JSON original».';
+    if (!broken.length) {
+      box.append(el('div', { class: 'hint', style: 'margin:0 0 8px' }, okNew
+        ? 'Este evento solo guarda los valores nuevos.'
+        : 'Este evento solo guarda los valores anteriores (p. ej. lo que se eliminó).'));
     }
-    box.append(el('div', { class: 'hint', style: 'margin:0 0 8px' }, note), renderSnapshot(okNew ? newV : oldV));
+    box.append(renderSnapshot(okNew ? newV : oldV));
   }
   const raw = rawDetails(oldV, newV, hasOld, hasNew);
   if (!okOld && !okNew) raw.setAttribute('open', '');
@@ -682,21 +859,27 @@ function renderChanges(oldV, newV) {
 }
 
 // Antes y despues: arriba lo que cambio; lo que no, detras del interruptor.
-function renderComparison(oldV, newV) {
-  const entries = diffValues(oldV, newV);
+function renderComparison(oldV, newV, ctx) {
+  const entries = diffValues(oldV, newV, ctx);
   const box = el('div', { class: 'diffbox' });
-  box.append(changeSummary(entries));
+  box.append(changeSummary(entries, ctx));
 
-  let quiet = 0;
+  let same = 0, notSent = 0;
   for (const e of entries) {
-    if (e.kind === 'field') quiet += e.status === 'same' || e.status === 'notsent' ? 1 : 0;
-    else if (e.kind === 'rows') quiet += e.counts.same;
-    else quiet += e.same.length;
+    if (e.kind === 'field') {
+      if (e.status === 'same') same++;
+      else if (e.status === 'notsent') notSent++;
+    } else {
+      same += e.kind === 'rows' ? e.counts.same : e.same.length;
+    }
   }
-  if (quiet) {
+  if (same || notSent) {
+    const parts = [];
+    if (same) parts.push('lo que no cambió (' + same + ')');
+    if (notSent) parts.push('lo no enviado (' + notSent + ')');
     const cb = el('input', { type: 'checkbox' });
     cb.addEventListener('change', () => box.classList.toggle('show-all', cb.checked));
-    box.append(el('label', { class: 'toggle' }, cb, 'Mostrar también lo que no cambió (' + quiet + ')'));
+    box.append(el('label', { class: 'toggle' }, cb, 'Mostrar también ' + parts.join(' y ')));
   }
 
   const fields = entries.filter(e => e.kind === 'field');
@@ -708,7 +891,7 @@ function renderComparison(oldV, newV) {
   return box;
 }
 
-function changeSummary(entries) {
+function changeSummary(entries, ctx) {
   const box = el('div', { class: 'chg-summary' });
   const fields = entries.filter(e => e.kind === 'field' && (e.status === 'changed' || e.status === 'added')).length;
   if (fields) box.append(pill('mod', plural(fields, 'campo cambió', 'campos cambiaron')));
@@ -725,9 +908,23 @@ function changeSummary(entries) {
       if (e.removed.length) box.append(pill('del', plural(e.removed.length, 'quitado', 'quitados')));
     }
   }
-  if (!box.childNodes.length) {
-    box.append(el('span', {}, 'Ningún valor registrado cambió.'),
-      dim('Las contraseñas y demás datos sensibles no se guardan en la bitácora: un cambio de clave se ve así.'));
+  // Lo no enviado no es "sin cambios": en products/proveedores el PUT vacia lo
+  // que no manda, y el servidor recalcula totales y updated_at.
+  const notSent = entries.filter(e => e.kind === 'field' && e.status === 'notsent').length;
+  const nothing = !box.childNodes.length;
+  if (nothing && notSent) {
+    box.append(el('span', {}, 'Ningún campo enviado cambió.'));
+  } else if (nothing) {
+    box.append(el('span', {}, 'Ningún valor registrado cambió.'));
+    // users relee la fila sin la clave: un PUT que solo cambia la contraseña sale igual.
+    if (ctx && ctx.module === 'users') box.append(dim('La contraseña no se guarda en la bitácora: un cambio de clave se ve así.'));
+  } else if (notSent) {
+    box.append(el('span', { class: 'dim lbl' }, '·'));
+  }
+  if (notSent) {
+    const p = pill('', plural(notSent, 'campo no enviado', 'campos no enviados'));
+    p.title = NOT_SENT_HINT;
+    box.append(p);
   }
   return box;
 }
@@ -740,17 +937,21 @@ function fieldsTable(fields) {
     if (isChange) changed++;
     let before, after;
     if (f.status === 'notsent') {
-      before = show(f.old);
+      before = show(f.old, f.key);
       after = el('span', { class: 'dim', title: NOT_SENT_HINT }, 'no enviado');
     } else if (f.noOld) {
       before = dim('sin valor anterior');
-      after = isChange ? mark(f.new, 'new') : show(f.new);
+      after = isChange ? mark(f.new, 'new', f.key) : show(f.new, f.key);
     } else if (isChange) {
-      before = mark(f.old, 'old');
-      after = mark(f.new, 'new');
+      [before, after] = markPair(f.old, f.new, f.key);
     } else {
-      before = show(f.old);
-      after = show(f.new);
+      before = show(f.old, f.key);
+      after = show(f.new, f.key);
+    }
+    if (f.absent) {
+      // No vino, pero se sabe lo que queda: el UPDATE lo escribe asi, o el objeto
+      // que lo contenia se reemplazo entero.
+      after = el('span', {}, after, el('div', { class: 'line-sub' }, 'no vino en lo enviado: queda así'));
     }
     const key = el('td', { class: 'k mono' }, pathLabel(f.path));
     if (f.alias) key.append(el('div', { class: 'line-sub' }, 'antes: ' + f.alias));
@@ -772,7 +973,7 @@ function rowFields(row, gone) {
   const skip = new Set([...ROW_SKIP, ...ROW_NAME_KEYS, ...ROW_REF_KEYS.map(([k]) => k)]);
   const box = el('div', { class: 'fields' + (gone ? ' gone' : '') });
   for (const [k, v] of Object.entries(row)) {
-    if (!skip.has(k) && !isVoid(v)) box.append(el('span', {}, el('span', { class: 'mono dim' }, k + ' '), show(v)));
+    if (!skip.has(k) && !isVoid(v)) box.append(el('span', {}, el('span', { class: 'mono dim' }, k + ' '), show(v, k)));
   }
   return box;
 }
@@ -784,11 +985,10 @@ function rowsBlock(e) {
     const [title, sub] = rowLabel(row);
     const [cls, text] = ROW_STATUS[r.status];
     const detail = r.status === 'modified'
-      ? el('div', {}, ...r.changes.map(c => el('div', { class: 'chg' },
-          el('span', { class: 'mono dim' }, c.key + ' '),
-          c.noOld ? dim('sin valor anterior') : mark(c.old, 'old'),
-          el('span', { class: 'arrow' }, '→'),
-          mark(c.new, 'new'))))
+      ? el('div', {}, ...r.changes.map(c => {
+          const [before, after] = c.noOld ? [dim('sin valor anterior'), mark(c.new, 'new', c.key)] : markPair(c.old, c.new, c.key);
+          return el('div', { class: 'chg' }, el('span', { class: 'mono dim' }, c.key + ' '), before, el('span', { class: 'arrow' }, '→'), after);
+        }))
       : rowFields(row, r.status === 'removed');
     tbody.append(el('tr', { class: r.status === 'same' ? 'unchanged' : '' },
       el('td', { class: 'n mono' }, r.status === 'removed' ? dim('antes #' + (r.oldIndex + 1)) : '#' + (r.newIndex + 1)),
@@ -804,7 +1004,7 @@ function rowsBlock(e) {
 }
 
 function setBlock(e) {
-  const chips = (vals, cls) => vals.map(v => el('span', { class: 'val ' + cls }, show(v)));
+  const chips = (vals, cls) => vals.map(v => el('span', { class: 'val ' + cls }, show(v, e.key)));
   const body = el('div', { class: 'set' });
   if (e.added.length) body.append(el('div', {}, dim('Agregados: '), ...chips(e.added, 'new')));
   if (e.removed.length) body.append(el('div', {}, dim('Quitados: '), ...chips(e.removed, 'old')));
@@ -817,20 +1017,20 @@ function setBlock(e) {
 // anidados aplanados (dgii_response.codigo) y los arreglos de objetos en tabla.
 function renderSnapshot(v) {
   const fields = [], tables = [];
-  (function walk(x, path) {
+  (function walk(x, path, key) {
     if (isPlainObject(x) && Object.keys(x).length) {
-      for (const [k, val] of Object.entries(x)) walk(val, path ? path + '.' + k : k);
+      for (const [k, val] of Object.entries(x)) walk(val, path ? path + '.' + k : k, k);
     } else if (Array.isArray(x) && x.length && x.every(isPlainObject)) {
       tables.push({ path, rows: x });
     } else {
-      fields.push({ path, value: x });
+      fields.push({ path, key, value: x });
     }
-  })(v, '');
+  })(v, '', '');
   const box = el('div');
   if (fields.length) {
     box.append(el('div', { class: 'table-wrap' }, el('table', { class: 'diff' }, thead(['Campo', 'Valor']),
       el('tbody', {}, ...fields.map(f => el('tr', {},
-        el('td', { class: 'k mono' }, pathLabel(f.path)), el('td', {}, show(f.value))))))));
+        el('td', { class: 'k mono' }, pathLabel(f.path)), el('td', {}, show(f.value, f.key))))))));
   }
   for (const t of tables) {
     const cols = [...new Set(t.rows.flatMap(r => Object.keys(r)))];
@@ -839,7 +1039,7 @@ function renderSnapshot(v) {
       el('div', { class: 'table-wrap' }, el('table', { class: 'grid' }, thead(['#', ...cols]),
         el('tbody', {}, ...t.rows.map((r, i) => el('tr', {},
           el('td', { class: 'mono dim' }, String(i + 1)),
-          ...cols.map(c => el('td', {}, own(r, c) ? show(r[c]) : dim('—'))))))))));
+          ...cols.map(c => el('td', {}, own(r, c) ? show(r[c], c) : dim('—'))))))))));
   }
   return box;
 }
