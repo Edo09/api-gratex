@@ -1747,6 +1747,30 @@ wa_chk('17 F9: el token de los cinco metodos (reenviarRFCE, reenviarECF, consult
     substr_count($s17Es, "'certificate_password' => \$cert['password'],\n        ] + self::opcionTimeout(\$timeout));") === 5,
     substr_count($s17Es, "'certificate_password' => \$cert['password'],\n        ] + self::opcionTimeout(\$timeout));"));
 
+// F8: el procedimiento 10.2 no puede devolver al contador el numero de una venta del POS, y la 030 es obligatoria en todo tenant.
+$s17Leer = static fn(string $ruta): string => str_replace("\r\n", "\n", (string) file_get_contents(dirname(__DIR__) . '/' . $ruta));
+$s17Plano = static fn(string $texto): string => preg_replace('/\s+/', ' ', $texto);
+$s17Dgii = $s17Leer('docs/integrations/dgii-ecf.md');
+$s17Proc = substr($s17Dgii, (int) strpos($s17Dgii, '### Resolver una factura sin confirmar'), (int) strpos($s17Dgii, '### Reenviar a la DGII una factura rechazada') - (int) strpos($s17Dgii, '### Resolver una factura sin confirmar'));
+wa_chk('17 F8: 10.2 abre con las filas del POS: nunca el UPDATE de ncf_sequences, envio_pendiente = 0 en los dos NO_ENCONTRADO y la espera propia del reenvio',
+    str_contains($s17Proc, '**Filas del POS (`pos_idempotency_key` no nulo).**') && str_contains($s17Proc, '**Nunca corras el `UPDATE` de `ncf_sequences`**')
+    && str_contains($s17Plano($s17Proc), 'menos de 2 minutos desde su reserva')
+    && strpos($s17Proc, 'Filas del POS') < strpos($s17Proc, '1. **Listar**'), strpos($s17Proc, 'Filas del POS'));
+wa_chk('17 F8: los renglones "La DGII no lo tiene" y RFCE_NO_ENCONTRADO de una fila del POS llevan envio_pendiente = 0 y ningun UPDATE de ncf_sequences',
+    substr_count($s17Proc, "estado_dgii = 'NO_ENCONTRADO', envio_pendiente = 0") === 1
+    && substr_count($s17Proc, "estado_dgii = 'RFCE_NO_ENCONTRADO', envio_pendiente = 0") === 1
+    && str_contains($s17Proc, 'no hay `UPDATE` de `ncf_sequences`') && str_contains($s17Proc, 'no hay devolución de `ncf_sequences`'));
+wa_chk('17 F8: 10.2 lista pos_idempotency_key y envio_pendiente, deja el trackId y el RFCE con envio_pendiente en 1 y no resuelve las sin_rango',
+    str_contains($s17Proc, 'pos_idempotency_key, envio_pendiente') && str_contains($s17Plano($s17Proc), 'En los casos del `trackId` y del RFCE el `UPDATE` **no** toca `envio_pendiente`')
+    && str_contains($s17Plano($s17Proc), '`"sin_rango": true`') && str_contains($s17Plano($s17Proc), 'no se resuelve con este procedimiento'));
+$s17Cot = $s17Plano($s17Leer('docs/modules/cotizaciones-formatos.md'));
+wa_chk('17 F8: el despliegue de los conduces dice que la 030 es obligatoria en todas las DBs de tenant (compuerta 027, 028 y 030)',
+    str_contains($s17Cot, 'La 030 es obligatoria en todas las DBs de tenant, se use o no el POS') && str_contains($s17Cot, 'La 027, la 028 y la 030 son la compuerta del despliegue')
+    && !str_contains($s17Cot, 'Es inofensiva donde no se usa el POS') && !str_contains($s17Cot, 'solo en las empresas que vayan a usar el POS'));
+$s17Mig = $s17Plano((string) preg_replace('/^--\s?/m', '', $s17Leer('db/migrations/030_pos.sql')));
+wa_chk('17 F8: la cabecera de la 030 ya no dice que no estorba ni que sea solo para quien use el POS: es OBLIGATORIA en todas',
+    str_contains($s17Mig, 'correr en la base de CADA empresa, use o no el POS. Es OBLIGATORIA en todas') && !str_contains($s17Mig, 'no estorba en las demas'));
+
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------

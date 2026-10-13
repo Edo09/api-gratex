@@ -1,9 +1,13 @@
 -- ============================================================================
 -- 030_pos.sql — tablas del POS (pos.fiscalpoint.com.do) en la DB del tenant.
 -- ============================================================================
--- Para DBs de tenant YA desplegados: correr en la base de CADA empresa que vaya
--- a usar el POS (no estorba en las demas). Los tenants nuevos lo reciben via
--- db/tenant_schema.sql (mismas tablas, indices y FKs).
+-- Para DBs de tenant YA desplegados: correr en la base de CADA empresa, use o no el
+-- POS. Es OBLIGATORIA en todas: desde el write-ahead del e-CF, los UPDATE que anotan
+-- la respuesta de la DGII en toda emision nombran facturas.pos_idempotency_key y
+-- facturas.envio_pendiente, que agrega esta migracion (compuerta del despliegue:
+-- 027, 028 y 030 en APLICADA en cada base antes de subir el codigo). Lo que si es
+-- solo para quien use el POS es el lado del master (master_migrations/012). Los
+-- tenants nuevos la reciben via db/tenant_schema.sql (mismas tablas, indices y FKs).
 -- Diseno: docs/specs/pos.md §9.3. Va junto con master_migrations/012.
 --
 -- QUE AGREGA (no toca datos):

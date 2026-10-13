@@ -158,12 +158,36 @@ procedimiento es un `UPDATE` de la fila, y lo que pasa después depende del caso
   aplica el veredicto, escribe `STATUS_CHANGE` y mueve el inventario una sola vez.
 - Si la DGII **no lo tiene**, el `UPDATE` de la fila y el de `ncf_sequences` que
   devuelve el número son todo el procedimiento: la app no devuelve el número después
-  de ese `UPDATE` (paso 3).
+  de ese `UPDATE` (paso 3). **En una fila del POS no hay `UPDATE` de `ncf_sequences`**
+  (siguiente párrafo).
+
+**Filas del POS (`pos_idempotency_key` no nulo).** Una venta del POS ya está entregada: su
+e-NCF está impreso en el recibo y **nunca vuelve al contador**. Por eso, en una fila del POS:
+
+- **Nunca corras el `UPDATE` de `ncf_sequences`** (ni siquiera con `dispensado = true`): la
+  próxima venta recibiría el número impreso en otro recibo y la reserva archivaría esta fila.
+  Tampoco lo hace la app: `GET /estado` guarda el veredicto y deja el contador como está.
+- En los casos «La DGII no lo tiene» y `RFCE_NO_ENCONTRADO` el `UPDATE` de `facturas` lleva
+  además `, envio_pendiente = 0`: así el reenvío automático deja de recogerla. `NO_ENCONTRADO`
+  se reemite con «Reenviar a la DGII» (el mismo e-NCF); `RFCE_NO_ENCONTRADO` queda para soporte,
+  porque la app no ofrece ese botón en ese estado.
+- En los casos del `trackId` y del RFCE el `UPDATE` **no** toca `envio_pendiente`: sigue en 1 y el
+  reenvío automático consulta el resultado y termina la fila (también lo hace abrirla en la app).
+- **No hace falta ganarle al reenvío automático.** Consulta primero y reenvía el XML guardado por
+  sí solo en cuanto un POS está abierto (al abrir, cada 2 minutos y tras cada venta); respeta su
+  propia espera: salta las `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` de menos de 2 minutos desde su
+  reserva (la regla de 5 minutos del paso 1 es más estricta y sigue vigente para el `UPDATE`
+  manual). Si los POS llevan horas cerrados y el cliente espera, entonces sí se aplica el
+  procedimiento, con estas diferencias.
+- Una fila `PENDIENTE_ENVIO` con `"sin_rango": true` en la meta (el rango autorizado se agotó) **no se
+  resuelve con este procedimiento**: nunca se envió y espera un rango; al registrarlo
+  (`POST /api/ncf/rangos`) el reenvío automático la envía.
 
 1. **Listar** en la base del tenant:
 
    ```sql
-   SELECT id, e_ncf, tipo_ecf, estado_dgii, track_id, ambiente_dgii, codigo_seguridad, respuesta_dgii
+   SELECT id, e_ncf, tipo_ecf, estado_dgii, track_id, ambiente_dgii, codigo_seguridad, respuesta_dgii,
+          pos_idempotency_key, envio_pendiente
    FROM facturas
    WHERE estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO')
       OR (estado_dgii = 'ENVIADO' AND track_id IS NULL AND e_ncf IS NOT NULL);
@@ -201,8 +225,8 @@ procedimiento es un `UPDATE` de la fila, y lo que pasa después depende del caso
    |---|---|
    | e-CF, la DGII tiene un trackId `T` | `UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = :T WHERE id = :id AND (estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO') OR (estado_dgii = 'ENVIADO' AND track_id IS NULL));` |
    | RFCE (`respuesta_dgii.flujo = 'RFCE'`) | `UPDATE facturas SET estado_dgii = 'RFCE_ENVIADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` La consulta RFCE usa el `codigo_seguridad` guardado. |
-   | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y después, **solo si ese `UPDATE` afectó 1 fila** (si afectó 0, no devuelvas el número y vuelve al paso 1), con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si este segundo `UPDATE` afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
-   | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` y la misma devolución de `ncf_sequences`, con la misma condición (solo si ese `UPDATE` afectó 1 fila; si afectó 0, no devuelvas el número y vuelve al paso 1). El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
+   | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` (en una **fila del POS**: `SET estado_dgii = 'NO_ENCONTRADO', envio_pendiente = 0` y **nada más**: no hay `UPDATE` de `ncf_sequences`). En una fila de la app, después, **solo si ese `UPDATE` afectó 1 fila** (si afectó 0, no devuelvas el número y vuelve al paso 1), con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si este segundo `UPDATE` afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
+   | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` (en una **fila del POS**: `SET estado_dgii = 'RFCE_NO_ENCONTRADO', envio_pendiente = 0` y **nada más**: no hay devolución de `ncf_sequences`). En una fila de la app, la misma devolución de `ncf_sequences`, con la misma condición (solo si ese `UPDATE` afectó 1 fila; si afectó 0, no devuelvas el número y vuelve al paso 1). El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
    | Fila heredada `ENVIADO` sin `track_id` (de antes del write-ahead) y la DGII no tiene el comprobante | **No se fuerza**: los `UPDATE` de arriba solo coinciden con `PENDIENTE_ENVIO`/`ENVIO_INCIERTO` y la guarda no se cambia. Avisa al usuario con su e-NCF y su `id`, y déjala como está. |
    | `certecf` (TrackIds responde 404 allí) | Decidir entre los casos de arriba con el portal de certificación de la DGII. Un error en `certecf` no tiene efecto fiscal. |
 
@@ -213,7 +237,8 @@ procedimiento es un `UPDATE` de la fila, y lo que pasa después depende del caso
      en la app (o `GET /api/facturas/{id}/estado`) consulta a la DGII y actualiza la fila:
      estado, `STATUS_CHANGE` y, en la primera aceptación, el inventario (una sola vez).
      Si esa consulta dijera que la DGII no lo tiene y no usó la secuencia, la app
-     también devuelve el número.
+     también devuelve el número, **salvo en una fila del POS**: ahí guarda el veredicto y
+     el número se queda (está impreso en el recibo).
    - **La DGII no lo tiene** (los dos casos `NO_ENCONTRADO`): los dos `UPDATE` son todo
      el procedimiento y la app **no devuelve el número**. Con `NO_ENCONTRADO` sin
      `track_id`, `GET /estado` responde `422`; con `RFCE_NO_ENCONTRADO` vuelve a

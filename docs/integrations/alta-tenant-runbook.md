@@ -158,8 +158,8 @@ verificadores otra vez, con la 012 del master y la 027 a la 031 del tenant en `A
 entonces desplegar `api-gratex` y después `fiscalo` (la lista completa, con el respaldo y las
 pruebas de humo, está en
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#despliegue-de-los-conduces)).
-La 030 es **obligatoria en todas las DBs de tenant**, se use o no el POS (su cabecera dice que solo
-hace falta donde se vaya a usar: ya no es así). Desde el write-ahead, los `UPDATE` con que toda
+La 030 es **obligatoria en todas las DBs de tenant**, se use o no el POS (su cabecera y el
+despliegue de los conduces ya lo dicen así). Desde el write-ahead, los `UPDATE` con que toda
 factura e-CF anota la respuesta de la DGII (y el de `GET /api/facturas/{id}/estado`) nombran
 `pos_idempotency_key` y `envio_pendiente`, dos columnas que agrega la 030: sin ella la factura se
 guarda y se envía, pero la respuesta no se anota (queda `PENDIENTE_ENVIO`) y la consulta de estado no

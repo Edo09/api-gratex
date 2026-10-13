@@ -328,12 +328,14 @@ cotización puede dar varios conduces (uno por entrega). Referencia de la API:
    `pos_handoff_codes`.
 4. **Correr la 027, después la 028, la 029 (`029_precios_4_decimales.sql`) y la 030
    (`030_pos.sql`)** en la base de tenant donde digan `FALTA`, según el ORDEN de la cabecera
-   de cada una. Este despliegue también lleva el código que las necesita. La 030 es la del
-   POS: su cabecera la pide solo en las empresas que vayan a usar el POS (va junto con la
-   012 del master) y dice que no estorba en las demás. Corre la 030 igual en las dos DBs: así
-   el verificador termina entero en `APLICADA` y las dos bases quedan con el mismo esquema.
-   Es inofensiva donde no se usa el POS (solo agrega tablas y columnas, no toca datos) y
-   obligatoria donde se vaya a usar.
+   de cada una. Este despliegue también lleva el código que las necesita. **La 030 es
+   obligatoria en todas las DBs de tenant, se use o no el POS:** desde el write-ahead del e-CF
+   los `UPDATE` que anotan la respuesta de la DGII en toda emisión nombran
+   `pos_idempotency_key` y `envio_pendiente`, dos columnas que agrega la 030; sin ella esas
+   emisiones quedan sin confirmar. La 027, la 028 y la 030 son la compuerta del despliegue: las
+   tres en `APLICADA` en cada base antes de subir el código. Corre la 030 en las dos DBs. No toca
+   datos (solo agrega tablas y columnas); lo que sigue siendo solo para las empresas que usen el
+   POS es el lado del master (la 012, `tenants.pos_enabled`).
 5. **Correr la 031 (`031_conduces.sql`)**, fuera de horario y después de la 030, en las dos
    DBs: pegar el archivo completo en la pestaña SQL con la base seleccionada y leer la fila
    final (`base` = esa base, las tres tablas `InnoDB`, `fila_secuencia` = `(1, 0)`, `todo_ok`
