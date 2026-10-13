@@ -926,5 +926,45 @@ wa_chk('stats: ventas_por_dia y ventas_por_mes traen las 3 ventas', $suma($stats
 wa_chk('stats: por_mes (e-CF emitidos) trae las mismas 3', $suma($stats['por_mes'] ?? []) === [3, 3540.0], $stats['por_mes'] ?? null);
 wa_limpiar($pdo);
 
+// ===========================================================================
+// Final fix wave F4: una factura simple de respaldo del POS (tipo_ecf NULL con la
+// clave de idempotencia del POS) no se edita ni se elimina desde "Facturas
+// simples": su caja, su inventario y su clave quedarian desfasados. 409 con un
+// texto claro; una factura simple normal sigue editandose y eliminandose.
+// ===========================================================================
+
+echo "F4) Facturas simples del POS: PUT y DELETE responden 409 y no cambian nada; las normales siguen igual\n";
+$ids = wa_reiniciar($pdo, $srv);
+$f4Hoy = date('Y-m-d H:i:s');
+$f4Id = wa_aviso_fila($pdo, 91, null, 'PENDIENTE', $f4Hoy);
+$pdo->prepare("INSERT INTO factura_items (factura_id, product_id, description, amount, quantity, subtotal, itbis_amount)
+               VALUES (:f, :p, 'WA producto', 100.0000, 1.000, 100.00, 18.00)")->execute([':f' => $f4Id, ':p' => $ids['product_id']]);
+$f4Movs = (int) $pdo->query('SELECT COUNT(*) FROM inventory_movements')->fetchColumn();
+$f4Cab = ['X-API-KEY: ' . $srv['token']];
+$f4Url = $srv['api'] . '/api/facturas-simples/' . $f4Id;
+const T_SIMPLE_DEL_POS = 'Esta factura viene de una venta del POS y no se puede editar ni eliminar.';
+$r = wa_http('PUT', $f4Url, ['client_name' => 'Otro nombre'], $f4Cab);
+wa_chk('PUT: 409 con el texto claro', $r['status'] === 409 && ($r['json']['status'] ?? null) === false
+    && ($r['json']['error'] ?? $r['json']['data'] ?? null) === T_SIMPLE_DEL_POS, $r);
+$r = wa_http('PUT', $f4Url, ['items' => [['nombre_item' => 'x', 'cantidad' => 1, 'precio_unitario' => 5]]], $f4Cab);
+wa_chk('PUT que reemplaza las lineas: tambien 409', $r['status'] === 409, $r);
+$r = wa_http('DELETE', $f4Url, null, $f4Cab);
+wa_chk('DELETE: 409 con el texto claro', $r['status'] === 409 && ($r['json']['status'] ?? null) === false
+    && ($r['json']['error'] ?? $r['json']['data'] ?? null) === T_SIMPLE_DEL_POS, $r);
+$f4Fila = $pdo->query("SELECT client_name, pos_idempotency_key FROM facturas WHERE id = {$f4Id}")->fetch(PDO::FETCH_ASSOC);
+$f4Lineas = (int) $pdo->query("SELECT COUNT(*) FROM factura_items WHERE factura_id = {$f4Id}")->fetchColumn();
+wa_chk('la fila sigue como estaba, con su clave y su linea, y el inventario no se movio',
+    ($f4Fila['client_name'] ?? null) === 'Consumidor Final' && ($f4Fila['pos_idempotency_key'] ?? '') !== '' && $f4Lineas === 1
+    && (int) $pdo->query('SELECT COUNT(*) FROM inventory_movements')->fetchColumn() === $f4Movs, [$f4Fila, $f4Lineas]);
+$pdo->prepare("INSERT INTO facturas (no_factura, date, client_name, total, tipo_pago) VALUES ('0092-WA', :f, 'WA simple normal', 100.00, 1)")->execute([':f' => $f4Hoy]);
+$f4Normal = (int) $pdo->lastInsertId();
+$r = wa_http('PUT', $srv['api'] . '/api/facturas-simples/' . $f4Normal, ['client_name' => 'Nombre nuevo'], $f4Cab);
+wa_chk('control, una factura simple normal: PUT 200 y cambia', $r['status'] === 200
+    && (string) $pdo->query("SELECT client_name FROM facturas WHERE id = {$f4Normal}")->fetchColumn() === 'Nombre nuevo', $r);
+$r = wa_http('DELETE', $srv['api'] . '/api/facturas-simples/' . $f4Normal, null, $f4Cab);
+wa_chk('control, una factura simple normal: DELETE 200 y desaparece', $r['status'] === 200
+    && (int) $pdo->query("SELECT COUNT(*) FROM facturas WHERE id = {$f4Normal}")->fetchColumn() === 0, $r);
+wa_limpiar($pdo);
+
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();

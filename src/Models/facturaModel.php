@@ -22,6 +22,21 @@ class facturaModel
     public const MSG_SIMPLE_YA_NO_EXISTE = 'Esta factura ya no existe. Puede que la hayan eliminado; vuelve al listado.';
 
     /**
+     * Tercer elemento de ['error', mensaje, codigo] cuando la factura simple es una
+     * venta del POS (pos_idempotency_key no nulo): facturaSimpleController responde 409.
+     */
+    public const ERROR_VENTA_POS = 'venta_pos';
+
+    /**
+     * Una factura simple con la clave de idempotencia del POS es la venta de respaldo
+     * del POS (el e-CF no se pudo generar). Su movimiento de caja, su inventario y su
+     * clave dependen de ella: editarla o eliminarla desde "Facturas simples" los
+     * dejaria desfasados (la caja cuenta una venta que ya no existe, el reintento de
+     * la clave crearia otra venta).
+     */
+    public const MSG_SIMPLE_VENTA_POS = 'Esta factura viene de una venta del POS y no se puede editar ni eliminar.';
+
+    /**
      * Decimales de cantidad de una factura simple: los de
      * factura_items.quantity DECIMAL(12,3). No va a la DGII, asi que no la ata
      * el limite de 2 del e-CF (EcfItemMapper::DECIMALES_CANTIDAD).
@@ -916,6 +931,9 @@ class facturaModel
             if ($row['tipo_ecf'] !== null) {
                 return ['error', 'Esta factura electrónica ya se envió a la DGII y no se puede editar. Si hay que corregirla, emite una nota de crédito.'];
             }
+            if (!empty($row['pos_idempotency_key'])) {
+                return ['error', self::MSG_SIMPLE_VENTA_POS, self::ERROR_VENTA_POS];
+            }
 
             $noFactura = $data['no_factura'] ?? $row['no_factura'];
             $date = ($data['date'] ?? '') !== '' ? $data['date'] : $row['date'];
@@ -977,13 +995,13 @@ class facturaModel
     }
 
     /**
-     * Elimina una factura no electronica y sus lineas. Rechaza e-CF emitidos.
-     * @return array ['success', mensaje] | ['error', mensaje] | ['error', mensaje, self::ERROR_NO_ENCONTRADA]
+     * Elimina una factura no electronica y sus lineas. Rechaza e-CF emitidos y las ventas del POS.
+     * @return array ['success', mensaje] | ['error', mensaje] | ['error', mensaje, self::ERROR_NO_ENCONTRADA | self::ERROR_VENTA_POS]
      */
     public function deleteFacturaSimple(int $id): array
     {
         try {
-            $cur = $this->conexion->prepare('SELECT tipo_ecf FROM facturas WHERE id = :id');
+            $cur = $this->conexion->prepare('SELECT tipo_ecf, pos_idempotency_key FROM facturas WHERE id = :id');
             $cur->execute([':id' => $id]);
             $row = $cur->fetch();
             if (!$row) {
@@ -991,6 +1009,9 @@ class facturaModel
             }
             if ($row['tipo_ecf'] !== null) {
                 return ['error', 'Esta factura electrónica ya se envió a la DGII y no se puede eliminar. Para anularla, emite una nota de crédito.'];
+            }
+            if (!empty($row['pos_idempotency_key'])) {
+                return ['error', self::MSG_SIMPLE_VENTA_POS, self::ERROR_VENTA_POS];
             }
 
             $this->conexion->beginTransaction();

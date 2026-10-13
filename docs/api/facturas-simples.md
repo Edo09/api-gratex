@@ -288,16 +288,16 @@ Si se envía `items`, **reemplaza todas las líneas** (debe traer ≥ 1).
 { "no_factura": "0001-MOD", "items": [ { "description": "Ajuste", "quantity": 3, "amount": 1500 } ] }
 ```
 
-**Respuestas**: `200` (ok), `404` (no existe), `400` (fallo), `422` (id o items inválidos, o la cantidad de una línea no es válida).
+**Respuestas**: `200` (ok), `404` (no existe), `409` (la factura viene de una venta del POS: «Esta factura viene de una venta del POS y no se puede editar ni eliminar.»), `400` (fallo), `422` (id o items inválidos, o la cantidad de una línea no es válida).
 
 ---
 
 ### DELETE `/api/facturas-simples/{id}` — Eliminar
 
-`id` en ruta o body. **No** elimina e-CF emitidos (devuelve error).
+`id` en ruta o body. **No** elimina e-CF emitidos (devuelve error) ni las facturas simples de respaldo de una venta del POS (`pos_idempotency_key` no nulo: `409`).
 
 > **Inventario.** Al borrar se revierte la venta: lo que salió del almacén
 > vuelve (movimiento `DEVOLUCION`). Un e-CF no se borra — se corrige con una
 > nota de crédito E34, que ya entra mercancía por su propia vía.
 
-**Respuestas**: `200` (ok), `404` (no existe), `400` (es e-CF / fallo), `422` (sin id).
+**Respuestas**: `200` (ok), `404` (no existe), `409` (viene de una venta del POS), `400` (es e-CF / fallo), `422` (sin id).

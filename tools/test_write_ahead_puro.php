@@ -1587,9 +1587,9 @@ wa_chk('pos-write-ahead.md: describe lo que hace el codigo (entrega, factura sim
     && str_contains($s16Pos, 'GET /api/facturas/avisos') && str_contains($s16Pos, '«Reenviar a la DGII»'));
 wa_chk('pos-write-ahead.md: ya no es la nota "lo que tiene que respetar"',
     !str_contains($s16Pos, 'tiene que respetar') && !str_contains($s16Pos, 'Hoy `reservarFacturaECF` no escribe'));
-wa_chk('pos-write-ahead.md: ERROR y NO_ENCONTRADO conservan envio_pendiente = 0, RFCE_NO_ENCONTRADO es de soporte y el punto abierto de las facturas simples',
+wa_chk('pos-write-ahead.md: ERROR y NO_ENCONTRADO conservan envio_pendiente = 0, RFCE_NO_ENCONTRADO es de soporte y las facturas simples del POS no se editan ni eliminan (F4)',
     str_contains($s16Plano($s16Pos), 'conservan `envio_pendiente = 0`') && str_contains($s16Pos, '`RFCE_NO_ENCONTRADO`')
-    && str_contains($s16Pos, 'Punto abierto') && str_contains($s16Pos, 'Facturas simples'));
+    && !str_contains($s16Pos, 'Punto abierto') && str_contains($s16Pos, 'no se editan ni se eliminan') && str_contains($s16Pos, 'Facturas simples'));
 $s16ApiPos = $s16Leer('docs/api/pos.md');
 wa_chk('api/pos.md: la venta ya no tiene DGII_RECHAZO, EMISION_FALLIDA ni GUARDADO_FALLIDO en la tabla de errores',
     !str_contains($s16ApiPos, '| `DGII_RECHAZO` |') && !str_contains($s16ApiPos, '| `EMISION_FALLIDA` |') && !str_contains($s16ApiPos, '| `GUARDADO_FALLIDO` |')
@@ -1637,6 +1637,89 @@ wa_chk('runbook: la 030 es obligatoria en todas las DBs de tenant y parte de la 
     str_contains($s16Runbook, 'La 030 es **obligatoria en todas las DBs de tenant**')
     && str_contains($s16Runbook, 'La 027, la 028 y la 030 son además la compuerta del write-ahead del e-CF')
     && !str_contains($s16Runbook, 'y es obligatoria donde sí se use'));
+
+// ---------------------------------------------------------------------------
+// 17) Final fix wave (revision final del plan POS y reenvio). Cada hallazgo agrega
+// aqui lo que se puede comprobar sin base: F4 (facturas simples del POS).
+// ---------------------------------------------------------------------------
+echo "\n== 17) Final fix wave ==\n";
+
+// F4: una factura simple con pos_idempotency_key no se edita ni se elimina. Conexion falsa que
+// devuelve la fila configurada y anota cada sentencia: ni el UPDATE ni los DELETE se preparan.
+final class WaS17Sentencia extends PDOStatement
+{
+    public function __construct(private ?array $fila)
+    {
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        return true;
+    }
+
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        return $this->fila ?? false;
+    }
+}
+
+final class WaS17Conexion extends PDO
+{
+    public array $sentencias = [];
+
+    public function __construct(private ?array $fila)
+    {
+        // Sin parent::__construct: nunca abre una conexion.
+    }
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        $this->sentencias[] = preg_replace('/\s+/', ' ', $query);
+        return new WaS17Sentencia($this->fila);
+    }
+
+    public function beginTransaction(): bool
+    {
+        $this->sentencias[] = 'BEGIN';
+        return true;
+    }
+
+    public function commit(): bool
+    {
+        return true;
+    }
+
+    public function inTransaction(): bool
+    {
+        return false;
+    }
+}
+
+$s17Modelo = static function (?array $fila): array {
+    $ref = new ReflectionClass(facturaModel::class);
+    $m = $ref->newInstanceWithoutConstructor();
+    $con = new WaS17Conexion($fila);
+    $ref->getProperty('conexion')->setValue($m, $con);
+    return [$m, $con];
+};
+$s17Pos = ['tipo_ecf' => null, 'no_factura' => '0091-131026', 'date' => '2026-10-13 10:00:00', 'client_id' => null, 'client_name' => 'Consumidor Final',
+    'NCF' => null, 'tipo_pago' => 1, 'dias_credito' => null, 'total' => '118.00', 'pos_idempotency_key' => '00000000-0000-4000-8000-000000000091'];
+$s17Normal = ['pos_idempotency_key' => null] + $s17Pos;
+$s17Error = [facturaModel::MSG_SIMPLE_VENTA_POS, facturaModel::ERROR_VENTA_POS];
+[$s17M, $s17Con] = $s17Modelo($s17Pos);
+$s17R = $s17M->updateFacturaSimple(5, ['client_name' => 'Otro']);
+wa_chk('17 F4: updateFacturaSimple rechaza una venta del POS (con la clave) y no prepara ninguna escritura',
+    $s17R === ['error', ...$s17Error] && count($s17Con->sentencias) === 1 && !preg_grep('/^(UPDATE|DELETE|BEGIN)/', $s17Con->sentencias), [$s17R, $s17Con->sentencias]);
+[$s17M, $s17Con] = $s17Modelo($s17Pos);
+$s17R = $s17M->deleteFacturaSimple(5);
+wa_chk('17 F4: deleteFacturaSimple rechaza una venta del POS y no prepara ninguna escritura',
+    $s17R === ['error', ...$s17Error] && count($s17Con->sentencias) === 1 && !preg_grep('/^(UPDATE|DELETE|BEGIN)/', $s17Con->sentencias), [$s17R, $s17Con->sentencias]);
+[$s17M, $s17Con] = $s17Modelo($s17Normal);
+$s17M->deleteFacturaSimple(5);
+wa_chk('17 F4: una factura simple normal (sin clave del POS) si llega a borrarse', (bool) preg_grep('/^DELETE FROM facturas/', $s17Con->sentencias), $s17Con->sentencias);
+wa_chk('17 F4: el mensaje es el de la spec y el controlador lo responde 409',
+    facturaModel::MSG_SIMPLE_VENTA_POS === 'Esta factura viene de una venta del POS y no se puede editar ni eliminar.'
+    && preg_match('/facturaModel::ERROR_VENTA_POS\s*=>\s*409/', (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaSimpleController.php')) === 1);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

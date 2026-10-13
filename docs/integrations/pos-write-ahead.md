@@ -96,11 +96,12 @@ idempotencia no cambia (`facturaModel::crearFacturaSimplePos`).
 La factura simple no es un comprobante fiscal: no lleva ITBIS ni entra en el 607. Falta confirmar con
 el contador cómo regularizar las que salgan así.
 
-**Punto abierto (para decidir):** las facturas simples del POS aparecen en la lista «Facturas simples»
-de app.\*, y `updateFacturaSimple` / `deleteFacturaSimple` no distinguen las del POS (solo piden
-`tipo_ecf` nulo). Editar o borrar una desde ahí descuadraría la caja, el inventario y la clave de
-idempotencia de la venta. Hace falta una guarda (por ejemplo, rechazar el cambio si la fila tiene
-`pos_idempotency_key`) o aceptar el riesgo; hoy no hay ninguna.
+**Las facturas simples del POS no se editan ni se eliminan.** Aparecen en la lista «Facturas simples»
+de app.\*, pero `updateFacturaSimple` y `deleteFacturaSimple` rechazan cualquier fila con
+`pos_idempotency_key` (`409`: «Esta factura viene de una venta del POS y no se puede editar ni
+eliminar.»; el controlador no toca el inventario). Cambiarlas o borrarlas desde ahí descuadraría la
+caja, el inventario y la clave de idempotencia de la venta. Si una hay que corregirla, se hace con
+soporte, no desde la lista.
 
 ## 5. Secuencia agotada o vencida: `sin_rango`
 

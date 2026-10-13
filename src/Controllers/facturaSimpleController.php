@@ -136,7 +136,12 @@ const FS_SIN_LINEAS = 'Agrega al menos una línea a la factura.';
  */
 function fsCodigoError(array $result): int
 {
-    return ($result[2] ?? null) === facturaModel::ERROR_NO_ENCONTRADA ? 404 : 400;
+    return match ($result[2] ?? null) {
+        facturaModel::ERROR_NO_ENCONTRADA => 404,
+        // Una venta del POS no se edita ni se elimina desde aqui: el estado de la fila no lo permite.
+        facturaModel::ERROR_VENTA_POS => 409,
+        default => 400,
+    };
 }
 
 /**
@@ -466,6 +471,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $previa = $facturaModel->getFacturaSimple($id);
         if ($previa === null) {
             fsRespond(false, facturaModel::MSG_SIMPLE_YA_NO_EXISTE, 404);
+            break;
+        }
+        // Venta de respaldo del POS: no se edita (el modelo lo vuelve a comprobar; aqui se corta
+        // antes de que las validaciones del body contesten otra cosa).
+        if (!empty($previa['pos_idempotency_key'])) {
+            fsRespond(false, facturaModel::MSG_SIMPLE_VENTA_POS, 409);
             break;
         }
         // Misma regla de cantidades que al crear (solo si se reemplazan las
