@@ -352,7 +352,8 @@ Las secuencias e-NCF funcionan como en DGII: por cada tipo se **solicita un rang
 La emisión dispensa números del rango ACTIVO (con capacidad y no vencido); cuando
 se agota, la emisión falla con un error claro hasta que se registre el siguiente
 rango aprobado. El `FechaVencimientoSecuencia` del XML sale del rango que dispensó
-(fallback: `emisor_config.fecha_vencimiento_secuencia`).
+(fallback: `emisor_config.fecha_vencimiento_secuencia`; si tampoco está configurada —o tiene
+el `2030-12-31` por defecto del esquema—, el 31-12 del año siguiente a la emisión).
 
 **`GET /api/ncf/rangos`** (ambiente activo; filtro opcional `?type=E31`):
 

@@ -188,8 +188,9 @@ Un RNC que no sea de su grupo devuelve `422`; no hay forma de emitir por una emp
    cuenta de un tercero.
 4. **Envíe `fecha_vencimiento_secuencia`** (`DD-MM-AAAA`) en todos los tipos excepto E32 y
    E34. Es la fecha de vencimiento que figura en la autorización de la DGII para el rango de
-   e-NCF de esa empresa y ese tipo, y debe coincidir: si falta o no corresponde, la DGII
-   rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de certificación y el
+   e-NCF de esa empresa y ese tipo, y debe coincidir. Si no la envía, usamos el 31 de diciembre
+   del año siguiente a la emisión (ej. `31-12-2027` para una factura de 2026); si su rango
+   vence otro día, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de certificación y el
    de producción son autorizaciones distintas y pueden vencer en fechas distintas: al pasar a
    producción, actualícela.
 

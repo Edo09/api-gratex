@@ -131,7 +131,7 @@ según la empresa: **no envíe `ambiente`**.
 | `tipo_ecf` | Sí | `31`, `32`, `33`, `34`, `41`, `43`, `44`, `45`, `46` o `47` (anexo) |
 | `e_ncf` | Sí | Lo asigna su sistema: `E` + tipo + 10 dígitos (`E310000000001`), dentro del rango que la DGII autorizó a esa empresa para ese tipo. No repita ni salte números |
 | `fecha_emision` | No | Fecha del comprobante, `DD-MM-AAAA`. Si no la envía, se usa la del día |
-| `fecha_vencimiento_secuencia` | Sí, salvo E32 y E34 | `DD-MM-AAAA`. La fecha de vencimiento de la autorización de la DGII para ese rango. Debe coincidir: si no, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de producción puede vencer en otra fecha que el de certificación |
+| `fecha_vencimiento_secuencia` | Sí, salvo E32 y E34 | `DD-MM-AAAA`. La fecha de vencimiento de la autorización de la DGII para ese rango. Si no la envía, usamos el 31 de diciembre del año siguiente a la emisión. Debe coincidir con la autorización: si no, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de producción puede vencer en otra fecha que el de certificación |
 | `tipo_pago` | No | `1` Contado (por defecto) · `2` Crédito · `3` Gratuito |
 | `fecha_limite_pago` | No | Solo con `tipo_pago` `2`. `DD-MM-AAAA`, igual o posterior a la emisión. Si no la envía: emisión + 30 días |
 | `tipo_ingresos` | No | `01` por defecto (anexo) |

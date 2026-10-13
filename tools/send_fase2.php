@@ -346,7 +346,8 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'e_ncf' => $row['ENCF'] ?? null,
         'client_id' => $clientId,
         'fecha_emision' => $row['FechaEmision'] ?? date('d-m-Y'),
-        'fecha_vencimiento_secuencia' => $row['FechaVencimientoSecuencia'] ?? null,
+        // La del set manda (DGII la compara); vacia -> default del server (31-12 del ano siguiente).
+        'fecha_vencimiento_secuencia' => blankToNull($row['FechaVencimientoSecuencia'] ?? null),
         'tipo_ingresos' => $row['TipoIngresos'] ?? '01',
         'tipo_pago' => blankToNull($row['TipoPago'] ?? null),
         'fecha_limite_pago' => blankToNull($row['FechaLimitePago'] ?? null),
