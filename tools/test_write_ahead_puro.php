@@ -1054,7 +1054,7 @@ wa_chk('handleConsultarEstado atiende las filas en vuelo antes de la ruta RFCE',
     $s12Vuelo !== false && $s12Rfce !== false && $s12Vuelo < $s12Rfce);
 $s12Filtro = preg_match('/\nfunction normalizeEstadoFilter\(.*?\n\}\n/s', $s12Ctl, $m) ? $m[0] : '';
 wa_chk("normalizeEstadoFilter acepta 'pendiente'", str_contains($s12Filtro, "return 'pendiente';"), $s12Filtro);
-wa_chk('ninguna respuesta lleva puede_reenviar (decision 7)', !str_contains($s12Ctl, 'puede_reenviar'));
+wa_chk('ninguna respuesta lleva puede_reenviar: el boton lo decide el front por el estado (decision 7, 10-12)', !str_contains($s12Ctl, 'puede_reenviar'));
 // Decision 7 redefinida (spec 2026-10-12, U7): la app nunca reenvia una factura SIN
 // CONFIRMAR (en vuelo, ENVIADO, EN_PROCESO); solo reemite una RECHAZADA. El
 // handleReenviar de master (4007eea) solo deja pasar los rechazos y contesta
@@ -1449,6 +1449,50 @@ $c = new GuionConexion();
 $c->errores[] = ['UPDATE facturas SET estado_dgii', new PDOException('se cayo la conexion')];
 wa_chk('15c: updateECFEstado: un PDOException sigue devolviendo false (la consulta de la app no cae)',
     $consulta($c, 'ACEPTADO') === false);
+
+// ---------------------------------------------------------------------------
+// Reenviar a la DGII sobre el write-ahead (Task 9). Texto del controlador, como en las secciones 11 y 12:
+// una rechazada se reemite con su mismo e-NCF y nunca se reenvia una sin confirmar (decision 7, 10-12).
+// ---------------------------------------------------------------------------
+echo "\n== Reenviar a la DGII sobre el write-ahead ==\n";
+$t9Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php'));
+$t9Fn = static fn(string $nombre): string
+    => preg_match('/\nfunction ' . $nombre . '\(.*?\n\}\n/s', $t9Ctl, $m) ? $m[0] : '';
+$t9Reenviar = $t9Fn('handleReenviar');
+$t9Emitir = $t9Fn('emitirFacturaEcf');
+$t9Armar = $t9Fn('armarInputReenvio');
+$t9Cerrar = $t9Fn('cerrarReenvioRechazado');
+wa_chk('FACTURA_REENVIO_SIN_CONFIRMAR es el texto del 409, letra por letra',
+    preg_match("/\nconst FACTURA_REENVIO_SIN_CONFIRMAR = '([^']*)';/", $t9Ctl, $m) === 1
+    && $m[1] === 'Este comprobante todavía no tiene respuesta de la DGII, así que no se puede reenviar desde aquí. '
+        . 'No lo emitas de nuevo; avisa a soporte con el número %s.', $m[1] ?? null);
+wa_chk('handleReenviar toma el candado antes de leer la factura',
+    str_contains($t9Reenviar, 'function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel $clientModel): void')
+    && strpos($t9Reenviar, 'tomarLockReenvio(') !== false && strpos($t9Reenviar, 'tomarLockReenvio(') < strpos($t9Reenviar, 'getFacturas('));
+wa_chk('handleReenviar conserva las condiciones de master: solo e-CF, rechazada sin archivar, secuencia no consumida, mismo ambiente, con lineas',
+    str_contains($t9Reenviar, "empty(\$f['tipo_ecf'])") && str_contains($t9Reenviar, "str_ends_with(\$estado, '_ARCHIVADO')")
+    && str_contains($t9Reenviar, "['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO']") && str_contains($t9Reenviar, "'secuencia_utilizada'")
+    && str_contains($t9Reenviar, 'AmbienteResolver::active()') && str_contains($t9Reenviar, 'getFacturaItems('));
+wa_chk('un comprobante sin confirmar se rechaza (409) antes de emitir: EstadosEcf::SIN_VEREDICTO va antes de emitirFacturaEcf',
+    strpos($t9Reenviar, 'EstadosEcf::SIN_VEREDICTO') !== false
+    && strpos($t9Reenviar, 'EstadosEcf::SIN_VEREDICTO') < strpos($t9Reenviar, 'emitirFacturaEcf(')
+    && str_contains($t9Reenviar, 'sprintf(FACTURA_REENVIO_SIN_CONFIRMAR'));
+wa_chk('handleReenviar reemite por emitirFacturaEcf con $facturaId como reenvioDe',
+    str_contains($t9Reenviar, 'emitirFacturaEcf($input, $facturaModel, $clientModel, $facturaId);'));
+wa_chk('el input lleva el e-NCF de la rechazada y el vencimiento del rango que lo cubre',
+    str_contains($t9Armar, "'e_ncf' => (string) \$f['e_ncf'],")
+    && str_contains($t9Reenviar, 'vencimientoDeLaSecuencia((string) $f[\'e_ncf\']')
+    && str_contains($t9Reenviar, "\$input['fecha_vencimiento_secuencia'] = \$vence;")
+    && str_contains($t9Fn('vencimientoDeLaSecuencia'), '->listRanges('));
+wa_chk('ya no hay un stub 501 en ningun lugar del controlador', !preg_match('/respond\(false, [^\n]*, 501\)/', $t9Ctl));
+wa_chk('emitirFacturaEcf cierra el reenvio con la fila nueva guardada, en el camino normal y en el 502 incierto',
+    substr_count($t9Emitir, 'cerrarReenvioRechazado($reenvioDe, $userId, $facturaModel);') === 2
+    && str_contains($t9Emitir, "\$data['reenvio_de'] = \$reenvioDe;"));
+wa_chk('archivarRechazoReenviado y devolverSaldoDeFactura solo se llaman desde cerrarReenvioRechazado',
+    substr_count($t9Ctl, '->archivarRechazoReenviado(') === 1 && substr_count($t9Ctl, '->devolverSaldoDeFactura(') === 1
+    && str_contains($t9Cerrar, '->archivarRechazoReenviado($reenvioDe)') && str_contains($t9Cerrar, '->devolverSaldoDeFactura($reenvioDe, $userId)'));
+wa_chk('el controlador sigue sin saveFacturaConECF', !str_contains($t9Ctl, 'saveFacturaConECF'));
+wa_chk('emitirFacturaEcf emite una sola vez: el reenvio no reintenta por su cuenta', substr_count($t9Emitir, '->emitir(') === 1);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

@@ -7,7 +7,7 @@
  * integracion y gastos siguen recibiendo la excepcion original.
  *
  * El controller responde 502 con data.factura_id para llevar al usuario a la
- * fila. La app nunca reenvia el e-CF (decision 7): lo resuelve soporte.
+ * fila. La app nunca reenvia un comprobante sin confirmar (decision 7): lo resuelve soporte.
  */
 class EcfEnvioInciertoException extends RuntimeException
 {

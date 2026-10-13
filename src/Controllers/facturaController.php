@@ -26,9 +26,15 @@ const FACTURA_EMISION_INCIERTA = 'No se pudo confirmar si la DGII recibió la fa
 
 // Notas de GET /api/facturas/{id}/estado para una fila sin veredicto que la
 // app no puede consultar (spec 7.3, Release 1). %s = el e-NCF. Decision 7: la
-// app nunca reenvia un e-CF; la nota manda a soporte y pide no emitirlo de nuevo.
+// app nunca reenvia un comprobante sin confirmar; la nota manda a soporte y pide
+// no emitirlo de nuevo.
 const FACTURA_NOTA_EN_VUELO = 'La DGII todavía no ha confirmado este comprobante. No lo emitas de nuevo; si sigue así en unos minutos, avisa a soporte con el número %s.';
 const FACTURA_NOTA_ENVIADO_SIN_TRACK = 'La DGII recibió este comprobante, pero no devolvió su número de seguimiento y por eso no se puede consultar su estado desde aquí. Si necesitas confirmarlo, avisa a soporte con el número %s.';
+
+// POST /api/facturas/{id}/reenviar sobre un comprobante SIN confirmar (PENDIENTE_ENVIO, ENVIO_INCIERTO,
+// ENVIADO, EN_PROCESO y sus RFCE_). Decision 7, redefinida el 10-12: la app nunca reenvia uno sin confirmar,
+// porque la DGII pudo haberlo recibido; solo reemite uno RECHAZADO. %s = el e-NCF.
+const FACTURA_REENVIO_SIN_CONFIRMAR = 'Este comprobante todavía no tiene respuesta de la DGII, así que no se puede reenviar desde aquí. No lo emitas de nuevo; avisa a soporte con el número %s.';
 
 // Estados en que la DGII acepto el comprobante: el primer paso a uno de estos
 // desde la consulta de estado mueve el stock (una sola vez).
@@ -554,6 +560,10 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
                 'success' => false, 'error_message' => ($e->getPrevious() ?? $e)->getMessage(),
                 'description' => 'e-CF reservado y enviado sin confirmación de la DGII (envío incierto).',
             ]);
+            // Reenvio de una rechazada: la fila nueva ya esta guardada aunque el envio quede sin confirmar.
+            if ($reenvioDe !== null) {
+                cerrarReenvioRechazado($reenvioDe, $userId, $facturaModel);
+            }
             // respond() no lleva `data`: el front necesita factura_id para "Ver factura".
             http_response_code(502);
             echo json_encode([
@@ -590,6 +600,11 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
 
     // La fila ya esta guardada y confirmada: emitir() devuelve su factura_id.
     $facturaId = (int) $result['factura_id'];
+
+    // Reenvio de una rechazada: la reserva ya archivo la vieja; falta devolverle su saldo de inventario.
+    if ($reenvioDe !== null) {
+        cerrarReenvioRechazado($reenvioDe, $userId, $facturaModel);
+    }
 
     // La respuesta de DGII puede venir en dgii_response (e-CF integro) o
     // rfce_response (RFCE E32 < 250k).
@@ -702,6 +717,25 @@ function moverStockFacturaEcf(int $facturaId, array $items, string $tipoEcf, ?in
     } catch (Throwable $e) {
         error_log('[inventario] no se pudo mover el stock de la factura ' . $facturaId
             . ' (' . $origen . ', ' . $estado . '): ' . $e->getMessage());
+    }
+}
+
+/**
+ * Cierra el reenvio de una rechazada (Reenviar a la DGII) cuando la fila nueva ya esta guardada: la vieja no debe
+ * volver a ofrecerse ni dejar mercancia movida.
+ *  - Archivo: la reserva ya archivo la rechazada (mismo e-NCF, regla REINTENTABLES de reservarFacturaECF);
+ *    archivarRechazoReenviado es el respaldo y solo actua si sigue en rechazo.
+ *  - Inventario: devolverSaldoDeFactura deshace lo que la rechazada haya movido (una venta del POS o una fila
+ *    anterior a Release 1; la app no mueve stock en un rechazo, asi que suele ser 0). Repetirlo no duplica.
+ * Nunca lanza: la fila nueva ya existe y un problema de inventario se corrige con un ajuste.
+ */
+function cerrarReenvioRechazado(int $reenvioDe, int $userId, facturaModel $facturaModel): void
+{
+    $facturaModel->archivarRechazoReenviado($reenvioDe);
+    try {
+        inventarioModelo()->devolverSaldoDeFactura($reenvioDe, $userId);
+    } catch (Throwable $e) {
+        error_log('[inventario] no se pudo devolver el saldo de la factura reenviada ' . $reenvioDe . ': ' . $e->getMessage());
     }
 }
 
@@ -1038,7 +1072,8 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
  * GET /estado de una fila sin veredicto que no se puede consultar: en vuelo
  * (PENDIENTE_ENVIO, ENVIO_INCIERTO) o ENVIADO sin track_id. Release 1 no llama
  * a la DGII: devuelve el estado guardado y una nota que manda a soporte
- * (spec 7.3). No ofrece ningun reenvio: la app nunca reenvia (decision 7).
+ * (spec 7.3). No ofrece ningun reenvio: la app nunca reenvia un comprobante sin
+ * confirmar (decision 7).
  */
 function handleEstadoEnVuelo(int $facturaId, array $ecf): void
 {
@@ -1085,17 +1120,20 @@ function moverStockPrimeraAceptacion(facturaModel $facturaModel, int $facturaId,
 }
 
 /**
- * POST /api/facturas/{id}/reenviar — vuelve a enviar a la DGII un e-CF que
- * rechazo SIN consumir la secuencia (p.ej. cod. 145, fecha de vencimiento de
- * la secuencia invalida): corregido el dato, el comprobante sale otra vez con
- * el mismo e-NCF, que ECFEmissionService ya habia devuelto al contador.
+ * POST /api/facturas/{id}/reenviar — vuelve a emitir un e-CF que la DGII RECHAZO
+ * (p.ej. cod. 145, fecha de vencimiento de la secuencia invalida): corregido el
+ * dato, el comprobante sale otra vez con el MISMO e-NCF. Nunca reenvia uno sin
+ * confirmar (decision 7, redefinida el 10-12): la DGII pudo haberlo recibido, y
+ * esos los resuelve soporte.
  *
- * Arma el mismo body que manda el front al emitir y lo pasa por
- * emitirFacturaEcf: mismas validaciones, mismo guardado. Las lineas salen del
- * XML firmado (nombre, descripcion, cantidad, precio y descuento tal como se
- * enviaron) completadas con lo que el XML no trae y la base si (producto,
- * unidad, indicadores). Cliente y emisor se leen de nuevo: si el rechazo era
- * por un dato del cliente, la correccion ya entra.
+ * Arma el mismo body que manda el front al emitir, con 'e_ncf' = el de la
+ * rechazada, y lo pasa por emitirFacturaEcf: mismas validaciones y el mismo
+ * write-ahead (guardar, enviar, anotar). La reserva archiva la rechazada con la
+ * regla de reintentables de reservarFacturaECF. Las lineas salen del XML firmado
+ * (nombre, descripcion, cantidad, precio y descuento tal como se enviaron)
+ * completadas con lo que el XML no trae y la base si (producto, unidad,
+ * indicadores). Cliente y emisor se leen de nuevo: si el rechazo era por un dato
+ * del cliente, la correccion ya entra.
  */
 function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel $clientModel): void
 {
@@ -1121,6 +1159,11 @@ function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel 
         respond(false, 'Este comprobante ya se reenvió. Búscalo en el listado de facturas.', 409);
         return;
     }
+    // Decision 7: un comprobante sin confirmar nunca se reenvia desde la app.
+    if (in_array($estado, EstadosEcf::SIN_VEREDICTO, true)) {
+        respond(false, sprintf(FACTURA_REENVIO_SIN_CONFIRMAR, (string) ($f['e_ncf'] ?? '')), 409);
+        return;
+    }
     if (!in_array($estado, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'], true)) {
         respond(false, 'Solo se puede reenviar un comprobante que la DGII rechazó.', 409);
         return;
@@ -1141,12 +1184,42 @@ function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel 
         return;
     }
 
-    emitirFacturaEcf(
-        armarInputReenvio($f, $guardadas, RequestContext::userId()),
-        $facturaModel,
-        $clientModel,
-        $facturaId
-    );
+    // Mismo numero: una rechazada sin archivar siempre lo tiene.
+    if (trim((string) ($f['e_ncf'] ?? '')) === '') {
+        respond(false, 'No se encontró el número de comprobante (e-NCF) de esta factura, así que no se puede reenviar. Avisa a soporte.', 422);
+        return;
+    }
+    $input = armarInputReenvio($f, $guardadas, RequestContext::userId());
+    // Con el e-NCF dado, emitir() no dispensa un numero y por eso tampoco toma el vencimiento del rango que lo
+    // dispensaria: se toma aqui del rango vigente que cubre el numero. Sin esto el XML llevaria el de
+    // emisor_config y una rechazada por la fecha de la secuencia (cod. 145) saldria rechazada otra vez.
+    $vence = vencimientoDeLaSecuencia((string) $f['e_ncf'], (string) ($f['ambiente_dgii'] ?? ''));
+    if ($vence !== null) {
+        $input['fecha_vencimiento_secuencia'] = $vence;
+    }
+    emitirFacturaEcf($input, $facturaModel, $clientModel, $facturaId);
+}
+
+/**
+ * Vencimiento (Y-m-d) del rango autorizado y vigente que cubre un e-NCF, o null si ninguno lo cubre, el rango
+ * no tiene vencimiento o ncf_sequences no se pudo leer (listRanges devuelve [] en ese caso): el XML usa entonces
+ * el vencimiento de emisor_config, como siempre.
+ */
+function vencimientoDeLaSecuencia(string $eNcf, string $ambiente): ?string
+{
+    if ($ambiente === '' || !preg_match('/^(E\d{2})(\d{10})$/', $eNcf, $m)) {
+        return null;
+    }
+    require_once __DIR__ . '/../Models/ncfModel.php';
+    $valor = (int) $m[2];
+    foreach ((new ncfModel())->listRanges($ambiente, $m[1]) as $rango) {
+        $hasta = $rango['numero_hasta'] !== null ? (int) $rango['numero_hasta'] : null;
+        if ((int) $rango['numero_desde'] <= $valor && ($hasta === null || $valor <= $hasta)
+            && $rango['estado'] !== 'vencido' && !empty($rango['fecha_vencimiento'])) {
+            return (string) $rango['fecha_vencimiento'];
+        }
+    }
+    return null;
 }
 
 /**
@@ -1196,6 +1269,8 @@ function armarInputReenvio(array $f, array $guardadas, ?int $userId): array
     $tipoPago = $tipoPagoXml !== '' ? (int) $tipoPagoXml : (int) ($f['tipo_pago'] ?? 1);
     $input = [
         'tipo_ecf' => (string) $f['tipo_ecf'],
+        // El mismo e-NCF de la rechazada: emitir() no dispensa uno nuevo y la reserva archiva la fila vieja.
+        'e_ncf' => (string) $f['e_ncf'],
         'client_id' => $f['client_id'] ?: null,
         'user_id' => $userId ?? $f['user_id'] ?? null,
         'tipo_pago' => $tipoPago,

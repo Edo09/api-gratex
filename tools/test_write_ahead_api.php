@@ -262,7 +262,7 @@ wa_chk('ENVIO_INCIERTO y en_vuelo, sin track_id ni secuencia_utilizada',
     && array_key_exists('track_id', $d) && $d['track_id'] === null
     && array_key_exists('secuencia_utilizada', $d) && $d['secuencia_utilizada'] === null, $d);
 wa_chk('nota en vuelo con el e-NCF', ($d['nota'] ?? null) === sprintf(T_NOTA_EN_VUELO, $eNcf), $d['nota'] ?? null);
-wa_chk('sin campo de reenvio (decision 7)', !array_key_exists('puede_reenviar', $d), $d);
+wa_chk('sin campo puede_reenviar: el boton lo decide el front por el estado', !array_key_exists('puede_reenviar', $d), $d);
 wa_chk('no llamo a la DGII', wa_mock_log($srv['mock']) === []);
 
 echo "C2) GET /estado de un ENVIADO sin track_id\n";
@@ -451,6 +451,214 @@ if ($copia === '') {
     wa_chk('resultado_parcial guarda la respuesta real: RFCE_ACEPTADO_CONDICIONAL',
         ($meta['resultado_parcial']['estado'] ?? null) === 'RFCE_ACEPTADO_CONDICIONAL', $meta);
 }
+
+// ===========================================================================
+// Task 9: POST /api/facturas/{id}/reenviar sobre el write-ahead. Una RECHAZADA se
+// reemite con el mismo e-NCF; una factura sin confirmar nunca se reenvia (decision 7,
+// redefinida el 10-12).
+// ===========================================================================
+
+// Textos de facturaController.php, letra por letra (FACTURA_REENVIO_SIN_CONFIRMAR y los de handleReenviar).
+const T_REENVIO_SIN_CONFIRMAR = 'Este comprobante todavía no tiene respuesta de la DGII, así que no se puede reenviar desde aquí. No lo emitas de nuevo; avisa a soporte con el número %s.';
+const T_REENVIO_SOLO_RECHAZADO = 'Solo se puede reenviar un comprobante que la DGII rechazó.';
+const T_REENVIO_YA_REENVIADO = 'Este comprobante ya se reenvió. Búscalo en el listado de facturas.';
+const T_REENVIO_CONSUMIDO = 'La DGII consumió el e-NCF de este comprobante, así que no se puede reenviar con el mismo número. Emítelo de nuevo desde Nueva factura.';
+const T_REENVIO_EN_CURSO = 'Este comprobante ya se está reenviando. Espera unos segundos y actualiza.';
+const T_REENVIO_SIN_NUMERO = 'No se encontró el número de comprobante (e-NCF) de esta factura, así que no se puede reenviar. Avisa a soporte.';
+const T_REENVIO_SIN_LINEAS = 'No se encontraron las líneas de esta factura, así que no se puede reenviar. Avisa a soporte.';
+
+/** POST /api/facturas/{id}/reenviar con el token de wa_prueba. */
+function wa_reenviar_factura(array $srv, int $id): array
+{
+    return wa_http('POST', $srv['api'] . "/api/facturas/{$id}/reenviar", [], ['X-API-KEY: ' . $srv['token']], 60);
+}
+
+/** Suma de cantidades de los movimientos de inventario de una factura: 0 = nada movido, o ya devuelto. */
+function wa_saldo_inventario(PDO $pdo, int $facturaId): float
+{
+    $st = $pdo->prepare("SELECT COALESCE(SUM(cantidad), 0) FROM inventory_movements WHERE referencia_tipo = 'factura' AND referencia_id = :id");
+    $st->execute([':id' => $facturaId]);
+    return round((float) $st->fetchColumn(), 3);
+}
+
+echo "RV1) Reenviar una E31 rechazada: mismo e-NCF, la rechazada se archiva\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza');
+$cuerpo = wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]);
+$r = wa_emitir($srv, $cuerpo);
+$d1 = $r['json']['data'] ?? [];
+$eNcf = (string) ($d1['e_ncf'] ?? '');
+$idRechazada = (int) ($d1['factura_id'] ?? 0);
+wa_chk('precondicion: 422, fila RECHAZADO y el numero vuelve al contador',
+    $r['status'] === 422 && (wa_filas($pdo, $eNcf)[0]['estado_dgii'] ?? null) === 'RECHAZADO' && wa_contador($pdo, 'E31') === 0, $r);
+wa_mock_modo($srv['mock'], 'acepta');
+wa_mock_log($srv['mock'], true);
+$r = wa_reenviar_factura($srv, $idRechazada);
+$d2 = $r['json']['data'] ?? [];
+wa_chk('200 con status true', $r['status'] === 200 && ($r['json']['status'] ?? null) === true, $r);
+wa_chk('mismo e-NCF y reenvio_de = la rechazada', ($d2['e_ncf'] ?? null) === $eNcf && ($d2['reenvio_de'] ?? null) === $idRechazada
+    && ($d2['factura_id'] ?? $idRechazada) !== $idRechazada, [$d1, $d2]);
+wa_chk('ACEPTADO con el track_id del mock', ($d2['estado_dgii'] ?? null) === 'ACEPTADO' && ($d2['track_id'] ?? null) === 'track-' . $eNcf, $d2);
+$filas = wa_filas($pdo, $eNcf);
+wa_chk('la rechazada queda RECHAZADO_ARCHIVADO sin e_ncf y la nueva ACEPTADO',
+    count($filas) === 2 && (int) $filas[0]['id'] === $idRechazada && $filas[0]['estado_dgii'] === 'RECHAZADO_ARCHIVADO'
+    && $filas[0]['e_ncf'] === null && (int) $filas[1]['id'] === (int) ($d2['factura_id'] ?? 0) && $filas[1]['estado_dgii'] === 'ACEPTADO', $filas);
+wa_chk('el stock lo mueve solo la fila nueva',
+    wa_movimientos($pdo, $idRechazada) === 0 && wa_movimientos($pdo, (int) ($d2['factura_id'] ?? 0)) === 1);
+wa_chk('una sola recepcion en la DGII', count(wa_recepciones(wa_mock_log($srv['mock']))) === 1);
+wa_chk('el contador no se movio: el numero reenviado no sale del contador', wa_contador($pdo, 'E31') === 0, wa_contador($pdo, 'E31'));
+$r = wa_emitir($srv, $cuerpo);
+wa_chk('el siguiente comprobante salta el numero ocupado', $r['status'] === 200 && ($r['json']['data']['e_ncf'] ?? null) === 'E310000000002', $r);
+$r = wa_reenviar_factura($srv, $idRechazada);
+wa_chk('reenviar la ya archivada: 409', $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_YA_REENVIADO, $r);
+$r = wa_reenviar_factura($srv, (int) ($d2['factura_id'] ?? 0));
+wa_chk('reenviar la ACEPTADO: 409', $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_SOLO_RECHAZADO, $r);
+
+echo "RV2) Una factura sin confirmar nunca se reenvia desde la app\n";
+$ids = wa_reiniciar($pdo, $srv, 'cuelga');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d = $r['json']['data'] ?? [];
+$eNcf = (string) ($d['e_ncf'] ?? '');
+wa_chk('precondicion: 502 incierto, fila ENVIO_INCIERTO', $r['status'] === 502 && ($d['estado_dgii'] ?? null) === 'ENVIO_INCIERTO', $r);
+wa_mock_modo($srv['mock'], 'acepta');   // espera a que termine el cuelga
+wa_mock_log($srv['mock'], true);
+$antes = [wa_filas($pdo, $eNcf), wa_contador($pdo, 'E31')];
+$r = wa_reenviar_factura($srv, (int) ($d['factura_id'] ?? 0));
+wa_chk('ENVIO_INCIERTO: 409 con el texto de sin confirmar',
+    $r['status'] === 409 && ($r['json']['error'] ?? null) === sprintf(T_REENVIO_SIN_CONFIRMAR, $eNcf), $r);
+wa_chk('la fila y el contador no cambiaron', [wa_filas($pdo, $eNcf), wa_contador($pdo, 'E31')] === $antes);
+$sembradas = [
+    ['PENDIENTE_ENVIO', 'E310000000921', null], ['ENVIADO', 'E310000000922', null], ['ENVIADO', 'E310000000923', 'track-E310000000923'],
+    ['EN_PROCESO', 'E310000000924', 'track-E310000000924'], ['RFCE_ENVIADO', 'E320000000925', null], ['RFCE_EN_PROCESO', 'E320000000926', null],
+];
+$obtenidos = [];
+foreach ($sembradas as [$estado, $encfSembrado, $track]) {
+    $idSembrada = wa_fila_sembrada($pdo, $ids, $encfSembrado, $estado, $track, 1);
+    $rr = wa_reenviar_factura($srv, $idSembrada);
+    $obtenidos[$estado . ' ' . $encfSembrado] = [$rr['status'], $rr['json']['error'] ?? null];
+}
+$esperados = [];
+foreach ($sembradas as [$estado, $encfSembrado]) {
+    $esperados[$estado . ' ' . $encfSembrado] = [409, sprintf(T_REENVIO_SIN_CONFIRMAR, $encfSembrado)];
+}
+wa_chk('PENDIENTE_ENVIO, ENVIADO (con y sin track), EN_PROCESO, RFCE_ENVIADO y RFCE_EN_PROCESO: todas 409 con el mismo texto', $obtenidos === $esperados, $obtenidos);
+$idAceptada = wa_fila_sembrada($pdo, $ids, 'E310000000927', 'ACEPTADO', 'track-E310000000927', 1);
+$r = wa_reenviar_factura($srv, $idAceptada);
+wa_chk('una ACEPTADO tampoco: 409 con el texto de solo rechazadas', $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_SOLO_RECHAZADO, $r);
+wa_chk('ninguna de las ocho llego a la DGII', wa_mock_log($srv['mock']) === []);
+
+echo "RV3) Una rechazada cuyo numero la DGII consumio no se reenvia\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza_usada');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d = $r['json']['data'] ?? [];
+wa_chk('precondicion: 422 con la fila RECHAZADO y secuencia_utilizada 1',
+    $r['status'] === 422 && (string) (wa_filas($pdo, (string) ($d['e_ncf'] ?? ''))[0]['secuencia_utilizada'] ?? '') === '1', $r);
+$r = wa_reenviar_factura($srv, (int) ($d['factura_id'] ?? 0));
+wa_chk('409 "La DGII consumió el e-NCF"', $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_CONSUMIDO, $r);
+
+echo "RV4) El saldo de inventario de la rechazada se devuelve\n";
+$ids = wa_reiniciar($pdo, $srv, 'acepta');
+// Una rechazada que ya habia movido mercancia (una venta del POS, o una fila anterior a Release 1).
+$idVieja = wa_fila_sembrada($pdo, $ids, 'E310000000930', 'RECHAZADO', 'track-E310000000930', 1);
+$almacen = (int) $pdo->query('SELECT warehouse_id FROM products WHERE id = ' . (int) $ids['product_id'])->fetchColumn();
+$pdo->prepare("INSERT INTO inventory_movements (product_id, warehouse_id, tipo_movimiento, referencia_tipo, referencia_id, cantidad, cantidad_anterior, cantidad_nueva)
+               VALUES (:p, :w, 'VENTA', 'factura', :f, -1.000, 1000.000, 999.000)")
+    ->execute([':p' => $ids['product_id'], ':w' => $almacen, ':f' => $idVieja]);
+$r = wa_reenviar_factura($srv, $idVieja);
+$d = $r['json']['data'] ?? [];
+wa_chk('200 con el mismo e-NCF y reenvio_de', $r['status'] === 200 && ($d['e_ncf'] ?? null) === 'E310000000930' && ($d['reenvio_de'] ?? null) === $idVieja, $r);
+wa_chk('el saldo de la vieja queda en 0 y la nueva descuenta una vez',
+    wa_saldo_inventario($pdo, $idVieja) === 0.0 && wa_saldo_inventario($pdo, (int) ($d['factura_id'] ?? 0)) === -1.0,
+    [wa_saldo_inventario($pdo, $idVieja), wa_saldo_inventario($pdo, (int) ($d['factura_id'] ?? 0))]);
+wa_chk('la vieja quedo RECHAZADO_ARCHIVADO', (wa_filas($pdo, 'E310000000930')[0]['estado_dgii'] ?? null) === 'RECHAZADO_ARCHIVADO', wa_filas($pdo, 'E310000000930'));
+
+echo "RV5) El XML lleva el vencimiento del rango, no el de emisor_config\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d = $r['json']['data'] ?? [];
+$xmlDe = static function (int $id) use ($pdo): string {
+    $st = $pdo->prepare('SELECT xml_firmado FROM facturas WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return (string) $st->fetchColumn();
+};
+$etiqueta = static fn(string $fecha): string => '<FechaVencimientoSecuencia>' . $fecha . '</FechaVencimientoSecuencia>';
+wa_chk('precondicion: la rechazada llevo el vencimiento que sembro wa_sembrar (dentro de un ano)',
+    str_contains($xmlDe((int) ($d['factura_id'] ?? 0)), $etiqueta(date('d-m-Y', strtotime('+1 year')))));
+// El admin corrige la fecha del rango.
+$pdo->prepare("UPDATE ncf_sequences SET fecha_vencimiento = :v WHERE type = 'E31' AND ambiente = 'certecf'")
+    ->execute([':v' => date('Y-m-d', strtotime('+2 years'))]);
+wa_mock_modo($srv['mock'], 'acepta');
+$r = wa_reenviar_factura($srv, (int) ($d['factura_id'] ?? 0));
+wa_chk('200', $r['status'] === 200, $r);
+wa_chk('el XML de la fila nueva lleva el vencimiento corregido del rango',
+    str_contains($xmlDe((int) ($r['json']['data']['factura_id'] ?? 0)), $etiqueta(date('d-m-Y', strtotime('+2 years')))));
+
+echo "RV6) Las condiciones de master: candado, 404, otro ambiente, solo e-CF, e-NCF y lineas guardadas\n";
+$ids = wa_reiniciar($pdo, $srv, 'acepta');
+$idLock = wa_fila_sembrada($pdo, $ids, 'E310000000940', 'RECHAZADO', 'track-E310000000940', 1);
+$otraConexion = wa_pdo($base);
+$st = $otraConexion->prepare("SELECT GET_LOCK(CONCAT(DATABASE(), ':reenvio_ecf:', :id), 0)");
+$st->execute([':id' => $idLock]);
+$r = wa_reenviar_factura($srv, $idLock);
+wa_chk('con el candado de reenvio tomado por otra conexion: 409 y la DGII no recibe nada',
+    $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_EN_CURSO && wa_mock_log($srv['mock']) === [], $r);
+$otraConexion->prepare("SELECT RELEASE_LOCK(CONCAT(DATABASE(), ':reenvio_ecf:', :id))")->execute([':id' => $idLock]);
+$r = wa_reenviar_factura($srv, $idLock);
+wa_chk('soltado el candado la misma factura se reenvia: 200', $r['status'] === 200 && ($r['json']['data']['e_ncf'] ?? null) === 'E310000000940', $r);
+$r = wa_reenviar_factura($srv, 999999);
+wa_chk('una factura que no existe: 404', $r['status'] === 404, $r);
+$idOtroAmbiente = wa_fila_sembrada($pdo, $ids, 'E310000000941', 'RECHAZADO', 'track-E310000000941', 1);
+$pdo->prepare("UPDATE facturas SET ambiente_dgii = 'ecf' WHERE id = :id")->execute([':id' => $idOtroAmbiente]);
+$r = wa_reenviar_factura($srv, $idOtroAmbiente);
+wa_chk('rechazada en otro ambiente: 409', $r['status'] === 409 && str_contains((string) ($r['json']['error'] ?? ''), 'otro ambiente'), $r);
+$idSinNumero = wa_fila_sembrada($pdo, $ids, 'E310000000942', 'RECHAZADO', 'track-E310000000942', 1);
+$pdo->prepare('UPDATE facturas SET e_ncf = NULL WHERE id = :id')->execute([':id' => $idSinNumero]);
+wa_mock_log($srv['mock'], true);
+$r = wa_reenviar_factura($srv, $idSinNumero);
+wa_chk('una rechazada sin e-NCF guardado: 422, no dispensa otro numero y no llega a la DGII',
+    $r['status'] === 422 && ($r['json']['error'] ?? null) === T_REENVIO_SIN_NUMERO && wa_contador($pdo, 'E31') === 0 && wa_mock_log($srv['mock']) === [],
+    [$r, wa_contador($pdo, 'E31')]);
+$idSinLineas = wa_fila_sembrada($pdo, $ids, 'E310000000943', 'RECHAZADO', 'track-E310000000943');
+$r = wa_reenviar_factura($srv, $idSinLineas);
+wa_chk('una rechazada sin lineas guardadas: 422, sigue RECHAZADO y no llega a la DGII',
+    $r['status'] === 422 && ($r['json']['error'] ?? null) === T_REENVIO_SIN_LINEAS
+    && (wa_filas($pdo, 'E310000000943')[0]['estado_dgii'] ?? null) === 'RECHAZADO' && wa_mock_log($srv['mock']) === [], $r);
+$pdo->exec("INSERT INTO facturas (no_factura, date, client_name, total, tipo_pago, estado_dgii) VALUES ('FS-WA-0001', NOW(), 'WA cliente', 100.00, 1, 'PENDIENTE')");
+$r = wa_reenviar_factura($srv, (int) $pdo->lastInsertId());
+wa_chk('una factura simple (sin tipo_ecf): 422', $r['status'] === 422 && ($r['json']['error'] ?? null) === 'Solo se pueden reenviar comprobantes electrónicos.', $r);
+
+echo "RV7) Si el reenvio queda sin confirmar, la rechazada ya esta archivada\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza');
+$r = wa_emitir($srv, wa_factura('31', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d1 = $r['json']['data'] ?? [];
+$eNcf = (string) ($d1['e_ncf'] ?? '');
+wa_mock_modo($srv['mock'], 'cuelga');
+$r = wa_reenviar_factura($srv, (int) ($d1['factura_id'] ?? 0));
+$d2 = $r['json']['data'] ?? [];
+wa_chk('502 incierto con la fila nueva y el mismo e-NCF',
+    $r['status'] === 502 && ($d2['e_ncf'] ?? null) === $eNcf && ($d2['estado_dgii'] ?? null) === 'ENVIO_INCIERTO'
+    && is_int($d2['factura_id'] ?? null) && $d2['factura_id'] !== $d1['factura_id'], $r);
+$filas = wa_filas($pdo, $eNcf);
+wa_chk('la rechazada quedo RECHAZADO_ARCHIVADO y la nueva ENVIO_INCIERTO',
+    count($filas) === 2 && $filas[0]['estado_dgii'] === 'RECHAZADO_ARCHIVADO' && $filas[1]['estado_dgii'] === 'ENVIO_INCIERTO', $filas);
+wa_mock_modo($srv['mock'], 'acepta');   // espera a que termine el cuelga
+$r = wa_reenviar_factura($srv, (int) ($d1['factura_id'] ?? 0));
+$r2 = wa_reenviar_factura($srv, (int) ($d2['factura_id'] ?? 0));
+wa_chk('ni la archivada ni la sin confirmar se reenvian otra vez: 409 las dos',
+    $r['status'] === 409 && ($r['json']['error'] ?? null) === T_REENVIO_YA_REENVIADO
+    && $r2['status'] === 409 && ($r2['json']['error'] ?? null) === sprintf(T_REENVIO_SIN_CONFIRMAR, $eNcf), [$r, $r2]);
+
+echo "RV8) El flujo RFCE: una E32 menor de 250k rechazada se reenvia con su mismo e-NCF\n";
+$ids = wa_reiniciar($pdo, $srv, 'rechaza');
+$r = wa_emitir($srv, wa_factura('32', $ids, [wa_linea(1000, 1, $ids['product_id'])]));
+$d1 = $r['json']['data'] ?? [];
+wa_chk('precondicion: 422 con la fila RFCE_RECHAZADO', $r['status'] === 422 && ($d1['estado_dgii'] ?? null) === 'RFCE_RECHAZADO', $r);
+wa_mock_modo($srv['mock'], 'acepta');
+$r = wa_reenviar_factura($srv, (int) ($d1['factura_id'] ?? 0));
+$d2 = $r['json']['data'] ?? [];
+wa_chk('200: RFCE_ACEPTADO con el mismo e-NCF, reenvio_de y la rechazada archivada',
+    $r['status'] === 200 && ($d2['e_ncf'] ?? null) === ($d1['e_ncf'] ?? '-') && ($d2['estado_dgii'] ?? null) === 'RFCE_ACEPTADO'
+    && ($d2['reenvio_de'] ?? null) === ($d1['factura_id'] ?? 0)
+    && (wa_filas($pdo, (string) ($d1['e_ncf'] ?? ''))[0]['estado_dgii'] ?? null) === 'RFCE_RECHAZADO_ARCHIVADO', [$r, wa_filas($pdo, (string) ($d1['e_ncf'] ?? ''))]);
 
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();

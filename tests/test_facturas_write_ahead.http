@@ -23,6 +23,7 @@
 @cliente = <client_id de 'WA cliente'>
 @producto = <product_id de 'WA producto'>
 @facturaId = <factura_id que devolvio el paso anterior>
+@facturaRechazada = <factura_id del 422 de un rechazo (mock en rechaza)>
 
 ### Login (solo con un usuario de prueba propio; el lanzador ya trae @token)
 POST {{base}}/api/auth/login
@@ -251,6 +252,14 @@ Content-Type: application/json
 ### sin fila nueva ni recepcion. Luego, con sql_mode estricto, una E32 < 250k en acepta_condicional -> 502 incierto y
 ### respuesta_dgii.resultado_parcial.estado = RFCE_ACEPTADO_CONDICIONAL.
 
-### Decision 7: la app no reenvia -> POST /reenviar sigue respondiendo 501
+### Reenviar (Task 9). Una factura SIN CONFIRMAR nunca se reenvia desde la app. {{facturaId}} = la de E3b
+### (ENVIO_INCIERTO) -> 409 "Este comprobante todavía no tiene respuesta de la DGII, así que no se puede
+### reenviar desde aquí. No lo emitas de nuevo; avisa a soporte con el número E31...". El mock no recibe nada.
 POST {{base}}/api/facturas/{{facturaId}}/reenviar
+X-API-KEY: {{token}}
+
+### Reenviar una RECHAZADA (mock en rechaza y luego en acepta; {{facturaRechazada}} = factura_id del 422) -> 200,
+### data.e_ncf igual al de la rechazada, data.reenvio_de = esa factura, estado_dgii ACEPTADO. En la base la
+### rechazada queda RECHAZADO_ARCHIVADO con e_ncf NULL y la nueva ACEPTADO con ese e-NCF.
+POST {{base}}/api/facturas/{{facturaRechazada}}/reenviar
 X-API-KEY: {{token}}
