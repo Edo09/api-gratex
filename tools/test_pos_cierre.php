@@ -77,6 +77,8 @@ $master = getenv('MASTER_DB_NAME') ?: 'gratex_master';
 $f = $pdo->query("SELECT t.id, t.db_name FROM `{$master}`.users u JOIN `{$master}`.tenants t ON t.id = u.tenant_id WHERE u.username = "
     . $pdo->quote((string) getenv('POS_TEST_ADMIN_A')))->fetch();
 [$tenantA, $dbA] = [(int) $f['id'], $f['db_name']];
+require_once __DIR__ . '/pos_scratch_guard.php';
+pos_scratch_exigir($pdo, (string) getenv('MASTER_DB_HOST'), [$master, $dbA]);
 $pdo->exec("UPDATE `{$master}`.tenants SET pos_enabled = 1 WHERE id = {$tenantA}");
 
 // --- Estado limpio ------------------------------------------------------------
@@ -144,9 +146,10 @@ $encfPendiente = (string) ($r4['data']['venta']['e_ncf'] ?? '');
 $modo('rechaza');
 [$h5, $r5] = $vender($ana, [['product_id' => $agua, 'cantidad' => 4]], 10000, 1, 10000);
 $modo('acepta');
-$chk('ventas: efectivo 179.50, tarjeta 25.00, transferencia 38.00, efectivo 50.00 pendiente; una rechazada',
-    [$h1, $h2, $h3, $h4, $h5] === [201, 201, 201, 201, 422] && ($r4['data']['venta']['envio_pendiente'] ?? false) === true
-    && ($r5['codigo'] ?? '') === 'DGII_RECHAZO', [$h1, $h2, $h3, $h4, $h5, $r5]);
+$encfRech = (string) ($r5['data']['venta']['e_ncf'] ?? '');
+$chk('ventas: efectivo 179.50, tarjeta 25.00, transferencia 38.00, efectivo 50.00 pendiente; efectivo 100.00 rechazada por la DGII y entregada igual',
+    [$h1, $h2, $h3, $h4, $h5] === [201, 201, 201, 201, 201] && ($r4['data']['venta']['envio_pendiente'] ?? false) === true
+    && ($r5['data']['venta']['estado_dgii'] ?? '') === 'RFCE_RECHAZADO' && $encfRech !== '', [$h1, $h2, $h3, $h4, $h5, $r5]);
 
 [$h, $r] = $api('POST', '/pos/eventos', ['tipo' => 'cancelada', 'monto_centavos' => 4500,
     'lineas' => [['product_id' => $arroz, 'nombre' => 'Arroz (libra)', 'cantidad' => 1]]], $ana);
@@ -158,9 +161,9 @@ $chk('evento desconocido: 422', $h === 422 && ($r['codigo'] ?? '') === 'EVENTO_I
 
 [$h, $r] = $api('GET', '/pos/ventas', null, $ana);
 $ventas = $r['data']['ventas'] ?? [];
-$chk('ventas del turno (K9): las 4 cobradas, sin la rechazada, la mas nueva primero y la pendiente marcada',
-    $h === 200 && count($ventas) === 4 && $ventas[0]['e_ncf'] === $encfPendiente && $ventas[0]['envio_pendiente'] === true
-    && array_column($ventas, 'forma_pago') === [1, 2, 3, 1], [$h, $ventas]);
+$chk('ventas del turno (K9): las 5 cobradas, la rechazada incluida porque se entrego, la mas nueva primero y la pendiente marcada',
+    $h === 200 && count($ventas) === 5 && $ventas[0]['e_ncf'] === $encfRech && $ventas[1]['e_ncf'] === $encfPendiente
+    && $ventas[1]['envio_pendiente'] === true && array_column($ventas, 'forma_pago') === [1, 1, 2, 3, 1], [$h, $ventas]);
 [$h, $r] = $api('GET', '/pos/estado', null, $ana);
 $chk('a ciegas: el estado de la caja no dice cuanto deberia haber', $h === 200
     && !array_key_exists('efectivo_esperado', $r['data']['turno_caja'] ?? []) && !str_contains(json_encode($r), 'esperado'), $r);
@@ -170,7 +173,7 @@ echo "\n2. Otro cajero no puede cerrar el turno de Ana sin supervisor (K4, S1)\n
 $bea = $entrar('Bea', $eq1);
 [$h, $r] = $api('POST', '/pos/eventos', ['tipo' => 'quitada', 'monto_centavos' => 999], $bea);
 $chk('evento de quien no tiene turno: solo bitacora, no suma al de Ana', $h === 200 && ($r['data']['registrado'] ?? true) === false, [$h, $r]);
-$cuentaAna = $conteo(['1000' => 1, '500' => 1, '200' => 1, '20' => 1, '5' => 1, '1' => 4], 25); // 1,729.25
+$cuentaAna = $conteo(['1000' => 1, '500' => 1, '200' => 1, '100' => 1, '20' => 1, '5' => 1, '1' => 4], 25); // 1,829.25
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => $cuentaAna], $bea);
 $chk('Bea (cajera) sin permiso: 403 PERMISO_INVALIDO', $h === 403 && ($r['codigo'] ?? '') === 'PERMISO_INVALIDO', [$h, $r]);
 [$h, $r] = $api('POST', '/pos/autorizar', ['pin' => $pines['Bea'], 'accion' => 'cerrar_turno', 'turno_id' => $turnoAna], $bea);
@@ -203,16 +206,17 @@ $chk('conteo de otro turno: 409 TURNO_CAMBIO', $h === 409 && ($r['codigo'] ?? ''
 echo "\n3. Cierre a ciegas con el permiso: esperado, contado y diferencia (K6, K7, K8)\n";
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => $cuentaAna, 'permiso' => $permiso], $bea);
 $rep = $r['data']['reporte'] ?? [];
-$chk('esperado = 1,500 de fondo + 179.50 + 50.00 en efectivo (la pendiente cuenta) = 1,729.50; contado 1,729.25; faltan 0.25',
-    $h === 200 && ($rep['esperado_centavos'] ?? 0) === 172950 && $rep['contado_centavos'] === 172925 && $rep['diferencia_centavos'] === -25, [$h, $r]);
+$chk('esperado = 1,500 de fondo + 179.50 + 50.00 (pendiente) + 100.00 (rechazada y entregada) en efectivo = 1,829.50; contado 1,829.25; faltan 0.25',
+    $h === 200 && ($rep['esperado_centavos'] ?? 0) === 182950 && $rep['contado_centavos'] === 182925 && $rep['diferencia_centavos'] === -25, [$h, $r]);
 $porForma = array_column($rep['ventas']['por_forma'] ?? [], null, 'forma_pago');
-$chk('ventas por forma: efectivo 2 / 229.50, transferencia 1 / 38.00, tarjeta 1 / 25.00; 4 en total',
-    ($rep['ventas']['cantidad'] ?? 0) === 4 && ($porForma[1]['cantidad'] ?? 0) === 2 && $porForma[1]['monto_centavos'] === 22950
+$chk('ventas por forma: efectivo 3 / 329.50, transferencia 1 / 38.00, tarjeta 1 / 25.00; 5 en total',
+    ($rep['ventas']['cantidad'] ?? 0) === 5 && ($porForma[1]['cantidad'] ?? 0) === 3 && $porForma[1]['monto_centavos'] === 32950
     && ($porForma[2]['monto_centavos'] ?? 0) === 3800 && ($porForma[3]['monto_centavos'] ?? 0) === 2500, $rep['ventas'] ?? $rep);
-$chk('4 facturas E32; 1 cancelada (45.00) y 2 lineas quitadas (50.00); la pendiente listada, ninguna rechazada cobrada',
-    ($rep['comprobantes'] ?? []) === ['E32' => 4] && $rep['canceladas'] === ['cantidad' => 1, 'monto_centavos' => 4500]
+$chk('5 facturas E32; 1 cancelada (45.00) y 2 lineas quitadas (50.00); la pendiente listada y la rechazada listada como rechazada',
+    ($rep['comprobantes'] ?? []) === ['E32' => 5] && $rep['canceladas'] === ['cantidad' => 1, 'monto_centavos' => 4500]
     && $rep['lineas_quitadas'] === ['cantidad' => 2, 'monto_centavos' => 5000]
-    && array_column($rep['pendientes'], 'e_ncf') === [$encfPendiente] && $rep['rechazadas'] === [], $rep);
+    && array_column($rep['pendientes'], 'e_ncf') === [$encfPendiente]
+    && $rep['rechazadas'] === [['e_ncf' => $encfRech, 'total_centavos' => 10000]], $rep);
 $chk('reporte: Ana es la del turno, Luis quien cerro, con el conteo por denominacion',
     ($rep['empleado']['nombre'] ?? '') === 'Ana' && ($rep['cerrado_por']['nombre'] ?? '') === 'Luis' && $rep['cerrado_por']['rol'] === 'supervisor'
     && ($rep['conteo']['1000'] ?? 0) === 1 && $rep['conteo']['otros_centavos'] === 25 && $rep['fondo_centavos'] === 150000, $rep);
@@ -220,8 +224,8 @@ $fila = $pdo->query("SELECT abierto, cerrado_por, efectivo_contado, efectivo_esp
                      FROM `{$dbA}`.pos_turnos WHERE id = {$turnoAna}")->fetch();
 $luisId = (int) $pdo->query("SELECT id FROM `{$dbA}`.pos_empleados WHERE nombre = 'Luis'")->fetchColumn();
 $chk('en la base: cerrado (abierto NULL) por Luis, con contado, esperado, diferencia, conteo y la foto del reporte',
-    $fila['abierto'] === null && (int) $fila['cerrado_por'] === $luisId && (float) $fila['efectivo_contado'] === 1729.25
-    && (float) $fila['efectivo_esperado'] === 1729.5 && (float) $fila['diferencia'] === -0.25 && (int) $fila['c'] === 1 && (int) $fila['t'] === 1, $fila);
+    $fila['abierto'] === null && (int) $fila['cerrado_por'] === $luisId && (float) $fila['efectivo_contado'] === 1829.25
+    && (float) $fila['efectivo_esperado'] === 1829.5 && (float) $fila['diferencia'] === -0.25 && (int) $fila['c'] === 1 && (int) $fila['t'] === 1, $fila);
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => $cuentaAna, 'permiso' => $permiso], $bea);
 $chk('el conteo no se rehace: cerrar otra vez con el mismo permiso da 409 SIN_TURNO', $h === 409 && ($r['codigo'] ?? '') === 'SIN_TURNO', [$h, $r]);
 
@@ -290,18 +294,18 @@ echo "\n5b. Ventas del dia: del cajero en esta caja, de todos sus turnos de hoy\
 $ana = $entrar('Ana', $eq1);
 [$h, $r] = $api('GET', '/pos/ventas/dia', null, $ana);
 $d = $r['data'] ?? [];
-$chk('Ana: sus 4 ventas de hoy aunque el turno ya se cerro, la mas nueva primero, sin la rechazada', $h === 200
-    && count($d['ventas'] ?? []) === 4 && $d['ventas'][0]['e_ncf'] === $encfPendiente && $d['fecha'] === date('Y-m-d')
+$chk('Ana: sus 5 ventas de hoy aunque el turno ya se cerro, la mas nueva primero, con la rechazada que se entrego', $h === 200
+    && count($d['ventas'] ?? []) === 5 && $d['ventas'][0]['e_ncf'] === $encfRech && $d['fecha'] === date('Y-m-d')
     && ($d['empleado']['nombre'] ?? '') === 'Ana' && ($d['caja']['id'] ?? 0) === $caja1, [$h, $d]);
-$chk('resumen: 4 ventas por 292.50; efectivo 2 (229.50), transferencia 1 (38.00), tarjeta 1 (25.00)',
-    ($d['resumen'] ?? null) === ['cantidad' => 4, 'total_centavos' => 29250, 'por_forma' => [
-        ['forma_pago' => 1, 'nombre' => 'Efectivo', 'cantidad' => 2, 'total_centavos' => 22950],
+$chk('resumen: 5 ventas por 392.50; efectivo 3 (329.50), transferencia 1 (38.00), tarjeta 1 (25.00)',
+    ($d['resumen'] ?? null) === ['cantidad' => 5, 'total_centavos' => 39250, 'por_forma' => [
+        ['forma_pago' => 1, 'nombre' => 'Efectivo', 'cantidad' => 3, 'total_centavos' => 32950],
         ['forma_pago' => 2, 'nombre' => 'Transferencia / depósito', 'cantidad' => 1, 'total_centavos' => 3800],
         ['forma_pago' => 3, 'nombre' => 'Tarjeta', 'cantidad' => 1, 'total_centavos' => 2500]]], $d['resumen'] ?? $d);
-$ayer = (int) ($d['ventas'][3]['factura_id'] ?? 0);
+$ayer = (int) ($d['ventas'][4]['factura_id'] ?? 0);
 $pdo->exec("UPDATE `{$dbA}`.facturas SET date = DATE_SUB(date, INTERVAL 1 DAY) WHERE id = {$ayer}");
 [$h, $r] = $api('GET', '/pos/ventas/dia', null, $ana);
-$chk('una venta de ayer no sale', $h === 200 && count($r['data']['ventas'] ?? []) === 3
+$chk('una venta de ayer no sale', $h === 200 && count($r['data']['ventas'] ?? []) === 4
     && !in_array($ayer, array_column($r['data']['ventas'] ?? [], 'factura_id'), true), [$h, $r]);
 $pdo->exec("UPDATE `{$dbA}`.facturas SET date = DATE_ADD(date, INTERVAL 1 DAY) WHERE id = {$ayer}");
 $bea = $entrar('Bea', $eq1);
@@ -329,7 +333,7 @@ $chk('filtro por caja y empleado: solo el de Bea', $h === 200 && array_column($r
 [$h, $r] = $api('GET', '/pos-admin/turnos?desde=2026-13-01', null, $admin);
 $chk('fecha mal escrita: 422', $h === 422, [$h, $r]);
 [$h, $r] = $api('GET', "/pos-admin/turnos/{$turnoAna}", null, $admin);
-$chk('detalle: el mismo reporte que se imprimio al cerrar, con la nota', $h === 200 && ($r['data']['reporte']['contado_centavos'] ?? 0) === 172925
+$chk('detalle: el mismo reporte que se imprimio al cerrar, con la nota', $h === 200 && ($r['data']['reporte']['contado_centavos'] ?? 0) === 182925
     && ($r['data']['reporte']['nota'] ?? '') === 'Faltan 25 centavos: no hay monedas', [$h, $r]);
 [$h, $r] = $api('GET', '/pos-admin/turnos/999999', null, $admin);
 $chk('turno que no existe: 404', $h === 404, [$h, $r]);

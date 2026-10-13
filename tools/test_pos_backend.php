@@ -83,6 +83,8 @@ $dbDe = function (string $usuario) use ($pdo, $master): array {
 };
 [$tenantA, $dbA] = $dbDe(getenv('POS_TEST_ADMIN_A'));
 [$tenantB, $dbB] = $dbDe(getenv('POS_TEST_ADMIN_B'));
+require_once __DIR__ . '/pos_scratch_guard.php';
+pos_scratch_exigir($pdo, (string) getenv('MASTER_DB_HOST'), [$master, $dbA, $dbB]);
 $posActivo = fn(int $t, int $v) => $pdo->exec("UPDATE `{$master}`.tenants SET pos_enabled = {$v} WHERE id = {$t}");
 $posActivo($tenantA, 1);
 $posActivo($tenantB, 1);

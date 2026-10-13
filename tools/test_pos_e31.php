@@ -85,6 +85,8 @@ $master = getenv('MASTER_DB_NAME') ?: 'gratex_master';
 $f = $pdo->query("SELECT t.id, t.db_name FROM `{$master}`.users u JOIN `{$master}`.tenants t ON t.id = u.tenant_id WHERE u.username = "
     . $pdo->quote((string) getenv('POS_TEST_ADMIN_A')))->fetch();
 [$tenantA, $dbA] = [(int) $f['id'], $f['db_name']];
+require_once __DIR__ . '/pos_scratch_guard.php';
+pos_scratch_exigir($pdo, (string) getenv('MASTER_DB_HOST'), [$master, $dbA]);
 $pdo->exec("UPDATE `{$master}`.tenants SET pos_enabled = 1 WHERE id = {$tenantA}");
 $rncEmisor = (string) $pdo->query("SELECT rnc FROM `{$dbA}`.emisor_config ORDER BY id LIMIT 1")->fetchColumn();
 
@@ -230,8 +232,13 @@ $chk('lineas: agua 75.00 - 7.50 = 67.50 (57.20 + 10.30 ITBIS); arroz 38.00 - 3.8
 echo "\n5. Rechazos\n";
 $modo('rechaza');
 [$h, $r] = $vender($una, 5000, $nuevo);
-$chk('rechazado al recibir: 422 DGII_RECHAZO con el motivo, sin cobrar', $h === 422 && ($r['codigo'] ?? '') === 'DGII_RECHAZO'
-    && str_contains((string) ($r['error'] ?? ''), 'RNCComprador no valido'), [$h, $r]);
+$encfRech = (string) ($r['data']['venta']['e_ncf'] ?? '');
+$chk('rechazado al recibir: 201, se entrega igual como RECHAZADO y sin envio pendiente', $h === 201 && preg_match('/^E31\d{10}$/', $encfRech) === 1
+    && ($r['data']['venta']['estado_dgii'] ?? '') === 'RECHAZADO' && ($r['data']['venta']['envio_pendiente'] ?? null) === false, [$h, $r]);
+$filaRech = $factura($encfRech);
+$chk('la factura queda RECHAZADA con el motivo de la DGII guardado y el dinero en caja', $filaRech && $filaRech['estado_dgii'] === 'RECHAZADO'
+    && str_contains((string) $filaRech['respuesta_dgii'], 'RNCComprador no valido')
+    && (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.pos_caja_movimientos WHERE factura_id = {$filaRech['id']}")->fetchColumn() === 1, $filaRech);
 $modo('rechaza_luego');
 [$h, $r] = $vender($una, 5000, $nuevo);
 $encfLuego = (string) ($r['data']['venta']['e_ncf'] ?? '');
@@ -247,11 +254,11 @@ $modo('caido');
 [$h, $r] = $vender($una, 5000, $nuevo);
 $encfCaido = (string) ($r['data']['venta']['e_ncf'] ?? '');
 $fac = $encfCaido !== '' ? $factura($encfCaido) : null;
-$chk('caida: 201, ENVIO_PENDIENTE, sin trackId, con el XML firmado guardado', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_PENDIENTE'
+$chk('caida: 201, ENVIO_INCIERTO, sin trackId, con el XML firmado guardado', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_INCIERTO'
     && $fac && $fac['track_id'] === null && (int) $fac['envio_pendiente'] === 1 && !empty($fac['xml_firmado']), [$h, $r]);
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('sigue caida: ConsultaTrackIds dice que no lo tiene, el reenvio falla y sigue pendiente', $h === 200 && ($r['data']['pendientes'] ?? 0) === 1
-    && $factura($encfCaido)['estado_dgii'] === 'ENVIO_PENDIENTE', [$h, $r]);
+    && $factura($encfCaido)['estado_dgii'] === 'ENVIO_INCIERTO', [$h, $r]);
 $modo('acepta');
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('volvio: se reenvia, recibe trackId y en la misma vuelta queda ACEPTADO', $h === 200 && ($r['data']['aceptadas'] ?? 0) === 1
@@ -261,7 +268,7 @@ $modo('lento');
 [$h, $r] = $vender($una, 5000, $nuevo);
 $encfLento = (string) ($r['data']['venta']['e_ncf'] ?? '');
 $modo('acepta');
-$chk('lenta: 201 pendiente sin trackId', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_PENDIENTE', [$h, $r]);
+$chk('lenta: 201 pendiente sin trackId', $h === 201 && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_INCIERTO', [$h, $r]);
 sleep(4);
 [$h, $r] = $api('POST', '/pos/pendientes/reenviar', [], $eq);
 $chk('ConsultaTrackIds la encuentra (la DGII la tenia): toma su trackId y queda ACEPTADA SIN reenviarla',

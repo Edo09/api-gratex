@@ -89,6 +89,8 @@ $master = getenv('MASTER_DB_NAME') ?: 'gratex_master';
 $f = $pdo->query("SELECT t.id, t.db_name FROM `{$master}`.users u JOIN `{$master}`.tenants t ON t.id = u.tenant_id WHERE u.username = "
     . $pdo->quote((string) getenv('POS_TEST_ADMIN_A')))->fetch();
 [$tenantA, $dbA] = [(int) $f['id'], $f['db_name']];
+require_once __DIR__ . '/pos_scratch_guard.php';
+pos_scratch_exigir($pdo, (string) getenv('MASTER_DB_HOST'), [$master, $dbA]);
 $pdo->exec("UPDATE `{$master}`.tenants SET pos_enabled = 1 WHERE id = {$tenantA}");
 
 // --- Estado limpio --------------------------------------------------------
@@ -271,24 +273,33 @@ $chk('tarjeta: sin recibido ni devuelta', ($resp['data']['cobro']['forma_pago'] 
     && $resp['data']['cobro']['devuelta_centavos'] === null, $resp['data']['cobro'] ?? $resp);
 
 // ---------------------------------------------------------------------------
-echo "\n5. Rechazo de la DGII (F6)\n";
+echo "\n5. Rechazo de la DGII al cobrar: la venta se entrega igual (F6, spec 2026-10-12)\n";
 $modo('rechaza');
 $stockAgua = $stock($agua);
 $secAntes = (int) $pdo->query("SELECT current_value FROM `{$dbA}`.ncf_sequences WHERE type = 'E32' AND ambiente = 'testecf'")->fetchColumn();
-[$h, $r] = $api('POST', '/pos/ventas', $venta([['product_id' => $agua, 'cantidad' => 2]], 5000, 1, 5000), $ana);
-$encfRech = (string) ($r['e_ncf'] ?? '');
-$chk('422 DGII_RECHAZO con el motivo de la DGII', $h === 422 && ($r['codigo'] ?? '') === 'DGII_RECHAZO'
-    && str_contains((string) ($r['error'] ?? ''), 'El MontoTotal no corresponde'), [$h, $r]);
-$filaR = $pdo->query("SELECT id, estado_dgii FROM `{$dbA}`.facturas WHERE e_ncf = " . $pdo->quote($encfRech))->fetch();
-$chk('queda como historial (RFCE_RECHAZADO), sin dinero en caja ni salida de inventario', $filaR && $filaR['estado_dgii'] === 'RFCE_RECHAZADO'
-    && (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.pos_caja_movimientos WHERE factura_id = {$filaR['id']}")->fetchColumn() === 0
-    && $stock($agua) === $stockAgua, [$filaR, $stock($agua)]);
+$cuerpoRech = $venta([['product_id' => $agua, 'cantidad' => 2]], 5000, 1, 5000);
+[$h, $r] = $api('POST', '/pos/ventas', $cuerpoRech, $ana);
+$vr = $r['data']['venta'] ?? [];
+$encfRech = (string) ($vr['e_ncf'] ?? '');
+$chk('201: se entrega aunque la DGII la rechace, con recibo y sin envio pendiente', $h === 201 && preg_match('/^E32\d{10}$/', $encfRech) === 1
+    && ($vr['estado_dgii'] ?? '') === 'RFCE_RECHAZADO' && ($vr['envio_pendiente'] ?? null) === false && is_array($r['data']['recibo'] ?? null)
+    && ($r['data']['cobro']['devuelta_centavos'] ?? -1) === 0, [$h, $r]);
+$filaR = $pdo->query("SELECT id, estado_dgii, rfce_respuesta FROM `{$dbA}`.facturas WHERE e_ncf = " . $pdo->quote($encfRech))->fetch();
+$chk('la factura queda RFCE_RECHAZADO con el motivo de la DGII guardado, el dinero en caja y la salida de inventario', $filaR && $filaR['estado_dgii'] === 'RFCE_RECHAZADO'
+    && str_contains((string) $filaR['rfce_respuesta'], 'El MontoTotal no corresponde')
+    && (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.pos_caja_movimientos WHERE factura_id = {$filaR['id']}")->fetchColumn() === 1
+    && $stock($agua) === $stockAgua - 2, [$filaR, $stockAgua, $stock($agua)]);
 $secDespues = (int) $pdo->query("SELECT current_value FROM `{$dbA}`.ncf_sequences WHERE type = 'E32' AND ambiente = 'testecf'")->fetchColumn();
-$chk('el e-NCF rechazado sin usar vuelve a la secuencia', $secDespues === $secAntes, [$secAntes, $secDespues]);
+$chk('el numero de una venta del POS nunca vuelve a la secuencia: ya esta impreso', $secDespues === $secAntes + 1, [$secAntes, $secDespues]);
 $modo('acepta');
 [$h, $r] = $api('POST', '/pos/ventas', $venta([['product_id' => $agua, 'cantidad' => 2]], 5000, 1, 5000), $ana);
-$chk('la venta siguiente reutiliza ese e-NCF y la rechazada queda archivada', $h === 201 && ($r['data']['venta']['e_ncf'] ?? '') === $encfRech
-    && $pdo->query("SELECT estado_dgii FROM `{$dbA}`.facturas WHERE id = {$filaR['id']}")->fetchColumn() === 'RFCE_RECHAZADO_ARCHIVADO', [$h, $r]);
+$chk('la venta siguiente toma el numero que sigue y la rechazada se queda como esta (no se archiva)', $h === 201 && ($r['data']['venta']['e_ncf'] ?? '') !== $encfRech
+    && $pdo->query("SELECT estado_dgii FROM `{$dbA}`.facturas WHERE id = {$filaR['id']}")->fetchColumn() === 'RFCE_RECHAZADO', [$h, $r]);
+[$h, $r] = $api('POST', '/pos/ventas', $cuerpoRech, $ana);
+$chk('repetir la clave de la rechazada: 201 repetida con la misma venta, sin otro envio ni otro movimiento de caja', $h === 201
+    && ($r['data']['repetida'] ?? false) === true && ($r['data']['venta']['e_ncf'] ?? '') === $encfRech && $rfceRecibidos($encfRech) === 1
+    && (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.pos_caja_movimientos WHERE factura_id = {$filaR['id']}")->fetchColumn() === 1,
+    [$h, $r, $rfceRecibidos($encfRech)]);
 
 // ---------------------------------------------------------------------------
 echo "\n6. DGII lenta: se imprime y se reenvia sola (F6, F7)\n";
@@ -297,8 +308,8 @@ $t0 = microtime(true);
 [$h, $r] = $api('POST', '/pos/ventas', $venta([['product_id' => $arroz, 'cantidad' => 1]], 3800, 1, 5000), $ana);
 $dur = microtime(true) - $t0;
 $encfLento = (string) ($r['data']['venta']['e_ncf'] ?? '');
-$chk('a los ~5 s responde 201 con envio pendiente (RFCE_PENDIENTE), recibo y devuelta', $h === 201 && $dur < 7.5
-    && ($r['data']['venta']['estado_dgii'] ?? '') === 'RFCE_PENDIENTE' && $r['data']['venta']['envio_pendiente'] === true
+$chk('a los ~5 s responde 201 con envio pendiente (ENVIO_INCIERTO), recibo y devuelta', $h === 201 && $dur < 7.5
+    && ($r['data']['venta']['estado_dgii'] ?? '') === 'ENVIO_INCIERTO' && $r['data']['venta']['envio_pendiente'] === true
     && is_array($r['data']['recibo'] ?? null) && $r['data']['cobro']['devuelta_centavos'] === 1200, [round($dur, 1), $h, $r]);
 $filaL = $pdo->query("SELECT id, envio_pendiente, rfce_xml IS NOT NULL AS tiene_rfce FROM `{$dbA}`.facturas WHERE e_ncf = " . $pdo->quote($encfLento))->fetch();
 $chk('guardada con envio_pendiente = 1, el RFCE firmado y su movimiento de caja', $filaL && (int) $filaL['envio_pendiente'] === 1
@@ -338,9 +349,11 @@ $chk('otro empleado en la caja con el turno de Ana: 409 TURNO_AJENO', $h === 409
 
 $filasAudit = $pdo->query("SELECT action, new_values FROM `{$master}`.audit_logs WHERE id > {$inicioAudit} AND module = 'pos'")->fetchAll();
 $acciones = array_count_values(array_column($filasAudit, 'action'));
-foreach (['POS_TURNO_ABIERTO', 'POS_VENTA', 'POS_VENTA_RECHAZADA', 'POS_VENTA_ENVIADA'] as $a) {
+foreach (['POS_TURNO_ABIERTO', 'POS_VENTA', 'POS_VENTA_ENVIADA'] as $a) {
     $chk("bitacora: {$a}", ($acciones[$a] ?? 0) > 0, $acciones);
 }
+$chk('bitacora: la venta rechazada al cobrar quedo como POS_VENTA (de su factura), no como una venta fallida',
+    count(array_filter($filasAudit, fn($f) => $f['action'] === 'POS_VENTA' && str_contains((string) $f['new_values'], '"factura_id":' . $filaR['id']))) > 0, $acciones);
 $todo = json_encode($filasAudit);
 $chk('ningun PIN ni token en la bitacora', !str_contains($todo, $pinAna) && !str_contains($todo, $pinLuis)
     && !str_contains($todo, $ana['X-POS-SESION']) && !str_contains($todo, $ana['X-POS-EQUIPO']));
