@@ -336,14 +336,17 @@ $cs = new ConexionStats();
 $conModelo($cs)->getECFStats();
 $sqlResumen = preg_replace('/\s+/', ' ', $cs->consultas[0] ?? '');
 $chk('stats: el resumen es la primera consulta', str_contains($sqlResumen, 'as total_ecf'), $sqlResumen);
-$chk('stats: monto_total deja fuera las filas en vuelo',
+// Regla de las filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO): las de la app
+// (pos_idempotency_key IS NULL) quedan fuera del dinero; las del POS
+// (pos_idempotency_key IS NOT NULL) suman porque el recibo ya se cobro.
+$chk('stats: monto_total deja fuera las filas de la app en vuelo (las del POS en vuelo suman)',
     str_contains($sqlResumen,
-        "COALESCE(SUM(CASE WHEN estado_dgii IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO') THEN 0 ELSE total END), 0) as monto_total"),
+        "COALESCE(SUM(CASE WHEN estado_dgii IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO') AND pos_idempotency_key IS NULL THEN 0 ELSE total END), 0) as monto_total"),
     $sqlResumen);
-$chk('stats: monto_neto resta la E34 y deja fuera los rechazados y las filas en vuelo',
+$chk('stats: monto_neto resta la E34, deja fuera los rechazados y las filas de la app en vuelo (las del POS en vuelo suman)',
     str_contains($sqlResumen,
         "COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' "
-        . "AND estado_dgii NOT IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO')) "
+        . "AND (estado_dgii NOT IN ('PENDIENTE_ENVIO', 'ENVIO_INCIERTO') OR pos_idempotency_key IS NOT NULL)) "
         . "THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END ELSE 0 END), 0) as monto_neto"),
     $sqlResumen);
 $chk('stats: monto_neto sobre las mismas filas del resumen (e-CF del ambiente)',
