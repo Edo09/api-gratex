@@ -58,6 +58,8 @@ petición de Gratex no carga el código ni el PDF de Ferretería).
 | `src/features/cotizaciones/formatos/index.ts` | Registro `FORMATOS`, `esFormato`, `formatoDeFila`, `useCotizacionFormato()` (lee `cotizacion_formato` de `GET /api/branding`) |
 | `src/features/cotizaciones/formatos/CotizacionEditor.tsx` | Elige el formulario: el de la empresa para una nueva, el de la fila para una existente |
 | `src/features/cotizaciones/CotizacionFormView.tsx` | El formulario de Gratex (sin cambios) |
+| `src/features/cotizaciones/AccionesCotizacion.tsx` | Las acciones de una cotización guardada (PDF, Conduce, Facturar) según `formatoDeFila`. Las usan la fila del listado (`CotizacionesView`, que elige las columnas) y la barra de arriba de `FerreteriaCotizacionForm` |
+| `src/features/cotizaciones/permisosCotizacion.ts` | `usePermisosCotizacion()`: qué acciones puede usar el rol (`puedeEcf`, `puedeSimple`, `puedeConduce`), calculado una vez por pantalla |
 | `src/features/cotizaciones/formatos/ferreteria/` | `FerreteriaCotizacionForm.tsx`, `totales.ts` (misma cuenta que el PHP), `schema.ts` (Zod), `conversion.ts` (Facturar), y lo que comparte con el conduce: `lineas.ts`, `DescripcionLinea.tsx`, `BloqueCliente.tsx` |
 | `scripts/parity-cotizacion-ferreteria.ts` | Corre `totalesFerreteria()` sobre la copia del fixture del backend |
 | `src/features/conduces/` | Los conduces: `ConducesView.tsx` (la lista), `ConduceEditor.tsx` + `ConduceForm.tsx` (el formulario), `schema.ts` (Zod) y `conversion.ts` (Facturar). El menú los muestra solo con el formato `ferreteria` (`NavItem.formato`, `useFormatoTenant()`) |
@@ -430,8 +432,14 @@ Ejemplo: el tenant "Acme" quiere su propia hoja. La clave será `acme`.
    formulario (que mande `"formato": "acme"` en cada POST, PUT y vista previa), su
    `totales.ts` si la pantalla calcula (misma cuenta que el PHP, con
    `scripts/parity-cotizacion-acme.ts` sobre la copia del fixture) y su conversión si
-   se factura. Agrega `'acme'` a `FormatoId` y a `FORMATOS` en
-   `formatos/index.ts`, y sus columnas y acciones en `CotizacionesView`.
+   se factura. Agrega `'acme'` a `FormatoId` y a `CONOCIDOS` en
+   `formatos/formatoId.ts` (sin la clave en `CONOCIDOS` no compila) y a `FORMATOS` en
+   `formatos/index.ts`. Las columnas del listado van en `CotizacionesView`; las
+   acciones de cada fila (PDF, Conduce, Facturar), en `AccionesCotizacion.tsx`, que
+   las elige por `formatoDeFila` (una fila sin rama propia sale con el Facturar de
+   Gratex). El formulario puede poner el mismo componente arriba, como
+   `FerreteriaCotizacionForm`; los permisos salen de `permisosCotizacion.ts` (hoy
+   `puedeConduce` es solo de `ferreteria`).
 9. **Docs.** Una sección en [../api/cotizaciones.md](../api/cotizaciones.md) y una
    fila en las tablas de este documento.
 10. **Despliegue.**

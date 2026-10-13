@@ -153,8 +153,31 @@ herramienta de operaciones, no del cliente). Solo lectura.
 - **Filtros:** tenant (todos, uno, o "sin tenant" = login fallido / DGII
   entrante), módulo, acción, resultado, rango de fechas (días completos) y texto
   libre sobre usuario, email, id de entidad, descripción, endpoint e IP.
-- **Detalle:** clic en una fila → todos los campos + tabla campo / antes / después
-  con lo que cambió resaltado.
+- **Detalle:** clic en una fila → todos los campos y, debajo, **solo lo que
+  cambió** (antes tachado en rojo → después en verde). Lo que no cambió queda
+  detrás de "Mostrar también lo que no cambió", y el JSON tal cual sigue en
+  "Ver JSON original". El diff está pensado para la forma real de los valores:
+  - Compara por valor, no por texto: `"18000.0000"` = `18000`, `1` = `true`,
+    `"12"` = `12`, `"2026-10-01 00:00:00"` = `"2026-10-01"`, y
+    `retencion_isr` `true` = el monto guardado. Un código con ceros a la
+    izquierda (`"001"` ≠ `1`) sí cuenta como cambio.
+  - `new_values` suele ser el cuerpo del PUT, parcial: un campo que no vino sale
+    como **no enviado** (según el módulo quedó igual o se vació; la vista no lo
+    adivina). Un campo nuevo en `0`/`false`/vacío no cuenta como cambio.
+  - Los arreglos de objetos (`items`) se comparan **línea por línea**. Las
+    líneas no tienen id estable (cada guardado las borra y reinserta), así que se
+    alinean por `product_id`, o por `description` en las líneas libres,
+    respetando el orden. Cada línea sale como Modificada (con sus campos
+    `antes → después`; si cambió de lugar, también `posición #3 → #1`),
+    Agregada, Quitada o Sin cambios. El `id` de la línea no se compara.
+  - Los arreglos de texto (`permissions`) se comparan como conjunto (agregados /
+    quitados). Branding compara `pdf_template` contra `template` (y el color).
+  - Eventos de un solo lado (EMIT, LOGIN, DELETE…): tabla campo / valor con los
+    objetos anidados aplanados (`dgii_response.codigo`) y los arreglos de
+    objetos en tabla. Los valores largos (`xml_firmado`, `logo_data_uri`) salen
+    plegados.
+  - Un valor recortado a 100.000 caracteres (JSON inválido) no se compara: se
+    avisa y se muestra tal cual.
 - **Backend:** `public/audit_logs.php` (acciones `meta` y `search`, JSON). Usa
   `AuditLogModel::searchAllTenants()` / `countAllTenants()`, las únicas lecturas
   sin aislamiento por tenant — **no** usarlas desde controllers de la API.

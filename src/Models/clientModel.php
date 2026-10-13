@@ -92,9 +92,10 @@ class clientModel
                     ':direccion' => $this->normalizeTexto($d['direccion'] ?? null),
                     ':municipio' => $this->normalizeTexto($d['municipio'] ?? null),
                     ':provincia' => $this->normalizeTexto($d['provincia'] ?? null),
-                    // Las columnas son NOT NULL: en alta, "no enviado" = 0.
+                    // Las columnas son NOT NULL. En alta, "no enviado" = sin descuento
+                    // y CON credito (migracion 035: el credito se quita editando el cliente).
                     ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null) ?? 0.0,
-                    ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null) ?? 0
+                    ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null) ?? 1
                 ]);
                 $id = (int) $this->conexion->lastInsertId();
                 // Se devuelve la fila recien creada, no un texto: el front la usa
