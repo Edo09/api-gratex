@@ -209,7 +209,12 @@ final class PosCierre
             // nunca lleva una llave vacia.
             $tipo = $v['tipo_ecf'] === null ? 'Simple' : 'E' . $v['tipo_ecf'];
             $comprobantes[$tipo] = ($comprobantes[$tipo] ?? 0) + 1;
-            $item = ['e_ncf' => $v['e_ncf'], 'total_centavos' => $centavos($v['total'])];
+            $item = ['e_ncf' => self::numero($v), 'total_centavos' => $centavos($v['total'])];
+            if (str_ends_with((string) $v['estado_dgii'], '_ARCHIVADO')) {
+                // Rechazada que ya se reenvio con el mismo numero (Reenviar a la DGII): sigue siendo una venta
+                // (el cobro esta en esta fila y ya se conto arriba), pero ya no hay nada que atender.
+                continue;
+            }
             if (str_contains((string) $v['estado_dgii'], 'RECHAZADO')) {
                 $rechazadas[] = $item;
             } elseif ((int) $v['envio_pendiente'] === 1) {
@@ -280,6 +285,16 @@ final class PosCierre
         return ['registrado' => $propio];
     }
 
+    /**
+     * Con que numero se identifica una venta: su e-NCF o, si no lo tiene (salio como factura
+     * simple, o es la fila archivada de una rechazada ya reenviada), el numero de su factura
+     * (no_factura, que en un e-CF es el mismo e-NCF).
+     */
+    private static function numero(array $v): string
+    {
+        return (string) (($v['e_ncf'] ?? '') !== '' ? $v['e_ncf'] : ($v['no_factura'] ?? ''));
+    }
+
     /** Ventas cobradas del turno abierto de la caja (K9), las mas nuevas primero. */
     public static function ventasDelTurno(posModel $pos, array $caja): array
     {
@@ -289,7 +304,7 @@ final class PosCierre
         }
         $ventas = array_map(static fn(array $v) => [
             'factura_id' => (int) $v['id'],
-            'e_ncf' => $v['e_ncf'],
+            'e_ncf' => self::numero($v),
             'tipo_ecf' => (string) $v['tipo_ecf'],
             'fecha' => $v['date'],
             'total_centavos' => (int) round(((float) $v['total']) * 100),
@@ -327,7 +342,7 @@ final class PosCierre
             }
             $ventas[] = [
                 'factura_id' => (int) $v['id'],
-                'e_ncf' => $v['e_ncf'],
+                'e_ncf' => self::numero($v),
                 'tipo_ecf' => (string) $v['tipo_ecf'],
                 'fecha' => $v['date'],
                 'turno_id' => (int) $v['turno_id'],

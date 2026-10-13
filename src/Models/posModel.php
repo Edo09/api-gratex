@@ -391,7 +391,7 @@ class posModel
     public function ventasCobradasDelTurno(int $turnoId): array
     {
         $stmt = $this->conexion->prepare(
-            "SELECT f.id, f.e_ncf, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago
+            "SELECT f.id, f.e_ncf, f.no_factura, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago
              FROM pos_caja_movimientos m JOIN facturas f ON f.id = m.factura_id
              WHERE m.turno_id = :t AND m.tipo = 'VENTA'
              ORDER BY f.id DESC"
@@ -408,7 +408,7 @@ class posModel
     public function ventasDelEmpleadoEnCaja(int $cajaId, int $empleadoId, string $desde, string $hasta): array
     {
         $stmt = $this->conexion->prepare(
-            "SELECT f.id, f.e_ncf, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago, m.turno_id,
+            "SELECT f.id, f.e_ncf, f.no_factura, f.tipo_ecf, f.estado_dgii, f.envio_pendiente, f.total, f.date, m.forma_pago, m.turno_id,
                     c.razon_social, c.company_name, c.client_name
              FROM pos_turnos t
              JOIN pos_caja_movimientos m ON m.turno_id = t.id AND m.tipo = 'VENTA'
