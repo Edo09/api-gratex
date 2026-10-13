@@ -12,8 +12,12 @@ require_once __DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php';
  * excluye por no ser comprobantes fiscales) y las facturas enviadas que aun no
  * tienen respuesta de la DGII: son ventas reales del negocio aunque el acuse
  * todavia no haya llegado. Para lo fiscal esta el 607, que si exige ACEPTADO.
- * Las filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO) NO entran: no se sabe si
- * la DGII las tiene, y una que nunca llego no fue una venta.
+ * Las filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO) de la APP no entran: no se
+ * sabe si la DGII las tiene, y una que nunca llego no fue una venta (el usuario
+ * recibio un error). Las del POS SI entran (pos_idempotency_key no nulo): ahi el
+ * recibo ya se imprimio y el dinero ya se cobro, y siguen en vuelo mientras la
+ * DGII no contesta o, si el rango autorizado se agoto (sin_rango), hasta que se
+ * registre uno nuevo.
  *
  * Qué cuenta como venta (y qué no):
  *   - E31, E32, E44, E45, E46 y las facturas simples (tipo_ecf NULL): SUMAN.
@@ -118,7 +122,7 @@ class ReporteVentasModel
                 WHERE f.date >= ? AND f.date < ?
                   AND (f.tipo_ecf IS NULL OR f.tipo_ecf IN ({$marcas}))
                   AND f.estado_dgii NOT LIKE '%RECHAZADO%'
-                  AND f.estado_dgii NOT IN (" . EstadosEcf::sql(EstadosEcf::EN_VUELO) . ")";
+                  AND (f.estado_dgii NOT IN (" . EstadosEcf::sql(EstadosEcf::EN_VUELO) . ") OR f.pos_idempotency_key IS NOT NULL)";
 
         $params = [$desde . ' 00:00:00', $this->diaSiguiente($hasta)];
         foreach ($tipos as $t) {

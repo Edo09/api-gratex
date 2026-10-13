@@ -39,7 +39,8 @@ Topes: rango máximo de 5 años, y fechas validadas con `checkdate` (un
 | E34 nota de crédito | sí | **resta** |
 | E41 compras, E43 gastos menores, E47 pagos al exterior | **no** | — |
 | Cualquiera con estado `%RECHAZADO%` | **no** | — |
-| Filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) | **no** | — |
+| Filas de la **app** en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) | **no** | — |
+| Filas del **POS** en vuelo (`pos_idempotency_key` no nulo), incluidas las `sin_rango` | sí | suma |
 
 E41/E43/E47 los genera el emisor por lo que **compra**, no por lo que vende;
 incluirlos inflaría las ventas con gasto propio.
@@ -48,9 +49,15 @@ A diferencia del 607, aquí **sí** entran las facturas simples y las que están
 `ENVIADO` sin respuesta de la DGII: son ventas reales del negocio aunque el acuse
 no haya llegado. El 607 exige `ACEPTADO` porque es una declaración fiscal.
 
-Las filas **en vuelo** (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: guardadas antes del envío y
-sin confirmación de la DGII) no entran: no se sabe si la DGII las tiene. Entran cuando
-soporte las resuelve a un estado de la DGII.
+Las filas de la **app** en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: guardadas antes
+del envío y sin confirmación de la DGII) no entran: no se sabe si la DGII las tiene y el
+usuario recibió un error. Entran cuando soporte las resuelve a un estado de la DGII.
+
+Las del **POS** sí entran aunque sigan en vuelo: el recibo ya se imprimió y el dinero ya se
+cobró. Eso incluye las ventas `sin_rango` (el rango autorizado se agotó) que esperan, días
+si hace falta, a que se registre un rango nuevo. La misma regla aplica a las ventas del
+dashboard (`GET /api/facturas/stats`). Si la DGII luego rechaza una venta del POS, sale del
+reporte como cualquier rechazada.
 
 También se aplica el filtro de ambiente (`AmbienteResolver::active()`), igual que
 listados y stats: la data de certificación no puede contaminar los montos.

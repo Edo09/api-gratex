@@ -302,18 +302,18 @@ X-API-KEY: <key>
 | Campo | Descripción |
 |-------|-------------|
 | `resumen.total_ecf` | Total de e-CFs emitidos (todos los tipos): cuenta filas, las en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`) incluidas |
-| `resumen.monto_total` | Suma de los montos emitidos (RD$): la nota de crédito (E34) suma y los rechazados también. **No** suma las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`): la app todavía no sabe si la DGII las recibió, así que no son dinero |
-| `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y no cuentan los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) ni las filas en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`). Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
+| `resumen.monto_total` | Suma de los montos emitidos (RD$): la nota de crédito (E34) suma y los rechazados también. **No** suma las filas de la app en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`): la app todavía no sabe si la DGII las recibió, así que no son dinero. Las del POS en vuelo (`pos_idempotency_key` no nulo) **sí** suman: el recibo ya se imprimió y el dinero ya se cobró |
+| `resumen.monto_neto` | Monto neto de los mismos e-CF (RD$): la nota de crédito (E34) **resta** y no cuentan los rechazados (`estado_dgii` con `RECHAZADO`: `RECHAZADO`, `RECHAZADO_ARCHIVADO`, `RFCE_RECHAZADO`) ni las filas de la app en vuelo (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`; las del POS sí cuentan). Es el "Monto total" que muestra el listado de comprobantes. Llega como texto (igual que `monto_total`): usar `Number()`. Un backend anterior no lo trae |
 | `resumen.tipos_distintos` | Cantidad de tipos e-CF distintos utilizados |
 | `por_tipo[].tipo_ecf` | Código del tipo (31, 32, 33, …) |
 | `por_tipo[].nombre` | Nombre del tipo |
 | `por_tipo[].total` | Total emitido de este tipo (filas, las en vuelo incluidas) |
-| `por_tipo[].monto_total` | Monto de este tipo (RD$), sin las filas en vuelo |
+| `por_tipo[].monto_total` | Monto de este tipo (RD$), sin las filas de la app en vuelo (las del POS en vuelo suman) |
 | `por_tipo[].aceptados` | Cuántos tienen `estado_dgii = ACEPTADO` |
 | `por_tipo[].rfce` | Cuántos pasaron por flujo RFCE (E32 < 250k) |
 | `por_tipo[].rechazados` | Cuántos fueron rechazados por DGII |
-| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses. e-CF emitidos de **todos** los tipos (incluye E41/E43/E47 de compras), sin rechazados ni filas en vuelo, por `fecha_emision_dgii`. No son ventas |
-| `ventas_por_mes[]` | Ventas en e-CF por mes (`mes`, `total` = documentos, `monto_total` neto), últimos 12 meses. Mismas reglas que el reporte de ventas (`ReporteVentasModel`): suman E31/E32/E44/E45/E46 y E33, **resta** E34, no entran E41/E43/E47, los rechazados ni las filas en vuelo. Por `date`, como el reporte. No incluye facturas simples (ver `GET /api/facturas-simples/stats`) |
+| `por_mes[].mes` | Año-Mes (`YYYY-MM`) — últimos 12 meses. e-CF emitidos de **todos** los tipos (incluye E41/E43/E47 de compras), sin rechazados ni filas de la app en vuelo (las del POS sí cuentan), por `fecha_emision_dgii`. No son ventas |
+| `ventas_por_mes[]` | Ventas en e-CF por mes (`mes`, `total` = documentos, `monto_total` neto), últimos 12 meses. Mismas reglas que el reporte de ventas (`ReporteVentasModel`): suman E31/E32/E44/E45/E46 y E33, **resta** E34, no entran E41/E43/E47, los rechazados ni las filas de la app en vuelo (las del POS en vuelo sí entran: ya se cobraron). Por `date`, como el reporte. No incluye facturas simples (ver `GET /api/facturas-simples/stats`) |
 | `ventas_por_dia[]` | Igual que `ventas_por_mes`, por día (`dia` = `YYYY-MM-DD`), últimos 31 días. Los días sin ventas no vienen |
 | `secuencias[].secuencia_actual` | Último número de secuencia asignado |
 | `por_estado[]` | `estado`, `total` y `monto_total` por cada `estado_dgii`. Trae `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` cuando hay filas en vuelo: el front suma esas dos cubetas para el KPI "Sin confirmar" |

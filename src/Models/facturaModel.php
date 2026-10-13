@@ -1762,10 +1762,12 @@ class facturaModel
         try {
             $ambiente = $this->resolveActiveAmbiente();
             $ambFilter = $ambiente !== null ? "AND ambiente_dgii = '{$ambiente}'" : '';
-            // Filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO): la DGII aun no
-            // dio veredicto, asi que no son dinero ni ventas. Se cuentan como
+            // Filas en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO) de la APP: la DGII aun
+            // no dio veredicto, asi que no son dinero ni ventas. Se cuentan como
             // filas (total_ecf, por_tipo.total, por_estado, total_emitidos)
-            // pero no suman en ningun monto ni serie de ventas.
+            // pero no suman en ningun monto ni serie de ventas. Las del POS
+            // (pos_idempotency_key no nulo) SI suman, como en el reporte de
+            // ventas: el recibo ya se imprimio y el dinero ya se cobro.
             $enVuelo = EstadosEcf::sql(EstadosEcf::EN_VUELO);
             // Los dos criterios que repiten varias consultas, armados una sola vez.
             // $montoSinVuelo: SUM(total) sin las filas en vuelo (resumen.monto_total
@@ -1773,15 +1775,15 @@ class facturaModel
             // cuenta (resumen.monto_neto y, con el AND, $notRechazado). "IS NULL OR
             // (...)": NULL NOT IN (...) da NULL y dejaria fuera una fila sin estado
             // que hoy si cuenta; en el CASE de $montoSinVuelo el NULL cae en ELSE.
-            $montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) THEN 0 ELSE total END), 0)";
-            $estadoCuenta = "estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo}))";
+            $montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) AND pos_idempotency_key IS NULL THEN 0 ELSE total END), 0)";
+            $estadoCuenta = "estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND (estado_dgii NOT IN ({$enVuelo}) OR pos_idempotency_key IS NOT NULL))";
 
-            // monto_total: la suma de los e-CF, sin las filas en vuelo (la
+            // monto_total: la suma de los e-CF, sin las filas en vuelo de la app (la
             // nota de credito suma y los rechazados tambien, como siempre).
             // monto_neto: lo que de verdad se emitio. La nota de credito (E34)
             // resta; no cuentan los rechazados (RECHAZADO, RECHAZADO_ARCHIVADO,
             // RFCE_RECHAZADO, el mismo criterio de $notRechazado mas abajo) ni
-            // las filas en vuelo.
+            // las filas en vuelo de la app.
             $resumen = $this->conexion->query(
                 "SELECT COUNT(*) as total_ecf,
                         {$montoSinVuelo} as monto_total,
@@ -1817,7 +1819,7 @@ class facturaModel
 
             // e-CF emitidos por mes, de todos los tipos (compras E41/E43/E47
             // incluidas). Sin los rechazados (RECHAZADO, RECHAZADO_ARCHIVADO,
-            // RFCE_RECHAZADO) ni las filas en vuelo; conserva NULL/PENDIENTE.
+            // RFCE_RECHAZADO) ni las filas en vuelo de la app; conserva NULL/PENDIENTE.
             // NO son ventas: para eso estan ventas_por_mes / ventas_por_dia, que
             // usan este mismo filtro por $esVenta.
             $notRechazado = "AND ({$estadoCuenta})";

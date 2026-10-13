@@ -878,5 +878,53 @@ wa_chk('control, una fila de la app: RFCE_RECHAZADO y el contador baja a 6',
     $r['status'] === 200 && ($r['json']['data']['estado_dgii'] ?? null) === 'RFCE_RECHAZADO' && wa_contador($pdo, 'E32') === 6, [$r['status'], wa_contador($pdo, 'E32')]);
 wa_limpiar($pdo);
 
+// ===========================================================================
+// Final fix wave F2: una venta del POS en vuelo (PENDIENTE_ENVIO, ENVIO_INCIERTO,
+// con o sin rango autorizado) ya se cobro y se imprimio: cuenta como venta y como
+// dinero en el reporte de ventas y en las estadisticas. Una fila de la app en vuelo
+// sigue sin contar (Release 1: ahi el usuario recibio un error).
+// ===========================================================================
+
+echo "F2) Ventas del POS en vuelo cuentan en el reporte y en las stats; las de la app en vuelo no\n";
+$ids = wa_reiniciar($pdo, $srv);
+$f2PosIncierta = 'E310000000011';
+$f2PosSinRango = 'E320000000012';
+$f2AppIncierta = 'E310000000013';
+$f2AppPendiente = 'E320000000014';
+$f2Aceptada = 'E310000000015';
+wa_fila_pos_sembrada($pdo, $ids, $f2PosIncierta, 'ENVIO_INCIERTO', null, 81);
+$f2IdSinRango = wa_fila_pos_sembrada($pdo, $ids, $f2PosSinRango, 'PENDIENTE_ENVIO', null, 82);
+$pdo->prepare('UPDATE facturas SET respuesta_dgii = :m WHERE id = :id')
+    ->execute([':m' => json_encode(['fase' => 'PENDIENTE_ENVIO', 'sin_rango' => true]), ':id' => $f2IdSinRango]);
+wa_fila_sembrada($pdo, $ids, $f2AppIncierta, 'ENVIO_INCIERTO', null);
+wa_fila_sembrada($pdo, $ids, $f2AppPendiente, 'PENDIENTE_ENVIO', null);
+wa_fila_sembrada($pdo, $ids, $f2Aceptada, 'ACEPTADO', 'track-' . $f2Aceptada);
+$desde = date('Y-m-d', strtotime('-1 day'));
+$hasta = date('Y-m-d', strtotime('+1 day'));
+$r = wa_get($srv, "/api/reportes/ventas?desde={$desde}&hasta={$hasta}");
+$docs = array_column($r['json']['data']['filas'] ?? [], 'documento');
+sort($docs);
+$f2Esperadas = [$f2PosIncierta, $f2PosSinRango, $f2Aceptada];
+sort($f2Esperadas);
+wa_chk('reporte de ventas: 200 con las dos del POS en vuelo y la aceptada; sin las dos de la app en vuelo',
+    $r['status'] === 200 && $docs === $f2Esperadas, [$r['status'], $docs]);
+$r = wa_get($srv, '/api/facturas/stats');
+$stats = $r['json']['data'] ?? [];
+$cerca = static fn(mixed $v, float $x): bool => is_numeric($v) && abs((float) $v - $x) < 0.005;
+$suma = static fn(array $serie): array => [(int) array_sum(array_column($serie, 'total')), round((float) array_sum(array_column($serie, 'monto_total')), 2)];
+$porTipo = static fn(string $t): array => array_values(array_filter($stats['por_tipo'] ?? [], static fn(array $x): bool => (string) ($x['tipo_ecf'] ?? '') === $t))[0] ?? [];
+wa_chk('stats: resumen.total_ecf cuenta las 5 filas', ($stats['resumen']['total_ecf'] ?? null) === 5, $stats['resumen'] ?? null);
+wa_chk('stats: resumen.monto_total suma 3 (las dos del POS en vuelo y la aceptada), no las de la app',
+    $cerca($stats['resumen']['monto_total'] ?? null, 3540.0), $stats['resumen'] ?? null);
+wa_chk('stats: resumen.monto_neto suma las mismas 3', $cerca($stats['resumen']['monto_neto'] ?? null, 3540.0), $stats['resumen'] ?? null);
+wa_chk('stats: por_tipo[31] cuenta 3 filas y suma 2 (la del POS y la aceptada)',
+    ($porTipo('31')['total'] ?? null) === 3 && $cerca($porTipo('31')['monto_total'] ?? null, 2360.0), $porTipo('31'));
+wa_chk('stats: por_tipo[32] cuenta 2 filas y suma 1 (la del POS sin rango)',
+    ($porTipo('32')['total'] ?? null) === 2 && $cerca($porTipo('32')['monto_total'] ?? null, 1180.0), $porTipo('32'));
+wa_chk('stats: ventas_por_dia y ventas_por_mes traen las 3 ventas', $suma($stats['ventas_por_dia'] ?? []) === [3, 3540.0]
+    && $suma($stats['ventas_por_mes'] ?? []) === [3, 3540.0], [$stats['ventas_por_dia'] ?? null, $stats['ventas_por_mes'] ?? null]);
+wa_chk('stats: por_mes (e-CF emitidos) trae las mismas 3', $suma($stats['por_mes'] ?? []) === [3, 3540.0], $stats['por_mes'] ?? null);
+wa_limpiar($pdo);
+
 wa_mock_modo($srv['mock'], 'acepta');
 wa_fin();

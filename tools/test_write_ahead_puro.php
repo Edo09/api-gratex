@@ -891,18 +891,20 @@ $s10Sql = static function (string $marca) use ($s10Con): string {
     return '';
 };
 $enVuelo = "'PENDIENTE_ENVIO', 'ENVIO_INCIERTO'";
-$montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) THEN 0 ELSE total END), 0) as monto_total";
-$notRechazado = "AND (estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo})))";
+// Final fix wave F2: una fila del POS en vuelo cuenta (ya se cobro); solo las de la app quedan fuera.
+$montoSinVuelo = "COALESCE(SUM(CASE WHEN estado_dgii IN ({$enVuelo}) AND pos_idempotency_key IS NULL THEN 0 ELSE total END), 0) as monto_total";
+$estadoCuentaSql = "estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND (estado_dgii NOT IN ({$enVuelo}) OR pos_idempotency_key IS NOT NULL))";
+$notRechazado = "AND ({$estadoCuentaSql})";
 
 wa_chk('stats: corre las 7 consultas', count($s10Con->consultas) === 7, $s10Con->consultas);
 $q = $s10Sql('as total_ecf');
-wa_chk('resumen: monto_total deja fuera las filas en vuelo', str_contains($q, $montoSinVuelo), $q);
+wa_chk('resumen: monto_total deja fuera las filas de la app en vuelo (las del POS suman)', str_contains($q, $montoSinVuelo), $q);
 wa_chk('resumen: total_ecf sigue contando todas las filas', str_contains($q, 'SELECT COUNT(*) as total_ecf,'), $q);
-wa_chk('resumen: monto_neto deja fuera rechazados y filas en vuelo (NULL sigue contando)', str_contains($q,
-    "COALESCE(SUM(CASE WHEN estado_dgii IS NULL OR (estado_dgii NOT LIKE '%RECHAZADO%' AND estado_dgii NOT IN ({$enVuelo})) "
+wa_chk('resumen: monto_neto deja fuera rechazados y filas de la app en vuelo (NULL y las del POS siguen contando)', str_contains($q,
+    "COALESCE(SUM(CASE WHEN {$estadoCuentaSql} "
     . "THEN CASE WHEN tipo_ecf = '34' THEN -total ELSE total END ELSE 0 END), 0) as monto_neto"), $q);
 $q = $s10Sql('GROUP BY tipo_ecf ORDER BY tipo_ecf');
-wa_chk('por_tipo: total sigue siendo COUNT(*) y monto_total sin filas en vuelo',
+wa_chk('por_tipo: total sigue siendo COUNT(*) y monto_total sin filas de la app en vuelo',
     str_contains($q, 'COUNT(*) as total, ' . $montoSinVuelo), $q);
 foreach ([
     'por_mes' => "DATE_FORMAT(fecha_emision_dgii, '%Y-%m') as mes",
@@ -910,7 +912,7 @@ foreach ([
     'ventas_por_dia' => "DATE_FORMAT(date, '%Y-%m-%d') as dia",
 ] as $serie => $marca) {
     $q = $s10Sql($marca);
-    wa_chk("{$serie}: sin rechazados ni filas en vuelo", str_contains($q, $notRechazado), $q);
+    wa_chk("{$serie}: sin rechazados ni filas de la app en vuelo (las del POS cuentan)", str_contains($q, $notRechazado), $q);
 }
 $q = $s10Sql("COALESCE(estado_dgii, 'PENDIENTE') as estado");
 wa_chk('por_estado: igual que antes (cada estado con su cubeta)', $q ===
@@ -960,8 +962,8 @@ $s10RefRep->getProperty('conexion')->setValue($s10Rep, $s10ConRep);
 $s10RefRep->getProperty('usuarios')->setValue($s10Rep, []);   // sin la consulta de usuarios
 (new ReflectionMethod(ReporteVentasModel::class, 'fetchDocumentos'))->invoke($s10Rep, '2026-10-01', '2026-10-31');
 $q = preg_replace('/\s+/', ' ', $s10ConRep->sql);
-wa_chk('reporte de ventas: excluye las filas en vuelo',
-    str_contains($q, "AND f.estado_dgii NOT LIKE '%RECHAZADO%' AND f.estado_dgii NOT IN ({$enVuelo})"), $q);
+wa_chk('reporte de ventas: excluye las filas de la app en vuelo; las del POS (pos_idempotency_key) cuentan',
+    str_contains($q, "AND f.estado_dgii NOT LIKE '%RECHAZADO%' AND (f.estado_dgii NOT IN ({$enVuelo}) OR f.pos_idempotency_key IS NOT NULL)"), $q);
 wa_chk('reporte de ventas: un ? por parametro', substr_count($q, '?') === count($s10ConRep->params), [$q, $s10ConRep->params]);
 wa_chk('reporte de ventas: los mismos parametros de antes', $s10ConRep->params === [
     '2026-10-01 00:00:00', '2026-11-01 00:00:00', '31', '32', '44', '45', '46', '33', '34', 'ecf',
