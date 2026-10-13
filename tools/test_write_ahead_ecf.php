@@ -107,6 +107,8 @@ final class FakeReception extends DgiiReceptionService
 {
     /** @var list<array{metodo:string, e_ncf:?string}> */
     public array $llamadas = [];
+    /** @var list<array> las opciones ($options) de cada envio, en orden */
+    public array $opciones = [];
     public ?Closure $espia = null;
     public ?Closure $reentrada = null;
 
@@ -117,11 +119,13 @@ final class FakeReception extends DgiiReceptionService
 
     public function recibir(string $signedXml, string $bearerToken, array $options = []): array
     {
+        $this->opciones[] = $options;
         return $this->responder('recibir', $signedXml);
     }
 
     public function recibirResumen(string $signedXml, string $bearerToken, array $options = []): array
     {
+        $this->opciones[] = $options;
         return $this->responder('recibirResumen', $signedXml);
     }
 
@@ -989,6 +993,47 @@ foreach (['-1' => null, '' => null, 'abc' => null, '64M' => '134217728', '128m' 
 wa_chk('S7: limiteConHolgura (-1 y basura sin tocar; K/M/G + 64M)',
     $holgura !== null && $obtenidoS7 === ['-1' => null, '' => null, 'abc' => null, '64M' => '134217728', '128m' => '201326592',
         '1G' => '1140850688', '512K' => '67633152', '134217728' => '201326592'], $obtenidoS7);
+
+// ---------------------------------------------------------------------------
+// 4) Opciones del envio que trae master (Task 1): dgii_timeout y formas_pago.
+// El POS las manda en el payload; app.* no, y su emision queda como siempre.
+// ---------------------------------------------------------------------------
+echo "\n== 4) Opciones de master: dgii_timeout y formas_pago ==\n";
+// El total real de la emision de prueba (la tabla de formas de pago lo repite).
+$totalM = (float) emision($pdo, $ids, '31')['payload']['totales']['monto_total'];
+$formasPago = [['forma_pago' => 1, 'monto_pago' => $totalM]];
+
+// M1 sin dgii_timeout (o con uno que no es un entero positivo): solo el ambiente del token.
+foreach ([[], ['dgii_timeout' => 0], ['dgii_timeout' => 'abc']] as $i => $payloadM1) {
+    $r = correr($pdo, $ids, ['payload' => $payloadM1]);
+    wa_chk('M1.' . ($i + 1) . ': el e-CF se envia con solo environment, como siempre',
+        $r['err'] === null && ($r['rec']->opciones[0] ?? null) === ['environment' => 'certecf'], [descErr($r['err']), $r['rec']->opciones]);
+    chkComun('M1.' . ($i + 1), $r);
+}
+
+// M2 e-CF completo con dgii_timeout y formas_pago.
+$r = correr($pdo, $ids, ['payload' => ['dgii_timeout' => 5, 'formas_pago' => $formasPago]]);
+wa_chk('M2: recibir lleva environment y timeout 5',
+    $r['err'] === null && ($r['rec']->opciones[0] ?? null) === ['environment' => 'certecf', 'timeout' => 5]
+    && ($r['rec']->llamadas[0]['metodo'] ?? null) === 'recibir', [descErr($r['err']), $r['rec']->opciones]);
+$xmlM2 = (string) ($r['ctxs']['reservar']['signed_xml'] ?? '');
+wa_chk('M2: el e-CF firmado que se guarda lleva TablaFormasPago con la forma de pago y el monto',
+    str_contains($xmlM2, '<TablaFormasPago>') && str_contains($xmlM2, '<FormaPago>1</FormaPago>')
+    && str_contains($xmlM2, '<MontoPago>' . number_format($totalM, 2, '.', '') . '</MontoPago>'), substr($xmlM2, 0, 800));
+chkComun('M2', $r);
+
+// M3 sin formas_pago el e-CF no lleva la tabla (app.*).
+$r = correr($pdo, $ids);
+wa_chk('M3: sin formas_pago el e-CF firmado no lleva TablaFormasPago',
+    $r['err'] === null && !str_contains((string) ($r['ctxs']['reservar']['signed_xml'] ?? ''), 'TablaFormasPago'), descErr($r['err']));
+chkComun('M3', $r);
+
+// M4 E32 < 250k (RFCE): el resumen sale por recibirResumen con el mismo timeout.
+$r = correr($pdo, $ids, ['tipo' => '32', 'payload' => ['dgii_timeout' => 5, 'formas_pago' => $formasPago]]);
+wa_chk('M4: recibirResumen lleva environment y timeout 5',
+    $r['err'] === null && ($r['rec']->llamadas[0]['metodo'] ?? null) === 'recibirResumen'
+    && ($r['rec']->opciones[0] ?? null) === ['environment' => 'certecf', 'timeout' => 5], [descErr($r['err']), $r['rec']->opciones]);
+chkComun('M4', $r);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega sus casos justo encima de este bloque.

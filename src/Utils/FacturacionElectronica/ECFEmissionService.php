@@ -410,6 +410,11 @@ class ECFEmissionService
             'emisor' => $emisorMerged,
             'comprador' => $payload['comprador'] ?? [],
             'items' => $payload['items'] ?? [],
+            // TablaFormasPago: la misma que lleva el RFCE, para que el e-CF
+            // firmado y su resumen digan lo mismo (el POS la manda; app.* aun
+            // no). En el set de pruebas (strict) se queda como estaba: sin ella.
+            'formas_pago' => !$strictInput && is_array($payload['formas_pago'] ?? null)
+                ? $payload['formas_pago'] : [],
             // Descuentos/recargos globales del documento: solo en el set de
             // pruebas, cuyos totales ya los incluyen. La emision normal calcula
             // los totales de las lineas (EcfItemMapper::totales) y no los
@@ -620,6 +625,14 @@ class ECFEmissionService
             throw $e;
         }
 
+        // Opciones del envio. 'dgii_timeout' (POS, docs/specs/pos.md F6): segundos
+        // de espera al ENVIAR; el resto del sistema usa DGII_ECF_TIMEOUT (30 s) y
+        // el token ya se pidio con ese timeout. Sin la opcion, todo como siempre.
+        $opcionesEnvio = ['environment' => $ambiente];
+        if ((int) ($payload['dgii_timeout'] ?? 0) > 0) {
+            $opcionesEnvio['timeout'] = (int) $payload['dgii_timeout'];
+        }
+
         // Envio. Desde aqui la DGII puede tener el e-CF: ningun fallo devuelve el
         // numero. Con fila reservada, un fallo del envio, del mapeo o de
         // 'confirmar' deja la fila en ENVIO_INCIERTO y sale como
@@ -628,9 +641,7 @@ class ECFEmissionService
         $ok = true;
         try {
             if ($usaRFCE) {
-                $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, [
-                    'environment' => $ambiente,
-                ]);
+                $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, $opcionesEnvio);
 
                 $rfceEstado = $this->mapEstado($rfceReception);
                 $rfceTrackId = $this->extractTrackId($rfceReception);
@@ -655,9 +666,7 @@ class ECFEmissionService
                     $ok = (bool) $persistencia('confirmar', $ctxConfirmar);
                 }
             } else {
-                $reception = $this->reception->recibir($signedXml, $bearerToken, [
-                    'environment' => $ambiente,
-                ]);
+                $reception = $this->reception->recibir($signedXml, $bearerToken, $opcionesEnvio);
 
                 $estado = $this->mapEstado($reception);
                 $trackId = $this->extractTrackId($reception);
@@ -960,6 +969,108 @@ class ECFEmissionService
             default => 1,
         };
         return $bytes > 0 ? (string) ($bytes + 64 * 1048576) : null;
+    }
+
+    /**
+     * Reenvia a la DGII un RFCE ya firmado que quedo pendiente (POS, F7). El que
+     * llama tiene que haber consultado antes (consultarEstadoRFCE) y no haberlo
+     * encontrado: si la DGII ya lo tenia, reenviarlo lo duplicaria.
+     *
+     * @return array{estado: string, response: mixed, status_code: int|null}
+     *   estado: RFCE_ACEPTADO, RFCE_RECHAZADO, RFCE_EN_PROCESO... (mapEstado con prefijo)
+     * Lanza excepcion si tampoco esta vez hay respuesta (sigue pendiente).
+     */
+    public function reenviarRFCE(string $rfceXml, ?string $ambiente = null, ?int $timeout = null): array
+    {
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
+        $opciones = ['environment' => $tokenInfo['ambiente']];
+        if ($timeout !== null && $timeout > 0) {
+            $opciones['timeout'] = $timeout;
+        }
+        $recepcion = $this->reception->recibirResumen($rfceXml, $tokenInfo['token'], $opciones);
+        return [
+            'estado' => 'RFCE_' . $this->mapEstado($recepcion),
+            'response' => $recepcion['data'],
+            'status_code' => $recepcion['status_code'],
+        ];
+    }
+
+    /**
+     * trackIds que la DGII tiene para un e-NCF (ConsultaTrackIds, POS F7): para
+     * saber si un e-CF completo que quedo sin respuesta llego o no. Existe en
+     * testecf y ecf (no en certecf).
+     *
+     * @return array<int,array{trackId:string,estado:?string}>|null
+     *   lista (vacia = la DGII no lo tiene), o null si la respuesta no permite
+     *   saberlo (no reenviar a ciegas).
+     */
+    public function consultarTrackIds(string $eNcf, ?string $ambiente = null): ?array
+    {
+        $emisor = $this->emisorModel()->get();
+        if (!$emisor) {
+            throw new EcfUsuarioException('emisor_config no configurado.', 'Faltan los datos fiscales de tu empresa. Avisa a soporte.');
+        }
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
+        $ruta = 'consultatrackids/api/TrackIds/Consulta?' . http_build_query(['RncEmisor' => $emisor['rnc'], 'Encf' => $eNcf]);
+        // tolerate: el "no existe" es un 404 con cuerpo ProblemDetails; un 404
+        // sin JSON (caida) sigue siendo excepcion.
+        $r = $this->auth->consultarEndpointAutenticado('GET', $ruta, $tokenInfo['token'], null,
+            ['environment' => $tokenInfo['ambiente'], 'tolerate_http_errors' => true]);
+        $data = $r['data'];
+        if ($r['status_code'] === 404) {
+            return [];
+        }
+        if (!is_array($data)) {
+            return null;
+        }
+        $lista = array_is_list($data) ? $data : [$data];
+        $out = [];
+        foreach ($lista as $item) {
+            if (is_array($item) && trim((string) ($item['trackId'] ?? '')) !== '') {
+                $out[] = ['trackId' => trim((string) $item['trackId']), 'estado' => isset($item['estado']) ? (string) $item['estado'] : null];
+            }
+        }
+        if ($out === [] && $r['status_code'] >= 300) {
+            return null;
+        }
+        return $out;
+    }
+
+    /**
+     * Reenvia un e-CF completo ya firmado que quedo sin respuesta (POS, F7). El
+     * que llama tiene que haber confirmado con consultarTrackIds que la DGII no
+     * lo tiene. Lanza excepcion si tampoco esta vez hay respuesta.
+     *
+     * @return array{estado: string, track_id: ?string, response: mixed}
+     */
+    public function reenviarECF(string $signedXml, ?string $ambiente = null, ?int $timeout = null): array
+    {
+        $cert = CertResolver::resolve();
+        $tokenInfo = $this->auth->autenticar([
+            'environment' => $ambiente,
+            'certificate_content' => $cert['content'],
+            'certificate_password' => $cert['password'],
+        ]);
+        $opciones = ['environment' => $tokenInfo['ambiente']];
+        if ($timeout !== null && $timeout > 0) {
+            $opciones['timeout'] = $timeout;
+        }
+        $recepcion = $this->reception->recibir($signedXml, $tokenInfo['token'], $opciones);
+        return [
+            'estado' => $this->mapEstado($recepcion),
+            'track_id' => $this->extractTrackId($recepcion),
+            'response' => $recepcion['data'],
+        ];
     }
 
     /**

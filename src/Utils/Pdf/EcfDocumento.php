@@ -203,10 +203,24 @@ final class EcfDocumento
     }
 
     /**
+     * true si es una venta a credito (TipoPago 2): la del e-CF firmado manda;
+     * sin XML (factura simple, vista previa), la de la fila.
+     */
+    public function esCredito(): bool
+    {
+        $delXml = $this->campoXml('TipoPago');
+        if ($delXml !== '') {
+            return $delXml === '2';
+        }
+        return (int) ($this->factura['tipo_pago'] ?? 1) === 2;
+    }
+
+    /**
      * Fecha limite de pago (dd/mm/aaaa). De contado se paga al emitir: es la
      * fecha de la factura. A credito manda la FechaLimitePago del e-CF firmado;
      * sin XML (factura simple, vista previa) la que pidio el front o, si no, la
-     * misma regla que ECFXmlBuilder aplica al emitir: fecha + 30 dias.
+     * fecha + el plazo de la factura simple (dias_credito, migracion 033). Sin
+     * plazo, la misma regla que ECFXmlBuilder aplica al emitir: 30 dias.
      */
     public function fechaLimitePago(): string
     {
@@ -217,7 +231,8 @@ final class EcfDocumento
         $ts = strtotime($this->fecha()) ?: time();
         if ((int) ($this->factura['tipo_pago'] ?? 1) === 2) {
             $pedida = strtotime((string) ($this->factura['fecha_limite_pago'] ?? ''));
-            $ts = $pedida ?: strtotime('+30 days', $ts);
+            $dias = (int) ($this->factura['dias_credito'] ?? 0);
+            $ts = $pedida ?: strtotime('+' . ($dias > 0 ? $dias : 30) . ' days', $ts);
         }
         return date('d/m/Y', $ts);
     }

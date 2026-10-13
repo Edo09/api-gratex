@@ -169,6 +169,25 @@ class productModel
         }
     }
 
+    /**
+     * Fija (o quita, con null) la foto del producto (migracion 032). Devuelve la
+     * ruta que tenia, para borrar ese archivo, o false si el producto no existe.
+     *
+     * @return string|null|false
+     */
+    public function cambiarImagen(int $id, ?string $imagenPath)
+    {
+        $stmt = $this->conexion->prepare('SELECT imagen_path FROM products WHERE id = :id');
+        $stmt->execute([':id' => $id]);
+        $fila = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($fila === false) {
+            return false;
+        }
+        $stmt = $this->conexion->prepare('UPDATE products SET imagen_path = :p WHERE id = :id');
+        $stmt->execute([':p' => $imagenPath, ':id' => $id]);
+        return $fila['imagen_path'] !== null && $fila['imagen_path'] !== '' ? (string) $fila['imagen_path'] : null;
+    }
+
     public function deleteProduct($id)
     {
         try {

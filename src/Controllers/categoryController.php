@@ -30,6 +30,9 @@ function validateCategory($c): ?string
     if (isset($c->descripcion) && strlen((string) $c->descripcion) > 255) {
         return 'La descripción no debe superar 255 caracteres.';
     }
+    if (isset($c->color) && !categoryModel::colorValido($c->color)) {
+        return 'El color tiene que ser un código HEX de 6 dígitos, como #2E7D32.';
+    }
     return null;
 }
 

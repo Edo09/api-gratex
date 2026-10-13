@@ -490,9 +490,38 @@ class facturaModel
         return round($total, 2);
     }
 
+    /** Plazo de credito mas largo que se acepta, en dias. */
+    public const DIAS_CREDITO_MAX = 365;
+
+    /**
+     * true si $valor sirve como plazo de credito: un entero de 1 a
+     * DIAS_CREDITO_MAX. Vacio tambien sirve (credito sin plazo = 30 dias).
+     */
+    public static function diasCreditoValido($valor): bool
+    {
+        if ($valor === null || $valor === '') {
+            return true;
+        }
+        $dias = filter_var($valor, FILTER_VALIDATE_INT);
+        return $dias !== false && $dias >= 1 && $dias <= self::DIAS_CREDITO_MAX;
+    }
+
+    /**
+     * Plazo que se guarda en facturas.dias_credito (migracion 033). De contado
+     * no hay plazo, y uno invalido tampoco se guarda (el controller ya lo
+     * rechazo). NULL a credito = 30 dias en la RI (EcfDocumento::fechaLimitePago).
+     */
+    private static function diasCredito($valor, int $tipoPago): ?int
+    {
+        if ($tipoPago !== 2 || $valor === null || $valor === '' || !self::diasCreditoValido($valor)) {
+            return null;
+        }
+        return (int) $valor;
+    }
+
     /**
      * Crea una factura no electronica con sus lineas.
-     * @param array $data {no_factura, client_id?, client_name, user_id, date?, NCF?, total?, items[]}
+     * @param array $data {no_factura, client_id?, client_name, user_id, date?, NCF?, total?, tipo_pago?, dias_credito?, items[]}
      * @return array ['success', payload] | ['error', mensaje]
      */
     public function createFacturaSimple(array $data): array
@@ -523,10 +552,11 @@ class facturaModel
             $noFactura = $generaNumero
                 ? $this->nextSimpleFacturaNumber()
                 : (string) $data['no_factura'];
+            $tipoPago = (int) ($data['tipo_pago'] ?? 1);
             $sql = 'INSERT INTO facturas
-                    (no_factura, date, client_id, client_name, user_id, total, tipo_pago, NCF, tipo_ecf)
+                    (no_factura, date, client_id, client_name, user_id, total, tipo_pago, dias_credito, NCF, tipo_ecf)
                     VALUES
-                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, :tipo_pago, :NCF, NULL)';
+                    (:no_factura, :date, :client_id, :client_name, :user_id, :total, :tipo_pago, :dias_credito, :NCF, NULL)';
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':no_factura' => $noFactura,
@@ -538,7 +568,8 @@ class facturaModel
                 ':total' => $total,
                 // Contado por defecto: es la venta de mostrador tipica y el lado
                 // seguro (el credito exige que el cliente lo tenga habilitado).
-                ':tipo_pago' => (int) ($data['tipo_pago'] ?? 1),
+                ':tipo_pago' => $tipoPago,
+                ':dias_credito' => self::diasCredito($data['dias_credito'] ?? null, $tipoPago),
                 ':NCF' => $data['NCF'] ?? null,
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
@@ -565,6 +596,41 @@ class facturaModel
 
     /** Nombre del candado, por base de datos: un tenant no serializa a otro. */
     private const LOCK_SECUENCIA_SIMPLE = "CONCAT(DATABASE(), ':factura_simple_seq')";
+
+    /**
+     * Candado del reenvio de un e-CF rechazado (facturaController::handleReenviar):
+     * dos clics seguidos, o dos usuarios a la vez, mandarian el mismo
+     * comprobante dos veces a la DGII. No espera: si otro reenvio lo tiene, este
+     * se rechaza. Se suelta solo al cerrarse la conexion, al final del request.
+     */
+    public function tomarLockReenvio(int $facturaId): bool
+    {
+        try {
+            $stmt = $this->conexion->prepare("SELECT GET_LOCK(CONCAT(DATABASE(), ':reenvio_ecf:', :id), 0)");
+            $stmt->execute([':id' => $facturaId]);
+            return (int) $stmt->fetchColumn() === 1;
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo tomar el lock de reenvio ' . $facturaId . ': ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Archiva el intento rechazado que un reenvio ya reemplazo, para que no se
+     * pueda reenviar otra vez. Solo si sigue en rechazo: cuando el envio nuevo
+     * reuso su e-NCF, reservarFacturaECF ya lo archivo y esto no hace nada.
+     */
+    public function archivarRechazoReenviado(int $facturaId): void
+    {
+        try {
+            $this->conexion->prepare(
+                "UPDATE facturas SET estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO')
+                 WHERE id = :id AND estado_dgii IN ('RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO')"
+            )->execute([':id' => $facturaId]);
+        } catch (PDOException $e) {
+            error_log('[facturas] no se pudo archivar el rechazo reenviado ' . $facturaId . ': ' . $e->getMessage());
+        }
+    }
 
     /**
      * Toma el candado con nombre que serializa la numeracion de facturas
@@ -775,6 +841,11 @@ class facturaModel
             $clientName = $data['client_name'] ?? $row['client_name'];
             $ncf = array_key_exists('NCF', $data) ? $data['NCF'] : $row['NCF'];
             $tipoPago = array_key_exists('tipo_pago', $data) ? (int) $data['tipo_pago'] : (int) $row['tipo_pago'];
+            // Pasar a contado borra el plazo; seguir a credito sin mandarlo lo conserva.
+            $diasCredito = self::diasCredito(
+                array_key_exists('dias_credito', $data) ? $data['dias_credito'] : ($row['dias_credito'] ?? null),
+                $tipoPago
+            );
 
             $replaceItems = isset($data['items']) && is_array($data['items']);
             $items = $replaceItems ? $this->normalizeSimpleItems($data['items']) : [];
@@ -791,7 +862,7 @@ class facturaModel
             $upd = $this->conexion->prepare(
                 'UPDATE facturas SET no_factura = :no_factura, date = :date,
                         client_id = :client_id, client_name = :client_name,
-                        total = :total, tipo_pago = :tipo_pago, NCF = :NCF
+                        total = :total, tipo_pago = :tipo_pago, dias_credito = :dias_credito, NCF = :NCF
                  WHERE id = :id AND tipo_ecf IS NULL'
             );
             $upd->execute([
@@ -801,6 +872,7 @@ class facturaModel
                 ':client_name' => $clientName,
                 ':total' => $total,
                 ':tipo_pago' => $tipoPago,
+                ':dias_credito' => $diasCredito,
                 ':NCF' => $ncf,
                 ':id' => $id,
             ]);

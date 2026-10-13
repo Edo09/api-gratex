@@ -994,13 +994,18 @@ function wa_grep(array $rutas, string $aguja): array
 }
 
 $s11Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php'));
-$s11Emision = preg_match('/\nfunction handleEmisionECF\(.*?\n\}\n/s', $s11Ctl, $m) ? $m[0] : '';
-wa_chk('controlador: se encontro handleEmisionECF', $s11Emision !== '');
+// Desde el merge con master (4007eea) el cuerpo de la emision vive en
+// emitirFacturaEcf; handleEmisionECF solo lee el body y delega.
+$s11Emision = preg_match('/\nfunction emitirFacturaEcf\(.*?\n\}\n/s', $s11Ctl, $m) ? $m[0] : '';
+wa_chk('controlador: se encontro emitirFacturaEcf', $s11Emision !== '');
+$s11Delega = preg_match('/\nfunction handleEmisionECF\(.*?\n\}\n/s', $s11Ctl, $m) ? $m[0] : '';
+wa_chk('handleEmisionECF lee el body y delega en emitirFacturaEcf',
+    str_contains($s11Delega, 'emitirFacturaEcf($input, $facturaModel, $clientModel);'), $s11Delega);
 $s11Texto = preg_match("/\nconst FACTURA_EMISION_INCIERTA = '([^']*)';/", $s11Ctl, $m) ? $m[1] : null;
 wa_chk('FACTURA_EMISION_INCIERTA es el texto de la spec 4.7, letra por letra', $s11Texto
     === 'No se pudo confirmar si la DGII recibió la factura %s. No la emitas de nuevo: ya quedó guardada. '
     . 'Búscala en Facturación con el filtro Pendientes y, si sigue sin confirmar, avisa a soporte con ese número.', $s11Texto);
-wa_chk('handleEmisionECF emite con el hook de persistencia',
+wa_chk('emitirFacturaEcf emite con el hook de persistencia',
     str_contains($s11Emision, '(new ECFEmissionService())->emitir($payload, $persistencia)'));
 wa_chk('el 502 incierto lleva data con factura_id, e_ncf, tipo_ecf y estado_dgii',
     str_contains($s11Emision, "'error' => sprintf(FACTURA_EMISION_INCIERTA, \$eNcfFila)")
@@ -1050,8 +1055,14 @@ wa_chk('handleConsultarEstado atiende las filas en vuelo antes de la ruta RFCE',
 $s12Filtro = preg_match('/\nfunction normalizeEstadoFilter\(.*?\n\}\n/s', $s12Ctl, $m) ? $m[0] : '';
 wa_chk("normalizeEstadoFilter acepta 'pendiente'", str_contains($s12Filtro, "return 'pendiente';"), $s12Filtro);
 wa_chk('ninguna respuesta lleva puede_reenviar (decision 7)', !str_contains($s12Ctl, 'puede_reenviar'));
-wa_chk('POST /reenviar sigue respondiendo 501 (decision 7)',
-    (bool) preg_match('/function handleReenviar\(.*?\n\{\n\s*respond\(false, [^\n]*, 501\);\n\}/s', $s12Ctl));
+// Decision 7 redefinida (spec 2026-10-12, U7): la app nunca reenvia una factura SIN
+// CONFIRMAR (en vuelo, ENVIADO, EN_PROCESO); solo reemite una RECHAZADA. El
+// handleReenviar de master (4007eea) solo deja pasar los rechazos y contesta
+// 409 al resto; Task 9 lo prueba de punta a punta.
+$s12Reenviar = preg_match('/\nfunction handleReenviar\(.*?\n\}\n/s', $s12Ctl, $m) ? $m[0] : '';
+wa_chk('POST /reenviar solo deja pasar RECHAZADO, RFCE_RECHAZADO y NO_ENCONTRADO; todo lo demas da 409',
+    str_contains($s12Reenviar, "if (!in_array(\$estado, ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO'], true)) {\n"
+        . "        respond(false, 'Solo se puede reenviar un comprobante que la DGII rechazó.', 409);"), $s12Reenviar);
 
 // ---------------------------------------------------------------------------
 // 13) Documentacion del write-ahead (Task 19): anclas de texto en los docs.
@@ -1094,6 +1105,120 @@ wa_chk('architecture.md: ECFEmissionService reserva la fila antes de enviar',
     str_contains($s13Leer('docs/architecture.md'), 'build → firmar → reservar fila → enviar → confirmar; hook `$persistencia`'));
 wa_chk('nada en src, docs ni CLAUDE.md nombra saveFacturaConECF',
     wa_grep(['src', 'docs', 'CLAUDE.md'], 'saveFacturaConECF') === [], wa_grep(['src', 'docs', 'CLAUDE.md'], 'saveFacturaConECF'));
+
+// ---------------------------------------------------------------------------
+// 14) Merge con origin/master (Task 1): lo que master aporto, lo que no entra y
+// lo que el write-ahead conserva. Texto de los archivos, reflexion y las
+// conexiones falsas de las secciones 5 y 6: nada toca la base.
+// ---------------------------------------------------------------------------
+echo "\n== 14) Merge con origin/master ==\n";
+$s14Leer = static fn(string $ruta): string
+    => str_replace("\r\n", "\n", (string) @file_get_contents(dirname(__DIR__) . '/' . $ruta));
+$s14Servicio = $s14Leer('src/Utils/FacturacionElectronica/ECFEmissionService.php');
+$s14Modelo = $s14Leer('src/Models/facturaModel.php');
+$s14Ctl = $s14Leer('src/Controllers/facturaController.php');
+$s14Inv = $s14Leer('src/Models/inventoryModel.php');
+$s14Conflicto = static fn(string $texto): bool => (bool) preg_match('/^(<<<<<<<|=======|>>>>>>>)/m', $texto);
+
+wa_chk('migraciones 032, 033 y 034 de master estan en db/migrations y en el verificador',
+    is_file(dirname(__DIR__) . '/db/migrations/032_producto_imagen.sql')
+    && is_file(dirname(__DIR__) . '/db/migrations/033_facturas_dias_credito.sql')
+    && is_file(dirname(__DIR__) . '/db/migrations/034_categorias_color.sql')
+    && str_contains($s14Leer('tools/verificar_migraciones_tenant.sql'), "SELECT '034', '034_categorias_color.sql'"));
+wa_chk('el POS de master esta (PosVenta, PosCierre, mock local de la DGII)',
+    is_file(dirname(__DIR__) . '/src/Pos/PosVenta.php') && is_file(dirname(__DIR__) . '/src/Pos/PosCierre.php')
+    && is_file(dirname(__DIR__) . '/tools/mock_dgii_local.php'));
+wa_chk('ninguno de los cuatro archivos conflictivos conserva marcas de conflicto',
+    !$s14Conflicto($s14Servicio) && !$s14Conflicto($s14Modelo) && !$s14Conflicto($s14Ctl) && !$s14Conflicto($s14Inv));
+
+// -- ECFEmissionService: flujo write-ahead + lo de master, sin tolerar_fallo_envio
+wa_chk('servicio: sin tolerar_fallo_envio ni los estados RFCE_PENDIENTE / ENVIO_PENDIENTE',
+    !str_contains($s14Servicio, 'tolerar_fallo_envio') && !str_contains($s14Servicio, 'RFCE_PENDIENTE')
+    && !str_contains($s14Servicio, 'ENVIO_PENDIENTE'));
+wa_chk('servicio: el e-CF firmado lleva formas_pago (no en strict_input)',
+    str_contains($s14Servicio, "'formas_pago' => !\$strictInput && is_array(\$payload['formas_pago'] ?? null)"));
+wa_chk("servicio: dgii_timeout entra como \$opcionesEnvio['timeout'] y lo usan recibir y recibirResumen",
+    str_contains($s14Servicio, "\$opcionesEnvio['timeout'] = (int) \$payload['dgii_timeout'];")
+    && substr_count($s14Servicio, '$bearerToken, $opcionesEnvio)') === 2, substr_count($s14Servicio, '$bearerToken, $opcionesEnvio)'));
+$s14Firmas = [
+    'reenviarRFCE' => ['rfceXml', 'ambiente', 'timeout'],
+    'consultarTrackIds' => ['eNcf', 'ambiente'],
+    'reenviarECF' => ['signedXml', 'ambiente', 'timeout'],
+];
+foreach ($s14Firmas as $metodo => $parametros) {
+    $m = method_exists(ECFEmissionService::class, $metodo) ? new ReflectionMethod(ECFEmissionService::class, $metodo) : null;
+    wa_chk("servicio: {$metodo} es publico, con los parametros de master",
+        $m !== null && $m->isPublic() && !$m->isStatic()
+        && array_map(static fn(ReflectionParameter $p): string => $p->getName(), $m->getParameters()) === $parametros);
+}
+wa_chk('servicio: emitir sigue recibiendo el gancho $persistencia (write-ahead)',
+    (new ReflectionMethod(ECFEmissionService::class, 'emitir'))->getNumberOfParameters() === 2
+    && str_contains($s14Servicio, "\$reserva = \$persistencia('reservar', \$ctxReservar);"));
+
+// -- facturaModel: dias_credito, el candado del reenvio y el archivo de rechazos
+wa_chk('facturaModel: tomarLockReenvio y archivarRechazoReenviado de master',
+    method_exists(facturaModel::class, 'tomarLockReenvio') && method_exists(facturaModel::class, 'archivarRechazoReenviado'));
+wa_chk('facturaModel: reservarFacturaECF sigue y saveFacturaConECF no vuelve',
+    method_exists(facturaModel::class, 'reservarFacturaECF') && !method_exists(facturaModel::class, 'saveFacturaConECF'));
+wa_chk('facturaModel: DIAS_CREDITO_MAX es 365',
+    defined('facturaModel::DIAS_CREDITO_MAX') && constant('facturaModel::DIAS_CREDITO_MAX') === 365);
+$s14Dias = [];
+foreach ([null, '', '1', '30', 45, '365', '0', '366', 'abc', '45.5', -5] as $valor) {
+    $s14Dias[] = method_exists(facturaModel::class, 'diasCreditoValido') ? facturaModel::diasCreditoValido($valor) : null;
+}
+wa_chk('facturaModel::diasCreditoValido: vacio y de 1 a 365 sirven; 0, 366, texto y decimales no',
+    $s14Dias === [true, true, true, true, true, true, false, false, false, false, false], $s14Dias);
+$s14DiasMetodo = method_exists(facturaModel::class, 'diasCredito') ? new ReflectionMethod(facturaModel::class, 'diasCredito') : null;
+$s14DiasObtenidos = $s14DiasMetodo === null ? null : [
+    $s14DiasMetodo->invoke(null, '45', 2), $s14DiasMetodo->invoke(null, '45', 1), $s14DiasMetodo->invoke(null, '', 2),
+    $s14DiasMetodo->invoke(null, '999', 2), $s14DiasMetodo->invoke(null, null, 2),
+];
+wa_chk('facturaModel::diasCredito: guarda el plazo solo a credito y valido',
+    $s14DiasObtenidos === [45, null, null, null, null], $s14DiasObtenidos);
+wa_chk('facturaModel: la factura simple guarda dias_credito al crear y al editar',
+    str_contains($s14Modelo, ':dias_credito, :NCF, NULL)') && str_contains($s14Modelo, 'dias_credito = :dias_credito, NCF = :NCF'));
+
+$c = new GuionConexion();
+$c->filas = ['GET_LOCK' => [[1]]];
+$libre = method_exists(facturaModel::class, 'tomarLockReenvio') ? puro_modelo($c)->tomarLockReenvio(41) : null;
+$sqlLock = (string) $c->sql('GET_LOCK');
+wa_chk('tomarLockReenvio: candado libre da true, sin espera y por factura',
+    $libre === true && str_contains($sqlLock, "GET_LOCK(CONCAT(DATABASE(), ':reenvio_ecf:', :id), 0)")
+    && $c->params('GET_LOCK') === [':id' => 41], [$sqlLock, $c->params('GET_LOCK')]);
+$c = new GuionConexion();
+$c->filas = ['GET_LOCK' => [[0]]];
+wa_chk('tomarLockReenvio: candado ocupado da false',
+    method_exists(facturaModel::class, 'tomarLockReenvio') && puro_modelo($c)->tomarLockReenvio(41) === false);
+$c = new GuionConexion();
+$c->prepareFalla = true;
+[$sinBase, $e, $log] = puro_con_log(static fn() => puro_modelo($c)->tomarLockReenvio(41));
+wa_chk('tomarLockReenvio: con la base caida da false y lo deja en el log',
+    $e === null && $sinBase === false && str_contains($log, '[facturas] no se pudo tomar el lock de reenvio 41'), [$e?->getMessage(), $log]);
+$c = new GuionConexion();
+[, $e] = puro_con_log(static fn() => puro_modelo($c)->archivarRechazoReenviado(41));
+$sqlArchivo = (string) $c->sql('UPDATE facturas SET estado_dgii');
+wa_chk('archivarRechazoReenviado: archiva solo si sigue en rechazo (un UPDATE con el estado en el WHERE)',
+    $e === null && str_contains($sqlArchivo, "estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO')")
+    && str_contains($sqlArchivo, "estado_dgii IN ('RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO')")
+    && $c->params('UPDATE facturas SET estado_dgii') === [':id' => 41], [$e?->getMessage(), $sqlArchivo]);
+
+// -- facturaController: la emision de master (emitirFacturaEcf) con el flujo write-ahead
+wa_chk('controlador: emitirFacturaEcf tiene la firma de master',
+    str_contains($s14Ctl, 'function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel $clientModel, ?int $reenvioDe = null): void'));
+wa_chk('controlador: la ruta y handleReenviar llevan el clientModel de master',
+    str_contains($s14Ctl, 'handleReenviar((int) $reenviarMatches[1], $facturaModel, $clientModel);')
+    && str_contains($s14Ctl, 'function handleReenviar(int $facturaId, facturaModel $facturaModel, clientModel $clientModel): void'));
+wa_chk('controlador: armarInputReenvio y campoXmlReenvio de master',
+    str_contains($s14Ctl, 'function armarInputReenvio(array $f, array $guardadas, ?int $userId): array')
+    && str_contains($s14Ctl, 'function campoXmlReenvio(string $xml, string $tag): string'));
+wa_chk('controlador: la respuesta de un reenvio lleva reenvio_de', str_contains($s14Ctl, "\$data['reenvio_de'] = \$reenvioDe;"));
+wa_chk('controlador: handleEstadoEnVuelo y moverStockPrimeraAceptacion siguen (el conflicto de handleReenviar)',
+    str_contains($s14Ctl, 'function handleEstadoEnVuelo(int $facturaId, array $ecf): void')
+    && str_contains($s14Ctl, 'function moverStockPrimeraAceptacion('));
+
+// -- inventoryModel: los dos metodos
+wa_chk('inventoryModel: yaMovioDocumento (write-ahead) y devolverSaldoDeFactura (master)',
+    method_exists(inventoryModel::class, 'yaMovioDocumento') && method_exists(inventoryModel::class, 'devolverSaldoDeFactura'));
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

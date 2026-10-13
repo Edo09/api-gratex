@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..031  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..034  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -55,11 +55,14 @@ CREATE TABLE IF NOT EXISTS categories (
   id INT(11) NOT NULL AUTO_INCREMENT,
   nombre VARCHAR(100) NOT NULL,
   descripcion VARCHAR(255) NULL,
+  color CHAR(7) NULL DEFAULT NULL
+    COMMENT 'Color en el POS, #RRGGBB en mayusculas; unico por categoria. NULL = calculado del nombre',
   estado TINYINT(1) NOT NULL DEFAULT 1 COMMENT '1=activo | 0=inactivo',
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uk_cat_nombre (nombre),
+  UNIQUE KEY uk_cat_color (color),
   KEY idx_cat_estado (estado)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -116,6 +119,9 @@ CREATE TABLE IF NOT EXISTS products (
     COMMENT 'Codigo de unidad de medida DGII (43 = unidad)',
   stock DECIMAL(15,3) NULL COMMENT 'NULL para servicios (sin inventario)',
   stock_minimo DECIMAL(15,3) NULL,
+  -- Migracion 032: foto del producto (src/Utils/ProductImageStorage.php).
+  imagen_path VARCHAR(255) NULL DEFAULT NULL
+    COMMENT 'Foto del producto: ruta relativa al API (public/uploads/productos/...). NULL = sin foto',
   activo TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -270,6 +276,8 @@ CREATE TABLE IF NOT EXISTS facturas (
   total        DECIMAL(18,2)  NOT NULL DEFAULT 0.00,
   tipo_pago TINYINT NOT NULL DEFAULT 1
     COMMENT '1=Contado 2=Credito 3=Gratuito 4=Permuta 5=Otros (codigos DGII)',
+  dias_credito SMALLINT       NULL DEFAULT NULL
+    COMMENT 'Plazo de credito en dias (factura simple). NULL = contado o sin plazo: 30',
   NCF          VARCHAR(50)    NULL,
   tipo_ecf     VARCHAR(2)     NULL
                  COMMENT '31, 32, 33, 34, 41, 43, 44, 45, 46, 47',

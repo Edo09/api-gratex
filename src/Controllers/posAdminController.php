@@ -14,12 +14,15 @@
 //   GET    /api/pos-admin/equipos             -> equipos habilitados
 //   POST   /api/pos-admin/equipos             -> {caja_id, nombre?, reemplazar?} -> {equipo, token}  el token se ve UNA vez
 //   DELETE /api/pos-admin/equipos/{id}        -> revocar
+//   GET    /api/pos-admin/turnos              -> ?caja_id&empleado_id&desde&hasta&limite (K8, M1)
+//   GET    /api/pos-admin/turnos/{id}         -> {turno, reporte} el reporte del cierre, para reimprimir
 //
 // Errores: {status:false, error, codigo}. El codigo es estable (CAJA_OCUPADA,
 // POS_INACTIVO...); el texto es para la persona.
 
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../Models/RoleModel.php';
+require_once __DIR__ . '/../Pos/PosCierre.php';
 require_once __DIR__ . '/../PermissionGate.php';
 require_once __DIR__ . '/../Pos/PosError.php';
 require_once __DIR__ . '/../Pos/PosPin.php';
@@ -205,6 +208,38 @@ try {
                 'equipo' => ['id' => $datos['equipo_id'], 'nombre' => $nombre, 'caja' => $caja],
                 'token' => $datos['token'],
             ]);
+            break;
+
+        // -------------------------------------------------------------- turnos
+        case 'GET turnos':
+            $filtros = [];
+            foreach (['caja_id', 'empleado_id'] as $k) {
+                if (isset($_GET[$k]) && $_GET[$k] !== '') {
+                    if (!ctype_digit((string) $_GET[$k])) {
+                        throw new PosError('Filtro no válido.', 422, 'FILTRO_INVALIDO');
+                    }
+                    $filtros[$k] = (int) $_GET[$k];
+                }
+            }
+            foreach (['desde', 'hasta'] as $k) {
+                if (isset($_GET[$k]) && $_GET[$k] !== '') {
+                    $fecha = DateTime::createFromFormat('!Y-m-d', (string) $_GET[$k]);
+                    if ($fecha === false || $fecha->format('Y-m-d') !== (string) $_GET[$k]) {
+                        throw new PosError('La fecha tiene que ser AAAA-MM-DD.', 422, 'FILTRO_INVALIDO');
+                    }
+                    $filtros[$k] = (string) $_GET[$k];
+                }
+            }
+            $limite = isset($_GET['limite']) && ctype_digit((string) $_GET['limite']) ? (int) $_GET['limite'] : 100;
+            posAdminResponder(200, ['turnos' => array_map([PosCierre::class, 'sinReporte'], $pos->listarTurnos($filtros, $limite))]);
+            break;
+
+        case 'GET turnos :id':
+            $turno = $pos->turnoPorId($id);
+            if ($turno === null) {
+                throw new PosError('Ese turno no existe.', 404, 'TURNO_NO_EXISTE');
+            }
+            posAdminResponder(200, ['turno' => PosCierre::sinReporte($turno), 'reporte' => PosCierre::conNota($turno)]);
             break;
 
         case 'DELETE equipos :id':

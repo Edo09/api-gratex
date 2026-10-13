@@ -90,7 +90,7 @@ class posMasterModel
     public function equipoPorToken(string $tokenHash): ?array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, tenant_id, caja_id, nombre, created_at, last_used,
+            'SELECT id, tenant_id, caja_id, nombre, created_at, last_used, habilitado_por,
                     (bloqueado_hasta IS NOT NULL AND bloqueado_hasta > NOW()) AS bloqueado,
                     GREATEST(TIMESTAMPDIFF(SECOND, NOW(), bloqueado_hasta), 0) AS bloqueo_segundos
              FROM pos_equipos
