@@ -23,8 +23,15 @@ require_once __DIR__ . '/../Models/posModel.php';
 final class PosCierre
 {
     /** Billetes y monedas dominicanos, del mayor al menor (en pesos). */
-    public const DENOMINACIONES = [2000, 1000, 500, 200, 100, 50, 20, 25, 10, 5, 1];
-    public const BILLETES = [2000, 1000, 500, 200, 100, 50, 20];
+    public const DENOMINACIONES = [2000, 1000, 500, 200, 100, 50, 25, 10, 5, 1];
+    public const BILLETES = [2000, 1000, 500, 200, 100, 50];
+    /**
+     * Denominaciones que ya no se cuentan: el billete de 20 salio el 2026-10-13.
+     * El API se despliega antes que el POS, y el POS viejo todavia manda "20": 0
+     * en cada cierre; asi que la clave se acepta EN CERO y se descarta. Con
+     * unidades se rechaza: solo puede venir de una caja sin actualizar.
+     */
+    private const RETIRADAS = [20];
     private const MAX_UNIDADES = 100000;
     private const MAX_OTROS_CENTAVOS = 10000000;
 
@@ -137,7 +144,15 @@ final class PosCierre
             throw new PosError('Cuenta el efectivo de la gaveta.', 422, 'CONTEO_INVALIDO');
         }
         $permitidas = array_merge(array_map('strval', self::DENOMINACIONES), ['otros_centavos']);
-        foreach (array_keys($crudo) as $k) {
+        $retiradas = array_map('strval', self::RETIRADAS);
+        foreach ($crudo as $k => $n) {
+            if (in_array((string) $k, $retiradas, true)) {
+                if ($n !== 0) {
+                    throw new PosError("El billete de RD\${$k} ya no se cuenta. Recarga la página de la caja (Ctrl+F5) y vuelve a contar.",
+                        422, 'CONTEO_INVALIDO');
+                }
+                continue;
+            }
             if (!in_array((string) $k, $permitidas, true)) {
                 throw new PosError('El conteo trae una denominación que no existe.', 422, 'CONTEO_INVALIDO');
             }

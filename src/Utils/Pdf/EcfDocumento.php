@@ -186,9 +186,11 @@ final class EcfDocumento
     }
 
     /**
-     * Vencimiento del e-NCF. La secuencia autorizada vence el 31 de diciembre
-     * del ano de emision — se calcula sobre la fecha de la factura, no sobre
-     * "hoy", para que reimprimir en enero no cambie lo que decia el papel.
+     * Vencimiento del e-NCF. Sin el del XML (E32/E34 no lo llevan), el 31 de
+     * diciembre del ano siguiente al de emision, la misma regla que el default
+     * del XML (ECFXmlBuilder::vencimientoSecuenciaPorDefecto). Se calcula sobre
+     * la fecha de la factura, no sobre "hoy", para que reimprimir en enero no
+     * cambie lo que decia el papel.
      */
     public function fechaVencimiento(): string
     {
@@ -199,7 +201,7 @@ final class EcfDocumento
             return str_replace('-', '/', $delXml);
         }
         $ts = strtotime($this->fecha());
-        return '31/12/' . date('Y', $ts ?: time());
+        return '31/12/' . ((int) date('Y', $ts ?: time()) + 1);
     }
 
     /**

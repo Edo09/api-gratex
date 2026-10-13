@@ -25,9 +25,9 @@
  * E31 0000000008, ... Repetir un e-NCF ya usado lo rechaza DGII.
  *
  * Opcionales de integracion: --fecha-vencimiento-secuencia=31-12-2026 (la del
- * rango autorizado; sin ella se usa el default 31-12-2030 que DGII suele
- * rechazar) y --comprador-rnc / --comprador-razon-social (default: el comprador
- * de prueba de DGII 131880681). El comprador se inyecta en los casos que el plan
+ * rango autorizado; sin ella el server usa el 31-12 del ano siguiente a la
+ * emision, que DGII rechaza si el rango vence otro dia) y --comprador-rnc /
+ * --comprador-razon-social (default: el comprador de prueba de DGII 131880681). El comprador se inyecta en los casos que el plan
  * no lo trae, porque en la ruta app lo aportaba client_id.
  *
  * Y como no hay emisor_config que leer, el emisor va en cada payload:
@@ -48,6 +48,11 @@
  * tools/xml_integracion): es la unica copia a mano, y para los E32 <250k es el
  * XML integro que hay que subir al portal DGII.
  *
+ * Antes de enviar nada verifica la empresa (cert_empresa_preflight.php): el
+ * --emisor-rnc tiene que ser igual a --empresa-rnc si vino (la empresa elegida
+ * en integracion.html) y estar en ambiente 'certecf' segun /integracion/empresas.
+ * --permitir-produccion (solo por CLI) deja pasar otro ambiente.
+ *
  *   # Enviar E34 creando los E31 en la misma corrida:
  *   php tools/send_fase4_simulation.php ... \
  *       --counts=E31:2,E32_gte_250k:0,E32_lt_250k:0,E33:0,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0 \
@@ -60,6 +65,8 @@
  * Para reenviar solo E33/E34 contra E31 ya aceptados:
  *   --refs-e31-file=tools/fase4_no_notes_estados.json --refs-date=27-05-2026
  */
+
+require_once __DIR__ . '/cert_empresa_preflight.php';
 
 const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_CLIENT_ID = 3511;
@@ -136,11 +143,17 @@ function main(array $argv): int
             'razon_social' => trim((string) ($opts['comprador-razon-social'] ?? 'CLIENTE COMPROBANTE TEST SRL')),
         ];
         // Vencimiento del rango autorizado. En la ruta app sale de ncf_sequences;
-        // sin DB hay que decirlo, y el default historico (31-12-2030) no coincide
-        // con el rango real -> "Fecha de vencimiento de secuencia invalida".
+        // sin DB hay que decirlo: el default del server (31-12 del ano siguiente)
+        // solo sirve si el rango vence ese dia; si no, "Fecha de vencimiento de
+        // secuencia invalida".
         $fechaVencSecuencia = isset($opts['fecha-vencimiento-secuencia'])
             ? trim((string) $opts['fecha-vencimiento-secuencia'])
             : null;
+        if ($fechaVencSecuencia === '') {
+            $fechaVencSecuencia = null;
+        }
+        echo 'Vencimiento de secuencia: ' . ($fechaVencSecuencia
+            ?? '31-12-' . ((int) date('Y') + 1) . ' (default del server: 31-12 del ano siguiente)') . "\n";
 
         $emisor = array_filter([
             'rnc' => trim((string) $opts['emisor-rnc']),
@@ -170,6 +183,22 @@ function main(array $argv): int
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
     if ($preloadedE31Refs !== []) {
         fwrite(STDOUT, "==> " . count($preloadedE31Refs) . " referencias E31 precargadas\n");
+    }
+
+    // Integracion: el --emisor-rnc elige la empresa del grupo que emite, y cada
+    // empresa tiene su propio ambiente. Antes de enviar nada: que sea la elegida
+    // y que este en certecf.
+    if ($integracion && !certEmpresaPreflightCli([
+        'api' => $apiBase,
+        'api_key' => $apiKey,
+        'api_secret' => $apiSecret,
+        'rncs' => [$emisor['rnc'] ?? ''],
+        'origen' => '--emisor-rnc',
+        'distinto' => '--emisor-rnc %1$s no coincide con la empresa elegida %2$s.'
+            . ' Corrige el RNC emisor o elige esa empresa en integracion.html',
+        'dry_run' => $dryRun,
+    ] + certEmpresaOpciones($opts))) {
+        return 2;
     }
 
     $results = [];

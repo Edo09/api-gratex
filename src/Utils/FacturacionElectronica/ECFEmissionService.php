@@ -166,6 +166,18 @@ class ECFEmissionService
     }
 
     /**
+     * emisor_config.fecha_vencimiento_secuencia, o null si no esta configurada.
+     * '2030-12-31' es el DEFAULT del esquema (db/tenant_schema.sql), no una
+     * autorizacion de la DGII: cuenta como sin configurar y cae al default
+     * (31-12 del ano siguiente a la emision). Un valor real se respeta.
+     */
+    private static function vencimientoConfigurado($valor): ?string
+    {
+        $v = trim((string) ($valor ?? ''));
+        return ($v === '' || $v === '2030-12-31' || $v === '31-12-2030') ? null : $v;
+    }
+
+    /**
      * Resuelve municipio/provincia de emisor y comprador al código DGII de 6
      * dígitos usando el catálogo. Fail-open: valores sin match quedan intactos.
      */
@@ -421,11 +433,13 @@ class ECFEmissionService
             'e_ncf' => $eNcf,
             'fecha_emision' => $payload['fecha_emision'] ?? date('d-m-Y'),
             // Prioridad: override del payload > vencimiento del RANGO autorizado
-            // que dispenso este e-NCF > emisor_config (legacy) > default.
-            'fecha_vencimiento_secuencia' => $payload['fecha_vencimiento_secuencia']
+            // que dispenso este e-NCF > emisor_config (legacy) > default
+            // (31-12 del ano siguiente al de la emision). Vacio cuenta como no enviado.
+            'fecha_vencimiento_secuencia' => (trim((string) ($payload['fecha_vencimiento_secuencia'] ?? '')) !== ''
+                    ? $payload['fecha_vencimiento_secuencia'] : null)
                 ?? $rangoVencimiento
-                ?? $emisor['fecha_vencimiento_secuencia']
-                ?? '31-12-2030',
+                ?? self::vencimientoConfigurado($emisor['fecha_vencimiento_secuencia'] ?? null)
+                ?? ECFXmlBuilder::vencimientoSecuenciaPorDefecto($payload['fecha_emision'] ?? null),
             'tipo_ingresos' => $payload['tipo_ingresos'] ?? '01',
             'tipo_pago' => array_key_exists('tipo_pago', $payload) ? $payload['tipo_pago'] : 1,
             'fecha_limite_pago' => $payload['fecha_limite_pago'] ?? null,

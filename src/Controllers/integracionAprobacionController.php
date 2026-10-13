@@ -12,8 +12,10 @@
  * decision en master (ecf_recibidos del tenant).
  *
  * Multi-empresa: con `grupo_id` una credencial aprueba por varias empresas.
- * `rnc_comprador` elige cual aprueba (omitirlo = la dueña de la credencial);
- * de ella salen el certificado que firma el ACECF y el ambiente.
+ * `rnc_comprador` elige cual aprueba; de ella salen el certificado que firma el
+ * ACECF y el ambiente. Si una credencial de grupo lo omite, la empresa se deduce
+ * del e-CF recibido (la unica del grupo que lo tiene; 422 si ninguna o varias).
+ * Sin grupo, omitirlo = la dueña de la credencial (como siempre).
  */
 
 header('Access-Control-Allow-Origin: *');
@@ -62,8 +64,8 @@ function handleIntegracionAprobacion(): void
     }
 
     // Multi-empresa: con `grupo_id`, una credencial aprueba por varias empresas.
-    // `rnc_comprador` elige cual de ellas es la que aprueba; omitirlo mantiene el
-    // comportamiento de siempre (la dueña de la credencial).
+    // `rnc_comprador` elige cual de ellas es la que aprueba. Si falta, mas abajo
+    // (ya validados rnc_emisor y e_ncf) se deduce del e-CF recibido.
     if (!empty($input['rnc_comprador'])
         && (string) $input['rnc_comprador'] !== (string) $tenant['rnc']) {
         if (!TenantResolver::switchToSibling((string) $input['rnc_comprador'])) {
@@ -79,7 +81,6 @@ function handleIntegracionAprobacion(): void
         // deben ser los de la empresa que aprueba.
         $tenant = TenantResolver::current();
     }
-    $tenantId = (int) $tenant['id'];
 
     $required = ['rnc_emisor', 'e_ncf', 'fecha_emision', 'monto_total', 'estado'];
     foreach ($required as $field) {
@@ -99,6 +100,33 @@ function handleIntegracionAprobacion(): void
 
     $decision = (string) $input['estado'] === '2' ? 'RECHAZADO' : 'ACEPTADO';
     $store = new IntegracionStoreModel();
+
+    // Credencial de grupo sin rnc_comprador: la compradora es la empresa del
+    // grupo que recibio ese e-CF. Antes se asumia la dueña de la credencial y,
+    // si lo habia recibido un hermano, el ACECF salia con el RNC y el cert
+    // equivocados y la decision no se guardaba en ningun lado. Sin grupo no
+    // entra aqui: sigue siendo la dueña de la credencial.
+    if (empty($input['rnc_comprador']) && TenantResolver::grupoId() !== null) {
+        $empresa = inferirEmpresaCompradora($store, (string) $input['rnc_emisor'], (string) $input['e_ncf']);
+        if (is_string($empresa)) {
+            respondIntegracionApc(false, $empresa, 422);
+            return;
+        }
+        if ((string) $empresa['rnc'] !== (string) $tenant['rnc']) {
+            if (!TenantResolver::switchToSibling((string) $empresa['rnc'])) {
+                // Solo si la empresa se desactivo/desagrupo entre las dos consultas.
+                respondIntegracionApc(
+                    false,
+                    'rnc_comprador (' . $empresa['rnc'] . ', deducido del e-CF recibido) no corresponde'
+                    . ' a la credencial usada ni a una empresa de su grupo.',
+                    422
+                );
+                return;
+            }
+            $tenant = TenantResolver::current();
+        }
+    }
+    $tenantId = (int) $tenant['id'];
 
     // Apuntar al mismo ambiente en que se recibio el e-CF (evita codigo 02). El
     // cliente no elige ambiente (igual que en la emision): si lo manda, se pisa.
@@ -174,6 +202,9 @@ function handleIntegracionAprobacion(): void
         'data' => [
             'rnc_emisor' => $input['rnc_emisor'],
             'e_ncf' => $input['e_ncf'],
+            // Empresa por la que se aprobo (la elegida o la deducida en un grupo).
+            'rnc_comprador' => (string) $tenant['rnc'],
+            'empresa' => (string) ($tenant['nombre'] ?? ''),
             'estado_aprobacion' => $input['estado'],
             'track_id' => $result['track_id'],
             'estado_dgii' => $result['estado'],
@@ -185,10 +216,47 @@ function handleIntegracionAprobacion(): void
     ]);
 }
 
+/**
+ * Empresa del grupo que recibio el e-CF rnc_emisor + e_ncf, o el mensaje del 422
+ * si ninguna o mas de una lo tiene. Busca solo entre las empresas integracion
+ * activas del grupo de la credencial: las unicas con recibidos en el master.
+ *
+ * @return array|string fila de TenantResolver::siblings(), o el mensaje de error
+ */
+function inferirEmpresaCompradora(IntegracionStoreModel $store, string $rncEmisor, string $eNcf): array|string
+{
+    $empresas = array_values(array_filter(
+        TenantResolver::siblings(),
+        fn(array $e) => ($e['tipo'] ?? '') === 'integracion'
+    ));
+    $conRecibido = $store->empresasConRecibido($empresas, $rncEmisor, $eNcf);
+
+    if (count($conRecibido) === 1) {
+        return $conRecibido[0];
+    }
+    if (!$conRecibido) {
+        return 'No hay un e-CF recibido ' . $eNcf . ' de ' . $rncEmisor . ' en ninguna empresa del grupo;'
+            . ' mande rnc_comprador con el RNC de la empresa que lo recibio.';
+    }
+    // Varias empresas lo tienen: la credencial ya puede verlas (GET /empresas),
+    // asi que listar sus RNC no expone nada nuevo y le dice al cliente que elegir.
+    return 'El e-CF ' . $eNcf . ' de ' . $rncEmisor . ' lo recibieron varias empresas del grupo ('
+        . implode(', ', array_column($conRecibido, 'rnc')) . ');'
+        . ' mande rnc_comprador con el RNC de la empresa que aprueba.';
+}
+
 function persistDecision(IntegracionStoreModel $store, int $tenantId, array $input, array $data): void
 {
     try {
-        $store->updateAprobacionComercial($tenantId, (string) $input['rnc_emisor'], (string) $input['e_ncf'], $data);
+        $filas = $store->updateAprobacionComercial($tenantId, (string) $input['rnc_emisor'], (string) $input['e_ncf'], $data);
+        if ($filas === 0) {
+            // El e-CF no esta en los recibidos de esa empresa (o se repitio la
+            // misma decision en el mismo segundo: MySQL cuenta filas cambiadas).
+            // No cambia la respuesta al cliente; queda la pista para soporte.
+            error_log('[integracionAprobacion] AVISO: decision sin persistir, 0 filas en ecf_recibidos'
+                . ' (tenant_id=' . $tenantId . ', rnc_emisor=' . ($input['rnc_emisor'] ?? '?')
+                . ', e_ncf=' . ($input['e_ncf'] ?? '?') . ')');
+        }
     } catch (Throwable $e) {
         error_log('[integracionAprobacion] no se pudo persistir decision ('
             . ($input['e_ncf'] ?? '?') . '): ' . $e->getMessage());

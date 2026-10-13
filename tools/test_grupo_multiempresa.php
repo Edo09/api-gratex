@@ -18,16 +18,23 @@
  *             cualquiera podria emitir por un tenant ajeno. Corre contra SQLite,
  *             que comparte con MySQL la semantica ternaria de NULL en `=`.
  *
+ *   Parte 3 — Deduccion de la empresa compradora en la aprobacion comercial
+ *             (IntegracionStoreModel::empresasConRecibido, el metodo real con
+ *             un PDO SQLite inyectado). Una credencial de grupo que no manda
+ *             rnc_comprador aprueba por la UNICA empresa del grupo que recibio
+ *             el e-CF; ninguna o varias = 422 en el controller.
+ *
  * Uso:
  *   php tools/test_grupo_multiempresa.php
  *
- * La Parte 2 necesita pdo_sqlite; si no esta activo se salta con aviso (la
- * Parte 1 corre siempre). Para forzarlo:
+ * Las Partes 2 y 3 necesitan pdo_sqlite; si no esta activo se saltan con aviso
+ * (la Parte 1 corre siempre). Para forzarlo:
  *   php -d extension=php_pdo_sqlite.dll tools/test_grupo_multiempresa.php  (Windows)
  *   php -d extension=pdo_sqlite tools/test_grupo_multiempresa.php          (Linux)
  */
 
 require_once __DIR__ . '/../src/TenantResolver.php';
+require_once __DIR__ . '/../src/Models/IntegracionStoreModel.php';
 
 $fallos = 0;
 $total = 0;
@@ -155,6 +162,73 @@ if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
     $rncs = $stmt->fetchAll(PDO::FETCH_COLUMN);
     $chk('grupo 1 lista exactamente las 3 activas (la desactivada queda fuera)',
         $rncs === ['131111111', '131111112', '131111113']);
+}
+
+// =============================================================================
+// Parte 3 — Deduccion de la empresa compradora (aprobacion comercial)
+// =============================================================================
+echo "\n== Parte 3: empresa compradora deducida del e-CF recibido ==\n\n";
+
+if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+    echo "  (SALTADA: pdo_sqlite no esta activo. Ver la cabecera de este archivo.)\n";
+} else {
+    $pdo = new PDO('sqlite::memory:', null, null, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+    ]);
+    // Solo las columnas que usa la consulta.
+    $pdo->exec('CREATE TABLE ecf_recibidos (
+        id INTEGER PRIMARY KEY, tenant_id INTEGER, rnc_emisor TEXT, e_ncf TEXT
+    )');
+    $recibidos = [
+        // tenant_id, rnc_emisor,  e_ncf
+        [2, '131222333', 'E310000000010'], // solo la empresa 2
+        [2, '131222333', 'E310000000010'], // reenvio de DGII: misma empresa, otra fila
+        [1, '131222333', 'E310000000011'], // solo la cabeza
+        [1, '131222333', 'E310000000012'], // cabeza y empresa 3: ambiguo
+        [3, '131222333', 'E310000000012'],
+        [5, '131222333', 'E310000000013'], // solo un tenant FUERA del grupo
+        [3, '139999999', 'E310000000014'], // mismo e-NCF, otro emisor
+    ];
+    $ins = $pdo->prepare('INSERT INTO ecf_recibidos (tenant_id, rnc_emisor, e_ncf) VALUES (?,?,?)');
+    foreach ($recibidos as $r) {
+        $ins->execute($r);
+    }
+
+    // Lo que devuelve TenantResolver::siblings() para el grupo 1 (la cabeza
+    // tiene grupo_id = su propio id; la desactivada no viene).
+    $grupo = [
+        ['id' => 1, 'nombre' => 'Cliente Empresa 1', 'rnc' => '131111111', 'tipo' => 'integracion', 'ambiente' => 'ecf'],
+        ['id' => 2, 'nombre' => 'Cliente Empresa 2', 'rnc' => '131111112', 'tipo' => 'integracion', 'ambiente' => 'certecf'],
+        ['id' => 3, 'nombre' => 'Cliente Empresa 3', 'rnc' => '131111113', 'tipo' => 'integracion', 'ambiente' => 'certecf'],
+    ];
+    $store = new IntegracionStoreModel($pdo);
+    $rncsCon = fn(string $rncEmisor, string $eNcf): array
+        => array_column($store->empresasConRecibido($grupo, $rncEmisor, $eNcf), 'rnc');
+
+    $casos = [
+        // descripcion                                          emisor       e-NCF            esperado
+        ['lo recibio un hermano -> 1, se salta a el',           '131222333', 'E310000000010', ['131111112']],
+        ['lo recibio la cabeza -> 1, sin salto',                '131222333', 'E310000000011', ['131111111']],
+        ['lo recibieron dos -> ambiguo (422)',                  '131222333', 'E310000000012', ['131111111', '131111113']],
+        ['nadie lo recibio -> 0 (422)',                         '131222333', 'E310000000099', []],
+        ['solo lo tiene un tenant fuera del grupo -> 0 (422)',  '131222333', 'E310000000013', []],
+        ['mismo e-NCF de otro emisor no cuenta -> 0 (422)',     '131222333', 'E310000000014', []],
+    ];
+    foreach ($casos as [$desc, $rncEmisor, $eNcf, $esperado]) {
+        $chk(sprintf('%-52s (%s)', $desc, $eNcf), $rncsCon($rncEmisor, $eNcf) === $esperado);
+    }
+
+    $fila = $store->empresasConRecibido($grupo, '131222333', 'E310000000010');
+    $chk('devuelve la fila completa de la empresa (id, nombre, ambiente)',
+        count($fila) === 1 && $fila[0]['id'] === 2 && $fila[0]['nombre'] === 'Cliente Empresa 2');
+
+    // Sin empresas no consulta: contra una base SIN la tabla, una consulta reventaria.
+    $vacia = new IntegracionStoreModel(new PDO('sqlite::memory:', null, null, [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+    ]));
+    $chk('lista de empresas vacia -> [] sin consultar la DB',
+        $vacia->empresasConRecibido([], '131222333', 'E310000000010') === []);
 }
 
 echo "\n" . ($fallos === 0

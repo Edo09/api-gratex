@@ -63,10 +63,15 @@ Cliente con varias empresas: `--grupo=self` la primera (su `tenant_id` pasa a se
 una con **su** `.p12` y su propia certificación DGII; comparten credencial. Para certificarlas
 con la credencial del grupo, `public/integracion.html` muestra arriba un selector **Empresa**:
 las consultas (pasos 3, 4, 8), la aprobación (paso 5) y el emisor precargado (pasos 2 y 6) van
-a nombre de la elegida. Las fases 2 y 3 toman la empresa del xlsx y la 4 del "RNC emisor".
+a nombre de la elegida. Las fases 2 y 3 toman la empresa del xlsx y la 4 del "RNC emisor", y
+el runner no envía nada si no es la elegida o no está en `certecf` — ver
+[Certificar las empresas de un grupo](#certificar-las-empresas-de-un-grupo).
 
 Del resumen guardar: **`tenant_id`**, **`api_key`** y **`api_secret`**. El secret se
 imprime **una sola vez** (el master guarda solo su sha256) — entregarlo por canal seguro.
+En un grupo se entrega **solo el par de la cabeza**: el de cada hermana también abre todo el
+grupo, no se entrega, y cuando ya no haga falta se desactiva con
+`UPDATE tenants SET api_secret_hash = '' WHERE id = <id>;`.
 
 ---
 
@@ -78,7 +83,9 @@ mysql -e "SELECT id, rnc, tipo, ambiente, activo FROM gratex_master.tenants WHER
 
 Tiene que decir `integracion` / `certecf` / `1`. **El ambiente lo fuerza el servidor desde
 ahí**: no hay parámetro que lo cambie, y los runners rechazan `--ambiente` justamente para
-que nadie crea que va a pruebas cuando el tenant está en `ecf`.
+que nadie crea que va a pruebas cuando el tenant está en `ecf`. En su lugar, antes de enviar
+consultan `GET /integracion/empresas` y no envían nada si la empresa no está en `certecf`.
+Con grupo, cada empresa tiene su propio ambiente: verificarlo para la que se va a certificar.
 
 Smoke de credenciales (no toca DGII):
 
@@ -113,11 +120,49 @@ curl "https://gratex.net/api/integracion/estado?e_ncf=<e_ncf>&track_id=<track_id
 
 ---
 
+## Certificar las empresas de un grupo
+
+Con credencial de grupo la **misma** `api_key`+`api_secret` emite por todas las empresas, y
+cada una tiene su `.p12`, su ambiente y su certificación DGII. Lo típico: la cabeza ya está
+en `ecf` mientras las hermanas certifican en `certecf`.
+
+- **Elegir la empresa en el selector "Empresa"** de `public/integracion.html` (arriba). Sin
+  elección guardada arranca en la primera empresa en `certecf`, no en la cabeza. Los pasos 2
+  y 6 muestran la empresa elegida y su ambiente; fuera de `certecf`, en rojo.
+- **Una empresa a la vez:** su xlsx, sus fases 2 → 3 → 4 y sus XML íntegros (paso 8); recién
+  después la siguiente. La página guarda solo la última corrida, con su empresa: los pasos 3 y
+  8 consultan esos e-NCF a nombre de esa empresa (si el selector está en otra, lo cambian y lo
+  avisan; si la empresa no es de la credencial, no los cargan).
+- **Guardas.** Los runners salen antes de enviar nada, sin tocar DGII:
+
+| Mensaje | Qué pasó |
+|---|---|
+| `El xlsx es de RNC X, la empresa elegida es Y` | Se subió el xlsx de otra empresa (fase 2 mira `RNCEmisor`, fase 3 `RNCComprador`). Corre también en dry-run |
+| `--emisor-rnc X no coincide con la empresa elegida Y` | Fase 4: el "RNC emisor" no es la empresa del selector |
+| `El set mezcla varias empresas (...)` | Las filas a enviar traen más de un RNC |
+| `N filas de ACEECF_Generadas sin RNCComprador` | Fase 3: esas aprobaciones saldrían a nombre de la dueña de la credencial |
+| `La credencial no cubre el RNC X` | Ese RNC no es de la credencial ni de su grupo |
+| `La empresa N (RNC X) esta en ambiente 'ecf', no en certecf` | El set saldría como e-CF reales. Desde la página no se puede forzar |
+| `No se pudo verificar la empresa: GET /integracion/empresas respondio HTTP …` | Falla cerrado: sin saber el ambiente no se envía |
+| Paso 2: confirmación *"ATENCIÓN: … e-CF REAL de producción"* | El e-CF suelto del paso 2 va directo al API (no pasa por los runners): para una empresa fuera de `certecf` pide confirmar |
+
+- **Por CLI:** `--empresa-rnc=<rnc>` hace el mismo chequeo que la página (`cert_run.php` lo
+  pasa con la empresa del selector). `--permitir-produccion` deja enviar a una empresa que no
+  está en `certecf`: existe solo por CLI, a propósito — `cert_run.php` nunca lo pasa. En modo
+  app (sin `--api-secret`) los dos se ignoran.
+
+```powershell
+php tools/send_fase2.php <set.xlsx> --api=https://gratex.net/api `
+  --api-key=<key-del-grupo> --api-secret=<secret> --empresa-rnc=<rnc-de-la-empresa>
+```
+
+---
+
 ## Fase 5 — Set de pruebas
 
-El e-NCF de cada caso sale del xlsx de DGII. Lo normal es correrlo desde la consola
+El e-NCF de cada caso sale del xlsx de DGII. Lo normal es correrlo desde
 `public/integracion.html` (paso 6, "Correr fase 2"), que sube el xlsx a `cert_run.php` y corre
-este mismo runner en el server. Por consola:
+este mismo runner en el server. Por CLI:
 
 ```powershell
 php tools/send_fase2.php <set.xlsx> --api=https://gratex.net/api `
@@ -141,7 +186,7 @@ php tools/check_fase2_status.php --api=https://gratex.net/api `
 - Si DGII rechaza **cualquier** comprobante, reinicia el set completo: hay que pasarlo
   limpio en una corrida.
 - **Notas (E33/E34):** el runner las manda al final y, antes de la primera, consulta en la
-  DGII todo lo que envió (`--nota-wait-accepted`, default 300 s; en la consola, la casilla
+  DGII todo lo que envió (`--nota-wait-accepted`, default 300 s; en integracion.html, la casilla
   "Esperar a que la DGII acepte…"). Si la DGII rechazó algo, **no manda las notas** y muestra
   el motivo de cada rechazo: el rechazo ya reinició el set y una nota enviada después cae con
   *"El eNCF modificado no ha sido emitido"* (614). Si se agota el tiempo con algo aún en
@@ -149,10 +194,10 @@ php tools/check_fase2_status.php --api=https://gratex.net/api `
   parcial (filtro E33,E34, o `--case`) consulta también el último envío del resto del set por
   e-NCF: tras un reinicio los originales siguen diciendo ACEPTADO, y solo el rechazo de otra
   pieza lo delata.
-- Para ver por qué la DGII rechazó cada comprobante: consola, paso 3 → "Consultar varios"
-  (o un e-NCF a la vez). Busca el `track_id` en `master.ecf_integracion_backup` y devuelve los
-  `mensajes` de ConsultaResultado. `cert_run.php` borra el reporte de la corrida al terminar;
-  la consola conserva la salida en el navegador y la deja descargar.
+- Para ver por qué la DGII rechazó cada comprobante: integracion.html, paso 3 → "Consultar
+  varios" (o un e-NCF a la vez). Busca el `track_id` en `master.ecf_integracion_backup` y
+  devuelve los `mensajes` de ConsultaResultado. `cert_run.php` borra el reporte de la corrida al
+  terminar; la página de integración conserva la salida en el navegador y la deja descargar.
 - Después de un reinicio se reenvía el **mismo xlsx**: los e-NCF rechazados vuelven con
   `secuenciaUtilizada: false`, y el respaldo del master no tiene unique por e-NCF (la consulta
   sin `track_id` toma el envío más reciente).
@@ -250,7 +295,8 @@ repite e-NCF y DGII los rechaza.
 | `La propiedad X no es válida debido a que el valor enviado (200) no coincide con el valor (200.00)` | La DGII compara el texto contra su set. Pasó con `DescuentoMonto` (corregido: en el set los montos se firman con el texto exacto del xlsx, también enteros como `3752`) | Comparar el XML contra el set antes de reenviar: un solo rechazo reinicia todo |
 | `La firma del XML no es válida` (y la firma sí es válida) | Retornos de carro (`\r`) en textos del payload | El backend normaliza y bloquea, pero conviene normalizar en el origen |
 | `404` en `/integracion/estado` | No hay respaldo de ese e-NCF, o es un RFCE sin `track_id` | Mandar `track_id`, o `codigo_seguridad` si es E32 <250k |
-| `NO_ENCONTRADO` al consultar estado | `track_id` de otro ambiente, o el envío nunca llegó | Confirmar el ambiente del tenant y reintentar la emisión |
+| `NO_ENCONTRADO` al consultar estado | Se consultó a nombre de otra empresa del grupo, `track_id` de otro ambiente, o el envío nunca llegó | **Primero verificar la empresa** antes de reemitir: el `rnc` de la respuesta (o el `?rnc=` de la consulta; en integracion.html, la columna Empresa) tiene que ser el de la empresa que emitió. Después confirmar el ambiente de esa empresa y, solo entonces, reintentar la emisión |
+| `... esta en ambiente 'ecf', no en certecf` al correr una fase | La empresa elegida es la cabeza (ya en producción) o ya se promovió | Elegir en el selector la empresa que certifica — ver [Certificar las empresas de un grupo](#certificar-las-empresas-de-un-grupo) |
 | `RNC comprador (X) no registrado` al recibir | El RNC del tenant no coincide con el `RNCComprador` del XML, o `activo=0` | Corregir `tenants.rnc` / reactivar |
 
 ---

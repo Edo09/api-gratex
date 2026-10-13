@@ -173,7 +173,7 @@ echo "\n2. Otro cajero no puede cerrar el turno de Ana sin supervisor (K4, S1)\n
 $bea = $entrar('Bea', $eq1);
 [$h, $r] = $api('POST', '/pos/eventos', ['tipo' => 'quitada', 'monto_centavos' => 999], $bea);
 $chk('evento de quien no tiene turno: solo bitacora, no suma al de Ana', $h === 200 && ($r['data']['registrado'] ?? true) === false, [$h, $r]);
-$cuentaAna = $conteo(['1000' => 1, '500' => 1, '200' => 1, '100' => 1, '20' => 1, '5' => 1, '1' => 4], 25); // 1,829.25
+$cuentaAna = $conteo(['1000' => 1, '500' => 1, '200' => 1, '100' => 1, '10' => 2, '5' => 1, '1' => 4], 25); // 1,829.25 (RD$20 = dos monedas de 10)
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => $cuentaAna], $bea);
 $chk('Bea (cajera) sin permiso: 403 PERMISO_INVALIDO', $h === 403 && ($r['codigo'] ?? '') === 'PERMISO_INVALIDO', [$h, $r]);
 [$h, $r] = $api('POST', '/pos/autorizar', ['pin' => $pines['Bea'], 'accion' => 'cerrar_turno', 'turno_id' => $turnoAna], $bea);
@@ -197,6 +197,9 @@ $alterado = substr($permiso, 0, -1) . (substr($permiso, -1) === 'a' ? 'b' : 'a')
 $chk('permiso alterado: 403', $h === 403 && ($r['codigo'] ?? '') === 'PERMISO_INVALIDO', [$h, $r]);
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => ['3' => 1] + $cuentaAna, 'permiso' => $permiso], $bea);
 $chk('denominacion que no existe (RD$3): 422', $h === 422 && ($r['codigo'] ?? '') === 'CONTEO_INVALIDO', [$h, $r]);
+[$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => ['20' => 1] + $cuentaAna, 'permiso' => $permiso], $bea);
+$chk('billete de 20 (retirado) con unidades: 422, pide recargar la caja', $h === 422 && ($r['codigo'] ?? '') === 'CONTEO_INVALIDO'
+    && str_contains((string) ($r['error'] ?? ''), 'RD$20'), [$h, $r]);
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna, 'conteo' => ['100' => -1] + $cuentaAna, 'permiso' => $permiso], $bea);
 $chk('cantidad negativa: 422', $h === 422 && ($r['codigo'] ?? '') === 'CONTEO_INVALIDO', [$h, $r]);
 [$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoAna + 999, 'conteo' => $cuentaAna, 'permiso' => $permiso], $bea);
@@ -248,11 +251,14 @@ $bea = $entrar('Bea', $eq1);
 $turnoBea = (int) ($r['data']['turno_caja']['id'] ?? 0);
 $chk('Bea abre su turno con la caja vacia (despues del cierre de Ana)', $h === 201 && $turnoBea > 0, [$h, $r]);
 $vender($bea, [['product_id' => $agua, 'cantidad' => 1]], 2500, 1, 2500);
-[$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoBea, 'conteo' => $conteo(['20' => 1, '5' => 1])], $bea);
+// "20": 0 es lo que manda un POS sin actualizar (el API se despliega antes): se acepta y se descarta.
+[$h, $r] = $api('POST', '/pos/turno/cerrar', ['turno_id' => $turnoBea, 'conteo' => $conteo(['10' => 2, '5' => 1, '20' => 0])], $bea);
 $rep = $r['data']['reporte'] ?? [];
 $chk('Bea cierra su turno sin supervisor: esperado 25.00, contado 25.00, diferencia 0', $h === 200
     && $rep['esperado_centavos'] === 2500 && $rep['contado_centavos'] === 2500 && $rep['diferencia_centavos'] === 0
     && ($rep['cerrado_por']['nombre'] ?? '') === 'Bea', [$h, $r]);
+$chk('un POS viejo que manda "20": 0 cierra igual, y el conteo guardado ya no trae el 20',
+    $h === 200 && !array_key_exists('20', $rep['conteo'] ?? ['20' => 0]), $rep['conteo'] ?? $r);
 $chk('sin ventas canceladas ni lineas quitadas en su turno (las de antes eran de Ana)',
     ($rep['canceladas'] ?? []) === ['cantidad' => 0, 'monto_centavos' => 0] && $rep['lineas_quitadas'] === ['cantidad' => 0, 'monto_centavos' => 0], $rep);
 

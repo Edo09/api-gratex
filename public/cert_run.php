@@ -13,6 +13,8 @@
  *     client_id  = id del comprador de prueba (en la tabla clients del tenant)
  *     user_id    = id del usuario emisor (opcional)
  *     xlsx       = archivo del set de pruebas DGII (fase 2 y 3)
+ *     empresa_rnc = solo integracion (opcional): RNC de la empresa elegida; el
+ *                  runner aborta si el set es de otra (--empresa-rnc)
  *     [api, filter, case, exclude, counts, nota-wait-accepted, nota-poll, dry-run]
  *
  * La salida es texto plano en vivo (progreso del runner).
@@ -71,6 +73,16 @@ if ($apiKey === '') {
 $apiSecret = (string) ($_REQUEST['api_secret'] ?? '');
 $esIntegracion = $apiSecret !== '';
 
+// Empresa elegida en integracion.html. Con credencial de grupo el RNC del set
+// elige la empresa, y cada una tiene su ambiente: el runner aborta antes de
+// enviar si el set es de otra. Se valida antes de crear temporales. Solo
+// integracion: el wizard app (cert.html) no la manda.
+$empresaRnc = $esIntegracion ? trim((string) ($_REQUEST['empresa_rnc'] ?? '')) : '';
+if ($empresaRnc !== '' && !preg_match('/^\d{9,11}$/', $empresaRnc)) {
+    http_response_code(422);
+    exit("empresa_rnc invalido: son 9 a 11 digitos.\n");
+}
+
 $tmpFiles = [];
 $tmpOut = tempnam(sys_get_temp_dir(), 'cert_out_');
 $tmpFiles[] = $tmpOut;
@@ -98,6 +110,11 @@ $argv[] = '--api-key=' . $apiKey;
 if ($esIntegracion) {
     $argv[] = '--api-secret=' . $apiSecret;
     echo "== modo INTEGRACION: /api/integracion/* ==" . PHP_EOL;
+    // El runner ademas consulta /integracion/empresas y aborta si la empresa no
+    // esta en certecf. --permitir-produccion NUNCA sale de aqui: solo por CLI.
+    if ($empresaRnc !== '') {
+        $argv[] = '--empresa-rnc=' . $empresaRnc;
+    }
 
     // Fase 4 no lee xlsx: el e-NCF lo asigna el runner y el emisor va en cada
     // payload (sin DB no hay ncf_sequences ni emisor_config que consultar).

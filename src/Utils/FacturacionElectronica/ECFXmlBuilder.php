@@ -178,7 +178,8 @@ class ECFXmlBuilder
         if ($cfg['fecha_vence']) {
             $idDoc->appendChild($doc->createElement(
                 'FechaVencimientoSecuencia',
-                $this->formatDate($data['fecha_vencimiento_secuencia'] ?? '31-12-2030')
+                $this->formatDate($data['fecha_vencimiento_secuencia']
+                    ?? self::vencimientoSecuenciaPorDefecto($data['fecha_emision'] ?? null))
             ));
         }
 
@@ -745,6 +746,21 @@ class ECFXmlBuilder
     {
         $ts = strtotime((string) ($data['fecha_emision'] ?? '')) ?: time();
         return date('d-m-Y', strtotime('+30 days', $ts));
+    }
+
+    /**
+     * Vencimiento de secuencia cuando nadie lo da (integracion sin el campo):
+     * 31-12 del ano siguiente al de la emision, como la DGII suele autorizar
+     * los rangos. Si la autorizacion real vence otro dia la DGII rechaza con
+     * "Fecha de vencimiento de secuencia invalida": ahi hay que mandar la real.
+     */
+    public static function vencimientoSecuenciaPorDefecto(?string $fechaEmision): string
+    {
+        $anio = (int) date('Y');
+        if ($fechaEmision !== null && preg_match('/\b(\d{4})\b/', $fechaEmision, $m)) {
+            $anio = (int) $m[1];
+        }
+        return '31-12-' . ($anio + 1);
     }
 
     private function formatDate(string $date): string

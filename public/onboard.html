@@ -29,6 +29,7 @@
   button:disabled { opacity:.6; cursor:not-allowed; }
   h2 { font-size:14px; margin:18px 0 0; color:var(--accent); border-top:1px solid var(--line); padding-top:14px; }
   .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  .note { font-size:13px; color:var(--accent); font-weight:600; margin-top:6px; }
   pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px;
         white-space:pre-wrap; word-break:break-word; font-size:13px; max-height:340px; overflow:auto; }
   .result.ok { border-color:var(--ok); }
@@ -57,11 +58,13 @@
       </div>
       <div>
         <label class="req">Ambiente</label>
-        <select name="ambiente">
+        <select name="ambiente" id="ambiente" required>
+          <option value="" selected>— elegir —</option>
+          <option value="certecf">certecf (certificación)</option>
           <option value="ecf">ecf (producción)</option>
-          <option value="certecf">certecf</option>
           <option value="testecf">testecf</option>
         </select>
+        <div class="hint">certecf mientras certifica; ecf solo si ya está certificada.</div>
       </div>
     </div>
 
@@ -87,11 +90,13 @@
     <section id="secIntegracion">
       <h2>Grupo de empresas (opcional)</h2>
       <label>Una sola credencial para varias empresas del mismo cliente</label>
-      <input name="grupo" placeholder="self  ·  o el tenant_id del grupo (ej. 7)">
+      <input name="grupo" id="grupo" placeholder="self  ·  o el tenant_id del grupo (ej. 7)">
+      <div id="grupoNote" class="note hidden"></div>
       <div class="hint">
         Vacío = empresa aislada (lo normal). <b>self</b> = es la primera empresa del cliente e inicia
-        el grupo; anota el tenant_id que sale y úsalo para las demás. Un <b>número</b> = se une a ese grupo
-        y comparte su credencial. Cada empresa conserva su propio .p12 y su propia certificación DGII.
+        el grupo; al crearla, este campo queda con su tenant_id para las demás. Un <b>número</b> = se une
+        a ese grupo (id de la cabeza) y comparte su credencial: al cliente se le entrega solo la de la cabeza.
+        Cada empresa conserva su propio .p12, su ambiente y su propia certificación DGII.
         <b>Solo empresas del mismo cliente</b>: comparten credencial.
       </div>
 
@@ -137,6 +142,12 @@
     <h2 style="border:none;padding:0;margin:0 0 10px">Resultado</h2>
     <pre id="out" class="result"></pre>
   </div>
+
+  <div id="histCard" class="card hidden">
+    <h2 style="border:none;padding:0;margin:0 0 10px">Altas anteriores (esta pestaña)</h2>
+    <p class="hint">Se pierden al recargar la página: copie cada API SECRET antes de cerrar.</p>
+    <div id="hist"></div>
+  </div>
 </div>
 
 <script>
@@ -149,6 +160,66 @@ const certPassLabel = document.getElementById('certPassLabel');
 const btn = document.getElementById('btn');
 const resultCard = document.getElementById('resultCard');
 const out = document.getElementById('out');
+const ambiente = document.getElementById('ambiente');
+const grupo = document.getElementById('grupo');
+const grupoNote = document.getElementById('grupoNote');
+
+// Campos de UNA empresa: tras un alta OK se vacian para que la siguiente no
+// herede el RNC, el .p12 ni la clave de la anterior. Token y tipo se quedan.
+const POR_EMPRESA = ['nombre', 'rnc', 'razon-social', 'direccion', 'cert', 'cert-pass', 'logo'];
+const POR_EMPRESA_PREFIJOS = ['webhook-', 'admin-', 'db-'];
+let trasAlta = false; // true tras el primer alta OK: grupo pudo quedar autollenado
+
+function updateGrupoNote() {
+  const n = grupo.value.trim();
+  const show = trasAlta && /^\d+$/.test(n);
+  grupoNote.textContent = show
+    ? `La siguiente empresa se unirá al grupo #${n} (cámbielo o vacíelo para un tenant aislado).`
+    : '';
+  grupoNote.classList.toggle('hidden', !show);
+}
+grupo.addEventListener('input', updateGrupoNote);
+
+function limpiarEmpresa(grupoEnviado, text) {
+  for (const el of f.elements) {
+    if (!el.name || el.type === 'checkbox') continue;
+    if (POR_EMPRESA.includes(el.name) || POR_EMPRESA_PREFIJOS.some(p => el.name.startsWith(p))) {
+      el.value = '';
+    }
+  }
+  ambiente.value = ''; // vuelve a "— elegir —": cada empresa elige el suyo
+
+  // grupo: self -> el tenant recien creado es la cabeza; numero -> se mantiene;
+  // vacio -> sigue vacio (aislado).
+  if (grupoEnviado.trim().toLowerCase() === 'self') {
+    const m = text.match(/^\s*tenant_id\s*:\s*(\d+)\s*$/m);
+    grupo.value = m ? m[1] : '';
+    if (!m) {
+      grupoNote.textContent = 'No se pudo leer el tenant_id del resultado: escríbalo aquí para unir la siguiente empresa al grupo.';
+      grupoNote.classList.remove('hidden');
+      return;
+    }
+  }
+  trasAlta = true;
+  updateGrupoNote();
+}
+
+// Altas en serie (cabeza + hermanas): el API SECRET sale una sola vez, asi que
+// el resultado OK anterior se archiva abajo en vez de reemplazarse.
+function archivarResultado() {
+  if (!out.classList.contains('ok') || !out.textContent) return;
+  const text = out.textContent;
+  const id = (text.match(/^\s*tenant_id\s*:\s*(\d+)\s*$/m) || [])[1] || '?';
+  const det = document.createElement('details');
+  const sum = document.createElement('summary');
+  sum.textContent = `Tenant #${id}`;
+  const pre = document.createElement('pre');
+  pre.className = 'result ok';
+  pre.textContent = text;
+  det.append(sum, pre);
+  document.getElementById('hist').prepend(det);
+  document.getElementById('histCard').classList.remove('hidden');
+}
 
 function toggle() {
   const isApp = tipo.value === 'app';
@@ -163,6 +234,7 @@ toggle();
 f.addEventListener('submit', async (e) => {
   e.preventDefault();
   btn.disabled = true; btn.textContent = 'Creando...';
+  archivarResultado(); // el alta anterior (y su API SECRET) no se pisa
   resultCard.classList.add('hidden');
   out.classList.remove('ok', 'err');
 
@@ -174,17 +246,22 @@ f.addEventListener('submit', async (e) => {
       if (el.files && el.files.length) fd.append(el.name, el.files[0]);
     } else if (el.type === 'checkbox') {
       if (el.checked) fd.append(el.name, el.value);
-    } else if (el.value !== '') {
+    } else if (el.value !== '' || el.name === 'ambiente') {
+      // ambiente va siempre, aun vacio: el backend lo rechaza en vez de
+      // aplicar un default silencioso.
       fd.append(el.name, el.value);
     }
   }
+  const grupoEnviado = grupo.value;
 
   try {
     const res = await fetch('create_tenant.php', { method: 'POST', body: fd });
     const text = await res.text();
-    out.textContent = text;
-    out.classList.add(res.ok && /Tenant creado OK/.test(text) ? 'ok' : 'err');
+    const ok = res.ok && /== Tenant creado OK ==/.test(text);
+    out.textContent = text; // queda visible: el API SECRET sale una sola vez
+    out.classList.add(ok ? 'ok' : 'err');
     resultCard.classList.remove('hidden');
+    if (ok) limpiarEmpresa(grupoEnviado, text); // si fallo no se toca nada: corregir y reintentar
   } catch (err) {
     out.textContent = 'Error de red: ' + err.message;
     out.classList.add('err');

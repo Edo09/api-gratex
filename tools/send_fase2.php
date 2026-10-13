@@ -39,6 +39,12 @@
  *                           encuentra su original ("El eNCF modificado no ha
  *                           sido emitido"). Si se agota el tiempo, salen con aviso.
  *   --nota-poll=N           Segundos entre consultas de esa espera (default 15)
+ *   --empresa-rnc=RNC       Solo integracion: la empresa elegida (integracion.html la
+ *                           manda). Si el RNCEmisor de lo que se va a enviar es otro,
+ *                           aborta antes de enviar nada (tambien en dry-run).
+ *   --permitir-produccion   Solo integracion, solo por CLI: deja enviar a una empresa
+ *                           cuyo ambiente no es 'certecf'. Sin esto el runner aborta:
+ *                           el set saldria como e-CF REALES. Ver cert_empresa_preflight.php.
  *
  * Salida:
  *   - JSON con resultado por caso (caso, e_ncf, http_status, track_id, estado, error)
@@ -46,6 +52,7 @@
  */
 
 require_once __DIR__ . '/Fase2XlsxReader.php';
+require_once __DIR__ . '/cert_empresa_preflight.php';
 
 const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_CLIENT_ID = 1;
@@ -154,6 +161,20 @@ function main(array $argv): int
     }
     $rows = sortRowsByReference($rows);
     $notas = array_values(array_filter($rows, fn($r) => !empty($r['NCFModificado'])));
+
+    // Integracion: antes de enviar nada, el set tiene que ser de la empresa
+    // elegida y esa empresa estar en certecf. Con credencial de grupo el
+    // RNCEmisor elige la empresa, y cada una tiene su propio ambiente.
+    if ($integracion && $rows !== [] && !certEmpresaPreflightCli([
+        'api' => $apiBase,
+        'api_key' => $apiKey,
+        'api_secret' => $apiSecret,
+        'rncs' => certEmpresaRncsDeFilas($rows, 'RNCEmisor')['rncs'],
+        'origen' => 'RNCEmisor de la hoja ECF',
+        'dry_run' => $dryRun,
+    ] + certEmpresaOpciones($opts))) {
+        return 2;
+    }
 
     $results = [];
     // Las notas van al final (sortRowsByReference). Antes de la primera se
@@ -325,7 +346,8 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'e_ncf' => $row['ENCF'] ?? null,
         'client_id' => $clientId,
         'fecha_emision' => $row['FechaEmision'] ?? date('d-m-Y'),
-        'fecha_vencimiento_secuencia' => $row['FechaVencimientoSecuencia'] ?? null,
+        // La del set manda (DGII la compara); vacia -> default del server (31-12 del ano siguiente).
+        'fecha_vencimiento_secuencia' => blankToNull($row['FechaVencimientoSecuencia'] ?? null),
         'tipo_ingresos' => $row['TipoIngresos'] ?? '01',
         'tipo_pago' => blankToNull($row['TipoPago'] ?? null),
         'fecha_limite_pago' => blankToNull($row['FechaLimitePago'] ?? null),

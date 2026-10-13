@@ -324,10 +324,15 @@ ESE turno y ESE equipo, por 15 minutos. Los PIN equivocados y los de cajero
 
 ```json
 { "turno_id": 7,
-  "conteo": { "2000": 0, "1000": 1, "500": 1, "200": 1, "100": 0, "50": 0, "20": 1,
-              "25": 0, "10": 0, "5": 1, "1": 4, "otros_centavos": 25 },
+  "conteo": { "2000": 0, "1000": 1, "500": 1, "200": 1, "100": 0, "50": 0,
+              "25": 0, "10": 2, "5": 1, "1": 4, "otros_centavos": 25 },
   "permiso": null }
 ```
+
+- Denominaciones: billetes 2000…50 y monedas 25, 10, 5, 1. Una clave que no es de esas
+  da `CONTEO_INVALIDO`. Excepción: `"20"` (el billete de 20, retirado el 2026-10-13) se
+  acepta en 0 y se descarta, porque un POS sin actualizar todavía lo manda; con unidades
+  da `CONTEO_INVALIDO` y pide recargar la caja.
 
 - Cierra el turno abierto de la caja del equipo. `turno_id` tiene que ser ese (si no,
   `TURNO_CAMBIO`). Su propio turno lo cierra el cajero; uno ajeno, un supervisor con su

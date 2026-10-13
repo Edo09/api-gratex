@@ -44,7 +44,8 @@ Cuando su credencial cubre varias empresas, cada llamada indica de cuál es por 
 | `GET /estado`, `GET /xml`, `GET /recibidos`, `GET /aprobaciones` | `?rnc=<RNC>` en la URL |
 | `GET /empresas` | No aplica: lista todas |
 
-Si no manda el RNC donde es opcional, la llamada va a la empresa dueña de la credencial.
+Si no manda el RNC donde es opcional, la llamada va a la empresa dueña de la credencial;
+al aprobar o rechazar, a la empresa que recibió la factura si se puede determinar (sección 11).
 **Mándelo siempre.** Un RNC que no sea de una de sus empresas responde `422`.
 
 ---
@@ -130,7 +131,7 @@ según la empresa: **no envíe `ambiente`**.
 | `tipo_ecf` | Sí | `31`, `32`, `33`, `34`, `41`, `43`, `44`, `45`, `46` o `47` (anexo) |
 | `e_ncf` | Sí | Lo asigna su sistema: `E` + tipo + 10 dígitos (`E310000000001`), dentro del rango que la DGII autorizó a esa empresa para ese tipo. No repita ni salte números |
 | `fecha_emision` | No | Fecha del comprobante, `DD-MM-AAAA`. Si no la envía, se usa la del día |
-| `fecha_vencimiento_secuencia` | Sí, salvo E32 y E34 | `DD-MM-AAAA`. La fecha de vencimiento de la autorización de la DGII para ese rango. Debe coincidir: si no, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de producción puede vencer en otra fecha que el de certificación |
+| `fecha_vencimiento_secuencia` | Sí, salvo E32 y E34 | `DD-MM-AAAA`. La fecha de vencimiento de la autorización de la DGII para ese rango. Si no la envía, usamos el 31 de diciembre del año siguiente a la emisión. Debe coincidir con la autorización: si no, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de producción puede vencer en otra fecha que el de certificación |
 | `tipo_pago` | No | `1` Contado (por defecto) · `2` Crédito · `3` Gratuito |
 | `fecha_limite_pago` | No | Solo con `tipo_pago` `2`. `DD-MM-AAAA`, igual o posterior a la emisión. Si no la envía: emisión + 30 días |
 | `tipo_ingresos` | No | `01` por defecto (anexo) |
@@ -593,7 +594,7 @@ empresas. Va al mismo ambiente en que se recibió la factura.
 
 | Campo | Requerido | Notas |
 |---|---|---|
-| `rnc_comprador` | Recomendado | Cuál de sus empresas recibió la factura. Sin él, la dueña de la credencial |
+| `rnc_comprador` | Sí, si su credencial cubre varias empresas | Cuál de sus empresas recibió la factura. Con una sola empresa puede omitirlo (se usa esa) |
 | `rnc_emisor` | Sí | Quien le facturó |
 | `e_ncf` | Sí | e-NCF del comprobante recibido |
 | `fecha_emision` | Sí | Fecha del comprobante recibido, `DD-MM-AAAA`. También acepta tal cual el `fecha_emision` de `/recibidos` (`AAAA-MM-DD`) |
@@ -603,12 +604,21 @@ empresas. Va al mismo ambiente en que se recibió la factura.
 
 No envíe otros campos; en particular, no envíe `ambiente`.
 
+Si su credencial cubre varias empresas y omite `rnc_comprador`, buscamos la factura
+(`rnc_emisor` + `e_ncf`) entre las recibidas por todas sus empresas. Si la recibió exactamente
+una, la decisión sale a nombre de esa. Si no la tiene ninguna, o la tienen varias, responde
+`422` y no se envía nada a la DGII: repita con `rnc_comprador`.
+
+La respuesta trae `rnc_comprador` y `empresa`: la empresa por la que se envió la decisión.
+
 ```json
 {
   "status": true,
   "data": {
     "rnc_emisor": "131222333",
     "e_ncf": "E310000000028",
+    "rnc_comprador": "131111111",
+    "empresa": "EMPRESA UNO SRL",
     "estado_aprobacion": "2",
     "track_id": null,
     "estado_dgii": "ACEPTADO",
@@ -636,7 +646,7 @@ haya quedado registrado. Guarde en su sistema el resultado de cada envío.
 
 | HTTP | Caso |
 |---|---|
-| `422` | Falta un campo obligatorio; `estado` no es `1` ni `2`; `estado` `2` sin `detalle_motivo`; o `rnc_comprador` no es de una de sus empresas |
+| `422` | Falta un campo obligatorio; `estado` no es `1` ni `2`; `estado` `2` sin `detalle_motivo`; `rnc_comprador` no es de una de sus empresas; o, con varias empresas y sin `rnc_comprador`, la factura no aparece en ninguna de ellas o aparece en más de una |
 | `502` | Ver la tabla anterior |
 
 ---

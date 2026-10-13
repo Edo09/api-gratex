@@ -24,10 +24,17 @@
  * elegir la empresa del grupo que aprueba, y luego lo fija al tenant activo.
  *   php tools/send_fase3.php samples/131111111-set.xlsx \
  *       --api=https://gratex.net/api \
- *       --api-key=<api_key> --api-secret=<api_secret>
+ *       --api-key=<api_key> --api-secret=<api_secret> \
+ *       [--empresa-rnc=131111111] [--permitir-produccion]
+ *
+ * Antes de enviar nada verifica la empresa (cert_empresa_preflight.php): un solo
+ * RNCComprador en las filas, igual a --empresa-rnc si vino, y en ambiente
+ * 'certecf' segun /integracion/empresas (--permitir-produccion, solo por CLI,
+ * deja pasar otro ambiente).
  */
 
 require_once __DIR__ . '/Fase2XlsxReader.php';
+require_once __DIR__ . '/cert_empresa_preflight.php';
 
 const DEFAULT_API = 'https://gratex.net/api';
 const DEFAULT_OUTPUT = __DIR__ . '/fase3_results.json';
@@ -74,6 +81,28 @@ function main(array $argv): int
     if ($caseFilter !== '') {
         $rows = array_values(array_filter($rows, fn($r) => ($r['eNCF'] ?? '') === $caseFilter));
         fwrite(STDOUT, "==> Filtro caso: $caseFilter -> " . count($rows) . " casos\n");
+    }
+
+    // Integracion: el RNCComprador elige la empresa del grupo que aprueba, y cada
+    // empresa tiene su propio ambiente. Una fila sin el aprobaria a nombre de la
+    // duena de la credencial.
+    if ($apiSecret !== '' && $rows !== []) {
+        $empresaFilas = certEmpresaRncsDeFilas($rows, 'RNCComprador');
+        if ($empresaFilas['sin_rnc'] > 0) {
+            fwrite(STDERR, "ERROR: {$empresaFilas['sin_rnc']} filas de $sheetName sin RNCComprador: saldrian a nombre"
+                . " de la empresa duena de la credencial. No se envio nada.\n");
+            return 2;
+        }
+        if (!certEmpresaPreflightCli([
+            'api' => $apiBase,
+            'api_key' => $apiKey,
+            'api_secret' => $apiSecret,
+            'rncs' => $empresaFilas['rncs'],
+            'origen' => 'RNCComprador de la hoja ' . $sheetName,
+            'dry_run' => $dryRun,
+        ] + certEmpresaOpciones($opts))) {
+            return 2;
+        }
     }
 
     $results = [];
