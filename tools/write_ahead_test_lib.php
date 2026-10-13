@@ -139,8 +139,12 @@ function wa_puerto_abierto(int $puerto): bool
  * puerto pedido antes de todo lo demas: sirve cuando otra aplicacion de la
  * maquina ya usa un puerto de las pruebas (WA_PUERTO_OFFSET=100 mueve 8099 a
  * 8199). Quien llama debe usar la URL que devuelve, nunca armar el puerto.
+ *
+ * $raiz es el directorio de trabajo del servidor y de donde se lee $router: por
+ * defecto la raiz de este API; tools/test_pos_scratch.php --api-root pasa la de
+ * otro checkout (la linea base de origin/master).
  */
-function wa_servidor(string $nombre, string $router, int $puerto, array $env = []): string
+function wa_servidor(string $nombre, string $router, int $puerto, array $env = [], string $raiz = ''): string
 {
     $puerto += (int) getenv('WA_PUERTO_OFFSET');
     $url = 'http://127.0.0.1:' . $puerto;
@@ -158,7 +162,7 @@ function wa_servidor(string $nombre, string $router, int $puerto, array $env = [
     $cmd = array_merge([PHP_BINARY], wa_php_flags(), ['-d', 'variables_order=EGPCS', '-S', "127.0.0.1:{$puerto}", $router]);
     $entorno = array_merge(getenv(), array_map('strval', $env));
     $nulo = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
-    $proc = proc_open($cmd, [0 => ['file', $nulo, 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, dirname(__DIR__), $entorno);
+    $proc = proc_open($cmd, [0 => ['file', $nulo, 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, $raiz !== '' ? $raiz : dirname(__DIR__), $entorno);
     if (!is_resource($proc)) {
         echo "[FALLO] no se pudo lanzar php -S para {$nombre}\n";
         exit(1);
