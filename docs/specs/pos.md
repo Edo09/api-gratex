@@ -278,7 +278,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **F7 · Reintento de envíos pendientes** — `Piloto`
 - [x] Un proceso reenvía las ventas con *envío pendiente* hasta tener respuesta: cron de cPanel, o el propio POS cuando está libre si no hay cron (Q4). *Hoy lo dispara el POS: al abrir, cada 2 minutos y tras cada venta.*
-- [x] Consulta primero, reenvía el XML guardado (nunca re-firma) y no devuelve números. Salta las `PENDIENTE_ENVIO` de menos de 2 minutos y las `sin_rango` hasta que un rango autorizado las cubra; escribe con compare-and-set.
+- [x] Consulta primero, reenvía el XML guardado (nunca re-firma) y no devuelve números. Salta las `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` de menos de 2 minutos y las `sin_rango` hasta que un rango autorizado las cubra; no escribe como final el rechazo de un reenvío con la secuencia ya consumida (duplicado); escribe con compare-and-set.
 - [x] Si después llega un **rechazo**, el POS no muestra nada (el cajero no ve la DGII): se ve solo en app.\*, donde la factura aparece «Rechazada» con «Reenviar a la DGII» en su detalle, y el reporte del cierre la lista en `rechazadas`.
 
 **F8 · Corregir el aviso de "carga manual"** — `Piloto`
@@ -625,7 +625,7 @@ El recibo sale de los endpoints que ya existen: `GET /api/facturas/{id}/pdf?form
 - Si cPanel tiene cron: `tools/pos_reenviar_pendientes.php` cada 5 min, para todos los tenants con `pos_enabled`.
 - Si no: el POS llama a `/api/pos/pendientes/reenviar` al abrir, cada 2 min mientras está abierto y tras cada venta (es lo que hay hoy).
 - Usa `consultarEstadoRFCE` / `consultarEstado` / `consultarTrackIds`, que ya existen, antes de reenviar, para no duplicar un envío que sí llegó, y reenvía el XML ya firmado: el RFCE si hay `rfce_xml`, el e-CF completo si no.
-- Elige las ventas del POS con `envio_pendiente = 1`, salta las `PENDIENTE_ENVIO` de menos de 2 minutos, las ventas cuya petición sigue viva y las `sin_rango` sin un rango que las cubra, y escribe con compare-and-set (detalle en `docs/integrations/pos-write-ahead.md` del API).
+- Elige las ventas del POS con `envio_pendiente = 1`, salta las `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` de menos de 2 minutos, las ventas cuya petición sigue viva y las `sin_rango` sin un rango que las cubra, y escribe con compare-and-set (detalle en `docs/integrations/pos-write-ahead.md` del API).
 
 ### 9.7 Auditoría
 

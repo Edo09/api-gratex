@@ -194,25 +194,36 @@ wa_chk('la fila final y la que no es del POS no se tocaron',
     [pr_fila($pdo, $final), pr_fila($pdo, $ajena)]);
 
 // ---------------------------------------------------------------------------
-// P3) RF3: una venta PENDIENTE_ENVIO reciente sigue en curso.
+// P3) RF3: una venta PENDIENTE_ENVIO reciente sigue en curso; con F3a la espera tambien cubre a una ENVIO_INCIERTO
+// reciente (ConsultaTrackIds puede no haberla indexado todavia: reenviarla duplicaria un comprobante que la DGII
+// esta procesando).
 // ---------------------------------------------------------------------------
-echo "P3) RF3: el reenvio no toca una PENDIENTE_ENVIO de menos de 2 minutos\n";
+echo "P3) RF3 y F3a: el reenvio no toca una PENDIENTE_ENVIO ni una ENVIO_INCIERTO de menos de 2 minutos\n";
 pr_reiniciar($pdo, $srv, 'trackids_vacio');
 $reciente = date('Y-m-d H:i:s', time() - 30);
 $joven = pr_venta($pdo, 'E310000000921', 'PENDIENTE_ENVIO', ['meta' => pr_meta(['desde' => $reciente])]);
 $incierto = pr_venta($pdo, 'E310000000922', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO', 'desde' => $reciente])]);
 $r = PosVenta::reenviarPendientes(new posModel());
 $tags = pr_tags($srv['mock']);
-wa_chk('revisa solo la ENVIO_INCIERTO (su envio ya termino); la reciente sigue contando como pendiente',
-    $r['revisadas'] === 1 && $r['aceptadas'] === 1 && $r['pendientes'] === 1, $r);
-wa_chk('la DGII recibio una sola vez: la de la ENVIO_INCIERTO', $tags === ['ecf:trackids', 'ecf:recepcion'], $tags);
-wa_chk('la PENDIENTE_ENVIO reciente sigue igual',
-    pr_fila($pdo, $joven) === ['estado' => 'PENDIENTE_ENVIO', 'pendiente' => 1, 'track' => null, 'rfce' => null], pr_fila($pdo, $joven));
+wa_chk('las dos son recientes: no revisa ninguna y siguen contando como pendientes', $r['revisadas'] === 0 && $r['aceptadas'] === 0 && $r['pendientes'] === 2, $r);
+wa_chk('la DGII no recibio nada (ni consulta ni envio)', $tags === [], $tags);
+wa_chk('las dos filas siguen igual',
+    pr_fila($pdo, $joven) === ['estado' => 'PENDIENTE_ENVIO', 'pendiente' => 1, 'track' => null, 'rfce' => null]
+    && pr_fila($pdo, $incierto) === ['estado' => 'ENVIO_INCIERTO', 'pendiente' => 1, 'track' => null, 'rfce' => null], [pr_fila($pdo, $joven), pr_fila($pdo, $incierto)]);
+$vieja = date('Y-m-d H:i:s', time() - (PosVenta::REENVIO_ESPERA_SEG + 1));
 $pdo->prepare('UPDATE facturas SET respuesta_dgii = :m WHERE id = :id')->execute([
-    ':m' => json_encode(pr_meta(['desde' => date('Y-m-d H:i:s', time() - (PosVenta::REENVIO_ESPERA_SEG + 1))])), ':id' => $joven,
+    ':m' => json_encode(pr_meta(['fase' => 'ENVIO_INCIERTO', 'desde' => $vieja])), ':id' => $incierto,
 ]);
 $r = PosVenta::reenviarPendientes(new posModel());
-wa_chk('pasados los 2 minutos la toma y la acepta',
+$tags = pr_tags($srv['mock']);
+wa_chk('pasados los 2 minutos la ENVIO_INCIERTO se toma (consulta trackIds y envia) y la PENDIENTE_ENVIO reciente sigue esperando',
+    $r['revisadas'] === 1 && $r['aceptadas'] === 1 && $r['pendientes'] === 1 && $tags === ['ecf:trackids', 'ecf:recepcion']
+    && pr_fila($pdo, $incierto)['estado'] === 'ACEPTADO' && pr_fila($pdo, $joven)['estado'] === 'PENDIENTE_ENVIO', [$r, $tags]);
+$pdo->prepare('UPDATE facturas SET respuesta_dgii = :m WHERE id = :id')->execute([
+    ':m' => json_encode(pr_meta(['desde' => $vieja])), ':id' => $joven,
+]);
+$r = PosVenta::reenviarPendientes(new posModel());
+wa_chk('pasados los 2 minutos tambien la PENDIENTE_ENVIO: la toma y la acepta',
     $r['revisadas'] === 1 && $r['aceptadas'] === 1 && pr_fila($pdo, $joven)['estado'] === 'ACEPTADO', [$r, pr_fila($pdo, $joven)]);
 $sinMeta = pr_venta($pdo, 'E310000000923', 'PENDIENTE_ENVIO');
 $r = PosVenta::reenviarPendientes(new posModel());
@@ -394,6 +405,114 @@ wa_chk('fila que no es del POS: cambia el estado y envio_pendiente no se toca',
     && pr_fila($pdo, $deLaApp)['estado'] === 'ACEPTADO' && pr_fila($pdo, $deLaApp)['pendiente'] === 1, pr_fila($pdo, $deLaApp));
 wa_chk('el reenvio ya no cuenta como pendientes las que la app resolvio: solo queda la EN_PROCESO',
     (new posModel())->contarPendientes() === 1, (new posModel())->contarPendientes());
+
+// ---------------------------------------------------------------------------
+// P11) F3b: entre que el reenvio lee la lista y toma el candado de la venta, otro proceso pudo terminarla.
+// Se relee estado_dgii y envio_pendiente con el candado puesto: si cambiaron, la fila ya no es la que se leyo.
+// ---------------------------------------------------------------------------
+echo "P11) F3b: con el candado tomado se relee la fila; si otro proceso la movio, se salta\n";
+pr_reiniciar($pdo, $srv, 'trackids_vacio');
+$movida = pr_venta($pdo, 'E310000000971', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO'])]);
+// Otro proceso la acepta justo despues de que el reenvio leyo la lista (antes de tomar el candado).
+PosVenta::$trasLeerPendientes = static function (array $lista) use ($pdo, $movida): void {
+    $pdo->prepare("UPDATE facturas SET estado_dgii = 'ACEPTADO', track_id = 'TK-OTRO', envio_pendiente = 0 WHERE id = :id")->execute([':id' => $movida]);
+};
+$r = PosVenta::reenviarPendientes(new posModel());
+PosVenta::$trasLeerPendientes = null;
+$tags = pr_tags($srv['mock']);
+wa_chk('la fila ya no es la que se leyo: no se revisa, la DGII no recibe nada y no se pisa',
+    $r['revisadas'] === 0 && $r['aceptadas'] === 0 && $r['rechazadas'] === [] && $r['pendientes'] === 0 && $tags === []
+    && pr_fila($pdo, $movida) === ['estado' => 'ACEPTADO', 'pendiente' => 0, 'track' => 'TK-OTRO', 'rfce' => null], [$r, $tags, pr_fila($pdo, $movida)]);
+// Otro proceso la deja ENVIADO con su trackId (envio_pendiente sigue en 1): el estado cambio igual y esta pasada la salta.
+$movida2 = pr_venta($pdo, 'E310000000972', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO'])]);
+PosVenta::$trasLeerPendientes = static function (array $lista) use ($pdo, $movida2): void {
+    $pdo->prepare("UPDATE facturas SET estado_dgii = 'ENVIADO', track_id = 'TK-OTRO2' WHERE id = :id")->execute([':id' => $movida2]);
+};
+$r = PosVenta::reenviarPendientes(new posModel());
+PosVenta::$trasLeerPendientes = null;
+wa_chk('si solo cambio el estado (ENVIADO, sigue pendiente) tambien se salta, sin gastar el cupo y sin llamar a la DGII',
+    $r['revisadas'] === 0 && $r['pendientes'] === 1 && pr_tags($srv['mock']) === []
+    && pr_fila($pdo, $movida2) === ['estado' => 'ENVIADO', 'pendiente' => 1, 'track' => 'TK-OTRO2', 'rfce' => null], [$r, pr_fila($pdo, $movida2)]);
+wa_mock_modo($srv['mock'], 'acepta');
+$r = PosVenta::reenviarPendientes(new posModel());
+wa_chk('la pasada siguiente la ve como esta (ENVIADO con trackId): consulta el resultado y la acepta',
+    $r['revisadas'] === 1 && $r['aceptadas'] === 1 && pr_tags($srv['mock']) === ['ecf:resultado'] && pr_fila($pdo, $movida2)['estado'] === 'ACEPTADO', [$r, pr_fila($pdo, $movida2)]);
+wa_chk('PosVenta relee la fila con el candado puesto (posModel::estadoDeEnvio) y compara el estado y envio_pendiente',
+    str_contains($region, '$pos->estadoDeEnvio($id)') && str_contains($region, "(int) \$actual['envio_pendiente'] !== 1"));
+
+// ---------------------------------------------------------------------------
+// P12) F3c: si el reenvio del XML guardado lo rechaza con la secuencia ya consumida, la DGII ya tenia ese comprobante
+// (el reenvio fue un duplicado): no se escribe ningun estado final; la fila sigue pendiente y la proxima pasada la
+// consulta de nuevo. Un rechazo de verdad (secuencia sin consumir) si se escribe, como siempre.
+// ---------------------------------------------------------------------------
+echo "P12) F3c: el rechazo de un duplicado no se escribe como final\n";
+$ids = pr_reiniciar($pdo, $srv, 'vacio_rechaza_usada');
+$e31 = pr_venta($pdo, 'E310000000981', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO'])]);
+$e32 = pr_venta($pdo, 'E320000000982', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO', 'flujo' => 'RFCE'])]);
+$antes = [pr_fila($pdo, $e31), pr_fila($pdo, $e32)];
+$r = PosVenta::reenviarPendientes(new posModel());
+$tags = pr_tags($srv['mock']);
+wa_chk('la DGII lo recibio dos veces (consulta no lo ve, reenvio): las dos se revisaron y ninguna se acepta ni se rechaza',
+    $r['revisadas'] === 2 && $r['aceptadas'] === 0 && $r['rechazadas'] === [] && $r['pendientes'] === 2
+    && $tags === ['ecf:trackids', 'ecf:recepcion', 'rfce:consulta', 'rfce:recepcion'], [$r, $tags]);
+wa_chk('las dos filas siguen igual: ENVIO_INCIERTO con envio_pendiente 1 (nada de RECHAZADO)',
+    [pr_fila($pdo, $e31), pr_fila($pdo, $e32)] === $antes && $antes[0]['estado'] === 'ENVIO_INCIERTO' && $antes[1]['estado'] === 'ENVIO_INCIERTO' && $antes[1]['pendiente'] === 1,
+    [pr_fila($pdo, $e31), pr_fila($pdo, $e32)]);
+wa_chk('sin auditoria de rechazo', pr_auditorias($pdo, 'POS_VENTA_RECHAZADA') === 0, pr_auditorias($pdo, 'POS_VENTA_RECHAZADA'));
+// La DGII ya lo habia aceptado (el reenvio fue un duplicado): la pasada siguiente lo consulta y lo encuentra.
+wa_mock_modo($srv['mock'], 'acepta');
+$r = PosVenta::reenviarPendientes(new posModel());
+$tags = pr_tags($srv['mock']);
+wa_chk('la proxima pasada consulta primero: la E31 se encuentra por trackIds y la E32 por la consulta RFCE, y quedan aceptadas',
+    $r['revisadas'] === 2 && $r['aceptadas'] === 2 && $r['pendientes'] === 0
+    && $tags === ['ecf:trackids', 'ecf:resultado', 'rfce:consulta']
+    && pr_fila($pdo, $e31)['estado'] === 'ACEPTADO' && pr_fila($pdo, $e32)['estado'] === 'RFCE_ACEPTADO', [$r, $tags, pr_fila($pdo, $e31), pr_fila($pdo, $e32)]);
+// Control: un rechazo de verdad (secuencia sin consumir) si es final.
+pr_reiniciar($pdo, $srv, 'vacio_rechaza');
+$e31 = pr_venta($pdo, 'E310000000983', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO'])]);
+$e32 = pr_venta($pdo, 'E320000000984', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO', 'flujo' => 'RFCE'])]);
+$r = PosVenta::reenviarPendientes(new posModel());
+wa_chk('control: con la secuencia sin consumir el rechazo se escribe (RECHAZADO / RFCE_RECHAZADO, envio_pendiente 0) y se lista',
+    $r['revisadas'] === 2 && count($r['rechazadas']) === 2 && $r['pendientes'] === 0
+    && pr_fila($pdo, $e31)['estado'] === 'RECHAZADO' && pr_fila($pdo, $e31)['pendiente'] === 0
+    && pr_fila($pdo, $e32)['estado'] === 'RFCE_RECHAZADO' && pr_fila($pdo, $e32)['pendiente'] === 0, [$r, pr_fila($pdo, $e31), pr_fila($pdo, $e32)]);
+
+// ---------------------------------------------------------------------------
+// P13) F9: el reenvio usa POS_DGII_TIMEOUT en TODA llamada a la DGII (el token, las consultas y el envio), no solo
+// en el envio: con la DGII caida cada llamada se rinde a los 3 segundos del POS y no a los 30 del resto del sistema.
+// ---------------------------------------------------------------------------
+echo "P13) F9: el reenvio pasa POS_DGII_TIMEOUT al token, a las consultas y al envio\n";
+/** DgiiAuthService real (contra el mock) que anota el timeout de cada llamada que sale hacia la DGII. */
+final class PrAuthTiempos extends DgiiAuthService
+{
+    /** @var list<array{0: string, 1: ?int}> */
+    public array $llamadas = [];
+
+    public function autenticar(array $options = []): array
+    {
+        $this->llamadas[] = ['token', isset($options['timeout']) ? (int) $options['timeout'] : null];
+        return parent::autenticar($options);
+    }
+
+    public function consultarEndpointAutenticado(string $method, string $pathOrUrl, string $bearerToken, $body = null, array $options = [], array $headers = []): array
+    {
+        $ruta = strtolower((string) parse_url($pathOrUrl, PHP_URL_PATH));
+        $this->llamadas[] = [$method . ' ' . substr($ruta, (int) strrpos($ruta, '/api/') + 1), isset($options['timeout']) ? (int) $options['timeout'] : null];
+        return parent::consultarEndpointAutenticado($method, $pathOrUrl, $bearerToken, $body, $options, $headers);
+    }
+}
+pr_reiniciar($pdo, $srv, 'trackids_vacio');
+$tiempos = new PrAuthTiempos();
+PosVenta::$fabricaServicio = static fn(): ECFEmissionService => new ECFEmissionService($tiempos);
+pr_venta($pdo, 'E320000000991', 'PENDIENTE_ENVIO', ['meta' => pr_meta(['flujo' => 'RFCE'])]);        // consulta RFCE y reenvio RFCE
+pr_venta($pdo, 'E310000000992', 'ENVIO_INCIERTO', ['meta' => pr_meta(['fase' => 'ENVIO_INCIERTO'])]);   // ConsultaTrackIds y reenvio e-CF
+pr_venta($pdo, 'E310000000993', 'ENVIADO', ['track' => 'track-E310000000993']);                         // ConsultaResultado
+$r = PosVenta::reenviarPendientes(new posModel());
+PosVenta::$fabricaServicio = null;
+$sinTimeout = array_values(array_filter($tiempos->llamadas, static fn(array $l): bool => $l[1] !== 3));
+wa_chk('las 3 ventas se revisaron', $r['revisadas'] === 3, $r);
+wa_chk('10 llamadas a la DGII (5 tokens y 5 consultas o envios) y todas con el timeout del POS (3 s)',
+    count($tiempos->llamadas) === 10 && $sinTimeout === [], ['sin_timeout' => $sinTimeout, 'total' => count($tiempos->llamadas)]);
 
 // Deja la base como recien sembrada (sin los rangos de prueba).
 pr_reiniciar($pdo, $srv, 'acepta');

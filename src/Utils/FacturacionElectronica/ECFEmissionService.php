@@ -1131,11 +1131,8 @@ class ECFEmissionService
             'environment' => $ambiente,
             'certificate_content' => $cert['content'],
             'certificate_password' => $cert['password'],
-        ]);
-        $opciones = ['environment' => $tokenInfo['ambiente']];
-        if ($timeout !== null && $timeout > 0) {
-            $opciones['timeout'] = $timeout;
-        }
+        ] + self::opcionTimeout($timeout));
+        $opciones = ['environment' => $tokenInfo['ambiente']] + self::opcionTimeout($timeout);
         $recepcion = $this->reception->recibirResumen($rfceXml, $tokenInfo['token'], $opciones);
         return [
             'estado' => 'RFCE_' . $this->mapEstado($recepcion),
@@ -1153,7 +1150,7 @@ class ECFEmissionService
      *   lista (vacia = la DGII no lo tiene), o null si la respuesta no permite
      *   saberlo (no reenviar a ciegas).
      */
-    public function consultarTrackIds(string $eNcf, ?string $ambiente = null): ?array
+    public function consultarTrackIds(string $eNcf, ?string $ambiente = null, ?int $timeout = null): ?array
     {
         $emisor = $this->emisorModel()->get();
         if (!$emisor) {
@@ -1164,12 +1161,12 @@ class ECFEmissionService
             'environment' => $ambiente,
             'certificate_content' => $cert['content'],
             'certificate_password' => $cert['password'],
-        ]);
+        ] + self::opcionTimeout($timeout));
         $ruta = 'consultatrackids/api/TrackIds/Consulta?' . http_build_query(['RncEmisor' => $emisor['rnc'], 'Encf' => $eNcf]);
         // tolerate: el "no existe" es un 404 con cuerpo ProblemDetails; un 404
         // sin JSON (caida) sigue siendo excepcion.
         $r = $this->auth->consultarEndpointAutenticado('GET', $ruta, $tokenInfo['token'], null,
-            ['environment' => $tokenInfo['ambiente'], 'tolerate_http_errors' => true]);
+            ['environment' => $tokenInfo['ambiente'], 'tolerate_http_errors' => true] + self::opcionTimeout($timeout));
         $data = $r['data'];
         if ($r['status_code'] === 404) {
             return [];
@@ -1204,11 +1201,8 @@ class ECFEmissionService
             'environment' => $ambiente,
             'certificate_content' => $cert['content'],
             'certificate_password' => $cert['password'],
-        ]);
-        $opciones = ['environment' => $tokenInfo['ambiente']];
-        if ($timeout !== null && $timeout > 0) {
-            $opciones['timeout'] = $timeout;
-        }
+        ] + self::opcionTimeout($timeout));
+        $opciones = ['environment' => $tokenInfo['ambiente']] + self::opcionTimeout($timeout);
         $recepcion = $this->reception->recibir($signedXml, $tokenInfo['token'], $opciones);
         return [
             'estado' => $this->mapEstado($recepcion),
@@ -1221,8 +1215,11 @@ class ECFEmissionService
      * $rncEmisor permite consultar sin `emisor_config`: los tenants tipo
      * integracion no tienen DB propia, asi que el RNC viene del tenant resuelto.
      * Sin ese parametro el comportamiento es el de siempre (lee emisor_config).
+     *
+     * $timeout (segundos, POS_DGII_TIMEOUT en el reenvio del POS) vale para el token y para la consulta;
+     * sin el, DGII_ECF_TIMEOUT como siempre.
      */
-    public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null, ?string $rncEmisor = null): array
+    public function consultarEstado(string $trackId, string $eNcf, ?string $ambiente = null, ?string $rncEmisor = null, ?int $timeout = null): array
     {
         $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
         if ($rncEmisor === null) {
@@ -1240,13 +1237,13 @@ class ECFEmissionService
             'environment' => $ambiente,
             'certificate_content' => $cert['content'],
             'certificate_password' => $cert['password'],
-        ]);
+        ] + self::opcionTimeout($timeout));
         return $this->reception->consultarEstado(
             $trackId,
             $rncEmisor,
             $eNcf,
             $tokenInfo['token'],
-            ['environment' => $tokenInfo['ambiente']]
+            ['environment' => $tokenInfo['ambiente']] + self::opcionTimeout($timeout)
         );
     }
 
@@ -1256,8 +1253,9 @@ class ECFEmissionService
      * en lugar de ConsultaResultado, porque los RFCE no generan trackId.
      *
      * $rncEmisor: igual que en consultarEstado(), para tenants sin emisor_config.
+     * $timeout: igual que en consultarEstado() (token y consulta).
      */
-    public function consultarEstadoRFCE(string $eNcf, string $codigoSeguridad, ?string $ambiente = null, ?string $rncEmisor = null): array
+    public function consultarEstadoRFCE(string $eNcf, string $codigoSeguridad, ?string $ambiente = null, ?string $rncEmisor = null, ?int $timeout = null): array
     {
         $rncEmisor = $rncEmisor !== null && $rncEmisor !== '' ? $rncEmisor : null;
         if ($rncEmisor === null) {
@@ -1275,14 +1273,20 @@ class ECFEmissionService
             'environment' => $ambiente,
             'certificate_content' => $cert['content'],
             'certificate_password' => $cert['password'],
-        ]);
+        ] + self::opcionTimeout($timeout));
         return $this->reception->consultarResumenRFCE(
             $rncEmisor,
             $eNcf,
             $codigoSeguridad,
             $tokenInfo['token'],
-            ['environment' => $tokenInfo['ambiente']]
+            ['environment' => $tokenInfo['ambiente']] + self::opcionTimeout($timeout)
         );
+    }
+
+    /** ['timeout' => segundos] si se pidio uno valido; [] si no (el servicio de la DGII usa DGII_ECF_TIMEOUT). */
+    private static function opcionTimeout(?int $timeout): array
+    {
+        return $timeout !== null && $timeout > 0 ? ['timeout' => $timeout] : [];
     }
 
     private function resolveCertPath(): string

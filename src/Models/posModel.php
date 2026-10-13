@@ -676,6 +676,19 @@ class posModel
         return $stmt->fetchAll();
     }
 
+    /**
+     * Estado de envio de una venta ahora mismo: estado_dgii y envio_pendiente (null si la fila ya no existe).
+     * El reenvio lo lee con el candado de la venta puesto para saber si otro proceso la movio desde que leyo
+     * la lista de pendientes (ventasPendientes).
+     */
+    public function estadoDeEnvio(int $facturaId): ?array
+    {
+        $stmt = $this->conexion->prepare('SELECT estado_dgii, envio_pendiente FROM facturas WHERE id = :id');
+        $stmt->execute([':id' => $facturaId]);
+        $f = $stmt->fetch();
+        return $f ?: null;
+    }
+
     /** Ventas del POS que siguen con envio pendiente (incluye las sin_rango). */
     public function contarPendientes(): int
     {

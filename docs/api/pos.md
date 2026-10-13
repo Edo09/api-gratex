@@ -279,9 +279,12 @@ ventas del POS con `envio_pendiente = 1`; nunca re-firma ni devuelve números.
   `ConsultaResultado`; sin él, `ConsultaTrackIds`: si la DGII ya lo tiene toma su `trackId`, si no
   reenvía el XML firmado; si la consulta no responde, espera a la próxima vuelta). En `certecf` no
   existe `ConsultaTrackIds`: una E31 sin `trackId` queda pendiente para soporte.
-- **Salta** las `PENDIENTE_ENVIO` de menos de 2 minutos (la petición original todavía las envía), las
-  ventas cuya petición sigue viva (tienen tomado el candado de su clave) y las `sin_rango` hasta que
-  un rango registrado incluya su número.
+- **Salta** las `PENDIENTE_ENVIO` y `ENVIO_INCIERTO` de menos de 2 minutos desde su reserva (la
+  petición original todavía envía la primera; la DGII puede estar procesando la segunda), las ventas
+  cuya petición sigue viva (tienen tomado el candado de su clave), las que otro proceso movió entre la
+  lectura y el candado y las `sin_rango` hasta que un rango registrado incluya su número. Un reenvío
+  que la DGII rechaza con la secuencia ya consumida es el rechazo de un duplicado: no se escribe, la
+  fila sigue pendiente y la próxima vuelta la consulta.
 - **Escribe con compare-and-set** (`UPDATE ... WHERE id = :id AND estado_dgii = :leido`) y cambia
   `envio_pendiente` en la misma sentencia: nunca pisa un estado final escrito por otro proceso.
 - Responde `{revisadas, aceptadas, rechazadas: [{factura_id, e_ncf, motivo}], pendientes}`. El POS lo

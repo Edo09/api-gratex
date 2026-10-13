@@ -19,10 +19,16 @@
  *
  * Modos (MOCK_DGII_MODE al arrancar, o GET /__mock/modo?valor=<modo>):
  *   acepta, acepta_condicional, rechaza, rechaza_usada, cuelga, html500,
- *   raw200, trackids_vacio, trackids_uno, trackids_404, trackids_rechazado.
- * Solo trackids_vacio, trackids_404 y trackids_rechazado cambian las tres
- * consultas; trackids_uno contesta como acepta (un trackId Aceptado). En los
- * cuatro trackids_* la recepcion acepta.
+ *   raw200, trackids_vacio, trackids_uno, trackids_404, trackids_rechazado,
+ *   vacio_rechaza, vacio_rechaza_usada.
+ * Solo trackids_vacio, trackids_404, trackids_rechazado y los vacio_* cambian
+ * las tres consultas; trackids_uno contesta como acepta (un trackId Aceptado).
+ * En los cuatro trackids_* la recepcion acepta.
+ * vacio_rechaza y vacio_rechaza_usada: la DGII no tiene el comprobante (las
+ * consultas dicen "No Encontrado" / lista vacia) y al reenviarlo lo rechaza,
+ * sin consumir la secuencia (vacio_rechaza, un rechazo de verdad) o
+ * consumida (vacio_rechaza_usada: lo que contesta a un duplicado de lo que
+ * ya recibio).
  * En "cuelga" la recepcion duerme MOCK_DGII_CUELGA_SEG segundos (10 por
  * defecto) y despues responde {}. php -S atiende de a una peticion: la
  * siguiente espera a que termine, por eso wa_mock_modo() sincroniza.
@@ -39,6 +45,7 @@
 const MD_MODOS = [
     'acepta', 'acepta_condicional', 'rechaza', 'rechaza_usada', 'cuelga', 'html500',
     'raw200', 'trackids_vacio', 'trackids_uno', 'trackids_404', 'trackids_rechazado',
+    'vacio_rechaza', 'vacio_rechaza_usada',
 ];
 
 $puerto = (int) ($_SERVER['SERVER_PORT'] ?? 0);
@@ -176,8 +183,10 @@ switch ($resto) {
             case 'acepta_condicional':
                 md_json(200, $base + ['codigo' => 4, 'estado' => 'Aceptado Condicional', 'secuenciaUtilizada' => true, 'mensajes' => $mensajesOk]);
             case 'rechaza':
+            case 'vacio_rechaza':
                 md_json(400, $base + ['codigo' => 2, 'estado' => 'Rechazado', 'secuenciaUtilizada' => false, 'mensajes' => $rechazo]);
             case 'rechaza_usada':
+            case 'vacio_rechaza_usada':
                 md_json(400, $base + ['codigo' => 2, 'estado' => 'Rechazado', 'secuenciaUtilizada' => true, 'mensajes' => $rechazo]);
             case 'cuelga':
                 sleep(max(1, (int) (getenv('MOCK_DGII_CUELGA_SEG') ?: 10)));
@@ -206,7 +215,7 @@ switch ($resto) {
         if ($modo === 'trackids_rechazado') {
             md_json(200, $base + ['codigo' => '2', 'estado' => 'Rechazado', 'secuenciaUtilizada' => false, 'mensajes' => $rechazo]);
         }
-        if ($modo === 'trackids_vacio' || $modo === 'trackids_404') {
+        if ($modo === 'trackids_vacio' || $modo === 'trackids_404' || str_starts_with($modo, 'vacio_')) {
             md_json(200, $base + ['codigo' => '0', 'estado' => 'No Encontrado', 'secuenciaUtilizada' => false, 'mensajes' => $mensajesOk]);
         }
         md_json(200, $base + ['codigo' => '1', 'estado' => 'Aceptado', 'secuenciaUtilizada' => true, 'mensajes' => $mensajesOk]);
@@ -216,7 +225,7 @@ switch ($resto) {
         // Misma forma que la respuesta real guardada en tools/test_consultar_ecf_dgii.php:
         // lista de {trackId, estado, fechaRecepcion dd/MM/yyyy}.
         $uno = ['trackId' => 'track-' . $eNcf, 'estado' => 'Aceptado', 'fechaRecepcion' => $ahora->format('d/m/Y')];
-        if ($modo === 'trackids_vacio') {
+        if ($modo === 'trackids_vacio' || str_starts_with($modo, 'vacio_')) {
             md_json(200, []);
         }
         if ($modo === 'trackids_404') {

@@ -111,5 +111,20 @@ wa_chk('/__mock/modo con un modo desconocido: 400', $r['status'] === 400, $r);
 $r = wa_http('GET', $mock . '/certecf/no/existe');
 wa_chk('ruta desconocida: 404', $r['status'] === 404, $r);
 
+echo "7) Modos vacio_*: la DGII no lo tiene y al reenviarlo lo rechaza\n";
+wa_mock_modo($mock, 'vacio_rechaza');
+$r = $rec->consultarEstado('track-E310000000001', '000000000', 'E310000000001', 'tok-mock', $opc);
+wa_chk('vacio_rechaza: la consulta dice No Encontrado', ($r['data']['estado'] ?? null) === 'No Encontrado', $r);
+wa_chk('vacio_rechaza: TrackIds vacio', ($tid())['json'] === []);
+$r = $rec->recibir($xml, 'tok-mock', $opc);
+wa_chk('vacio_rechaza: rechaza sin consumir la secuencia',
+    ($r['status_code'] ?? 0) === 400 && ($r['data']['secuenciaUtilizada'] ?? null) === false, $r);
+wa_mock_modo($mock, 'vacio_rechaza_usada');
+$r = $rec->consultarResumenRFCE('000000000', 'E320000000001', 'ABC123', 'tok-mock', $opc);
+wa_chk('vacio_rechaza_usada: la consulta RFCE dice No Encontrado', ($r['data']['estado'] ?? null) === 'No Encontrado', $r);
+$r = $rec->recibirResumen($xml, 'tok-mock', $opc);
+wa_chk('vacio_rechaza_usada: rechaza con la secuencia consumida (lo que contesta a un duplicado)',
+    ($r['data']['estado'] ?? null) === 'Rechazado' && ($r['data']['secuenciaUtilizada'] ?? null) === true, $r);
+
 wa_mock_modo($mock, 'acepta');
 wa_fin();

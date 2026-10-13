@@ -1144,7 +1144,8 @@ wa_chk("servicio: dgii_timeout entra como \$opcionesEnvio['timeout'] y lo usan r
     && substr_count($s14Servicio, '$bearerToken, $opcionesEnvio)') === 2, substr_count($s14Servicio, '$bearerToken, $opcionesEnvio)'));
 $s14Firmas = [
     'reenviarRFCE' => ['rfceXml', 'ambiente', 'timeout'],
-    'consultarTrackIds' => ['eNcf', 'ambiente'],
+    // F9 (revision final): le sumo un timeout al final, para que el reenvio del POS no espere 30 s a la DGII.
+    'consultarTrackIds' => ['eNcf', 'ambiente', 'timeout'],
     'reenviarECF' => ['signedXml', 'ambiente', 'timeout'],
 ];
 foreach ($s14Firmas as $metodo => $parametros) {
@@ -1720,6 +1721,31 @@ wa_chk('17 F4: una factura simple normal (sin clave del POS) si llega a borrarse
 wa_chk('17 F4: el mensaje es el de la spec y el controlador lo responde 409',
     facturaModel::MSG_SIMPLE_VENTA_POS === 'Esta factura viene de una venta del POS y no se puede editar ni eliminar.'
     && preg_match('/facturaModel::ERROR_VENTA_POS\s*=>\s*409/', (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaSimpleController.php')) === 1);
+
+// F3 y F9: el reenvio del POS (PosVenta::reenviarPendientes). El comportamiento lo prueba tools/test_pos_reenvio.php
+// (P3, P11, P12, P13); aqui, lo que se puede fijar sin base.
+$s17Pv = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Pos/PosVenta.php'));
+$s17Es = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php'));
+wa_chk('17 F3a: la espera de REENVIO_ESPERA_SEG cubre a PENDIENTE_ENVIO y a ENVIO_INCIERTO (EstadosEcf::EN_VUELO)',
+    str_contains($s17Pv, "in_array((string) \$v['estado_dgii'], EstadosEcf::EN_VUELO, true)")
+    && !str_contains($s17Pv, "if ((string) \$v['estado_dgii'] === EstadosEcf::PENDIENTE_ENVIO) {"));
+wa_chk('17 F3c: el rechazo de un reenvio con la secuencia consumida no es un veredicto (RFCE y e-CF)',
+    str_contains($s17Pv, 'private static function esRechazoDeDuplicado(string $estado, $respuesta): bool')
+    && substr_count($s17Pv, 'self::esRechazoDeDuplicado(') === 2);
+wa_chk('17 F9: PosVenta pasa POS_DGII_TIMEOUT al token, las consultas y el envio (5 llamadas)',
+    substr_count($s17Pv, 'self::timeoutDgii()') >= 5
+    && str_contains($s17Pv, "\$servicio->consultarTrackIds((string) \$v['e_ncf'], \$ambiente, self::timeoutDgii())")
+    && str_contains($s17Pv, "\$servicio->consultarEstado(\$trackId, (string) \$v['e_ncf'], \$ambiente, null, self::timeoutDgii())")
+    && str_contains($s17Pv, "\$v['ambiente_dgii'] ?? null, null, self::timeoutDgii())"));
+$s17Params = static fn(string $metodo): array => array_map(static fn(ReflectionParameter $p): string => $p->getName(),
+    (new ReflectionMethod(ECFEmissionService::class, $metodo))->getParameters());
+wa_chk('17 F9: consultarTrackIds, consultarEstado y consultarEstadoRFCE aceptan un timeout al final, sin mover los parametros de siempre',
+    $s17Params('consultarTrackIds') === ['eNcf', 'ambiente', 'timeout']
+    && $s17Params('consultarEstado') === ['trackId', 'eNcf', 'ambiente', 'rncEmisor', 'timeout']
+    && $s17Params('consultarEstadoRFCE') === ['eNcf', 'codigoSeguridad', 'ambiente', 'rncEmisor', 'timeout']);
+wa_chk('17 F9: el token de los cinco metodos (reenviarRFCE, reenviarECF, consultarTrackIds, consultarEstado, consultarEstadoRFCE) lleva el timeout',
+    substr_count($s17Es, "'certificate_password' => \$cert['password'],\n        ] + self::opcionTimeout(\$timeout));") === 5,
+    substr_count($s17Es, "'certificate_password' => \$cert['password'],\n        ] + self::opcionTimeout(\$timeout));"));
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

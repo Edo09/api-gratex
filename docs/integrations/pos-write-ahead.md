@@ -131,10 +131,20 @@ cada 2 minutos y tras cada venta, en silencio. Revisa hasta 5 ventas por llamada
 reenvía el XML guardado, no re-firma y no devuelve números.
 
 - **Flujo por XML guardado:** RFCE si `rfce_xml` no es nulo; e-CF completo si no.
-- **Selección:** filas del POS que son e-CF (no las facturas simples) con `envio_pendiente = 1`, salvo las `PENDIENTE_ENVIO` de menos
-  de 2 minutos (la petición original todavía las está enviando), las ventas cuya petición sigue viva
-  (el reenvío pide sin esperar el candado de su clave y salta la fila si está tomado) y las
-  `sin_rango` mientras `rangoCubre` sea falso.
+- **Selección:** filas del POS que son e-CF (no las facturas simples) con `envio_pendiente = 1`, salvo las `PENDIENTE_ENVIO` y
+  `ENVIO_INCIERTO` de menos de 2 minutos desde su reserva (la `PENDIENTE_ENVIO` todavía la está enviando la petición
+  original; la `ENVIO_INCIERTO` ya terminó de enviar, pero la DGII puede estar procesándola y `ConsultaTrackIds` no
+  devolverla aún: reenviar el XML duplicaría un comprobante que la DGII acepta), las ventas cuya petición sigue
+  viva (el reenvío pide sin esperar el candado de su clave y salta la fila si está tomado) y las
+  `sin_rango` mientras `rangoCubre` sea falso. Con el candado puesto se relee `estado_dgii` y `envio_pendiente`:
+  si otro proceso movió la fila desde que se leyó la lista, esta pasada la salta.
+- **Un reenvío rechazado por duplicado no es un veredicto:** si el reenvío del XML guardado se rechaza con
+  `secuenciaUtilizada = true`, la DGII ya tenía ese comprobante (el original sigue en proceso o ya fue
+  aceptado). No se escribe ningún estado final: la fila sigue pendiente y la próxima pasada consulta de nuevo.
+  Un rechazo con la secuencia sin consumir (firma o XML malos) sí se escribe como `RECHAZADO`.
+- **Tiempos de espera:** todas las llamadas a la DGII del reenvío (token, consultas y envío) usan
+  `POS_DGII_TIMEOUT` (5 s por defecto), no los 30 s del resto del sistema: con la DGII caída cada llamada
+  se rinde pronto y no amarra los procesos de PHP.
 - **Escrituras con compare-and-set** (`UPDATE ... WHERE id = :id AND estado_dgii = :leido`), con
   `envio_pendiente` en la misma sentencia: nunca pisa un estado final escrito por otro proceso.
 - **Respuesta:** `{revisadas, aceptadas, rechazadas, pendientes}`. Bitácora: `POS_VENTA_ENVIADA` y

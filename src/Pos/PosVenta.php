@@ -64,6 +64,13 @@ final class PosVenta
     public static ?Closure $fabricaServicio = null;
 
     /**
+     * Solo las pruebas (tools/test_pos_reenvio.php): se llama con la lista de candidatas justo despues de
+     * leerla y antes de tomar el candado de cada venta, para simular que otro proceso movio una fila entre
+     * las dos cosas. En produccion es null.
+     */
+    public static ?Closure $trasLeerPendientes = null;
+
+    /**
      * Cobra la venta. Devuelve los datos para la respuesta; lanza PosError con
      * su codigo en cualquier caso que el POS tenga que tratar.
      *
@@ -730,9 +737,11 @@ final class PosVenta
     // ------------------------------------------------------------------
 
     /**
-     * Una venta PENDIENTE_ENVIO mas nueva que esto sigue en curso: la peticion que la guardo todavia esta
-     * enviando (el envio dura como mucho POS_DGII_TIMEOUT segundos). El reenvio no la toca, o mandaria dos
-     * veces el mismo comprobante.
+     * Una venta PENDIENTE_ENVIO o ENVIO_INCIERTO mas nueva que esto (desde su reserva) no se toca. La
+     * PENDIENTE_ENVIO sigue en curso: la peticion que la guardo todavia esta enviando (el envio dura como mucho
+     * POS_DGII_TIMEOUT segundos). La ENVIO_INCIERTO ya termino de enviar, pero la DGII puede estar procesandola
+     * y no devolverla aun en ConsultaTrackIds. En los dos casos reenviar el XML mandaria dos veces el mismo
+     * comprobante.
      */
     public const REENVIO_ESPERA_SEG = 120;
 
@@ -753,7 +762,15 @@ final class PosVenta
      *    y ENVIO_INCIERTO no llevan el prefijo RFCE_ del estado.
      *  - Nunca re-firma ni devuelve numeros al contador: el numero de una venta del POS ya esta impreso.
      *  - Una venta cuya peticion sigue viva no se toca: se salta mientras tenga tomado el candado de su clave
-     *    (el mismo de cobrar; aqui se pide sin esperar y se suelta al terminar con la fila).
+     *    (el mismo de cobrar; aqui se pide sin esperar y se suelta al terminar con la fila). Con el candado
+     *    puesto se relee la fila: si otro proceso cambio su estado_dgii o su envio_pendiente desde que se leyo
+     *    la lista, ya no es la que se leyo y se salta (la proxima pasada la ve como esta).
+     *  - Una venta guardada hace menos de REENVIO_ESPERA_SEG (PENDIENTE_ENVIO o ENVIO_INCIERTO) no se toca: la
+     *    DGII puede estar procesandola y ConsultaTrackIds todavia no devolverla; reenviar el XML duplicaria
+     *    un comprobante que la DGII acepta.
+     *  - Si el reenvio del XML guardado lo rechaza con la secuencia ya consumida, la DGII ya tenia ese
+     *    comprobante: el rechazo es el de un duplicado, no el veredicto de la venta. No se escribe ningun
+     *    estado final: la fila sigue pendiente y la proxima pasada la consulta de nuevo.
      *  - Cada escritura es compare-and-set sobre el estado que se leyo (posModel::marcarEnvio*) y pone
      *    envio_pendiente en la misma sentencia: si otro proceso ya movio la fila, no se pisa.
      *
@@ -764,7 +781,11 @@ final class PosVenta
         $aceptadas = 0;
         $rechazadas = [];
         $revisadas = 0;
-        foreach (self::pendientesAReenviar($pos) as $v) {
+        $candidatas = self::pendientesAReenviar($pos);
+        if (self::$trasLeerPendientes !== null) {
+            (self::$trasLeerPendientes)($candidatas);
+        }
+        foreach ($candidatas as $v) {
             if ($revisadas >= max(1, $max)) {
                 break;
             }
@@ -780,8 +801,14 @@ final class PosVenta
                     continue;
                 }
             }
-            $revisadas++;
             try {
+                // Otro proceso (la peticion de la venta, otra caja, GET /estado) pudo moverla entre la lectura
+                // de la lista y el candado: con el candado puesto ya nadie la cambia, y esta es la lectura buena.
+                $actual = $pos->estadoDeEnvio($id);
+                if ($actual === null || (string) $actual['estado_dgii'] !== (string) $v['estado_dgii'] || (int) $actual['envio_pendiente'] !== 1) {
+                    continue;   // ya no es la que se leyo: no cuenta como revisada
+                }
+                $revisadas++;
                 if (empty($v['e_ncf'])) {
                     error_log('[pos] pendiente ' . $id . ' sin e-NCF: no se puede reenviar');
                     continue;
@@ -842,9 +869,12 @@ final class PosVenta
     /**
      * Las ventas que el reenvio puede tocar ahora, las mas viejas primero (hasta REENVIO_CANDIDATAS de cada
      * grupo; reenviarPendientes se queda con las primeras $max cuyo candado este libre). Salta:
-     *  - PENDIENTE_ENVIO con menos de REENVIO_ESPERA_SEG segundos desde su reserva (meta 'desde'): la peticion
-     *    que la guardo sigue enviando. Sin 'desde' en la meta no hay como saber que es reciente: se revisa.
-     *    ENVIO_INCIERTO y los demas estados no se saltan: su envio ya termino.
+     *  - PENDIENTE_ENVIO o ENVIO_INCIERTO con menos de REENVIO_ESPERA_SEG segundos desde su reserva (meta
+     *    'desde'; marcarEnvioIncierto la conserva). La PENDIENTE_ENVIO sigue enviando en la peticion que la
+     *    guardo. La ENVIO_INCIERTO ya termino de enviar, pero la DGII puede estar procesandola: ConsultaTrackIds
+     *    todavia no la devuelve y reenviar el XML duplicaria un comprobante que la DGII acepta. Sin 'desde' en
+     *    la meta no hay como saber que es reciente: se revisa. Los demas estados (ENVIADO...) no se saltan:
+     *    ya tienen trackId y solo se consulta su resultado.
      *  - sin_rango (numero fuera de rango autorizado) mientras ningun rango registrado y vigente cubra su
      *    numero (ncfModel::rangoCubre): la DGII lo rechazaria. La meta dice con que ambiente se numero.
      *
@@ -855,7 +885,7 @@ final class PosVenta
         $ahora = time();
         $elegibles = [];
         foreach ($pos->ventasPendientes(self::REENVIO_CANDIDATAS, false) as $v) {
-            if ((string) $v['estado_dgii'] === EstadosEcf::PENDIENTE_ENVIO) {
+            if (in_array((string) $v['estado_dgii'], EstadosEcf::EN_VUELO, true)) {
                 $desde = strtotime((string) (facturaModel::metaEnvio($v['respuesta_dgii'] ?? null)['desde'] ?? ''));
                 if ($desde !== false && $ahora - $desde < self::REENVIO_ESPERA_SEG) {
                     continue;
@@ -887,7 +917,7 @@ final class PosVenta
             error_log('[pos] pendiente ' . $v['id'] . ' sin codigo de seguridad: no se puede consultar');
             return [null, null, null];
         }
-        $consulta = $servicio->consultarEstadoRFCE((string) $v['e_ncf'], (string) $v['codigo_seguridad'], $v['ambiente_dgii'] ?? null);
+        $consulta = $servicio->consultarEstadoRFCE((string) $v['e_ncf'], (string) $v['codigo_seguridad'], $v['ambiente_dgii'] ?? null, null, self::timeoutDgii());
         $estado = self::estadoDeConsulta($consulta['data'] ?? null);
         $respuesta = $consulta['data'] ?? null;
         if ($estado === 'NO_ENCONTRADO') {
@@ -896,7 +926,12 @@ final class PosVenta
                 return [null, null, null];
             }
             $envio = $servicio->reenviarRFCE((string) $v['rfce_xml'], $v['ambiente_dgii'] ?? null, self::timeoutDgii());
-            return [preg_replace('/^RFCE_/', '', (string) $envio['estado']), $envio['response'], null];
+            $estadoEnvio = preg_replace('/^RFCE_/', '', (string) $envio['estado']);
+            if (self::esRechazoDeDuplicado($estadoEnvio, $envio['response'])) {
+                error_log('[pos] pendiente ' . $v['id'] . ': el reenvio del RFCE se rechazo con la secuencia ya consumida (la DGII ya lo tenia): se consulta de nuevo en la proxima pasada');
+                return [null, null, null];
+            }
+            return [$estadoEnvio, $envio['response'], null];
         }
         return [$estado, $respuesta, null];
     }
@@ -915,7 +950,7 @@ final class PosVenta
         $ambiente = $v['ambiente_dgii'] ?? null;
         $trackId = !empty($v['track_id']) ? (string) $v['track_id'] : null;
         if ($trackId === null) {
-            $tracks = $servicio->consultarTrackIds((string) $v['e_ncf'], $ambiente);
+            $tracks = $servicio->consultarTrackIds((string) $v['e_ncf'], $ambiente, self::timeoutDgii());
             if ($tracks === null) {
                 return [null, null, null];
             }
@@ -925,6 +960,10 @@ final class PosVenta
                     return [null, null, null];
                 }
                 $envio = $servicio->reenviarECF((string) $v['xml_firmado'], $ambiente, self::timeoutDgii());
+                if (self::esRechazoDeDuplicado((string) $envio['estado'], $envio['response'])) {
+                    error_log('[pos] pendiente ' . $v['id'] . ': el reenvio del e-CF se rechazo con la secuencia ya consumida (la DGII ya lo tenia): se consulta de nuevo en la proxima pasada');
+                    return [null, null, null];
+                }
                 $trackId = $envio['track_id'];
                 if (in_array($envio['estado'], ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RECHAZADO'], true) || $trackId === null) {
                     return [$envio['estado'], $envio['response'], $trackId];
@@ -940,8 +979,20 @@ final class PosVenta
             }
             $v['estado_dgii'] = 'ENVIADO';
         }
-        $consulta = $servicio->consultarEstado($trackId, (string) $v['e_ncf'], $ambiente);
+        $consulta = $servicio->consultarEstado($trackId, (string) $v['e_ncf'], $ambiente, null, self::timeoutDgii());
         return [self::estadoDeConsulta($consulta['data'] ?? null), $consulta['data'] ?? null, $trackId];
+    }
+
+    /**
+     * ¿Es el rechazo de un REENVIO que la DGII contesta porque ya tenia el comprobante? Un RECHAZADO con
+     * secuenciaUtilizada = true: la DGII ya consumio ese e-NCF (con el envio original, que sigue en proceso o
+     * ya fue aceptado), asi que el rechazo es el del duplicado, no el veredicto de la venta. Un rechazo de
+     * verdad (por la firma o el XML) llega con la secuencia sin consumir.
+     */
+    private static function esRechazoDeDuplicado(string $estado, $respuesta): bool
+    {
+        return $estado === 'RECHAZADO' && is_array($respuesta)
+            && filter_var($respuesta['secuenciaUtilizada'] ?? null, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) === true;
     }
 
     /** Estado de una consulta DGII ({estado: "Aceptado"} o {codigo: 1}) en mayusculas, o null. */
