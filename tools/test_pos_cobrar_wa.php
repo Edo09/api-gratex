@@ -235,7 +235,10 @@ function reiniciar(PDO $pdo): void
     wa_limpiar($pdo);
 }
 
-/** Cuerpo de POST /api/pos/ventas: una unidad del producto sembrado, en efectivo con RD$ 1,500. */
+/**
+ * Cuerpo de POST /api/pos/ventas: una unidad del producto sembrado, en efectivo con RD$ 1,500.
+ * Opciones: clave, tipo, forma_pago y recibido_centavos (null para tarjeta o transferencia).
+ */
 function cuerpoVenta(array $f, array $op = []): array
 {
     $tipo = (string) ($op['tipo'] ?? '32');
@@ -245,8 +248,8 @@ function cuerpoVenta(array $f, array $op = []): array
         'client_id' => $tipo === '31' ? $f['client_id'] : null,
         'lineas' => [['product_id' => $f['product_id'], 'cantidad' => 1]],
         'total_centavos' => 118000,
-        'forma_pago' => 1,
-        'recibido_centavos' => 150000,
+        'forma_pago' => $op['forma_pago'] ?? 1,
+        'recibido_centavos' => array_key_exists('recibido_centavos', $op) ? $op['recibido_centavos'] : 150000,
         'ancho' => 80,
         'iniciada_ms' => null,
     ];
@@ -665,6 +668,84 @@ wa_chk('RF2b: responde 422 FORMA_PAGO_INVALIDA y no escribe la caja',
 $r3 = venta($pdo, $f, ['cuerpo' => $r['cuerpo']]);
 wa_chk('RF2b: con el cuerpo completo el reintento la completa',
     $r3['err'] === null && cajaDe($pdo, $idRf2b)['n'] === 1 && wa_movimientos($pdo, $idRf2b) === 1, descErr($r3['err']));
+
+// PG) Como se pago: el recibo del POS lleva 'pago' (filas {etiqueta, valor}), igual al cobrar, al repetir la
+// clave y al reimprimir, y tambien en la factura simple de respaldo. El recibo de app.* no cambia.
+echo "PG) El recibo del POS muestra como se pago\n";
+require_once __DIR__ . '/../src/Utils/Pdf/RepresentacionImpresa.php';
+$filaPago = static fn(string $etiqueta, string $valor): array => ['etiqueta' => $etiqueta, 'valor' => $valor];
+
+reiniciar($pdo);
+$r = venta($pdo, $f);
+$v = $r['res'];
+$idPg1 = (int) ($v['venta']['factura_id'] ?? 0);
+$pagoConDevuelta = [$filaPago('Efectivo', '1,500.00'), $filaPago('Devuelta', '320.00')];
+wa_chk('PG1: efectivo con devuelta: Efectivo (lo recibido) y Devuelta (el cambio)',
+    $r['err'] === null && ($v['recibo']['pago'] ?? null) === $pagoConDevuelta, $v['recibo']['pago'] ?? descErr($r['err']));
+$reimpresoPg1 = PosVenta::recibo($idPg1, 80);
+wa_chk('PG1: la reimpresion (GET .../recibo) trae el mismo pago y es el mismo recibo que el primero',
+    is_array($reimpresoPg1) && ($reimpresoPg1['pago'] ?? null) === $pagoConDevuelta && $reimpresoPg1 === ($v['recibo'] ?? null));
+wa_chk('PG1: en otro ancho de papel el pago es el mismo', (PosVenta::recibo($idPg1, 72)['pago'] ?? null) === $pagoConDevuelta);
+$rRep = venta($pdo, $f, ['cuerpo' => $r['cuerpo']]);
+wa_chk('PG1: la venta repetida (misma clave) responde el recibo con el mismo pago',
+    $rRep['err'] === null && ($rRep['res']['repetida'] ?? null) === true && ($rRep['res']['recibo']['pago'] ?? null) === $pagoConDevuelta,
+    $rRep['res']['recibo']['pago'] ?? descErr($rRep['err']));
+$facturasPg = new facturaModel();
+$filaApp = $facturasPg->getFacturas($idPg1)[0] ?? [];
+$filaApp['items'] = $facturasPg->getFacturaItems($idPg1);
+$reciboApp = RepresentacionImpresa::datosRecibo($filaApp, [], false, 80, 'Factura_pg');
+wa_chk('PG1: el recibo de app.* (RepresentacionImpresa) no lleva pago',
+    !array_key_exists('pago', $reciboApp) && is_array($reciboApp['totales'] ?? null));
+
+reiniciar($pdo);
+$r = venta($pdo, $f, ['recibido_centavos' => 118000]);
+$v = $r['res'];
+$idPg2 = (int) ($v['venta']['factura_id'] ?? 0);
+$pagoExacto = [$filaPago('Efectivo', '1,180.00')];
+wa_chk('PG2: efectivo exacto (sin devuelta): una sola fila Efectivo con el total',
+    $r['err'] === null && ($v['recibo']['pago'] ?? null) === $pagoExacto, $v['recibo']['pago'] ?? descErr($r['err']));
+wa_chk('PG2: la reimpresion trae el mismo pago', (PosVenta::recibo($idPg2, 80)['pago'] ?? null) === $pagoExacto);
+
+reiniciar($pdo);
+$r = venta($pdo, $f, ['forma_pago' => 3, 'recibido_centavos' => null]);
+$v = $r['res'];
+$idPg3 = (int) ($v['venta']['factura_id'] ?? 0);
+$pagoTarjeta = [$filaPago('Tarjeta', '1,180.00')];
+wa_chk('PG3: tarjeta: una sola fila con el nombre de la forma y el total',
+    $r['err'] === null && ($v['recibo']['pago'] ?? null) === $pagoTarjeta, $v['recibo']['pago'] ?? descErr($r['err']));
+wa_chk('PG3: la reimpresion trae el mismo pago', (PosVenta::recibo($idPg3, 80)['pago'] ?? null) === $pagoTarjeta);
+
+reiniciar($pdo);
+$r = venta($pdo, $f, ['forma_pago' => 2, 'recibido_centavos' => null]);
+$v = $r['res'];
+$idPg4 = (int) ($v['venta']['factura_id'] ?? 0);
+$pagoTransferencia = [$filaPago(PosVenta::FORMAS_PAGO[2], '1,180.00')];
+wa_chk('PG4: transferencia: una sola fila con el nombre que usa el POS y el total',
+    $r['err'] === null && ($v['recibo']['pago'] ?? null) === $pagoTransferencia, $v['recibo']['pago'] ?? descErr($r['err']));
+wa_chk('PG4: la reimpresion trae el mismo pago', (PosVenta::recibo($idPg4, 80)['pago'] ?? null) === $pagoTransferencia);
+
+// PG5) Factura simple de respaldo (sin certificado): el mismo recibo, con el pago.
+reiniciar($pdo);
+$certOk = (string) $_ENV['DGII_ECF_CERT_PATH'];
+putenv('DGII_ECF_CERT_PATH=' . $certOk . '.no-existe');
+$_ENV['DGII_ECF_CERT_PATH'] = $certOk . '.no-existe';
+$r = venta($pdo, $f);
+putenv('DGII_ECF_CERT_PATH=' . $certOk);
+$_ENV['DGII_ECF_CERT_PATH'] = $certOk;
+$v = $r['res'];
+$idPg5 = (int) ($v['venta']['factura_id'] ?? 0);
+wa_chk('PG5: la factura simple de respaldo trae el pago (Efectivo y Devuelta), al cobrar y al reimprimir',
+    $r['err'] === null && array_key_exists('tipo_ecf', $v['venta'] ?? []) && $v['venta']['tipo_ecf'] === null
+    && ($v['recibo']['pago'] ?? null) === $pagoConDevuelta && (PosVenta::recibo($idPg5, 80)['pago'] ?? null) === $pagoConDevuelta,
+    $v['recibo']['pago'] ?? descErr($r['err']));
+
+// PG6) Una venta sin movimiento de caja (se cayo antes de cobrar): el recibo sigue saliendo, sin pago.
+reiniciar($pdo);
+$r = venta($pdo, $f, ['pos' => new PosQueMuereAlCobrar()]);
+$idPg6 = (int) (filaPorClave($pdo, $r['cuerpo']['clave'])['id'] ?? 0);
+$reciboPg6 = PosVenta::recibo($idPg6, 80);
+wa_chk('PG6: sin movimiento de caja el recibo se arma y pago es null',
+    $idPg6 > 0 && cajaDe($pdo, $idPg6)['n'] === 0 && is_array($reciboPg6) && ($reciboPg6['pago'] ?? null) === null, $reciboPg6['pago'] ?? null);
 
 PosVenta::$fabricaServicio = null;
 wa_fin();

@@ -262,13 +262,25 @@ Respuesta `201`:
              "cliente": null },
   "cobro": { "forma_pago": 1, "forma_pago_nombre": "Efectivo", "total_centavos": 24500,
              "recibido_centavos": 50000, "devuelta_centavos": 25500 },
-  "recibo": { "...": "los mismos datos de GET /api/facturas/{id}/pdf?format=datos" },
+  "recibo": { "...": "los mismos datos de GET /api/facturas/{id}/pdf?format=datos, mas `pago`" },
   "repetida": false
 }
 ```
 
 **`GET /api/pos/ventas/{id}/recibo?ancho=80`** (con `X-POS-SESION`) — `{recibo}` para
 reimprimir. Solo ventas del POS (`404 VENTA_NO_EXISTE` si no).
+
+**`recibo.pago`** (solo en el POS; el recibo de `app.*` no lo lleva) es como se pagó la venta, para
+imprimirlo debajo del total: una lista de filas `{etiqueta, valor}` con el valor como las filas de
+`totales` (2 decimales, sin `RD$`). Sale del movimiento de caja de la venta, así que es el mismo al
+cobrar, al repetir la clave, en la factura simple de respaldo y al reimprimir. Es `null` si la venta
+no tiene movimiento de caja.
+
+- Efectivo con devuelta: `[{"etiqueta":"Efectivo","valor":"3,558.00"},{"etiqueta":"Devuelta","valor":"914.80"}]`
+  (lo recibido y el cambio).
+- Efectivo justo: `[{"etiqueta":"Efectivo","valor":"2,643.20"}]` (el total).
+- Tarjeta o transferencia: una fila con el nombre de la forma de pago y el total, p. ej.
+  `[{"etiqueta":"Tarjeta","valor":"2,643.20"}]`.
 
 **`POST /api/pos/pendientes/reenviar`** (solo `X-POS-EQUIPO`) — el reenvío automático: revisa hasta 5
 ventas del POS con `envio_pendiente = 1`; nunca re-firma ni devuelve números.
@@ -408,7 +420,7 @@ los tenants de prueba). Todas se niegan a correr contra una base que no sea
 `*wa_scratch` / `*wa_scratch_sin_gate` marcada, salvo un MySQL local (`tools/pos_scratch_guard.php`).
 
 Tres suites más corren en proceso, sin servidor HTTP, de una en una y con
-`--tenant-db=wa_scratch`: `tools/test_pos_cobrar_wa.php` (75: la venta sobre el gancho write-ahead, la
-misma clave desde dos procesos y el corte entre guardar y la caja), `tools/test_pos_continuidad.php`
+`--tenant-db=wa_scratch`: `tools/test_pos_cobrar_wa.php` (88: la venta sobre el gancho write-ahead, la
+misma clave desde dos procesos, el corte entre guardar y la caja y el `pago` del recibo), `tools/test_pos_continuidad.php`
 (54: certificado ausente, con otra clave y vencido, factura simple, secuencia agotada o vencida y el
 cierre con facturas simples) y `tools/test_pos_reenvio.php` (47: el reenvío automático).

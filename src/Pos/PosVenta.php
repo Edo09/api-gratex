@@ -588,7 +588,9 @@ final class PosVenta
     }
 
     /**
-     * Datos del recibo de tirilla (los mismos de app.*: RepresentacionImpresa).
+     * Datos del recibo de tirilla (los mismos de app.*: RepresentacionImpresa) mas
+     * 'pago', como se pago la venta (solo en el POS: ver pagoDelRecibo). Es lo
+     * que sale al cobrar, al repetir la clave y al reimprimir, siempre igual.
      * null si no se pudo armar: la venta ya existe y se reimprime despues.
      */
     public static function recibo(int $facturaId, int $ancho): ?array
@@ -606,12 +608,46 @@ final class PosVenta
             $simple = ($factura['tipo_ecf'] ?? null) === null;
             $nombre = 'Factura_' . ($simple ? ($factura['no_factura'] ?? $facturaId) : ($factura['e_ncf'] ?? $facturaId)) . RepresentacionImpresa::sufijo($ancho);
             // Credito fiscal: el recibo lleva el RNC y la razon social del comprador.
-            $cliente = !empty($factura['client_id']) ? ((new posModel())->clientePorId((int) $factura['client_id']) ?? []) : [];
-            return RepresentacionImpresa::datosRecibo($factura, $cliente, $simple, $ancho, $nombre);
+            $pos = new posModel();
+            $cliente = !empty($factura['client_id']) ? ($pos->clientePorId((int) $factura['client_id']) ?? []) : [];
+            return RepresentacionImpresa::datosRecibo($factura, $cliente, $simple, $ancho, $nombre)
+                + ['pago' => self::pagoDelRecibo($pos, $facturaId)];
         } catch (Throwable $e) {
             error_log('[pos] recibo de la factura ' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
             return null;
         }
+    }
+
+    /**
+     * Como se pago la venta, para el recibo: filas {etiqueta, valor} con el valor
+     * como las filas de totales (number_format a 2 decimales, sin RD$). Sale de
+     * su movimiento de caja, asi que es el mismo al cobrar, al repetir y al reimprimir:
+     *  - efectivo con devuelta: «Efectivo» con lo recibido y «Devuelta» con el cambio;
+     *  - efectivo justo: solo «Efectivo» con el total;
+     *  - tarjeta o transferencia: una fila con el nombre de la forma y el total.
+     * null si la venta no tiene movimiento de caja, o si no se puede leer: eso no
+     * tumba el recibo, que sale sin esa parte.
+     *
+     * @return list<array{etiqueta: string, valor: string}>|null
+     */
+    private static function pagoDelRecibo(posModel $pos, int $facturaId): ?array
+    {
+        try {
+            $mov = $pos->movimientoDeFactura($facturaId);
+        } catch (Throwable $e) {
+            error_log('[pos] pago del recibo de la factura ' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
+            return null;
+        }
+        if ($mov === null) {
+            return null;
+        }
+        $forma = (int) ($mov['forma_pago'] ?? 0);
+        $total = (float) ($mov['monto'] ?? 0);
+        $fila = static fn(string $etiqueta, float $valor): array => ['etiqueta' => $etiqueta, 'valor' => number_format($valor, 2)];
+        if ($forma === 1 && isset($mov['monto_recibido']) && isset($mov['devuelta']) && (float) $mov['devuelta'] > 0) {
+            return [$fila(self::FORMAS_PAGO[1], (float) $mov['monto_recibido']), $fila('Devuelta', (float) $mov['devuelta'])];
+        }
+        return [$fila(self::FORMAS_PAGO[$forma] ?? 'Otra', $total)];
     }
 
     /**
