@@ -161,16 +161,34 @@ herramienta de operaciones, no del cliente). Solo lectura.
   "Ver JSON original". El diff está pensado para la forma real de los valores:
   - Compara por valor, no por texto: `"18000.0000"` = `18000`, `1` = `true`,
     `"12"` = `12`, `"2026-10-01 00:00:00"` = `"2026-10-01"`, y
-    `retencion_isr` `true` = el monto guardado. Un código con ceros a la
-    izquierda (`"001"` ≠ `1`) sí cuenta como cambio.
+    `retencion_isr` `true` = el monto guardado. Los campos de texto o código
+    (`sku`, `codigo`, `description`, `nombre`, `rnc`, `telefono`, `email`…) se
+    comparan y muestran tal cual: `"2.10"` → `"2.1"` y `"001"` → `1` sí son
+    cambios.
   - `new_values` suele ser el cuerpo del PUT, parcial: un campo que no vino sale
-    como **no enviado** (según el módulo quedó igual o se vació; la vista no lo
-    adivina). Un campo nuevo en `0`/`false`/vacío no cuenta como cambio.
+    como **no enviado** y el resumen los cuenta aparte, porque la bitácora no
+    guarda su valor después (pudo quedar igual o recalcularlo el servidor:
+    totales, `updated_at`). Un campo nuevo en `0`/`false`/vacío no cuenta como
+    cambio.
+  - Excepción, los UPDATE que escriben toda la fila: products, proveedores,
+    categories y warehouses ponen NULL (o su valor por defecto: `activo`/`estado`
+    = 1, `precio`/`costo` = 0, `unidad_medida` = `43`) en la columna que no viene,
+    y el formulario no manda los campos que el usuario dejó en blanco. Ahí el
+    campo que falta sale como **cambio** al valor que queda (`telefono 809… →
+    vacío`, "no vino en lo enviado: queda así"). La lista vive en
+    `OMITTED_BECOMES` de `audit_logs.html` y copia los `bindParams` de cada
+    modelo: si uno cambia, hay que tocarla. clients usa COALESCE (lo que no viene
+    se conserva) y no está. En una cotización Ferretería un PUT sin `ajustes` los
+    quita todos, y dentro de un `ajustes` que sí vino el concepto que falta vale 0.
+  - En un texto largo que cambió se resalta solo el tramo distinto (un cambio
+    que solo toca espacios o saltos de línea se ve como `·`/`↵`).
   - Los arreglos de objetos (`items`) se comparan **línea por línea**. Las
     líneas no tienen id estable (cada guardado las borra y reinserta), así que se
     alinean por `product_id`, o por `description` en las líneas libres,
-    respetando el orden. Cada línea sale como Modificada (con sus campos
-    `antes → después`; si cambió de lugar, también `posición #3 → #1`),
+    respetando el orden; con el mismo producto en varias líneas gana la
+    alineación que deja quietas las líneas idénticas, y una línea suelta se
+    empareja con la más parecida. Cada línea sale como Modificada (con sus
+    campos `antes → después`; si cambió de lugar, también `posición #3 → #1`),
     Agregada, Quitada o Sin cambios. El `id` de la línea no se compara.
   - Los arreglos de texto (`permissions`) se comparan como conjunto (agregados /
     quitados). Branding compara `pdf_template` contra `template` (y el color).

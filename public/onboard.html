@@ -85,6 +85,11 @@
     <input type="file" name="cert" id="cert" accept=".p12,.pfx">
     <label id="certPassLabel" class="req">Clave del certificado</label>
     <input type="password" name="cert-pass" id="certPass" autocomplete="off">
+    <div class="hint">
+      Al crear, el .p12 se abre aquí con esa clave. Si viene con cifrado legacy (RC2-40, lo normal en los
+      de la CA), se re-cifra en este navegador a AES-256 con la <b>misma clave</b> antes de subirlo: el servidor
+      no puede leer el legacy. La llave y el certificado no cambian.
+    </div>
 
     <!-- Integración -->
     <section id="secIntegracion">
@@ -150,6 +155,14 @@
   </div>
 </div>
 
+<!-- node-forge: abre los .p12 legacy (RC2-40/3DES) que el PHP del server (OpenSSL 3 sin provider legacy) no lee.
+     SRI fijado: la pagina maneja la llave privada y su clave, asi que un forge.min.js
+     alterado en el CDN no se ejecuta (el navegador lo bloquea y el submit pregunta antes
+     de subir sin revisar). Al cambiar de version, recalcular:
+       openssl dgst -sha384 -binary forge.min.js | openssl base64 -A -->
+<script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"
+        integrity="sha384-xE6n3RBMZWgwAhyzoIMfY7HN3oDBa/+HBwFFNyxsdY8kseup7C4Blx1yDzprEESV"
+        crossorigin="anonymous"></script>
 <script>
 const f = document.getElementById('f');
 const tipo = document.getElementById('tipo');
@@ -157,6 +170,7 @@ const secApp = document.getElementById('secApp');
 const secInt = document.getElementById('secIntegracion');
 const certFileLabel = document.getElementById('certFileLabel');
 const certPassLabel = document.getElementById('certPassLabel');
+const certPass = document.getElementById('certPass');
 const btn = document.getElementById('btn');
 const resultCard = document.getElementById('resultCard');
 const out = document.getElementById('out');
@@ -221,6 +235,105 @@ function archivarResultado() {
   document.getElementById('histCard').classList.remove('hidden');
 }
 
+// ---------------------------------------------------------------- certificado
+// Algoritmos PBE de PKCS#12 (1.2.840.113549.1.12.1.x) y PBES1 (1.2.840.113549.1.5.x)
+// que OpenSSL 3 solo lee con el provider legacy: RC4, RC2 y DES simple. 3DES y
+// PBES2/AES los lee sin el. El server no tiene el legacy activo, y con estos la
+// emision falla con "Unable to read certificate ... error:0308010C ... unsupported".
+const PBE_LEGACY = {
+  '1.2.840.113549.1.12.1.1': 'RC4-128', '1.2.840.113549.1.12.1.2': 'RC4-40',
+  '1.2.840.113549.1.12.1.5': 'RC2-128', '1.2.840.113549.1.12.1.6': 'RC2-40',
+  '1.2.840.113549.1.5.1': 'MD2-DES', '1.2.840.113549.1.5.3': 'MD5-DES',
+  '1.2.840.113549.1.5.4': 'MD2-RC2', '1.2.840.113549.1.5.6': 'MD5-RC2',
+  '1.2.840.113549.1.5.10': 'SHA1-DES', '1.2.840.113549.1.5.11': 'SHA1-RC2',
+};
+
+// Los AlgorithmIdentifier del AuthenticatedSafe van en claro dentro del DER (solo el
+// contenido esta cifrado), asi que basta buscar el OID codificado en los bytes.
+function algoritmosLegacy(der) {
+  return Object.entries(PBE_LEGACY)
+    .filter(([oid]) => {
+      const v = forge.asn1.oidToDer(oid).getBytes();
+      return der.includes('\x06' + String.fromCharCode(v.length) + v);
+    })
+    .map(([, nombre]) => nombre);
+}
+
+const bagsDe = (p12, tipo) => p12.getBags({ bagType: tipo })[tipo] || [];
+const mismaLlave = (pub, key) => !!(pub && pub.n && key && key.n && pub.n.equals(key.n) && pub.e.equals(key.e));
+
+/**
+ * Abre el .p12 con la clave (asi una clave mal escrita se ve aqui, no al emitir) y,
+ * si viene con cifrado legacy, lo re-cifra a AES-256 con la MISMA clave: no hay que
+ * tocar cert_pass_encrypted, y la firma que ve la DGII es identica. Es lo mismo que
+ * hace convertir_cert.ps1 con openssl.
+ * Devuelve {file, nota}; lanza Error con el mensaje para el usuario si no sirve.
+ */
+async function prepararCert(file, pass) {
+  const der = forge.util.binary.raw.encode(new Uint8Array(await file.arrayBuffer()));
+  const legacy = algoritmosLegacy(der);
+  const usarScript = 'Conviértelo con convertir_cert.ps1 (misma clave) y súbelo de nuevo.';
+
+  let p12;
+  try {
+    p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(der), false, pass);
+  } catch (e) {
+    if (/MAC could not be verified|wrong password|Invalid password/i.test(e.message)) {
+      throw new Error('La clave no abre este .p12: revise la clave del certificado.');
+    }
+    if (legacy.length) {
+      throw new Error(`El .p12 viene con cifrado legacy (${legacy.join(', ')}) y no se pudo abrir aquí `
+        + `(${e.message}). ${usarScript}`);
+    }
+    // Moderno pero raro para forge: el server lo puede leer igual; create_tenant.php avisa si no.
+    return { file, nota: `Certificado: no se pudo revisar el .p12 en el navegador (${e.message}); se subió tal cual.` };
+  }
+
+  const llaves = [...bagsDe(p12, forge.pki.oids.pkcs8ShroudedKeyBag), ...bagsDe(p12, forge.pki.oids.keyBag)];
+  const certs = bagsDe(p12, forge.pki.oids.certBag);
+  if (!llaves.length) {
+    throw new Error('El .p12 no trae la llave privada (solo el certificado): pida al cliente el archivo completo.');
+  }
+  if (!legacy.length) {
+    return { file, nota: '' }; // el server lo lee tal cual: se sube sin tocar
+  }
+
+  // forge solo re-codifica llaves y certificados RSA (los de la CA dominicana lo son).
+  if (llaves.length !== 1 || !llaves[0].key || certs.some(b => !b.cert)) {
+    throw new Error(`El .p12 viene con cifrado legacy (${legacy.join(', ')}) pero no se puede convertir aquí `
+      + `(${llaves.length} llave(s), o una llave/certificado que no es RSA). ${usarScript}`);
+  }
+  const key = llaves[0].key;
+  const cadena = certs.map(b => b.cert);
+  const hoja = cadena.find(c => mismaLlave(c.publicKey, key));
+  if (!hoja) {
+    throw new Error('Ningún certificado del .p12 corresponde a su llave privada: pida al cliente el archivo correcto.');
+  }
+
+  // Hoja primero: generateLocalKeyId une la llave con el PRIMER certificado, que es
+  // como openssl_pkcs12_read sabe cual de la cadena es el del emisor.
+  const nuevoAsn1 = forge.pkcs12.toPkcs12Asn1(key, [hoja, ...cadena.filter(c => c !== hoja)], pass,
+    { algorithm: 'aes256', generateLocalKeyId: true });
+  const nuevoDer = forge.asn1.toDer(nuevoAsn1).getBytes();
+
+  // Ida y vuelta: el .p12 nuevo abre con la misma clave, trae la misma llave y ya no es legacy.
+  const check = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(nuevoDer), false, pass);
+  const checkLlave = (bagsDe(check, forge.pki.oids.pkcs8ShroudedKeyBag)[0] || {}).key;
+  if (!mismaLlave(checkLlave, key) || algoritmosLegacy(nuevoDer).length) {
+    throw new Error(`La conversión del .p12 no se pudo verificar. ${usarScript}`);
+  }
+
+  let cn = (hoja.subject.getField('CN') || {}).value || 'sin CN';
+  try { cn = forge.util.decodeUtf8(cn); } catch (e) { /* forge lo dejo en bytes: se muestra tal cual */ }
+  const nombre = file.name.replace(/\.(p12|pfx)$/i, '') + '_moderno.p12';
+  return {
+    file: new File([forge.util.binary.raw.decode(nuevoDer)], nombre, { type: 'application/x-pkcs12' }),
+    nota: `Certificado: el .p12 venía con cifrado legacy (${legacy.join(', ')}), que el servidor no puede leer.\n`
+      + `Se re-cifró en este navegador a AES-256 con la misma clave; la llave y el certificado no cambian\n`
+      + `(${cn}, vence ${hoja.validity.notAfter.toISOString().slice(0, 10)}).`,
+  };
+}
+
 function toggle() {
   const isApp = tipo.value === 'app';
   secApp.classList.toggle('hidden', !isApp);   // seccion App solo si tipo=app
@@ -238,12 +351,42 @@ f.addEventListener('submit', async (e) => {
   resultCard.classList.add('hidden');
   out.classList.remove('ok', 'err');
 
+  const mostrarError = (msg) => {
+    out.textContent = msg;
+    out.classList.add('err');
+    resultCard.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Crear tenant';
+  };
+
+  // El .p12 se revisa (y si es legacy, se convierte) ANTES de crear nada: un
+  // certificado que el server no puede leer deja un tenant que no emite.
+  const certInput = document.getElementById('cert');
+  let cert = certInput.files && certInput.files.length ? certInput.files[0] : null;
+  let certNota = '';
+  if (cert) {
+    if (typeof forge === 'undefined') {
+      const seguir = confirm('No cargó el revisor de certificados (sin internet o CDN bloqueado).\n\n'
+        + '¿Subir el .p12 sin revisar? Si viene con cifrado legacy, la emisión va a fallar hasta convertirlo.');
+      if (!seguir) { mostrarError('No se creó nada: recargue la página para reintentar la revisión del .p12.'); return; }
+      certNota = 'Certificado: subido SIN revisar (no cargó node-forge).';
+    } else {
+      try {
+        ({ file: cert, nota: certNota } = await prepararCert(cert, certPass.value));
+      } catch (err) {
+        mostrarError('No se creó nada.\n\n' + err.message);
+        return;
+      }
+    }
+  }
+
   // Construir FormData omitiendo campos vacios (para no romper la logica del backend).
   const fd = new FormData();
   for (const el of f.elements) {
     if (!el.name) continue;
     if (el.type === 'file') {
-      if (el.files && el.files.length) fd.append(el.name, el.files[0]);
+      // cert: el revisado/convertido de arriba, no el que se eligio
+      const archivo = el === certInput ? cert : (el.files && el.files.length ? el.files[0] : null);
+      if (archivo) fd.append(el.name, archivo, archivo.name);
     } else if (el.type === 'checkbox') {
       if (el.checked) fd.append(el.name, el.value);
     } else if (el.value !== '' || el.name === 'ambiente') {
@@ -258,7 +401,8 @@ f.addEventListener('submit', async (e) => {
     const res = await fetch('create_tenant.php', { method: 'POST', body: fd });
     const text = await res.text();
     const ok = res.ok && /== Tenant creado OK ==/.test(text);
-    out.textContent = text; // queda visible: el API SECRET sale una sola vez
+    // queda visible: el API SECRET sale una sola vez
+    out.textContent = (certNota ? certNota + '\n\n' : '') + text;
     out.classList.add(ok ? 'ok' : 'err');
     resultCard.classList.remove('hidden');
     if (ok) limpiarEmpresa(grupoEnviado, text); // si fallo no se toca nada: corregir y reintentar

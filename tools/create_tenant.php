@@ -319,7 +319,8 @@ if ($tipo === 'app') {
 // Certificado (.p12): requerido en integracion, opcional en app
 // =============================================================================
 $certPathRel = null;
-$certIguales = []; // tenants con el mismo .p12 (sha256); solo para avisar
+$certIguales = []; // tenants con el mismo certificado; solo para avisar
+$certIlegible = false; // este PHP no abre el .p12 con esa clave: la firma va a fallar
 if ($certPathArg !== null && $certPathArg !== '') {
     if (!is_file($certPathArg)) {
         fail("cert-path no existe: {$certPathArg}");
@@ -327,8 +328,13 @@ if ($certPathArg !== null && $certPathArg !== '') {
     // Respaldo contra el .p12 de la empresa anterior arrastrado en el formulario:
     // se compara contra los cert de los demas tenants ANTES de mover el archivo.
     // Solo avisa: hay casos validos (misma persona delegada para ambos RNC).
+    // Por archivo (sha256) Y por certificado: onboard.html re-cifra los .p12
+    // legacy y cada conversion sale con otro salt, asi que el mismo certificado
+    // convertido dos veces da dos archivos distintos.
     $certHash = (string) hash_file('sha256', $certPathArg);
-    $certIguales = $certHash !== '' ? tenantsConMismoCert($masterPdo, $certHash) : [];
+    $certFp = certFingerprint($certPathArg, $certPass);
+    $certIlegible = $certFp === null;
+    $certIguales = tenantsConMismoCert($masterPdo, $certHash, $certFp);
     // Carpeta raiz de certificados, relativa a la raiz del proyecto. Se puede
     // sobreescribir con CERT_DIR en el .env cuando el deploy la tiene con otro
     // nombre; lo que importa es que coincida con lo que se graba en
@@ -354,6 +360,12 @@ if ($certPathArg !== null && $certPathArg !== '') {
         echo PHP_EOL . "!! WARNING: el .p12 es IDENTICO al del tenant #{$igual['id']} '{$igual['nombre']}' (RNC {$igual['rnc']})." . PHP_EOL;
         echo "   Solo es valido si la misma persona esta delegada para ambos RNC en la DGII." . PHP_EOL;
         echo "   Si no, corrija el certificado ({$certPathRel} + su clave) antes de la Fase 2." . PHP_EOL;
+    }
+    if ($certIlegible) {
+        echo PHP_EOL . "!! WARNING: este servidor NO pudo abrir el .p12 con la clave dada." . PHP_EOL;
+        echo "   La emision va a fallar con 'Unable to read certificate'. O la clave esta mal, o el" . PHP_EOL;
+        echo "   .p12 viene con cifrado legacy (RC2-40): onboard.html lo convierte solo; por CLI," . PHP_EOL;
+        echo "   convertirlo con convertir_cert.ps1 y reemplazar {$certPathRel} (misma clave)." . PHP_EOL;
     }
 }
 
@@ -523,6 +535,9 @@ if ($grupoId !== null && !$grupoSelf) {
 foreach ($certIguales as $igual) {
     echo "  !! .p12 identico al del tenant #{$igual['id']} '{$igual['nombre']}' (RNC {$igual['rnc']}): ver WARNING arriba.\n";
 }
+if ($certIlegible) {
+    echo "  !! El servidor no pudo abrir el .p12 con esa clave: ver WARNING arriba.\n";
+}
 if ($tipo === 'integracion' && $ambiente === 'ecf') {
     echo "\n!! ATENCION: este tenant se creo directamente en PRODUCCION (ambiente ecf).\n";
     echo "!! NO corra el set de pruebas DGII (Fase 2/3/4) para el: saldrian facturas fiscales reales.\n";
@@ -564,16 +579,19 @@ function runSqlFile(PDO $pdo, string $path): void
 }
 
 /**
- * Tenants cuyo .p12 guardado es identico (sha256) al que se esta dando de alta.
+ * Tenants con el mismo certificado que el que se esta dando de alta: mismo
+ * archivo (sha256) o, si los dos se pueden abrir, el mismo X509 dentro del .p12
+ * (huella sha256; cubre los .p12 que onboard.html re-cifro, ver arriba).
  * tenants.cert_path se resuelve igual que CertResolver::toAbsolute (absoluta tal
  * cual, relativa desde la raiz del proyecto); los archivos que no existen se saltan.
  * @return array<int, array{id: int|string, nombre: string, rnc: string}>
  */
-function tenantsConMismoCert(PDO $pdo, string $hash): array
+function tenantsConMismoCert(PDO $pdo, string $hash, ?string $fingerprint): array
 {
     $iguales = [];
     $rows = $pdo->query(
-        "SELECT id, nombre, rnc, cert_path FROM tenants WHERE cert_path IS NOT NULL AND cert_path <> '' ORDER BY id"
+        "SELECT id, nombre, rnc, cert_path, cert_pass_encrypted FROM tenants
+          WHERE cert_path IS NOT NULL AND cert_path <> '' ORDER BY id"
     );
     foreach ($rows as $t) {
         $path = (string) $t['cert_path'];
@@ -584,11 +602,39 @@ function tenantsConMismoCert(PDO $pdo, string $hash): array
             continue;
         }
         $h = @hash_file('sha256', $path);
-        if ($h !== false && hash_equals($h, $hash)) {
+        $igual = $hash !== '' && $h !== false && hash_equals($h, $hash);
+        if (!$igual && $fingerprint !== null && !empty($t['cert_pass_encrypted'])) {
+            try {
+                $fp = certFingerprint($path, TenantResolver::decrypt((string) $t['cert_pass_encrypted']));
+            } catch (Throwable $e) {
+                $fp = null; // clave que no descifra: solo cuenta la comparacion por archivo
+            }
+            $igual = $fp !== null && hash_equals($fp, $fingerprint);
+        }
+        if ($igual) {
             $iguales[] = ['id' => $t['id'], 'nombre' => (string) $t['nombre'], 'rnc' => (string) $t['rnc']];
         }
     }
     return $iguales;
+}
+
+/**
+ * Huella sha256 del X509 dentro del .p12, o null si este PHP no lo abre con esa
+ * clave (clave incorrecta, o cifrado legacy sin el provider legacy de OpenSSL 3:
+ * lo mismo que despues haria fallar a DgiiXmlSigner).
+ */
+function certFingerprint(string $path, ?string $pass): ?string
+{
+    $raw = @file_get_contents($path);
+    $ok = $raw !== false && $pass !== null && @openssl_pkcs12_read($raw, $certs, $pass);
+    while (openssl_error_string() !== false) {
+        // vaciar la cola de errores de OpenSSL: no tiene que contaminar la proxima llamada
+    }
+    if (!$ok || empty($certs['cert'])) {
+        return null;
+    }
+    $fp = openssl_x509_fingerprint($certs['cert'], 'sha256');
+    return $fp === false ? null : $fp;
 }
 
 /**

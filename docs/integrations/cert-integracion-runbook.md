@@ -44,6 +44,7 @@ openssl pkcs12 -in cert_cliente.p12 -nokeys -noout
 
 Si responde `error:0308010C ... unsupported`, es legacy → convertir conservando la misma
 contraseña (procedimiento y script en [alta-tenant-runbook.md](alta-tenant-runbook.md#fase-1--preparar-el-certificado)).
+Dando el alta por `onboard.html` no hace falta: la página lo convierte sola antes de subirlo.
 
 ---
 
