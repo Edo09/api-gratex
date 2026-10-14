@@ -34,6 +34,15 @@ Los `.p12` que entrega la CA vienen cifrados con algoritmos legacy (RC2-40 + 3DE
 MAC SHA-1) que PHP con OpenSSL 3 **no puede leer**. Hay que convertirlos antes, no
 después de que falle la primera factura.
 
+**Con `onboard.html` no hace falta hacer nada:** al crear el tenant, la página abre el
+`.p12` con la clave (una clave mal escrita se rechaza ahí, sin crear nada) y, si es
+legacy, lo re-cifra en el navegador a AES-256 con la misma clave antes de subirlo (con
+node-forge, desde jsDelivr). El resultado lo dice arriba de la salida. Si la página no
+puede convertirlo (llave no RSA, varias llaves, sin internet) lo dice y pide el script.
+`create_tenant.php` además avisa con un `WARNING` si el servidor no pudo abrir el `.p12`.
+
+Lo de abajo es para el alta por CLI o para reemplazar el certificado de un tenant ya creado.
+
 **Detectar si es legacy** (no necesita la contraseña):
 
 ```bash
@@ -94,7 +103,7 @@ cPanel → MySQL Databases:
 | razón social, dirección | Los reales del cliente — van a `emisor_config` y al XML |
 | db-name, db-user, db-pass | Los de la Fase 2 |
 | "La DB ya existe" | **Marcado** (en hosting compartido PHP no puede crear DBs) |
-| cert | El `.p12` **convertido** en Fase 1, subido por el campo de archivo |
+| cert | El `.p12` del cliente tal cual (la página lo convierte si es legacy, ver Fase 1) |
 | cert-pass | La contraseña del `.p12` |
 | logo | Opcional |
 | admin-email, username, nombre, password | Los 4 o ninguno; email y username únicos globales |
@@ -231,7 +240,7 @@ Desde ahí sus listados y su emisión salen en `ecf`, sin afectar a los demás t
 | `No se pudo crear directorio de certificado` | La carpeta de certificados no existe o PHP no puede escribir en la raíz del API | Crearla a mano; si tiene otro nombre, `CERT_DIR=<nombre>` en el `.env` |
 | La salida se corta en "Creando usuario admin" | El email o el username ya existen en otro tenant (UNIQUE globales) | Usar otros; el tenant ya quedó creado, completar con `public/create_user.php` |
 | `Ya existe un tenant con RNC ...` | Re-corrida del onboarding sobre un RNC ya registrado | No re-correr: agregar usuarios con `create_user.php` |
-| `Unable to read certificate ... unsupported` | `.p12` legacy (Fase 1 saltada) | Convertir el certificado y reemplazarlo en el server |
+| `Unable to read certificate ... unsupported` | `.p12` legacy: alta por CLI sin convertir, o tenant creado antes de que `onboard.html` convirtiera | Convertir el certificado (misma clave) y reemplazarlo en el server |
 | `Unable to read certificate ... mac verify failure` | Contraseña incorrecta o `cert_pass_encrypted` NULL | Re-cifrarla con `public/encrypt_credential.php` y actualizar `tenants` |
 | El PDF muestra datos de Gratex | `emisor_config` incompleto y/o tenant sin logo (Fase 4 saltada) | El `UPDATE` de la Fase 4 + subir el logo |
 | Clientes de prueba DGII duplicados | El schema se aplicó dos veces sobre la misma DB | `DELETE FROM clients WHERE rnc IN ('131880681','533445861');` y dejar una corrida limpia |
