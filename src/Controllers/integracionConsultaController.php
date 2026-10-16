@@ -181,14 +181,21 @@ function handleIntegracionEstado(array $tenant): void
 
     require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 
+    // Los RFCE no generan trackId: se consultan en RecepcionFC por codigo de
+    // seguridad. Si vienen los dos, manda el trackId (consulta canonica).
+    $esRfce = $trackId === '' && $codigoSeguridad !== '';
+    $sandbox = SandboxEcf::activo($ambiente);
+
     try {
-        $service = new ECFEmissionService();
-        // Los RFCE no generan trackId: se consultan en RecepcionFC por codigo de
-        // seguridad. Si vienen los dos, manda el trackId (consulta canonica).
-        $esRfce = $trackId === '' && $codigoSeguridad !== '';
-        $consulta = $esRfce
-            ? $service->consultarEstadoRFCE($eNcf, $codigoSeguridad, $ambiente, $rncEmisor)
-            : $service->consultarEstado($trackId, $eNcf, $ambiente, $rncEmisor);
+        if ($sandbox) {
+            // Nada sale hacia la DGII: lo emitido en sandbox solo existe aqui.
+            $consulta = SandboxEcf::consulta($eNcf, $trackId);
+        } else {
+            $service = new ECFEmissionService();
+            $consulta = $esRfce
+                ? $service->consultarEstadoRFCE($eNcf, $codigoSeguridad, $ambiente, $rncEmisor)
+                : $service->consultarEstado($trackId, $eNcf, $ambiente, $rncEmisor);
+        }
     } catch (Throwable $e) {
         error_log('[integracionEstado] consulta fallo (tenant ' . $tenantId . ', ' . $eNcf . '): ' . $e->getMessage());
         respondIntegracionEstado(502, [
@@ -204,7 +211,7 @@ function handleIntegracionEstado(array $tenant): void
         $estado = 'RFCE_' . $estado;
     }
 
-    respondIntegracionEstado(200, [
+    $respuesta = [
         'status' => true,
         'recurso' => 'estado',
         'rnc' => $rncEmisor,
@@ -216,7 +223,12 @@ function handleIntegracionEstado(array $tenant): void
         'estado' => $estado,
         'fecha_emision' => $respaldo['created_at'] ?? null,
         'consulta' => $consulta['data'] ?? null,
-    ]);
+    ];
+    if ($sandbox) {
+        $respuesta['sandbox'] = true;
+        $respuesta['aviso'] = SandboxEcf::aviso();
+    }
+    respondIntegracionEstado(200, $respuesta);
 }
 
 /**

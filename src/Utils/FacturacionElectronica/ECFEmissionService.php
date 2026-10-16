@@ -12,6 +12,7 @@ require_once __DIR__ . '/EcfNumeroOcupadoException.php';
 require_once __DIR__ . '/EcfEnvioInciertoException.php';
 require_once __DIR__ . '/InformacionReferencia.php';
 require_once __DIR__ . '/../../AuditLogger.php';
+require_once __DIR__ . '/SandboxEcf.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Database.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
@@ -332,6 +333,10 @@ class ECFEmissionService
             );
         }
 
+        // Sandbox (solo integracion, lo fija tenants.ambiente): se arma y firma con
+        // un cert descartable y NADA sale hacia la DGII. Ver SandboxEcf.
+        $sandbox = $integration && SandboxEcf::activo($ambienteEarly);
+
         $eNcfOverride = $payload['e_ncf'] ?? null;
         if ($integration && ($eNcfOverride === null || $eNcfOverride === '')) {
             throw new RuntimeException('Integracion: el e_ncf es requerido en el payload (no generamos secuencia).');
@@ -499,7 +504,8 @@ class ECFEmissionService
             $unsignedXml = $this->builder->build($xmlData);
 
             // Cert del tenant resuelto (multi-tenant) o el global del .env (fallback).
-            $cert = CertResolver::resolve();
+            // Sandbox: el descartable, NUNCA CertResolver (caeria al cert de Gratex).
+            $cert = $sandbox ? SandboxEcf::certificado() : CertResolver::resolve();
             $certContent = $cert['content'];
             $certPassword = $cert['password'];
             if ($certPassword === '') {
@@ -573,13 +579,17 @@ class ECFEmissionService
             // sin token no se crea la factura y el numero vuelve a la secuencia.
             $tokenDespues = $autenticarDespues || $sinRango;
             // El mismo cert firma la semilla de autenticacion DGII.
-            $tokenInfo = $tokenDespues
-                ? ['token' => null, 'ambiente' => $this->auth->ambienteEfectivo(['environment' => $payload['ambiente'] ?? null])]
-                : $this->auth->autenticar([
-                    'environment' => $payload['ambiente'] ?? null,
-                    'certificate_content' => $certContent,
-                    'certificate_password' => $certPassword,
-                ]);
+            // Sandbox: sin token real (nada sale hacia la DGII). Es solo integracion, que
+            // no tiene gancho, asi que tokenDespues es siempre false aqui.
+            $tokenInfo = $sandbox
+                ? ['token' => 'sandbox', 'ambiente' => SandboxEcf::AMBIENTE]
+                : ($tokenDespues
+                    ? ['token' => null, 'ambiente' => $this->auth->ambienteEfectivo(['environment' => $payload['ambiente'] ?? null])]
+                    : $this->auth->autenticar([
+                        'environment' => $payload['ambiente'] ?? null,
+                        'certificate_content' => $certContent,
+                        'certificate_password' => $certPassword,
+                    ]));
             // Pre-vuelo del token. normalizeTokenResponse solo rechaza un token
             // empty(): uno de puros espacios pasaria y normalizeBearerToken lo
             // rechazaria DENTRO de recibir(), con la fila ya reservada (un envio
@@ -756,7 +766,9 @@ class ECFEmissionService
                 $faseEnvio = 'envio';
             }
             if ($usaRFCE) {
-                $rfceReception = $this->reception->recibirResumen($signedRfce, $bearerToken, $opcionesEnvio);
+                $rfceReception = $sandbox
+                    ? SandboxEcf::respuesta($eNcf, false)
+                    : $this->reception->recibirResumen($signedRfce, $bearerToken, $opcionesEnvio);
 
                 $rfceEstado = $this->mapEstado($rfceReception);
                 $rfceTrackId = $this->extractTrackId($rfceReception);
@@ -781,7 +793,9 @@ class ECFEmissionService
                     $ok = (bool) $persistencia('confirmar', $ctxConfirmar);
                 }
             } else {
-                $reception = $this->reception->recibir($signedXml, $bearerToken, $opcionesEnvio);
+                $reception = $sandbox
+                    ? SandboxEcf::respuesta($eNcf)
+                    : $this->reception->recibir($signedXml, $bearerToken, $opcionesEnvio);
 
                 $estado = $this->mapEstado($reception);
                 $trackId = $this->extractTrackId($reception);

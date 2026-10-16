@@ -5,6 +5,7 @@ require_once __DIR__ . '/DgiiXmlSigner.php';
 require_once __DIR__ . '/DgiiReceptionService.php';
 require_once __DIR__ . '/ACECFXmlBuilder.php';
 require_once __DIR__ . '/EcfUsuarioException.php';
+require_once __DIR__ . '/SandboxEcf.php';
 require_once __DIR__ . '/../../CertResolver.php';
 require_once __DIR__ . '/../../Models/EmisorConfigModel.php';
 
@@ -93,8 +94,12 @@ class ACECFEmissionService
 
         $unsignedXml = $this->builder->build($xmlData);
 
+        // Sandbox (solo integracion, lo fija tenants.ambiente): firma con el cert
+        // descartable y no envia nada a la DGII. Ver SandboxEcf.
+        $sandbox = $integration && SandboxEcf::activo($payload['ambiente'] ?? null);
+
         // Cert del tenant resuelto (integracion/app) o el global del .env.
-        $cert = CertResolver::resolve();
+        $cert = $sandbox ? SandboxEcf::certificado() : CertResolver::resolve();
         $certContent = $cert['content'];
         $certPassword = $cert['password'];
         if ($certPassword === '') {
@@ -107,17 +112,21 @@ class ACECFEmissionService
         $signedXml = $this->signer->sign($certContent, $certPassword, $unsignedXml);
         $codigoSeguridad = $this->extractCodigoSeguridad($signedXml);
 
-        $tokenInfo = $this->auth->autenticar([
-            'environment' => $payload['ambiente'] ?? null,
-            'certificate_content' => $certContent,
-            'certificate_password' => $certPassword,
-        ]);
+        $tokenInfo = $sandbox
+            ? ['token' => 'sandbox', 'ambiente' => SandboxEcf::AMBIENTE]
+            : $this->auth->autenticar([
+                'environment' => $payload['ambiente'] ?? null,
+                'certificate_content' => $certContent,
+                'certificate_password' => $certPassword,
+            ]);
         $bearerToken = $tokenInfo['token'];
         $ambiente = $tokenInfo['ambiente'];
 
-        $reception = $this->reception->enviarAprobacionComercial($signedXml, $bearerToken, [
-            'environment' => $ambiente,
-        ]);
+        $reception = $sandbox
+            ? SandboxEcf::respuesta((string) ($payload['e_ncf'] ?? ''))
+            : $this->reception->enviarAprobacionComercial($signedXml, $bearerToken, [
+                'environment' => $ambiente,
+            ]);
 
         $trackId = $this->extractTrackId($reception);
 

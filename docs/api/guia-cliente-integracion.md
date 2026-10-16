@@ -760,6 +760,24 @@ Cada empresa avanza por su cuenta: puede tener unas en producción y otras todav
 certificación, con la misma credencial y sin tocar su código (consulte `GET
 /api/integracion/empresas`: el campo `ambiente` dice en qué está cada una).
 
+### Probar antes de certificar (ambiente `sandbox`)
+
+Si todavía no tiene certificado digital ni ha hecho la postulación en la DGII, podemos darle
+de alta en un **ambiente de pruebas simulado** para que su equipo integre desde el primer día:
+
+- Usa la misma credencial y los mismos endpoints de esta guía.
+- Le devolvemos un `xml_firmado`, un `track_id` (empieza con `SANDBOX-`) y un
+  `codigo_seguridad`, y el `estado` sale `ACEPTADO`. Las respuestas traen `"sandbox": true`.
+- **Nada se envía a la DGII y nada tiene valor fiscal.** El XML está firmado con un certificado
+  de prueba: la DGII no lo aceptaría.
+- Sí se validan sus datos: los mismos errores `422` que verá en producción (campos
+  obligatorios, formato del `e_ncf`, RNC del emisor, etc.).
+- No prueba que la DGII acepte el comprobante; eso se comprueba al certificar. Un `502` o un
+  rechazo de la DGII no se pueden simular aquí.
+
+Cuando la empresa esté lista para certificar, cargamos su certificado y la pasamos a
+certificación; su código no cambia. Lo emitido en sandbox no se traslada.
+
 > **Mientras certificamos una empresa, no emita pruebas con ella.** La DGII reinicia todas las
 > pruebas de esa empresa si rechaza **cualquier** comprobante, incluido uno de prueba suyo. Le
 > avisamos cuándo empezamos y cuándo terminamos con cada una.

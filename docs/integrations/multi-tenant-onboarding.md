@@ -138,7 +138,7 @@ prueba DGII recién creados).
 |---|---|
 | token | `ONBOARD_TOKEN` |
 | nombre, rnc | Identidad del tenant |
-| ambiente | **Obligatorio elegirlo** (el select arranca en "— elegir —", sin default): **`certecf`** mientras certifica; `ecf` solo si ya está certificada. Si se crea en `ecf`, el resumen avisa que está en PRODUCCIÓN y que NO se corre el set de pruebas. Por CLI sin `--ambiente`, integración queda en `certecf` |
+| ambiente | **Obligatorio elegirlo** (el select arranca en "— elegir —", sin default): **`certecf`** mientras certifica; `ecf` solo si ya está certificada; **`sandbox`** si todavía no tiene certificado y solo va a probar la API (simulado, sin `.p12`; ver [integracion.md#sandbox](../api/integracion.md#sandbox--probar-la-api-antes-de-certificarse)). Si se crea en `ecf`, el resumen avisa que está en PRODUCCIÓN y que NO se corre el set de pruebas. Por CLI sin `--ambiente`, integración queda en `certecf` |
 | cert (.p12) + cert-pass | **Obligatorio** (firma sus e-CF y acuses). Si el `.p12` es idéntico al de otro tenant, el resumen imprime un WARNING (no bloquea): solo vale si la misma persona está delegada para ambos RNC en DGII; si no, corregir el cert antes de la Fase 2 |
 | logo | Opcional (Representación Impresa) |
 | grupo | Opcional. Vacío = tenant aislado (lo normal) · `self` = inicia un grupo (esta empresa es la cabeza) · número = id de la cabeza del grupo al que se une. Ver [Cliente con varias empresas](#cliente-con-varias-empresas-una-sola-credencial) |

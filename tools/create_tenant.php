@@ -18,8 +18,11 @@
  *     --nombre="Cliente A SRL" --rnc=131111111 `
  *     --cert-path=ruta/al/cert.p12 --cert-pass=claveCert [--ambiente=certecf]
  *
- * --ambiente: certecf | ecf | testecf. Sin el flag, integracion arranca en certecf
- * (mientras certifica) y app conserva ecf. Desde la web es obligatorio elegirlo.
+ * --ambiente: certecf | ecf | testecf | sandbox. Sin el flag, integracion arranca en
+ * certecf (mientras certifica) y app conserva ecf. Desde la web es obligatorio elegirlo.
+ * sandbox (solo integracion): el cliente prueba la API ANTES de certificarse; el XML se
+ * firma con un cert descartable, nada va a la DGII y no hay .p12 (--cert-pass opcional).
+ * Para pasar a certecf: docs/api/integracion.md#sandbox.
  *
  * Cliente con VARIAS empresas (una sola credencial para todas, --grupo):
  *   # 1a empresa: inicia el grupo (queda agrupada consigo misma)
@@ -91,11 +94,15 @@ if (!in_array($tipo, ['app', 'integracion'], true)) {
     fail("--tipo invalido: '{$tipo}'. Use 'app' o 'integracion'.");
 }
 
+// Sandbox (solo integracion): firma con un cert descartable, asi que no pide .p12.
+$esSandbox = $tipo === 'integracion'
+    && strtolower(trim((string) ($opts['ambiente'] ?? ''))) === 'sandbox';
+
 // Requeridos comunes + por tipo
 $required = ['nombre', 'rnc'];
 if ($tipo === 'app') {
     $required = array_merge($required, ['db-name', 'db-user', 'db-pass']);
-} else { // integracion: cert obligatorio para poder firmar
+} elseif (!$esSandbox) { // integracion: cert obligatorio para poder firmar
     $required = array_merge($required, ['cert-pass']);
 }
 $missing = array_filter($required, fn($k) => !isset($opts[$k]) || $opts[$k] === '');
@@ -119,8 +126,13 @@ if (isset($opts['ambiente'])) {
 } else {
     $ambiente = $tipo === 'integracion' ? 'certecf' : 'ecf';
 }
-if (!in_array($ambiente, ['certecf', 'ecf', 'testecf'], true)) {
-    fail("Ambiente invalido: '{$ambiente}'. Use certecf, ecf o testecf.");
+if (!in_array($ambiente, ['certecf', 'ecf', 'testecf', 'sandbox'], true)) {
+    fail("Ambiente invalido: '{$ambiente}'. Use certecf, ecf, testecf o sandbox (solo integracion).");
+}
+if ($ambiente === 'sandbox' && $tipo !== 'integracion') {
+    // Un tenant app con ambiente sandbox mandaria sus llamadas a una URL de la DGII
+    // que no existe: el sandbox solo esta implementado en la ruta de integracion.
+    fail("El ambiente sandbox es solo para tenants tipo integracion.");
 }
 
 // Grupo de empresas (opcional): un cliente con varios RNC usa UNA credencial
@@ -143,7 +155,7 @@ $certUploadTmp = (!$isCli && isset($_FILES['cert']) && is_array($_FILES['cert'])
     ? $_FILES['cert']['tmp_name'] : null;
 $certIsUpload = $certUploadTmp !== null;
 $certPathArg  = $certIsUpload ? $certUploadTmp : (isset($opts['cert-path']) ? (string) $opts['cert-path'] : null);
-if ($tipo === 'integracion' && ($certPathArg === null || $certPathArg === '')) {
+if ($tipo === 'integracion' && !$esSandbox && ($certPathArg === null || $certPathArg === '')) {
     fail('Integracion requiere el certificado .p12 (sube el archivo o pasa cert-path).');
 }
 
@@ -185,7 +197,8 @@ if ($createAdmin) {
 }
 
 echo "== Onboarding tenant ({$tipo}): {$nombre} (RNC {$rnc}) ==\n";
-echo "   ambiente: {$ambiente}" . ($ambiente === 'ecf' ? ' (PRODUCCION)' : '') . "\n";
+echo "   ambiente: {$ambiente}" . ($ambiente === 'ecf' ? ' (PRODUCCION)' : '')
+    . ($ambiente === 'sandbox' ? ' (simulado: nada va a la DGII)' : '') . "\n";
 
 // =============================================================================
 // Pre-flight: choques contra los UNIQUE del master ANTES de crear nada. Sin
@@ -537,6 +550,12 @@ foreach ($certIguales as $igual) {
 }
 if ($certIlegible) {
     echo "  !! El servidor no pudo abrir el .p12 con esa clave: ver WARNING arriba.\n";
+}
+if ($ambiente === 'sandbox') {
+    echo "\n  >> SANDBOX: los e-CF se firman con un certificado de prueba y no se envian a la DGII.\n";
+    echo "     Al pasar a certificacion: subir el .p12 del cliente, UPDATE tenants SET ambiente = 'certecf'\n";
+    echo "     WHERE id = {$tenantId}; y DELETE FROM ecf_integracion_backup WHERE tenant_id = {$tenantId};\n";
+    echo "     (ver docs/api/integracion.md#sandbox).\n";
 }
 if ($tipo === 'integracion' && $ambiente === 'ecf') {
     echo "\n!! ATENCION: este tenant se creo directamente en PRODUCCION (ambiente ecf).\n";
