@@ -770,8 +770,9 @@ de alta en un **ambiente de pruebas simulado** para que su equipo integre desde 
   `codigo_seguridad`, y el `estado` sale `ACEPTADO`. Las respuestas traen `"sandbox": true`.
 - **Nada se envía a la DGII y nada tiene valor fiscal.** El XML está firmado con un certificado
   de prueba: la DGII no lo aceptaría.
-- Sí se validan sus datos: los mismos errores `422` que verá en producción (campos
-  obligatorios, formato del `e_ncf`, RNC del emisor, etc.).
+- Sí se validan sus datos, con los mismos errores que verá en producción: `422` por campos
+  obligatorios o un RNC de emisor que no corresponde, y `502` con el detalle cuando el
+  comprobante no se puede armar (por ejemplo, un `e_ncf` mal formado).
 - No prueba que la DGII acepte el comprobante; eso se comprueba al certificar. Un `502` o un
   rechazo de la DGII no se pueden simular aquí.
 
