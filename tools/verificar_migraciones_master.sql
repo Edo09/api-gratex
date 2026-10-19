@@ -90,6 +90,12 @@ FROM (
          AND (SELECT COUNT(*) FROM information_schema.TABLES
               WHERE TABLE_SCHEMA = DATABASE()
                 AND TABLE_NAME IN ('pos_handoff_codes', 'pos_equipos')) = 2
+  UNION ALL
+  SELECT '013', '013_tenants_inventario_estricto.sql',
+         'columna tenants.inventario_estricto',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+                   AND COLUMN_NAME = 'inventario_estricto')
 ) m
 ORDER BY m.migracion;
 

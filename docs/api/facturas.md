@@ -351,7 +351,9 @@ de `/api/facturas`.
 Reemite una factura **rechazada** con el mismo e-NCF y los datos de la rechazada (por ejemplo, tras
 corregir un dato del cliente). Sin cuerpo. Sale por la misma emisión write-ahead que
 `POST /api/facturas` y responde igual: `200` con `data`, `422` si la DGII la rechaza otra vez, `502`
-con `data.factura_id` si queda sin confirmar. Otros códigos: `404` (no existe); `409` (ya se está
+con `data.factura_id` si queda sin confirmar. **La revisión de existencia no se aplica al reenvío**
+(con «Bloquear ventas sin existencia» encendido, el `422` `STOCK_INSUFICIENTE` de
+`POST /api/facturas` nunca sale aquí: es una obligación fiscal por mercancía ya vendida). Otros códigos: `404` (no existe); `409` (ya se está
 reenviando, ya se reenvió, no está rechazada, **incluida toda factura sin confirmar**, la DGII consumió
 el e-NCF o se envió en otro ambiente); `422` (no es electrónica, no tiene líneas o no guarda su
 e-NCF). Cuando la nueva se guarda, la rechazada queda archivada (`..._ARCHIVADO`), su inventario se
@@ -1117,7 +1119,7 @@ pensado para mostrarse tal cual al usuario (español llano, sin nombres de campo
 { "status": false, "error": "Este cliente no tiene RNC ni cédula, y la factura de crédito fiscal los necesita. Agrégale el RNC o emite una factura de consumo." }
 ```
 
-Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, unidad de medida, cantidad de una línea, RNC faltante, datos de la nota E33/E34, total que no se pudo calcular, rechazo de la DGII) · `404` cliente no encontrado · `502` fallo en emisión DGII: sin `data` no se guardó nada; con `data` la factura quedó guardada sin confirmación (ver abajo) · `500` error interno no manejado (`error_id`, sin `data`).
+Códigos comunes: `400` JSON inválido · `422` validación (tipo_ecf, client_id, items, unidad de medida, cantidad de una línea, RNC faltante, datos de la nota E33/E34, total que no se pudo calcular, rechazo de la DGII, y existencia insuficiente cuando la empresa bloquea las ventas sin existencia: `codigo` `STOCK_INSUFICIENTE` con `data.faltantes`, ver [más abajo](#422-por-existencia-insuficiente-solo-con-el-bloqueo-encendido)) · `404` cliente no encontrado · `502` fallo en emisión DGII: sin `data` no se guardó nada; con `data` la factura quedó guardada sin confirmación (ver abajo) · `500` error interno no manejado (`error_id`, sin `data`).
 
 En un `502` el texto depende del caso: los que el usuario puede resolver o
 reportar (rango e-NCF agotado, emisor o certificado sin configurar) traen su
@@ -1151,6 +1153,44 @@ eso se pudo escribir, y la respuesta trae `data`:
 - La app no reenvía una factura sin confirmar: `POST /api/facturas/{id}/reenviar` responde
   `409`. Las facturas sin confirmar las resuelve soporte
   ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md)).
+
+#### `422` por existencia insuficiente (solo con el bloqueo encendido)
+
+Cada empresa decide si bloquea las ventas sin existencia («Bloquear ventas sin existencia»;
+**apagado por defecto**, y `GET /api/branding` lo trae como `inventario_estricto`). Con el bloqueo
+**encendido**, `POST /api/facturas` revisa la existencia **antes de armar el payload y de reservar
+el e-NCF**; si una línea pide más de lo que hay, responde `422` y **no emite nada**: no se consume un
+e-NCF (el contador de la serie no se mueve), no se guarda ninguna fila y no se manda nada a la DGII.
+
+```json
+{
+  "status": false,
+  "error": "No hay existencia suficiente de «Cemento gris»: pides 5 y hay 2.",
+  "codigo": "STOCK_INSUFICIENTE",
+  "data": { "faltantes": [
+    { "product_id": 12, "nombre": "Cemento gris", "sku": "CEM-01", "unidad_medida": "43",
+      "solicitado": 5, "disponible": 2, "faltante": 3 } ] }
+}
+```
+
+- Es el mismo cuerpo que el de las facturas simples; el significado de cada campo, la comparación en
+  milésimas y el resto del contrato están en
+  [inventario.md](inventario.md#el-rechazo-por-existencia-http-422). Un `product_id` que no existe o
+  una cantidad ≤ 0 dan un `422` llano, sin `codigo` ni `data`.
+- Se revisan las líneas con `product_id` (el vínculo con el catálogo) de un **Bien**, en todos los
+  tipos **menos E34 y E41**: son entradas de mercancía y nunca se revisan. Los servicios y las líneas
+  sin `product_id` tampoco. Corre también con `strict_input`.
+- **El reenvío no se revisa:** `POST /api/facturas/{id}/reenviar` nunca responde este `422` (es una
+  obligación fiscal por mercancía ya vendida).
+- La existencia **no baja al guardar** sino cuando la DGII responde (como siempre). Entre la revisión
+  y ese descuento pasa lo que tarde la DGII (más de 30 s si va lenta), y dos ventas de la última unidad
+  dentro de esa ventana pueden pasar las dos ([../modules/inventario.md](../modules/inventario.md#cuándo-se-revisa-y-cuándo-baja-la-existencia)).
+- Si la revisión misma falla (la base no responde), no se rechaza: la factura sigue y el fallo queda
+  en el log del servidor.
+- El rechazo deja una fila `EMIT` con `success=0` y `faltantes` en la bitácora
+  ([../modules/auditoria.md](../modules/auditoria.md)).
+- Con el bloqueo **apagado**, nada de esto aplica: la factura se emite y la existencia puede quedar
+  en negativo.
 
 ---
 

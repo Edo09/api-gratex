@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT 'Formato de cotizacion: gratex | ferreteria (src/Utils/Cotizacion/). Se cambia solo por SQL. Ver master_migrations/011',
   pos_enabled         TINYINT(1)     NOT NULL DEFAULT 0
                         COMMENT '1 = el tenant tiene el POS (pos.fiscalpoint.com.do). Se activa solo por SQL. Ver master_migrations/012',
+  inventario_estricto TINYINT(1)     NOT NULL DEFAULT 0
+                        COMMENT '1 = la empresa bloquea facturas (e-CF y simples) que piden mas de la existencia del sistema. 0 = vende sin existencia como siempre. Lo cambia un admin en Configuracion. Ver master_migrations/013',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -73,6 +73,15 @@ Una venta rechazada, al cobrar o más tarde, conserva su caja y su inventario, n
 el cierre la lista como rechazada y en app.\* aparece «Rechazada» con «Reenviar a la DGII». Al cobrar
 quedan `POS_VENTA` y `POS_VENTA_RECHAZADA` en la bitácora.
 
+**La entrega no revisa existencia.** «Bloquear ventas sin existencia» (control de existencias en las
+ventas, `master.tenants.inventario_estricto`) no cambia nada aquí: `entregarVenta` sigue llamando
+`registrarVenta` después de guardar, sin la bandera `bloquear_sin_existencia`, así que una venta del
+POS nunca se rechaza por existencia ni deja la entrega a medias (decisión 7 de `docs/specs/pos.md`).
+Lo único nuevo que el POS puede tocar con el interruptor encendido es una línea de log: si el
+descuento deja el saldo bajo 0, `[inventario] SOBREVENTA factura <id> producto <pid> saldo <n>`.
+La factura simple de respaldo del POS (sección 4) tampoco se revisa: la crea `crearFacturaSimplePos`,
+que no recibe el callback `$enTransaccion` del camino atómico de las facturas simples de la app.
+
 ## 4. Fallo antes de guardar: factura simple
 
 Si el e-CF no se puede generar (certificado ausente, vencido o con clave incorrecta, fallo de firma,
@@ -171,6 +180,13 @@ Una venta del POS reemitida así sigue siendo una sola venta: la fila archivada 
 inventario que movió se devuelve y la nueva lo descuenta cuando la DGII la acepta; el cierre la cuenta
 pero ya no la lista en `rechazadas`, y repetir la clave original devuelve la misma venta (`201`,
 `repetida: true`).
+
+**El reenvío no se revisa contra la existencia**, ni aunque la empresa tenga «Bloquear ventas sin
+existencia» encendido: `emitirFacturaEcf` recibe `$reenvioDe` y `verificarVentaEcf` devuelve éxito sin
+consultar nada cuando no es nulo. Es una obligación fiscal por mercancía que ya salió (una venta del POS
+rechazada, por ejemplo, ya descontó su existencia y `devolverSaldoDeFactura` la devolvió), y la
+existencia de hoy no puede frenarla. Si entre tanto otra venta se llevó la existencia, el reenvío la
+deja bajo 0 y queda `[inventario] SOBREVENTA` en el log, como cualquier descuento.
 
 ## 8. Avisos al admin (solo en la app, nunca en la caja)
 

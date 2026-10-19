@@ -184,6 +184,47 @@ Cantidad y precio quedan en memoria igual que en la base (`quantity`
 DECIMAL(12,3), `amount` DECIMAL(18,4)), así que el `subtotal` se calcula con lo
 que se guarda. Misma regla en el `PUT` (si trae `items`) y en el `preview`.
 
+**Existencia («Bloquear ventas sin existencia»).** Es un interruptor por empresa, apagado
+por defecto (`GET /api/branding` → `inventario_estricto`; se cambia en
+`PUT /api/inventario/configuracion`). **Apagado** nada cambia: la factura se guarda, el
+descuento del inventario se hace después y la existencia puede quedar en negativo.
+**Encendido**, la factura y el descuento del inventario se guardan en **una sola
+transacción**: si alguna línea con `product_id` (un Bien, no un servicio) pide más de lo
+que hay, la factura **no se guarda** y no se mueve nada. Las líneas libres (sin
+`product_id`) y los servicios no se revisan. Si el mismo producto va en varias líneas, se
+suman antes de comparar, y una existencia vacía (`NULL`) cuenta como 0.
+
+Respuesta de rechazo por existencia, solo con el interruptor encendido (**`422`**, nunca
+`409`):
+
+```json
+{
+  "status": false,
+  "error": "No hay existencia suficiente de «Cemento gris»: pides 5 y hay 2.",
+  "codigo": "STOCK_INSUFICIENTE",
+  "data": { "faltantes": [
+    { "product_id": 12, "nombre": "Cemento gris", "sku": "CEM-01", "unidad_medida": "43",
+      "solicitado": 5, "disponible": 2, "faltante": 3 } ] }
+}
+```
+
+`solicitado`, `disponible` y `faltante` son números JSON, no textos. `disponible` nunca es
+negativo (un saldo de 0, vacío o negativo se informa como 0); `faltante` es `solicitado`
+menos la existencia real (vacía = 0), así que un saldo negativo hace que `faltante` sea
+mayor que `solicitado − disponible`. `faltantes` va ordenado por `product_id` (si otra venta
+se lleva la existencia justo entre la revisión y el bloqueo, el `422` puede nombrar solo el
+primer producto que falta). Un `product_id` que no existe, o una cantidad ≤ 0 en una línea
+de producto, **no** son faltantes: dan un `422` llano, `{ "status": false, "error": "…" }`,
+sin `codigo` ni `data`.
+
+**Si el libro falla, no se guarda (`400`).** Con el interruptor encendido, un fallo del libro de
+inventario dentro de la transacción (error de base, espera de bloqueo vencida) aborta el
+guardado: la factura **no se guarda** y la respuesta es **`400`** con «No se pudieron
+actualizar las existencias. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.» (el
+detalle va al log del servidor). Es lo contrario del e-CF, donde un fallo de la revisión se
+anota y la venta sigue: la factura simple descuenta dentro de su propia transacción, así que
+no puede quedar guardada sin descontar.
+
 **Ejemplo**
 
 ```json
@@ -199,7 +240,7 @@ que se guarda. Misma regla en el `PUT` (si trae `items`) y en el `preview`.
 ```
 
 **Respuesta `201`**: `{ "status": true, "data": { ...factura creada con items... } }`
-**Errores**: `422` (falta cliente o items, o la cantidad de una línea no es válida), `401` (sin usuario), `400` (fallo al crear).
+**Errores**: `422` (falta cliente o items, o la cantidad de una línea no es válida; con el interruptor de existencia encendido, también `codigo: "STOCK_INSUFICIENTE"` con `data.faltantes`, o un `422` llano si un `product_id` no existe o una cantidad es ≤ 0), `401` (sin usuario), `400` (fallo al crear; con el interruptor de existencia encendido, también un fallo del libro de inventario dentro de la transacción, y entonces no se guarda nada).
 
 ---
 
@@ -280,6 +321,22 @@ Si se envía `items`, **reemplaza todas las líneas** (debe traer ≥ 1).
 > descuenta la nueva: quedan dos movimientos en el kardex (`DEVOLUCION` +
 > `VENTA`) en vez de un salto de saldo sin explicar.
 >
+> **Existencia.** Con el interruptor «Bloquear ventas sin existencia» **encendido**
+> (ver el `POST`), y solo cuando el `PUT` trae `items`, la edición y el movimiento
+> del inventario van en **una sola transacción**: primero se devuelven al almacén las
+> líneas que la factura tenía guardadas, después se revisan las nuevas y se
+> descuentan. Por eso solo el **aumento neto** puede faltar: volver a guardar con la
+> misma cantidad y existencia 0 pasa, y subir de 3 a 5 con existencia 1 falta 1, no 4.
+> (Con la existencia del producto ya **bajo 0** por otras ventas, volver a guardar sin
+> cambiar nada también se rechaza: lo que la factura devuelve no alcanza para volver a
+> sacarlo.)
+> Si falta, el `PUT` completo se deshace (datos y líneas) y responde `422` con
+> `codigo: "STOCK_INSUFICIENTE"` y `data.faltantes` (misma forma que en el `POST`); un
+> `product_id` inexistente o una cantidad ≤ 0 dan el `422` llano. Si el libro de
+> inventario falla dentro de la transacción, el `PUT` también se deshace y responde
+> `400` (ver el `POST`). Un `PUT` sin `items` no mueve existencia. Con el interruptor
+> apagado, la devolución y el descuento se hacen después de guardar, como siempre.
+>
 > **Crédito.** `tipo_pago = 2` exige que el cliente tenga `permitir_credito`. Si
 > el body no reenvía `client_id`, se valida contra el cliente ya guardado en la
 > factura.
@@ -288,7 +345,7 @@ Si se envía `items`, **reemplaza todas las líneas** (debe traer ≥ 1).
 { "no_factura": "0001-MOD", "items": [ { "description": "Ajuste", "quantity": 3, "amount": 1500 } ] }
 ```
 
-**Respuestas**: `200` (ok), `404` (no existe), `409` (la factura viene de una venta del POS: «Esta factura viene de una venta del POS y no se puede editar ni eliminar.»), `400` (fallo), `422` (id o items inválidos, o la cantidad de una línea no es válida).
+**Respuestas**: `200` (ok), `404` (no existe), `409` (la factura viene de una venta del POS: «Esta factura viene de una venta del POS y no se puede editar ni eliminar.»), `400` (fallo; con el interruptor de existencia encendido y `items`, también un fallo del libro de inventario dentro de la transacción: el `PUT` completo se deshace), `422` (id o items inválidos, o la cantidad de una línea no es válida; con el interruptor de existencia encendido, también `codigo: "STOCK_INSUFICIENTE"` con `data.faltantes`, o un `422` llano si un `product_id` no existe o una cantidad es ≤ 0).
 
 ---
 

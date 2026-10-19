@@ -105,16 +105,19 @@ contenga: `password`, `pass`, `secret`, `api_secret`, `token`, `authorization`,
 `CREATE`, `UPDATE`, `DELETE`, `ASSIGN`, `EMIT`, `STATUS_CHANGE`, `ECF_RECEIVED`,
 `ACECF_SENT`, `ACECF_RECEIVED`, `INTEGRACION_EMIT`, `INTEGRACION_ACECF`,
 `NCF_RANGE_REGISTER`, `NCF_SEQUENCE_UPDATE`, `LOGO_UPLOAD`, `LOGO_DELETE`,
-`AJUSTE_CREAR`, `AJUSTE_ANULAR`, `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`,
+`AJUSTE_CREAR`, `AJUSTE_ANULAR`, `INVENTARIO_CONFIG`, `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`,
 `ACCESS_DENIED`, `DGII_AUTH_IN_OK`, `DGII_AUTH_IN_FAILED`, `DGII_AUTH_OUT_FAILED`.
 
 | Acción | Módulo | Cuándo |
 |---|---|---|
-| `ACCESS_DENIED` | el módulo al que se intentó entrar | Un usuario con sesión válida pide un módulo que su rol no tiene (**403**). Lo registran `PermissionGate::deny` y `auditLogController`. `new_values.bloqueado=false` = modo sombra (`PERMISSIONS_ENFORCE=false`): se anotó pero no se bloqueó. Los **401** (token vencido o falso) no se registran a propósito: cada sesión que expira con la app abierta dejaría filas sin usuario. |
+| `ACCESS_DENIED` | el módulo al que se intentó entrar | Un usuario con sesión válida pide un módulo que su rol no tiene (**403**). Lo registran `PermissionGate::deny`, `auditLogController` e `inventarioController` (un `PUT /api/inventario/configuracion` de un rol que no es `admin`: módulo `inventario`, motivo `rol distinto de admin`). `new_values.bloqueado=false` = modo sombra (`PERMISSIONS_ENFORCE=false`): se anotó pero no se bloqueó. Los **401** (token vencido o falso) no se registran a propósito: cada sesión que expira con la app abierta dejaría filas sin usuario. |
+| `INVENTARIO_CONFIG` | `inventario` | Un admin enciende o apaga «Bloquear ventas sin existencia» de su empresa (`PUT /api/inventario/configuracion`, solo rol `admin`). `entity_type` `inventario_config`, `entity_id` = el id de la empresa. `old_values` / `new_values`: `{ bloquear_sin_existencia: bool }`. Se registra solo cuando el cambio quedó guardado; si falla la escritura (p. ej. la migración master `013` sin correr) no hay fila de éxito. |
 | `DGII_AUTH_IN_OK` | `dgii-auth` | Token emitido a quien se autentica contra nuestro receptor (incluye los reintentos sobre una semilla ya canjeada). Sin empresa. |
 | `DGII_AUTH_IN_FAILED` | `dgii-auth` | Handshake rechazado: sin XML, firma inválida, semilla no reconocida / expirada / canjeada por otro RNC, error interno. Sin empresa. |
 | `DGII_AUTH_OUT_FAILED` | `dgii-auth` | La DGII no nos entregó el token (`DgiiAuthService::autenticar`), con el paso que falló. Solo los fallos: se pide un token por emisión y registrar los éxitos sería una fila por factura. |
 | `EMIT` con `success=0` (envío sin confirmar) | `facturas` | La factura quedó guardada antes del envío (write-ahead) pero no se sabe si la DGII la recibió; la respuesta fue el `502` con `data`. `entity_id` = e-NCF. `new_values`: `factura_id`, `tipo_ecf`, `client_id`, `estado_dgii` (`ENVIO_INCIERTO`, o `PENDIENTE_ENVIO` si ni eso se pudo escribir), `fase_fallida` (`envio`, `confirmar` o `reservar`) y `resultado_parcial` (la respuesta de la DGII ya recortada y sin XML, cuando falló la confirmación). `error_message`: el error original. Soporte la usa para resolver la fila ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md)). |
+| `EMIT` con `success=0` (rechazo por existencia) | `facturas` | El e-CF **no se emitió**: la empresa tiene encendido «Bloquear ventas sin existencia» y la revisión previa lo rechazó (`422`: `codigo` `STOCK_INSUFICIENTE`, o el `422` llano de un producto que no existe o una cantidad ≤ 0). Pasa antes de reservar el e-NCF, así que **no se dispensó ningún e-NCF y no hay fila en `facturas`**: no hay nada que resolver, al contrario de la fila anterior. `entity_id` = el `e_ncf` que mandó el cliente (casi siempre vacío). `new_values`: `tipo_ecf`, `client_id` y `faltantes` (la lista del `422`; `null` en el `422` llano). `error_message`: el texto que vio el usuario. `description`: «e-CF no emitido: la verificación de existencia lo rechazó.», que es lo que la distingue del envío sin confirmar. El reenvío de un rechazado, E34 y E41 nunca la generan. |
+| `CREATE` / `UPDATE` con `success=0` (rechazo por existencia) | `facturas-simples` | Una factura simple que la revisión de existencia rechazó con `422` (`STOCK_INSUFICIENTE`, o el `422` llano). El modelo ya deshizo todo: no hay factura nueva ni cambios en la editada, ni movimientos de inventario. `entity_type` `factura_simple`. `CREATE`: sin `entity_id`; `new_values`: `client_id`, `client_name` y `faltantes`; `description` «Factura simple no guardada: la verificación de existencia la rechazó.» `UPDATE`: `entity_id` = el id de la factura; `new_values`: `faltantes`; `description` «Factura simple `{no_factura}` no actualizada: la verificación de existencia la rechazó.» (con el número de la factura, o su id si no tiene) `error_message`: el texto del `422`; `faltantes` es `null` en el `422` llano. Un fallo del libro dentro de la transacción (`400`) **no** deja fila: solo la línea `[inventario] …` en el log. |
 | `NCF_SEQUENCE_UPDATE` con `success=0` | `ncf` | Un e-NCF quedó consumido sin fila: la emisión falló antes del envío y no se pudo devolver el número a la secuencia (`error_message` `rollback sin coincidencia`). `entity_id` = e-NCF. `new_values`: `e_ncf`, `tipo_ecf`, `rango_id`, `secuencia_valor`, `ambiente_secuencia`, `causa` (la clase del error). |
 
 Inmutabilidad e-CF: un e-CF emitido solo genera `EMIT`/`STATUS_CHANGE`; **nunca**
@@ -214,7 +217,11 @@ conduce: CREATE con el cuerpo en `new_values`, UPDATE con la fila de antes y el 
 DELETE con la fila en `old_values`; el DELETE no borra, pone `activo = 0`). Gastos:
 alta/emisión exitosa **y fallida** (`success=0` con el
 motivo: un E41 que la DGII rechaza ya no desaparece sin rastro). Inventario:
-ajustes. Ciclo e-CF: emisión, transiciones de estado, ACECF saliente/entrante,
+ajustes, el interruptor de ventas sin existencia (`INVENTARIO_CONFIG`) y los rechazos por existencia
+(`EMIT` de `facturas`, y `CREATE` / `UPDATE` de `facturas-simples`, con `success=0` y `faltantes`; ver la
+tabla de arriba). El ajuste `INVENTARIO_INICIAL` con que se abre la existencia de un producto nuevo
+(`POST /api/products` con el interruptor encendido) no deja fila `AJUSTE_CREAR`: lo audita solo el
+`CREATE` del producto, cuyo `new_values` lleva el `stock` tecleado. Ciclo e-CF: emisión, transiciones de estado, ACECF saliente/entrante,
 recepción (ligada al token DGII), emisión/aprobación por integración, emisión sin
 confirmar de la DGII (`EMIT success=0` con la fila en `new_values`) y e-NCF consumidos
 sin fila (`NCF_SEQUENCE_UPDATE success=0`). Auth: login

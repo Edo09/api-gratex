@@ -315,6 +315,35 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
         return;
     }
 
+    // Existencia (spec 4.3): con el interruptor de la empresa encendido, un e-CF que
+    // pide mas de lo que hay se rechaza AQUI, antes de armar el payload y de que el
+    // servicio dispense el e-NCF: un rechazo despues de dispensarlo puede dejar un
+    // hueco en la secuencia fiscal. Corre tambien con strict_input, para que un
+    // request crudo no se salte la regla. Sin el interruptor, en el reenvio de un
+    // rechazado y en las entradas (E34, E41) devuelve success sin consultar nada.
+    // La regla es un resguardo, no una dependencia fiscal: si la verificacion
+    // misma falla (base caida, modelo ausente) se anota y la venta sigue.
+    try {
+        $existencia = inventarioModelo()->verificarVentaEcf($items, $tipoEcf, $reenvioDe);
+    } catch (Throwable $e) {
+        error_log('[inventario] no se pudo verificar la existencia del e-CF tipo ' . $tipoEcf . ': ' . $e->getMessage());
+        $existencia = ['success', []];
+    }
+    if ($existencia[0] !== 'success') {
+        AuditLogger::log([
+            'module' => 'facturas', 'action' => 'EMIT', 'entity_type' => 'factura',
+            'entity_id' => $input['e_ncf'] ?? null,
+            'new_values' => [
+                'tipo_ecf' => $tipoEcf, 'client_id' => $clientId,
+                'faltantes' => $existencia[3]['faltantes'] ?? null,
+            ],
+            'success' => false, 'error_message' => $existencia[1],
+            'description' => 'e-CF no emitido: la verificación de existencia lo rechazó.',
+        ]);
+        respondExistencia($existencia);
+        return;
+    }
+
     // La cadena de respaldo salta los vacios, no solo los NULL: un cliente
     // importado con razon_social = '' dejaba RazonSocialComprador en blanco y la
     // DGII rechaza el e-CF por un campo obligatorio sin contenido.
@@ -1819,4 +1848,18 @@ function respond(bool $status, string $message, int $code = 200): void
         'status' => $status,
         $status ? 'message' : 'error' => $message,
     ]);
+}
+
+/**
+ * Responde un rechazo de la verificacion de existencia (spec 4.4): HTTP 422 (el
+ * 409 en esta app significa "la pantalla esta desactualizada") y el cuerpo de
+ * inventoryModel::respuestaExistencia, que lleva `codigo` y `data.faltantes` cuando
+ * hay faltantes. respond() no puede cargar `data`, de ahi esta aparte.
+ *
+ * @param array $res ['error', mensaje, 422] | ['error', mensaje, 422, ['codigo' =>, 'faltantes' =>]]
+ */
+function respondExistencia(array $res): void
+{
+    http_response_code(422);
+    echo json_encode(inventoryModel::respuestaExistencia($res));
 }

@@ -16,10 +16,17 @@ class inventoryModel
 {
     private $conexion;
 
-    /** Motivos validos de un ajuste. ANULACION la pone el sistema, no el usuario. */
+    /**
+     * Motivos validos de un ajuste. ANULACION la pone el sistema, no el usuario.
+     * ENTRADA (mercancia que llega) e INVENTARIO_INICIAL (la existencia con que
+     * se abre un producto) son los dos que SUMAN con un nombre honesto: antes
+     * habia que escoger DEVOLUCION u OTRO para una compra o una apertura.
+     * inventory_adjustments.motivo es VARCHAR(20): no hace falta migracion.
+     */
     public const MOTIVOS = [
         'CONTEO_FISICO', 'MERMA', 'DANO', 'ROBO',
         'DEVOLUCION', 'ERROR_CAPTURA', 'ANULACION', 'OTRO',
+        'ENTRADA', 'INVENTARIO_INICIAL',
     ];
 
     /**
@@ -29,9 +36,26 @@ class inventoryModel
      */
     public const MAX_LINEAS = 500;
 
-    public function __construct()
+    /**
+     * Codigo del error de existencia insuficiente (spec 4.4): viaja en el JSON
+     * como `codigo` y el front lo lee para armar el aviso con su boton a Ajuste.
+     */
+    public const CODIGO_STOCK_INSUFICIENTE = 'STOCK_INSUFICIENTE';
+
+    /** Lo que ve quien guarda cuando el libro no se pudo actualizar (el detalle va al log). */
+    private const FALLO_EXISTENCIAS = 'No se pudieron actualizar las existencias. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.';
+
+    /**
+     * @param PDO|null $conexion La conexion a usar. Sin ella, la de siempre
+     *     (Database::getInstance()). La da quien ya tiene una transaccion
+     *     abierta en SU conexion y necesita que el inventario corra en esa misma:
+     *     un `new inventoryModel()` tardio puede abrir otra (el singleton se
+     *     reinicia al resolver la empresa), y en esa el bloqueo se suelta de una
+     *     vez y un rollback del documento no desharia el descuento (spec C20).
+     */
+    public function __construct(?PDO $conexion = null)
     {
-        $this->conexion = Database::getInstance()->getConnection();
+        $this->conexion = $conexion ?? Database::getInstance()->getConnection();
     }
 
     // ------------------------------------------------------------------
@@ -45,9 +69,19 @@ class inventoryModel
      *                         hasta 3 decimales), 'costo_unitario'=>float|null], ...]
      * @param array $ctx     tipo_movimiento, referencia_tipo, referencia_id,
      *                       warehouse_id (opcional: si falta usa el del producto),
-     *                       user_id
-     * @param bool  $ownTransaction  false cuando el llamador ya abrio una.
-     * @return array{0:string,1:mixed} ['success', [movimientos]] | ['error', mensaje]
+     *                       user_id,
+     *                       bloquear_sin_existencia (opcional, false por defecto):
+     *                       con true, una linea de SALIDA (cantidad < 0) que dejaria
+     *                       el saldo bloqueado por debajo de 0 no se escribe y se
+     *                       devuelve el error de existencia. Sin la clave, el
+     *                       saldo negativo se tolera como siempre.
+     * @param bool  $ownTransaction  false cuando el llamador ya abrio una. Entonces
+     *                       esto NO abre, confirma ni deshace nada: si devuelve un
+     *                       error, el rollback es de quien abrio la transaccion.
+     * @return array ['success', [movimientos]]
+     *               | ['error', mensaje]
+     *               | ['error', mensaje, 422, ['codigo' => 'STOCK_INSUFICIENTE',
+     *                 'faltantes' => [una fila]]]   solo con bloquear_sin_existencia
      */
     public function aplicarMovimientos(array $lineas, array $ctx, bool $ownTransaction = true): array
     {
@@ -66,10 +100,14 @@ class inventoryModel
                 $this->conexion->beginTransaction();
             }
 
+            $bloquear = !empty($ctx['bloquear_sin_existencia']);
+
             // FOR UPDATE: dos usuarios ajustando el mismo producto a la vez leerian
             // el mismo saldo y el segundo pisaria al primero. El bloqueo los serializa.
+            // nombre, sku y unidad_medida solo sirven para el mensaje cuando se
+            // rechaza por existencia: la fila ya esta bloqueada, no cuesta otra consulta.
             $lock = $this->conexion->prepare(
-                'SELECT id, stock, costo, warehouse_id FROM products WHERE id = :id FOR UPDATE'
+                'SELECT id, nombre, sku, unidad_medida, stock, costo, warehouse_id FROM products WHERE id = :id FOR UPDATE'
             );
             $insert = $this->conexion->prepare(
                 'INSERT INTO inventory_movements
@@ -84,9 +122,19 @@ class inventoryModel
                 'UPDATE products SET stock = :nueva WHERE id = :id'
             );
 
-            $creados = [];
-            foreach ($lineas as $l) {
-                $productId = (int) $l['product_id'];
+            // Orden del bloqueo: por product_id, sin importar el orden de las
+            // lineas. Dos documentos que llevan los mismos productos en orden
+            // distinto (A,B contra B,A) se bloqueaban cruzados y MySQL abortaba a
+            // uno por deadlock, que aqui se tragaba como "venta sin movimiento".
+            // Con todos bloqueando de menor a mayor id, uno espera al otro.
+            // Solo se ordena el BLOQUEO: los movimientos se escriben (mas abajo)
+            // en el orden en que llegaron las lineas, asi el libro y el detalle de
+            // un ajuste quedan como los capturo quien los hizo.
+            $ids = array_values(array_unique(array_map(static fn($l) => (int) $l['product_id'], $lineas)));
+            sort($ids);
+            $filas = [];
+            $inicial = [];
+            foreach ($ids as $productId) {
                 $lock->execute([':id' => $productId]);
                 $prod = $lock->fetch(PDO::FETCH_ASSOC);
                 if (!$prod) {
@@ -100,6 +148,18 @@ class inventoryModel
                     return ['error', 'Uno de los productos ya no existe en el catálogo; puede que otra persona lo haya eliminado. '
                         . 'Quítalo y vuelve a intentarlo.'];
                 }
+                $filas[$productId] = $prod;
+                $inicial[$productId] = round((float) ($prod['stock'] ?? 0), 3);
+            }
+            // Saldo corriente por producto: lo que leeria el siguiente SELECT ...
+            // FOR UPDATE de la misma transaccion. Un producto en dos lineas parte,
+            // en la segunda, del saldo que dejo la primera.
+            $saldos = $inicial;
+
+            $creados = [];
+            foreach ($lineas as $l) {
+                $productId = (int) $l['product_id'];
+                $prod = $filas[$productId];
 
                 // Stock y libro son DECIMAL(15,3) (migracion 025): 1,5 m de cable
                 // mueven 1,5, no 2. MySQL devuelve el DECIMAL como texto
@@ -107,11 +167,37 @@ class inventoryModel
                 // foto guardada (antes / movimiento / despues) sea exactamente lo
                 // que la columna conserva y 10,1 - 0,3 no quede en 9,7999999.
                 $cantidad = round((float) $l['cantidad'], 3);
-                $anterior = round((float) ($prod['stock'] ?? 0), 3);
+                $anterior = $saldos[$productId];
                 $nueva = round($anterior + $cantidad, 3);
-                // El saldo negativo NO se bloquea: la venta ya ocurrio y el
-                // comprobante puede estar emitido. Se registra y queda visible
-                // en el reporte para que lo corrijan con un ajuste.
+                // Con el interruptor de la empresa apagado (tenants.inventario_estricto
+                // = 0, lo normal) el saldo negativo se tolera: la venta ya ocurrio y
+                // el comprobante puede estar emitido. Se registra y queda visible en
+                // el reporte para que lo corrijan con un ajuste. Con el interruptor
+                // encendido la venta se rechaza ANTES de guardarse
+                // (verificarDisponibilidad); y la que se guarda dentro de su propia
+                // transaccion (factura simple) pide ademas bloquear_sin_existencia,
+                // que aqui, ya con la fila bloqueada, es la palabra final: la
+                // verificacion previa lee sin bloquear y otra venta pudo llevarse la
+                // existencia entre su lectura y este bloqueo.
+                if ($bloquear && $cantidad < 0 && self::milesimas($nueva) < 0) {
+                    if ($ownTransaction) {
+                        $this->conexion->rollBack();
+                    }
+                    // Lo que haria falta contra el saldo con que EMPEZO la llamada
+                    // (no contra el que dejo una linea anterior del mismo producto):
+                    // dos lineas de 3 contra 4 piden 6, no 3, para que el ajuste
+                    // sugerido lo lleve hasta lo que se vende.
+                    $fila = self::filaFaltante(
+                        $productId,
+                        $prod,
+                        self::milesimas($inicial[$productId] - $nueva),
+                        self::milesimas($inicial[$productId])
+                    );
+                    return ['error', self::mensajeFaltantes([$fila]), 422, [
+                        'codigo' => self::CODIGO_STOCK_INSUFICIENTE,
+                        'faltantes' => [$fila],
+                    ]];
+                }
                 $costo = isset($l['costo_unitario']) && $l['costo_unitario'] !== null
                     ? round((float) $l['costo_unitario'], 2)
                     : round((float) ($prod['costo'] ?? 0), 2);
@@ -134,6 +220,7 @@ class inventoryModel
                     ':user_id' => $ctx['user_id'] ?? null,
                 ]);
                 $updStock->execute([':nueva' => $nueva, ':id' => $productId]);
+                $saldos[$productId] = $nueva;
 
                 $creados[] = [
                     'id' => (int) $this->conexion->lastInsertId(),
@@ -160,7 +247,7 @@ class inventoryModel
             // se guardo y que hacer.
             error_log('[inventario] aplicarMovimientos ' . ($ctx['referencia_tipo'] ?? 'movimiento') . ' '
                 . ($ctx['referencia_id'] ?? '-') . ': ' . $e->getMessage());
-            return ['error', 'No se pudieron actualizar las existencias. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
+            return ['error', self::FALLO_EXISTENCIAS];
         }
     }
 
@@ -176,20 +263,19 @@ class inventoryModel
      *    de que DGII acepto: a esas alturas el comprobante ya existe y no se
      *    puede deshacer. Si el inventario falla se registra en el log y se
      *    corrige con un ajuste.
-     *  - Se permite saldo negativo. Bloquear una venta por un stock que hasta hoy
-     *    nadie mantenia seria peor que registrarlo y que lo vean en el reporte.
+     *  - Con el interruptor de la empresa apagado (lo normal) se permite saldo
+     *    negativo: bloquear una venta por un stock que hasta hoy nadie mantenia
+     *    seria peor que registrarlo y que lo vean en el reporte. Con el
+     *    interruptor encendido, verificarDisponibilidad rechaza la venta antes de
+     *    guardarla; esto sigue sin bloquear porque corre despues de guardar.
      *
      * @param array $items lineas ya persistidas (product_id, quantity, indicador_bien_servicio)
      * @return int cuantos movimientos se registraron
      */
     public function registrarVenta(int $facturaId, array $items, ?string $tipoEcf, ?int $userId = null): int
     {
-        // Que comprobantes ENTRAN mercancia en vez de sacarla:
-        //   E34 Nota de Credito -> devolucion del cliente, vuelve al almacen.
-        //   E41 Compras         -> comprobante que el emisor levanta por una
-        //                          compra a un proveedor no registrado: la
-        //                          mercancia entra, no sale.
-        $entrada = in_array((string) $tipoEcf, ['34', '41'], true);
+        // Que comprobantes ENTRAN mercancia en vez de sacarla: ver esEntrada().
+        $entrada = self::esEntrada($tipoEcf);
 
         return $this->moverPorFactura(
             $facturaId,
@@ -198,6 +284,23 @@ class inventoryModel
             (string) $tipoEcf === '41' ? 'COMPRA' : ($entrada ? 'DEVOLUCION' : 'VENTA'),
             $userId
         );
+    }
+
+    /**
+     * ¿Este comprobante ENTRA mercancia en vez de sacarla?
+     *   E34 Nota de Credito -> devolucion del cliente, vuelve al almacen.
+     *   E41 Compras         -> comprobante que el emisor levanta por una compra a
+     *                          un proveedor no registrado: la mercancia entra, no
+     *                          sale.
+     * Es la unica prueba de "entrada": la usan lo que se descuenta
+     * (registrarVenta) y lo que se revisa (verificarDisponibilidad), para que
+     * "bloquea" y "descuenta" nunca se separen.
+     *
+     * @param string|null $tipoEcf '31'..'47'; null = factura simple (sale)
+     */
+    public static function esEntrada(?string $tipoEcf): bool
+    {
+        return in_array((string) $tipoEcf, ['34', '41'], true);
     }
 
     /**
@@ -217,6 +320,139 @@ class inventoryModel
     public function revertirVenta(int $facturaId, array $items, ?int $userId = null): int
     {
         return $this->moverPorFactura($facturaId, $items, 1, 'DEVOLUCION', $userId);
+    }
+
+    /**
+     * La venta de una factura simple CON el interruptor de la empresa encendido
+     * (spec C2): revisar y descontar dentro de la transaccion de la propia factura,
+     * de modo que si falta existencia la factura no se guarda, y si el documento se
+     * deshace el descuento se deshace con el.
+     *
+     * Debe correr DENTRO de la transaccion que el llamador tiene abierta, y en SU
+     * conexion (por eso el modelo se arma con ella: constructor con ?PDO, C20).
+     * Nunca abre, confirma ni deshace una transaccion: si devuelve un error, el
+     * rollback es del llamador. Sin una transaccion abierta no mueve nada y
+     * devuelve error: cada sentencia suelta se confirmaria sola, el bloqueo se
+     * soltaria de una vez y un rollback posterior no desharia el descuento.
+     *
+     * Pasos, en este orden:
+     *  0. Si hay lineas viejas que devolver Y lineas nuevas que vender (un PUT que
+     *     reemplaza las lineas), se bloquea la union de sus productos de menor a
+     *     mayor product_id en una sola pasada (bloquearProductosEnOrden), para que
+     *     el orden de bloqueo sea ascendente en TODA la transaccion y no solo
+     *     dentro de cada pasada de aplicarMovimientos.
+     *  1. Si hay lineas viejas (la factura se esta editando), se devuelven al
+     *     almacen (DEVOLUCION). Asi la revision que sigue ya cuenta lo que la
+     *     factura tenia: re-guardar con la misma cantidad y existencia 0 pasa, y
+     *     subir de 3 a 5 con existencia 1 falta 1, no 4 (spec C13).
+     *  2. verificarDisponibilidad: solo lee, y devuelve el error con faltantes.
+     *  3. Se descuenta (VENTA) con bloquear_sin_existencia: la revision del paso 2
+     *     no bloquea, y esta es la palabra final con la fila bloqueada si otra venta
+     *     se llevo la existencia entretanto.
+     * Usa el mismo filtro de lineas que el camino de despues del commit
+     * (lineasQueMueve): servicios y lineas sin product_id no mueven ni se revisan.
+     *
+     * @param array      $itemsNuevos lineas tal como las escribio la factura (product_id, quantity)
+     * @param array|null $itemsViejos lineas que la factura tenia guardadas, o null si es nueva
+     * @return array ['success', int movimientos registrados (devolucion + venta)]
+     *               | ['error', mensaje, 422]                       producto inexistente o cantidad <= 0
+     *               | ['error', mensaje, 422, ['codigo' => 'STOCK_INSUFICIENTE', 'faltantes' => [...]]]
+     *               | ['error', mensaje]                            fallo al actualizar
+     */
+    public function moverVentaEnTransaccion(int $facturaId, array $itemsNuevos, ?int $userId, ?array $itemsViejos = null): array
+    {
+        if (!$this->conexion->inTransaction()) {
+            error_log('[inventario] moverVentaEnTransaccion factura ' . $facturaId . ': no hay una transaccion abierta en la conexion');
+            return ['error', self::FALLO_EXISTENCIAS];
+        }
+        try {
+            $movimientos = 0;
+
+            // Lo que se devuelve y lo que se vende, con el mismo filtro que usa el
+            // camino de despues del commit. Solo lee: no toma ningun bloqueo.
+            $devolver = $itemsViejos !== null ? $this->lineasQueMueve($itemsViejos, 1, false) : [];
+            $descontar = $this->lineasQueMueve($itemsNuevos, -1, false);
+
+            // Orden global de bloqueo (4.2): el PUT hace DOS pasadas de
+            // aplicarMovimientos (la reversa y la venta) y cada una ordena solo sus
+            // propios ids. Con lineas viejas del producto 9 y nuevas del 4 se
+            // bloqueaba 9 y despues 4, mientras una venta de {4, 9} bloquea 4 y
+            // despues 9: se cruzan, MySQL mata a una por interbloqueo y, si la
+            // victima es el descuento de un e-CF ya aceptado, ese descuento se
+            // pierde (moverPorDocumento lo anota y no lo reintenta). Por eso la UNION
+            // de ids viejos y nuevos se bloquea ANTES, de menor a mayor y de una vez:
+            // las dos pasadas siguientes solo vuelven a bloquear filas que esta
+            // transaccion ya tiene. Con una sola pasada (factura nueva, o lineas que
+            // no mueven nada) aplicarMovimientos ya ordena por si mismo.
+            if ($devolver !== [] && $descontar !== []) {
+                $this->bloquearProductosEnOrden(array_merge($devolver, $descontar));
+            }
+
+            if ($devolver !== []) {
+                $res = $this->aplicarMovimientos($devolver, [
+                    'tipo_movimiento' => 'DEVOLUCION',
+                    'referencia_tipo' => 'factura',
+                    'referencia_id' => $facturaId,
+                    'user_id' => $userId,
+                ], false);
+                if ($res[0] !== 'success') {
+                    return $res;
+                }
+                $movimientos += count($res[1]);
+            }
+
+            $revision = $this->verificarDisponibilidad($itemsNuevos, null);
+            if ($revision[0] !== 'success') {
+                return $revision;
+            }
+
+            if ($descontar !== []) {
+                $res = $this->aplicarMovimientos($descontar, [
+                    'tipo_movimiento' => 'VENTA',
+                    'referencia_tipo' => 'factura',
+                    'referencia_id' => $facturaId,
+                    'user_id' => $userId,
+                    'bloquear_sin_existencia' => true,
+                ], false);
+                if ($res[0] !== 'success') {
+                    return $res;
+                }
+                $movimientos += count($res[1]);
+            }
+            return ['success', $movimientos];
+        } catch (Throwable $e) {
+            // Una venta que no se pudo descontar no se guarda: se devuelve el error
+            // para que el llamador deshaga la factura (aqui no se traga como en el
+            // camino de despues del commit, donde el documento ya existe).
+            error_log('[inventario] moverVentaEnTransaccion factura ' . $facturaId . ': ' . $e->getMessage());
+            return ['error', self::FALLO_EXISTENCIAS];
+        }
+    }
+
+    /**
+     * Bloquea (SELECT ... FOR UPDATE) las filas de producto de estas lineas, cada
+     * una una sola vez y de menor a mayor product_id: el mismo orden con que
+     * aplicarMovimientos bloquea, para que todos los que toman filas de producto
+     * las tomen en el mismo sentido y uno espere al otro en vez de cruzarse.
+     *
+     * Debe correr DENTRO de la transaccion que el llamador tiene abierta: nunca la
+     * abre, confirma ni deshace (el bloqueo se mantiene hasta que ella termine). Un
+     * id que ya no existe no se reporta aqui (no hay fila que bloquear): lo reporta
+     * aplicarMovimientos, con su mensaje de siempre. Una excepcion de la base sale
+     * tal cual.
+     *
+     * @param array $lineas lineas con 'product_id' (las de lineasQueMueve)
+     */
+    private function bloquearProductosEnOrden(array $lineas): void
+    {
+        $ids = array_values(array_unique(array_map(static fn($l) => (int) $l['product_id'], $lineas)));
+        sort($ids);
+        $lock = $this->conexion->prepare('SELECT id FROM products WHERE id = :id FOR UPDATE');
+        foreach ($ids as $productId) {
+            $lock->execute([':id' => $productId]);
+            // Se lee la fila para dejar la sentencia lista para la siguiente vuelta.
+            $lock->fetch(PDO::FETCH_ASSOC);
+        }
     }
 
     /**
@@ -372,50 +608,7 @@ class inventoryModel
         // fallo de inventario NUNCA tumba un documento ya guardado, y eso incluye
         // los errores que no vienen de aplicarMovimientos.
         try {
-            $ids = [];
-            foreach ($items as $it) {
-                $it = (array) $it;
-                if (!empty($it['product_id'])) {
-                    $ids[(int) $it['product_id']] = true;
-                }
-            }
-            if ($ids === []) {
-                return 0;
-            }
-            // Quien decide que es servicio es el catalogo, no la linea: las
-            // facturas simples no llevan indicador_bien_servicio, y asumir "bien"
-            // hacia que un servicio del catalogo descontara existencias.
-            $servicios = $this->serviciosDelCatalogo(array_keys($ids));
-
-            $lineas = [];
-            foreach ($items as $it) {
-                $it = (array) $it;
-                $productId = (int) ($it['product_id'] ?? 0);
-                if ($productId <= 0 || isset($servicios[$productId])) {
-                    continue;
-                }
-                // La cantidad de la linea tal cual, con sus decimales: el stock es
-                // DECIMAL(15,3) desde la migracion 025. Antes se redondeaba a entero
-                // (1,5 m descontaba 2 y 0,4 kg no descontaba nada). El documento ya
-                // la limito (2 decimales en e-CF, 3 en la factura simple); el
-                // round(3) solo la iguala a lo que guarda la columna. Viene como
-                // texto ("1.500") cuando son las lineas releidas de la DB.
-                $cantidad = round((float) ($it['quantity'] ?? $it['cantidad'] ?? 0), 3);
-                if ($cantidad <= 0) {
-                    continue;
-                }
-                $lineas[] = [
-                    'product_id' => $productId,
-                    'cantidad' => $signo * $cantidad,
-                    // Venta: el costo lo pone el producto (valorizar la salida al
-                    // precio de venta inflaria el valor del movimiento). Compra: lo
-                    // pone la linea, que es lo que costo de verdad y es lo que
-                    // alimenta el costo promedio.
-                    'costo_unitario' => $costoDeLinea
-                        ? (float) ($it['amount'] ?? $it['precio_unitario'] ?? 0)
-                        : null,
-                ];
-            }
+            $lineas = $this->lineasQueMueve($items, $signo, $costoDeLinea);
             if ($lineas === []) {
                 return 0;
             }
@@ -430,10 +623,109 @@ class inventoryModel
                 error_log('[inventario] ' . $referenciaTipo . ' ' . $referenciaId . ': ' . $res[1]);
                 return 0;
             }
+            if ($tipoMovimiento === 'VENTA') {
+                self::avisarSobreventa($referenciaId, $res[1]);
+            }
             return count($res[1]);
         } catch (Throwable $e) {
             error_log('[inventario] ' . $referenciaTipo . ' ' . $referenciaId . ' fallo inesperado: ' . $e->getMessage());
             return 0;
+        }
+    }
+
+    /**
+     * Las lineas de un documento (factura o gasto) que de verdad mueven
+     * existencias, ya con signo y listas para aplicarMovimientos. Es el filtro
+     * unico: lo usan el camino de despues del commit (moverPorDocumento) y el de
+     * dentro de la transaccion (moverVentaEnTransaccion), para que "lo que se
+     * descuenta" no se separe segun por donde llegue la venta.
+     *
+     * Solo cuentan las lineas con product_id que no son servicio del catalogo y
+     * cuya cantidad, a 3 decimales, es mayor que 0. Hace UNA consulta (los
+     * servicios) y solo si alguna linea trae product_id; una PDOException sale tal
+     * cual: cada llamador decide que hacer con ella.
+     *
+     * @param int  $signo        -1 saca del almacen, +1 entra
+     * @param bool $costoDeLinea true = valoriza al precio de la linea (compras);
+     *                           false = al costo del producto (ventas)
+     * @return array<int,array{product_id:int,cantidad:float,costo_unitario:?float}>
+     */
+    private function lineasQueMueve(array $items, int $signo, bool $costoDeLinea): array
+    {
+        $ids = [];
+        foreach ($items as $it) {
+            $it = (array) $it;
+            if (!empty($it['product_id'])) {
+                $ids[(int) $it['product_id']] = true;
+            }
+        }
+        if ($ids === []) {
+            return [];
+        }
+        // Quien decide que es servicio es el catalogo, no la linea: las
+        // facturas simples no llevan indicador_bien_servicio, y asumir "bien"
+        // hacia que un servicio del catalogo descontara existencias.
+        $servicios = $this->serviciosDelCatalogo(array_keys($ids));
+
+        $lineas = [];
+        foreach ($items as $it) {
+            $it = (array) $it;
+            $productId = (int) ($it['product_id'] ?? 0);
+            if ($productId <= 0 || isset($servicios[$productId])) {
+                continue;
+            }
+            // La cantidad de la linea tal cual, con sus decimales: el stock es
+            // DECIMAL(15,3) desde la migracion 025. Antes se redondeaba a entero
+            // (1,5 m descontaba 2 y 0,4 kg no descontaba nada). El documento ya
+            // la limito (2 decimales en e-CF, 3 en la factura simple); el
+            // round(3) solo la iguala a lo que guarda la columna. Viene como
+            // texto ("1.500") cuando son las lineas releidas de la DB.
+            $cantidad = round((float) ($it['quantity'] ?? $it['cantidad'] ?? 0), 3);
+            if ($cantidad <= 0) {
+                continue;
+            }
+            $lineas[] = [
+                'product_id' => $productId,
+                'cantidad' => $signo * $cantidad,
+                // Venta: el costo lo pone el producto (valorizar la salida al
+                // precio de venta inflaria el valor del movimiento). Compra: lo
+                // pone la linea, que es lo que costo de verdad y es lo que
+                // alimenta el costo promedio.
+                'costo_unitario' => $costoDeLinea
+                    ? (float) ($it['amount'] ?? $it['precio_unitario'] ?? 0)
+                    : null,
+            ];
+        }
+        return $lineas;
+    }
+
+    /**
+     * Con el interruptor de la empresa encendido, una venta que se guardo y dejo un
+     * saldo por debajo de 0 es una sobreventa: pasa en e-CF, donde la revision previa
+     * y el descuento estan separados por la ida y vuelta con la DGII (dos ventas de
+     * la ultima unidad pueden pasar las dos). No cambia nada: solo la deja en el log
+     * para poder medir cuantas ocurren.
+     *
+     * Nunca lanza: corre despues de guardar el documento y de aplicar los
+     * movimientos, y un fallo aqui no puede hacer que se reporten como no aplicados.
+     *
+     * @param array $movimientos lo que devolvio aplicarMovimientos (cantidad_nueva)
+     */
+    private static function avisarSobreventa(int $facturaId, array $movimientos): void
+    {
+        try {
+            // class_exists: el modelo tambien corre en scripts sin resolver empresa.
+            if (!class_exists('TenantResolver', false) || !TenantResolver::inventarioEstricto()) {
+                return;
+            }
+            foreach ($movimientos as $m) {
+                $saldo = round((float) ($m['cantidad_nueva'] ?? 0), 3);
+                if (self::milesimas($saldo) < 0) {
+                    error_log('[inventario] SOBREVENTA factura ' . $facturaId . ' producto ' . ($m['product_id'] ?? '?') . ' saldo ' . $saldo);
+                }
+            }
+        } catch (Throwable $e) {
+            // Es solo un aviso: no se reporta el fallo del aviso.
         }
     }
 
@@ -529,11 +821,413 @@ class inventoryModel
      */
     private static function nombreEnMensaje(?array $prod): string
     {
+        $nombre = self::nombreMostrable($prod);
+        return $nombre === '' ? '' : ' («' . $nombre . '»)';
+    }
+
+    /**
+     * El nombre limpio (sin «»), o '' cuando no conviene ponerlo en un mensaje:
+     * esta en blanco o parece una constante. Es la regla de nombreEnMensaje, para
+     * que los mensajes de ajuste y los de existencia decidan igual.
+     */
+    private static function nombreMostrable(?array $prod): string
+    {
         $nombre = trim((string) ($prod['nombre'] ?? ''));
         if ($nombre === '' || preg_match('/\b[A-Z][A-Z0-9]+_[A-Z][A-Z0-9_]{2,}\b/', $nombre)) {
             return '';
         }
-        return ' («' . $nombre . '»)';
+        return $nombre;
+    }
+
+    // ------------------------------------------------------------------
+    // Verificacion de existencia al vender (spec 4.2 y 4.4)
+    //
+    // Solo LEE. La llama quien tiene el interruptor de la empresa encendido
+    // (TenantResolver::inventarioEstricto()), ANTES de cualquier efecto: antes de
+    // gastar el e-NCF y antes de guardar la factura simple. Quien descuenta sigue
+    // siendo aplicarMovimientos.
+    // ------------------------------------------------------------------
+
+    /**
+     * Cuanto de un producto se puede vender, en milesimas. Un Bien sin dato de
+     * existencia (NULL) cuenta como 0, igual que el libro (`stock ?? 0`).
+     *
+     * Es el UNICO lugar que responde "cuanto hay del producto X": cuando haya
+     * saldo por almacen cambia esta funcion (y la consulta que arma el catalogo),
+     * no los comparadores. Puede ser negativo: el stock guardado puede estarlo.
+     *
+     * @param array $fila fila del catalogo de calcularFaltantes
+     */
+    private static function disponibleEnMilesimas(array $fila): int
+    {
+        return self::milesimas($fila['stock'] ?? 0);
+    }
+
+    /**
+     * Un numero a milesimas enteras: (int) round($x * 1000). Todas las
+     * comparaciones de existencia se hacen en enteros: con flotantes
+     * 0.1 + 0.2 no es 0.3. Lo que no es numero cuenta como 0, y el tope de
+     * +-1e12 (mas que lo que cabe en DECIMAL(15,3)) evita que un valor absurdo
+     * desborde el entero.
+     *
+     * @param mixed $valor numero o texto DECIMAL ("1.500")
+     */
+    private static function milesimas($valor): int
+    {
+        if (!is_numeric($valor)) {
+            return 0;
+        }
+        $v = (float) $valor;
+        if (is_nan($v)) {
+            return 0;
+        }
+        return (int) round(max(-1e12, min(1e12, $v)) * 1000);
+    }
+
+    /**
+     * Lo que faltaria si se vendieran estas lineas: el nucleo puro de la
+     * verificacion, sin base de datos.
+     *
+     * Reglas (espejo de lo que descuenta moverPorDocumento: "revisa" = "descuenta"):
+     *  - Solo cuentan las lineas con product_id, que no sean servicio del catalogo.
+     *    Una entrada (E34, E41) no se revisa en absoluto.
+     *  - Las lineas del mismo producto se SUMAN antes de comparar (dos lineas de 3
+     *    contra un stock de 4 no pasan).
+     *  - Se compara en milesimas enteras; igual pasa; stock NULL cuenta como 0.
+     *  - Un product_id que no esta en el catalogo va en no_existe, y una cantidad
+     *    <= 0 (o que redondea a 0 a 3 decimales) de un producto va en
+     *    cantidad_invalida. Ninguno de los dos es un faltante: nunca salen en
+     *    `faltantes`, que solo nombra productos reales con existencia corta.
+     *  - `faltante` = solicitado - saldo guardado (puede ser negativo: -3 y pide 5
+     *    falta 8, para que el ajuste lo lleve hasta lo vendido); `disponible` es
+     *    el saldo con piso en 0, para que ningun texto diga "quedan -3".
+     *
+     * @param array $items lineas con product_id y quantity o cantidad (arreglos u objetos)
+     * @param array<int,array{nombre:string,sku:?string,unidad_medida:?string,stock:?float,servicio:bool}> $catalogo
+     *        filas de products por id; un id ausente es un producto que no existe
+     * @return array{faltantes:list<array{product_id:int,nombre:string,sku:?string,unidad_medida:?string,solicitado:float,disponible:float,faltante:float}>,no_existe:list<int>,cantidad_invalida:list<int>}
+     *         todo ordenado por product_id
+     */
+    public static function calcularFaltantes(array $items, array $catalogo, ?string $tipoEcf): array
+    {
+        if (self::esEntrada($tipoEcf)) {
+            return ['faltantes' => [], 'no_existe' => [], 'cantidad_invalida' => []];
+        }
+
+        $pedido = [];   // product_id => milesimas pedidas, sumadas
+        $noExiste = [];
+        $invalida = [];
+        foreach ($items as $it) {
+            $it = (array) $it;
+            $productId = (int) ($it['product_id'] ?? 0);
+            if ($productId <= 0) {
+                continue;
+            }
+            $fila = $catalogo[$productId] ?? null;
+            if ($fila === null) {
+                $noExiste[$productId] = true;
+                continue;
+            }
+            if (!empty($fila['servicio'])) {
+                continue;
+            }
+            // La misma cantidad que lee moverPorDocumento: quantity y, si no
+            // viene, cantidad.
+            $milesimas = self::milesimas($it['quantity'] ?? $it['cantidad'] ?? 0);
+            if ($milesimas <= 0) {
+                $invalida[$productId] = true;
+                continue;
+            }
+            $pedido[$productId] = ($pedido[$productId] ?? 0) + $milesimas;
+        }
+
+        ksort($pedido);
+        $faltantes = [];
+        foreach ($pedido as $productId => $solicitado) {
+            $fila = $catalogo[$productId];
+            $saldo = self::disponibleEnMilesimas($fila);
+            if ($solicitado <= $saldo) {
+                continue;
+            }
+            $faltantes[] = self::filaFaltante((int) $productId, $fila, $solicitado, $saldo);
+        }
+
+        $noExiste = array_keys($noExiste);
+        $invalida = array_keys($invalida);
+        sort($noExiste);
+        sort($invalida);
+        return ['faltantes' => $faltantes, 'no_existe' => $noExiste, 'cantidad_invalida' => $invalida];
+    }
+
+    /**
+     * Una fila de `faltantes` (spec 4.4). Es el UNICO lugar que decide como se
+     * cuentan solicitado, disponible y faltante: la usan calcularFaltantes (la
+     * revision previa) y aplicarMovimientos (el rechazo con la fila bloqueada), para
+     * que el front reciba la misma forma venga de donde venga.
+     *
+     * `disponible` es el saldo con piso en 0 (nada dice "quedan -3"); `faltante` es
+     * solicitado menos el saldo guardado SIN piso, para que el ajuste sugerido
+     * lleve la existencia hasta lo que se vende aunque el saldo sea negativo.
+     *
+     * @param array $fila     nombre, sku y unidad_medida del producto (la fila del
+     *                        catalogo o la de products tal como sale de MySQL)
+     * @param int   $solicitado milesimas pedidas
+     * @param int   $saldo      milesimas guardadas (puede ser negativo)
+     * @return array{product_id:int,nombre:string,sku:?string,unidad_medida:?string,solicitado:float,disponible:float,faltante:float}
+     */
+    private static function filaFaltante(int $productId, array $fila, int $solicitado, int $saldo): array
+    {
+        return [
+            'product_id' => $productId,
+            'nombre' => (string) ($fila['nombre'] ?? ''),
+            'sku' => isset($fila['sku']) && $fila['sku'] !== '' ? (string) $fila['sku'] : null,
+            'unidad_medida' => isset($fila['unidad_medida']) && $fila['unidad_medida'] !== '' ? (string) $fila['unidad_medida'] : null,
+            // / 1000.0: siempre float (6000 / 1000 en enteros daria int).
+            'solicitado' => $solicitado / 1000.0,
+            'disponible' => max(0, $saldo) / 1000.0,
+            'faltante' => ($solicitado - $saldo) / 1000.0,
+        ];
+    }
+
+    /**
+     * Una cantidad para un mensaje, como la muestra el app (es-DO): sin ceros de
+     * relleno, punto decimal y coma de miles ("5", "0.299", "1,250.5").
+     */
+    private static function cantidadEnMensaje(float $cantidad): string
+    {
+        return rtrim(rtrim(number_format(round($cantidad, 3), 3, '.', ','), '0'), '.');
+    }
+
+    /**
+     * El texto para quien vende: una oracion por producto, unidas. Los nombres
+     * van entre «» y se omiten cuando parecen una constante (ver nombreEnMensaje);
+     * la oracion sigue diciendo cuanto se pide y cuanto hay. Nunca imprime un
+     * saldo negativo. El front arma su propia lista con `faltantes` y puede
+     * ignorar este texto.
+     *
+     * @param array $faltantes filas de calcularFaltantes()['faltantes']
+     */
+    public static function mensajeFaltantes(array $faltantes): string
+    {
+        $frases = [];
+        foreach ($faltantes as $f) {
+            $nombre = self::nombreMostrable(['nombre' => $f['nombre'] ?? '']);
+            $frases[] = 'No hay existencia suficiente' . ($nombre !== '' ? ' de «' . $nombre . '»' : '')
+                . ': pides ' . self::cantidadEnMensaje((float) ($f['solicitado'] ?? 0))
+                . ' y hay ' . self::cantidadEnMensaje(max(0.0, (float) ($f['disponible'] ?? 0))) . '.';
+        }
+        return implode(' ', $frases);
+    }
+
+    /**
+     * Fila de products de cada id, en la forma que espera calcularFaltantes.
+     * Una sola consulta de lectura (sin FOR UPDATE: la verificacion no bloquea).
+     * Un id que no existe no sale.
+     *
+     * @param int[] $ids
+     * @return array<int,array{nombre:string,sku:?string,unidad_medida:?string,stock:?float,servicio:bool}>
+     */
+    private function catalogoParaVenta(array $ids): array
+    {
+        $marcadores = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->conexion->prepare(
+            "SELECT id, nombre, sku, unidad_medida, stock, indicador_bien_servicio FROM products WHERE id IN ({$marcadores})"
+        );
+        $stmt->execute(array_map('intval', $ids));
+        $catalogo = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $catalogo[(int) $r['id']] = [
+                'nombre' => (string) ($r['nombre'] ?? ''),
+                'sku' => isset($r['sku']) && $r['sku'] !== '' ? (string) $r['sku'] : null,
+                'unidad_medida' => isset($r['unidad_medida']) && $r['unidad_medida'] !== '' ? (string) $r['unidad_medida'] : null,
+                // DECIMAL llega como texto ("8.500"); NULL = sin dato (cuenta como 0).
+                'stock' => isset($r['stock']) && is_numeric($r['stock']) ? round((float) $r['stock'], 3) : null,
+                'servicio' => (int) ($r['indicador_bien_servicio'] ?? 1) === 2,
+            ];
+        }
+        return $catalogo;
+    }
+
+    /**
+     * ¿Alcanza la existencia para estas lineas? Solo lee.
+     *
+     * Quien llama ya decidio que el interruptor de la empresa esta encendido
+     * (ver verificarVentaEcf y el camino de la factura simple); esta funcion no
+     * lo consulta.
+     *
+     * Una PDOException de la consulta sale tal cual: quien llama decide que hacer
+     * (en e-CF la regla es un resguardo, no una dependencia fiscal, y no debe
+     * impedir la venta si la base falla).
+     *
+     * @param array       $items   lineas con product_id y quantity o cantidad
+     * @param string|null $tipoEcf '31'..'47'; null = factura simple. Una entrada
+     *                             (E34, E41) devuelve success sin consultar.
+     * @return array ['success', []]
+     *               | ['error', mensaje, 422]  producto que no existe o cantidad <= 0,
+     *                 en texto llano: no es un faltante de existencia
+     *               | ['error', mensaje, 422, ['codigo' => 'STOCK_INSUFICIENTE',
+     *                 'faltantes' => [...]]]   ver calcularFaltantes()
+     */
+    public function verificarDisponibilidad(array $items, ?string $tipoEcf): array
+    {
+        if (self::esEntrada($tipoEcf)) {
+            return ['success', []];
+        }
+        $ids = [];
+        foreach ($items as $it) {
+            $it = (array) $it;
+            $productId = (int) ($it['product_id'] ?? 0);
+            if ($productId > 0) {
+                $ids[$productId] = true;
+            }
+        }
+        if ($ids === []) {
+            return ['success', []];
+        }
+        $ids = array_keys($ids);
+        sort($ids);
+
+        $catalogo = $this->catalogoParaVenta($ids);
+        $r = self::calcularFaltantes($items, $catalogo, $tipoEcf);
+
+        if ($r['no_existe'] !== []) {
+            // El id sirve para rastrearlo, no a quien vende: va al log y el texto
+            // queda llano (el mismo de aplicarMovimientos cuando un producto
+            // desaparece). Antes de esta revision el error llegaba como una
+            // violacion de llave foranea y se veia como un fallo generico.
+            foreach ($r['no_existe'] as $id) {
+                error_log('[inventario] verificarDisponibilidad: el producto ' . $id . ' no existe');
+            }
+            return ['error', 'Uno de los productos ya no existe en el catálogo; puede que otra persona lo haya eliminado. '
+                . 'Quítalo y vuelve a intentarlo.', 422];
+        }
+        if ($r['cantidad_invalida'] !== []) {
+            $frases = [];
+            foreach ($r['cantidad_invalida'] as $id) {
+                $nombre = self::nombreMostrable($catalogo[$id] ?? null);
+                $frases[] = ($nombre !== '' ? 'El producto «' . $nombre . '»' : 'Uno de los productos')
+                    . ' necesita una cantidad mayor que 0.';
+            }
+            return ['error', implode(' ', $frases), 422];
+        }
+        if ($r['faltantes'] !== []) {
+            return ['error', self::mensajeFaltantes($r['faltantes']), 422, [
+                'codigo' => self::CODIGO_STOCK_INSUFICIENTE,
+                'faltantes' => $r['faltantes'],
+            ]];
+        }
+        return ['success', []];
+    }
+
+    /**
+     * La puerta del e-CF (POST /api/facturas): ¿alcanza la existencia para esta
+     * factura? La llama facturaController::emitirFacturaEcf ANTES de armar el
+     * payload, o sea antes de que el servicio gaste el e-NCF: un rechazo despues de
+     * dispensarlo puede dejar un hueco en la secuencia fiscal (spec C1).
+     *
+     * Devuelve success SIN consultar nada (ni siquiera la base) cuando:
+     *  - el interruptor de la empresa esta apagado (TenantResolver::inventarioEstricto(),
+     *    lo normal): la factura se comporta exactamente como siempre;
+     *  - es el reenvio de un rechazado ($reenvioDe !== null, spec C5): es una
+     *    obligacion fiscal por mercancia que ya se vendio y no puede frenarla la
+     *    existencia de hoy;
+     *  - el comprobante es una entrada (E34, E41; esEntrada): no saca mercancia.
+     * Con el interruptor encendido todo lo demas (E31, E32, E33, E43, E44, E45, E46,
+     * E47) se revisa, igual que lo que descuenta moverStockFacturaEcf (C15).
+     *
+     * Las cantidades se leen COMO LAS LEE EcfItemMapper::map, que es lo que luego
+     * descuenta ("revisa" = "descuenta"): `cantidad` manda sobre `quantity` y una
+     * linea sin cantidad cuenta 1. Con el request normal (no strict_input) los
+     * items ya traen `cantidad` redondeada; el set de pruebas de la DGII puede traer
+     * solo `quantity`, o ninguna, y no debe salir como "cantidad invalida" una linea
+     * que si se descontaria. Lo demas (lineas libres, servicios, producto inexistente,
+     * cantidad <= 0, suma por producto) lo decide verificarDisponibilidad.
+     *
+     * Una PDOException de la consulta sale tal cual: en e-CF la regla es un
+     * resguardo, no una dependencia fiscal, y el controlador la atrapa para no
+     * impedir la venta si la base falla.
+     *
+     * @param array  $items     lineas del e-CF ya normalizadas (product_id, cantidad)
+     * @param string $tipoEcf   '31'..'47'
+     * @param ?int   $reenvioDe id de la factura rechazada que este envio reemplaza
+     * @return array ['success', []] | los errores de verificarDisponibilidad
+     */
+    public function verificarVentaEcf(array $items, string $tipoEcf, ?int $reenvioDe): array
+    {
+        // class_exists: el modelo tambien corre en scripts sin resolver empresa (como
+        // en avisarSobreventa); sin empresa el interruptor esta apagado.
+        if (!class_exists('TenantResolver', false) || !TenantResolver::inventarioEstricto()
+            || $reenvioDe !== null || self::esEntrada($tipoEcf)) {
+            return ['success', []];
+        }
+        $lineas = [];
+        foreach ($items as $it) {
+            $it = (array) $it;
+            $lineas[] = [
+                'product_id' => $it['product_id'] ?? null,
+                // La misma lectura que EcfItemMapper::map: cantidad, luego quantity,
+                // y sin ninguna de las dos, 1.
+                'cantidad' => (float) ($it['cantidad'] ?? $it['quantity'] ?? 1),
+            ];
+        }
+        return $this->verificarDisponibilidad($lineas, $tipoEcf);
+    }
+
+    /**
+     * El cuerpo JSON de una respuesta de verificarDisponibilidad (o de un
+     * aplicarMovimientos que rechazo por existencia): lo que imprimen los
+     * controladores con HTTP 422. Con faltantes lleva `codigo` y `data.faltantes`
+     * (spec 4.4); en el caso llano (producto inexistente, cantidad <= 0), solo
+     * status y error.
+     *
+     * @param array $res ['error', mensaje, 422] | ['error', mensaje, 422, ['codigo' =>, 'faltantes' =>]]
+     * @return array{status:false,error:string,codigo?:string,data?:array{faltantes:array}}
+     */
+    public static function respuestaExistencia(array $res): array
+    {
+        $cuerpo = ['status' => false, 'error' => (string) ($res[1] ?? '')];
+        $datos = $res[3] ?? null;
+        if (is_array($datos) && isset($datos['faltantes']) && is_array($datos['faltantes'])) {
+            $cuerpo['codigo'] = (string) ($datos['codigo'] ?? self::CODIGO_STOCK_INSUFICIENTE);
+            $cuerpo['data'] = ['faltantes' => $datos['faltantes']];
+        }
+        return $cuerpo;
+    }
+
+    // ------------------------------------------------------------------
+    // Configuracion del control de existencias (GET/PUT /api/inventario/configuracion)
+    // ------------------------------------------------------------------
+
+    /**
+     * ¿Este rol puede encender o apagar el bloqueo de ventas sin existencia?
+     *
+     * Solo el rol de sistema 'admin', por nombre (sin importar mayusculas) y no
+     * por permiso: el mismo criterio que la bitacora (auditLogController). Un rol
+     * personalizado puede tener '*' o el modulo de productos y aun asi no debe
+     * decidir si la empresa vende sin existencia. Se exige tambien con
+     * PERMISSIONS_ENFORCE apagado: el controlador lo llama en cada PUT.
+     */
+    public static function rolPuedeConfigurar(?string $rol): bool
+    {
+        return strtolower((string) $rol) === 'admin';
+    }
+
+    /**
+     * Cuantos productos rechazaria hoy el bloqueo: Bienes activos con stock NULL
+     * o <= 0 (un NULL cuenta como 0, C3). Lo muestra Configuracion junto al
+     * interruptor para que el admin vea el efecto antes de encenderlo.
+     *
+     * "Bien" es lo mismo que en la venta y en el reporte de valor: todo lo que no
+     * es Servicio (indicador_bien_servicio = 2). Solo lee.
+     */
+    public function contarSinExistencia(): int
+    {
+        $stmt = $this->conexion->query(
+            'SELECT COUNT(*) FROM products
+             WHERE activo = 1 AND indicador_bien_servicio <> 2
+               AND (stock IS NULL OR stock <= 0)'
+        );
+        return (int) $stmt->fetchColumn();
     }
 
     // ------------------------------------------------------------------

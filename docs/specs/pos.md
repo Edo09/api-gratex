@@ -220,6 +220,15 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] Agregar un producto con existencia ≤ 0 está permitido. La línea muestra "Sin existencia".
 - [ ] Al emitir, la existencia baja aunque quede negativa (ya pasa así).
 
+*Nota 2026-10-19 (control de existencias en las ventas):* la decisión 7 y este criterio **siguen
+valiendo para el POS**. «Bloquear ventas sin existencia» (`master.tenants.inventario_estricto`) se
+revisa solo en `POST /api/facturas` y en las facturas simples; `src/Pos/*` no lo consulta ni revisa
+la existencia, y la venta del POS baja la existencia por el mismo `registrarVenta` de siempre,
+después de guardar. Consecuencia que se acepta y se dice en el texto de ayuda del interruptor: una
+venta del POS puede dejar un producto en 0 o bajo 0, y las facturas de ese producto se rechazan hasta
+que un Ajuste de inventario lo reponga. Detalle en
+[../modules/inventario.md](../modules/inventario.md#control-de-existencias-en-las-ventas).
+
 **V4 · Cancelar venta** — `Piloto`
 - [x] ESC o botón, con confirmación si hay artículos. Sin PIN.
 - [x] Ventas canceladas y líneas eliminadas quedan en la auditoría y salen en el reporte de cierre (cantidad y monto).
@@ -459,7 +468,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 4 | Acceso | El botón de app.\* pasa la sesión; pos.\* tiene login de admin propio |
 | 5 | Impresión | Se imprime **siempre**, con el diálogo normal del navegador en la térmica POS 80. `--kiosk-printing` es opcional (cambiado el 2026-10-08; antes: silenciosa) |
 | 6 | Hardware | PC Windows táctil; se vende **por toque**. El lector de barras queda para después del piloto (cambiado el 2026-10-08). Sin gaveta ni báscula |
-| 7 | Existencia en 0 | Se vende y se avisa |
+| 7 | Existencia en 0 | Se vende y se avisa. **Sigue valiendo** aunque la empresa encienda «Bloquear ventas sin existencia» (2026-10-19): ese interruptor aplica a facturas e-CF y facturas simples, no al POS, que no lo consulta |
 | 8 | Sin internet | Aviso + contingencia. Sin cola local |
 | 9 | Precio en pantalla | Final, con ITBIS |
 | 10 | Códigos de barras | Varios por producto, en tabla aparte. Un código desconocido **solo avisa** |

@@ -267,7 +267,10 @@ mismo.
 líneas ligadas a sus productos (así la factura mueve inventario). El descuento fijo
 del cliente se aplica como siempre, con un aviso. Los cargos no se copian como líneas
 (sale un aviso) y la retención y el abono tampoco (el pago se registra en la factura).
-En factura simple, cada precio lleva su ITBIS dentro.
+En factura simple, cada precio lleva su ITBIS dentro. Una cotización no revisa ni reserva
+existencia: con «Bloquear ventas sin existencia» encendido, la factura puede rechazarse con
+`422` `STOCK_INSUFICIENTE` al facturar
+([../api/inventario.md](../api/inventario.md#control-de-existencias-en-las-ventas)).
 
 ### Conduces de mercancía (Ferretería)
 

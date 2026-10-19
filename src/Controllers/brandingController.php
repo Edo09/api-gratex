@@ -3,7 +3,8 @@
 // Ruta: /api/branding (requiere token; el tenant sale SIEMPRE del token,
 // nunca del body).
 //   GET    /api/branding          -> branding actual + plantillas disponibles
-//                                    + cotizacion_formato (solo lectura)
+//                                    + cotizacion_formato, pos_enabled e
+//                                    inventario_estricto (solo lectura)
 //   PUT    /api/branding          -> {template?, accent_color?} (422 si invalido)
 //   POST   /api/branding/logo     -> multipart campo "logo" (png/jpg, max 2 MB)
 //   DELETE /api/branding/logo     -> elimina el logo (vuelve al global)
@@ -93,6 +94,14 @@ function brCurrent(int $tenantId): array
         // master 012): con esto el front decide si muestra el boton POS (A1).
         // Solo lectura: se activa por SQL. Sin la columna, nadie tiene POS.
         'pos_enabled'         => (int) ($tenant['pos_enabled'] ?? 0) === 1,
+        // Bloqueo de ventas sin existencia (master.tenants.inventario_estricto,
+        // migracion master 013): con esto el front sabe si debe mostrar la
+        // existencia y avisar en las facturas. Solo empresas tipo 'app' (una de
+        // integracion no tiene catalogo ni stock). Solo lectura aqui: lo cambia un
+        // admin con PUT /api/inventario/configuracion y el PUT de branding no lo
+        // acepta. Sin la columna (013 sin correr), nadie lo tiene.
+        'inventario_estricto' => ($tenant['tipo'] ?? 'app') === 'app'
+            && (int) ($tenant['inventario_estricto'] ?? 0) === 1,
     ];
 }
 

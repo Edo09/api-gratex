@@ -189,6 +189,21 @@ class MasterDatabase
         $stmt->execute($params);
     }
 
+    /**
+     * Enciende o apaga el bloqueo de ventas sin existencia de una empresa
+     * (tenants.inventario_estricto, migracion 013). Solo empresas tipo 'app': una
+     * de integracion no tiene catalogo ni stock, y el UPDATE no la toca.
+     * Quien llama (PUT /api/inventario/configuracion) ya verifico que sea admin y
+     * saca el id del token, nunca del cuerpo de la peticion.
+     */
+    public function setInventarioEstricto(int $tenantId, bool $activo): void
+    {
+        $stmt = $this->conexion->prepare(
+            "UPDATE tenants SET inventario_estricto = :v WHERE id = :id AND tipo = 'app'"
+        );
+        $stmt->execute([':v' => $activo ? 1 : 0, ':id' => $tenantId]);
+    }
+
     // ------------------------------------------------------------------
     // Centralized auth (App mode: users + api_tokens live here)
     // ------------------------------------------------------------------

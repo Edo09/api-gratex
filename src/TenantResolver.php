@@ -92,6 +92,23 @@ class TenantResolver
         return self::$current !== null && (self::$current['tipo'] ?? 'app') === 'integracion';
     }
 
+    /**
+     * ¿La empresa resuelta bloquea las ventas sin existencia? (master.tenants
+     * .inventario_estricto, migracion 013; un admin la cambia en Configuracion).
+     *
+     * Solo vale para empresas tipo 'app': una de integracion no tiene catalogo ni
+     * stock. Sin empresa resuelta, con la columna ausente (master sin migrar) o en
+     * 0 es false: el codigo nuevo puede subir antes que la migracion sin cambiar
+     * nada, y toda empresa sigue vendiendo sin existencia como hasta hoy.
+     */
+    public static function inventarioEstricto(): bool
+    {
+        $tenant = self::$current;
+        return $tenant !== null
+            && ($tenant['tipo'] ?? 'app') === 'app'
+            && (int) ($tenant['inventario_estricto'] ?? 0) === 1;
+    }
+
     // ------------------------------------------------------------------
     // Grupo de empresas — una credencial para varios RNC.
     //

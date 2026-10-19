@@ -21,12 +21,25 @@ if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
         $auth->sendUnauthorized($validation['message']);
     }
 }
+// Usuario del token: lo lleva el ajuste con que se abre la existencia de un
+// producto nuevo (productModel::saveProduct). Sin sesion (OPTIONS) queda null.
+$authUserId = $validation['user_id'] ?? null;
 
 /**
  * Existencia y stock mínimo: pueden llevar decimales (hasta 3, DECIMAL(15,3))
  * solo si la unidad del producto los admite. A diferencia de una cantidad de
- * factura pueden ser 0, y la existencia negativa (se vende sin bloquear), así
- * que de problemaCantidad solo cuenta la parte de decimales y unidad.
+ * factura pueden ser 0, y la existencia puede ser negativa cuando la empresa
+ * tiene APAGADO el interruptor «Bloquear ventas sin existencia» (lo normal: se
+ * vende sin bloquear). Así que de problemaCantidad solo cuenta la parte de
+ * decimales y unidad.
+ *
+ * Con ese interruptor ENCENDIDO la existencia solo se mueve por el libro de
+ * inventario: la que se teclea al crear entra como un ajuste INVENTARIO_INICIAL
+ * y en PUT el campo se ignora en silencio (productModel). Por eso:
+ * En PUT, con ese interruptor encendido, el stock no se juzga: un cliente viejo
+ * que reenvía una existencia vieja o fraccionaria no recibe un 422 por un campo
+ * que se descarta. En POST se sigue juzgando como siempre (es la cantidad que va
+ * al libro) y el stock mínimo se juzga siempre.
  *
  * En PUT, un valor que no cambió, con la misma unidad, no se juzga: el libro
  * mueve la existencia (vender 1,5 metros de un producto en "Unidad" la deja en
@@ -41,7 +54,13 @@ function problemaExistencias($p, ?array $actual): ?string
     static $unidades = null;
     $unidad = productModel::unidadDelPayload($p);
     $mismaUnidad = $actual !== null && trim((string) ($actual['unidad_medida'] ?? '')) === $unidad;
+    // $actual solo viene en PUT: ahi, con el interruptor encendido, el modelo
+    // descarta el stock y no hay nada que juzgar.
+    $stockIgnorado = $actual !== null && productModel::inventarioEstricto();
     foreach (['stock' => 'la existencia', 'stock_minimo' => 'el stock mínimo'] as $campo => $nombre) {
+        if ($campo === 'stock' && $stockIgnorado) {
+            continue;
+        }
         $valor = $p->$campo ?? null;
         if ($valor === null || $valor === '') {
             continue;
@@ -236,13 +255,17 @@ switch ($_SERVER['REQUEST_METHOD']) {
 
     case 'POST':
         $_POST = InputSanitizer::jsonInput(false);
-        $error = validateProduct($_POST);
+        // Con el interruptor de existencias encendido, una existencia inicial
+        // negativa tampoco se guarda (el libro de apertura solo suma): se rechaza
+        // aqui, como cualquier otro dato del formulario, con el texto del modelo.
+        $error = validateProduct($_POST)
+            ?? productModel::problemaExistenciaInicial($_POST, productModel::inventarioEstricto());
         if ($error !== null) {
             // 422: es un dato del formulario, no un fallo del servidor.
             http_response_code(422);
             $respuesta = ['status' => false, 'error' => $error];
         } else {
-            $result = $productModel->saveProduct($_POST);
+            $result = $productModel->saveProduct($_POST, $authUserId);
             if ($result[0] === 'success') {
                 $respuesta = ['status' => true, 'data' => ['id' => $result[2] ?? null, 'message' => $result[1]]];
                 AuditLogger::log([
@@ -279,7 +302,10 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 AuditLogger::log([
                     'module' => 'products', 'action' => 'UPDATE',
                     'entity_type' => 'product', 'entity_id' => $_PUT->id,
-                    'old_values' => $oldProduct, 'new_values' => $_PUT,
+                    // Con el interruptor encendido el stock enviado se ignora: la
+                    // bitacora lleva el guardado, no un cambio que no ocurrio.
+                    'old_values' => $oldProduct,
+                    'new_values' => productModel::nuevosValoresParaBitacora($_PUT, $oldProduct, productModel::inventarioEstricto()),
                     'description' => 'Producto actualizado.',
                 ]);
             }

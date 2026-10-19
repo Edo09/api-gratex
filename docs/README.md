@@ -31,7 +31,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [api/recepcion-aprobacion.md](api/recepcion-aprobacion.md) | e-CF recibidos + aprobación comercial (saliente/entrante); `ecf_recibidos` vs `aprobaciones_comerciales` |
 | [api/ncf.md](api/ncf.md) | Endpoint NCF y secuencia legacy `B01` |
 | [api/reportes-606-607.md](api/reportes-606-607.md) | Formatos 606 (compras) y 607 (ventas) DGII |
-| [api/inventario.md](api/inventario.md) | Inventario (categorías, almacenes) + campos `category_id`/`warehouse_id` de producto — guía frontend |
+| [api/inventario.md](api/inventario.md) | Inventario (categorías, almacenes) + campos `category_id`/`warehouse_id` de producto, cantidades con decimales, motivos de ajuste y el [control de existencias en las ventas](api/inventario.md#control-de-existencias-en-las-ventas) (`/api/inventario/configuracion`, `422` `STOCK_INSUFICIENTE`) — guía frontend |
 | [api/pos.md](api/pos.md) | POS: botón de app.\*, equipos de caja, empleados con PIN y sesiones; encabezados `X-POS-EQUIPO`/`X-POS-SESION` y códigos de error |
 
 ### `frontend/` — guías para quien consume la API
@@ -53,7 +53,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/representacion-impresa-pos.md](modules/representacion-impresa-pos.md) | Tirilla POS de 80, 76 o 72 mm: `?formato=pos` / `pos76` / `pos72`, alto variable, contenido compartido con la hoja carta |
 | [modules/reporte-ventas.md](modules/reporte-ventas.md) | Reporte de ventas de gestión: `/api/reportes/ventas`, detalle y agrupaciones por cliente, forma de pago y usuario |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |
-| [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos |
+| [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos, ventas y compras que mueven existencia (ajustes, kardex, valor de inventario) y el [interruptor «Bloquear ventas sin existencia»](modules/inventario.md#control-de-existencias-en-las-ventas): cómo funciona, encender, apagar y límites |
 | [modules/auditoria.md](modules/auditoria.md) | Bitácora de auditoría (`audit_logs`): quién hizo qué y cuándo, `AuditLogger`, `GET /api/audit-logs` |
 
 ### `business-rules/`

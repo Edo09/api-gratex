@@ -1,5 +1,13 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
+// El libro de inventario solo hace falta con el interruptor de existencias
+// encendido (saveProduct). Un require_once que falla es un fatal que ningun
+// try/catch atrapa: con un archivo que no subio (subida parcial) TODO /api/products,
+// de TODAS las empresas, respondia un 500 vacio. Como en los otros consumidores
+// (facturaController::inventarioModelo, fsInventario), el archivo se comprueba antes.
+if (is_file(__DIR__ . '/inventoryModel.php')) {
+    require_once(__DIR__ . '/inventoryModel.php');
+}
 
 /**
  * Catalogo de productos/servicios (tabla `products`, DB del tenant).
@@ -8,6 +16,13 @@ require_once(__DIR__ . '/../Database.php');
  *
  * Inventario: `category_id` (FK categories, opcional) y `warehouse_id` (FK warehouses,
  * obligatorio). Si no se envia warehouse_id al crear, se asigna "Almacén Principal".
+ *
+ * Existencia (`stock`): con el interruptor «Bloquear ventas sin existencia» de la
+ * empresa APAGADO (lo normal) el formulario escribe `products.stock` directo, como
+ * siempre. Con el interruptor ENCENDIDO la existencia solo se mueve por el libro
+ * (inventoryModel): la que se teclea al CREAR entra como un ajuste INVENTARIO_INICIAL
+ * y al EDITAR el campo se ignora. Si el formulario pudiera escribirla sin dejar
+ * rastro, el bloqueo de ventas no tendria con que cuadrar.
  */
 class productModel
 {
@@ -109,14 +124,43 @@ class productModel
         }
     }
 
-    public function saveProduct($data)
+    /**
+     * Crea el producto.
+     *
+     * Con el interruptor de existencias de la empresa encendido y una existencia
+     * inicial en el formulario, el producto se inserta con stock NULL y esa
+     * cantidad se registra por el libro (ajuste INVENTARIO_INICIAL, a nombre del
+     * usuario del token), todo en una sola transaccion: si el libro falla, el
+     * producto tampoco se crea. En cualquier otro caso el INSERT es el de siempre.
+     *
+     * Con el interruptor encendido y el archivo del libro (inventoryModel.php) sin
+     * subir, se rechaza antes de tocar la base con un texto llano: un producto que
+     * naciera sin pasar por el libro dejaria saldo sin movimiento que lo explique.
+     *
+     * @param ?int $userId el usuario del token, para el ajuste (null = sin usuario)
+     * @return array ['success', mensaje, id] | ['error', mensaje]
+     */
+    public function saveProduct($data, ?int $userId = null)
     {
         try {
+            $estricto = self::inventarioEstricto();
+            if ($estricto && !class_exists('inventoryModel', false)) {
+                error_log('[productos] saveProduct: falta Models/inventoryModel.php (subida incompleta) y el interruptor de existencias esta encendido; el producto no se creo');
+                return ['error', 'No se pudo guardar el producto: el control de existencias no está disponible en este momento. '
+                    . 'Inténtalo de nuevo más tarde y, si sigue pasando, avisa a soporte.'];
+            }
             $warehouseId = $this->resolveWarehouseId($data, null);
             if ($warehouseId === null) {
                 // Sin almacen elegido se usa "Almacén Principal"; si no aparece es
                 // que no hay almacenes o que lo renombraron. El texto cubre ambos.
                 return ['error', 'Elige el almacén del producto. Si no tienes ninguno, créalo primero en Almacenes.'];
+            }
+            $inicial = self::existenciaInicialDelLibro($data, $estricto);
+            // El controlador ya la responde con 422; esto cubre a quien llame al
+            // modelo sin pasar por el.
+            $problemaInicial = self::problemaExistenciaInicial($data, $estricto);
+            if ($problemaInicial !== null) {
+                return ['error', $problemaInicial];
             }
             $sql = "INSERT INTO products
                 (sku, nombre, descripcion, category_id, warehouse_id, indicador_bien_servicio, indicador_facturacion,
@@ -124,9 +168,49 @@ class productModel
                 VALUES
                 (:sku, :nombre, :descripcion, :category_id, :warehouse_id, :ibs, :ifact,
                  :precio, :precio_2, :precio_3, :precio_4, :costo, :unidad_medida, :stock, :stock_minimo, :activo)";
-            $stmt = $this->conexion->prepare($sql);
-            $stmt->execute($this->bindParams($data, $warehouseId));
-            return ['success', 'Product saved', (int) $this->conexion->lastInsertId()];
+            $params = $this->bindParams($data, $warehouseId);
+            if ($inicial === null) {
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute($params);
+                return ['success', 'Product saved', (int) $this->conexion->lastInsertId()];
+            }
+
+            // La existencia la pone el libro, no el INSERT: sin esto el producto
+            // tendria saldo sin ningun movimiento que lo explique.
+            $params[':stock'] = null;
+            $this->conexion->beginTransaction();
+            try {
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute($params);
+                // El id se toma ya: el libro escribe otras filas y lastInsertId()
+                // devolveria el id de la ultima.
+                $productoId = (int) $this->conexion->lastInsertId();
+                // SU conexion y sin transaccion propia (false): el libro corre dentro
+                // de esta, asi que un fallo suyo se deshace junto con el producto.
+                $res = (new inventoryModel($this->conexion))->crearAjuste([
+                    'motivo' => 'INVENTARIO_INICIAL',
+                    'nota' => 'Existencia inicial al crear el producto.',
+                    // El almacen del producto, no el primero que haya.
+                    'warehouse_id' => $warehouseId,
+                    'user_id' => $userId,
+                    'lineas' => [['product_id' => $productoId, 'tipo' => 'INCREMENTO', 'cantidad' => $inicial]],
+                ], false);
+                if ($res[0] !== 'success') {
+                    $this->conexion->rollBack();
+                    // El texto del libro habla de un «ajuste» que quien crea un
+                    // producto no pidio, y el producto no se creo: se le dice eso.
+                    // Lo que dijo el libro queda en el log.
+                    error_log('[productos] saveProduct: el libro no abrio la existencia inicial (' . $inicial . ') y el producto no se creo: ' . $res[1]);
+                    return ['error', 'No se pudo guardar el producto con su existencia inicial. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
+                }
+                $this->conexion->commit();
+                return ['success', 'Product saved', $productoId];
+            } catch (Throwable $e) {
+                if ($this->conexion->inTransaction()) {
+                    $this->conexion->rollBack();
+                }
+                throw $e;
+            }
         } catch (PDOException $e) {
             $conflicto = $this->mensajeConflicto($e);
             if ($conflicto !== null) {
@@ -137,8 +221,20 @@ class productModel
         }
     }
 
+    /**
+     * Actualiza el producto.
+     *
+     * Con el interruptor de existencias de la empresa encendido, el `stock` que
+     * llegue se ignora en silencio y la fila conserva el que tiene (ver
+     * existenciaAGuardarEnEdicion); un cliente viejo que lo siga reenviando no se
+     * rompe. Ese saldo se lee con FOR UPDATE dentro de una transaccion y el UPDATE
+     * va en ella: una venta que se lleva existencia entre la lectura del producto
+     * y este UPDATE no queda pisada con el saldo viejo. Apagado, no hay
+     * transaccion ni bloqueo: el UPDATE es el de siempre.
+     */
     public function updateProduct($id, $data)
     {
+        $transaccionPropia = false;
         try {
             $current = $this->getProducts($id);
             if (count($current) === 0) {
@@ -146,6 +242,23 @@ class productModel
             }
             // En update, si no se envia warehouse_id se conserva el actual.
             $warehouseId = $this->resolveWarehouseId($data, (int) $current[0]['warehouse_id']);
+            $estricto = self::inventarioEstricto();
+            $actual = $current[0]['stock'] ?? null;
+            if ($estricto) {
+                $this->conexion->beginTransaction();
+                $transaccionPropia = true;
+                $bloqueo = $this->conexion->prepare('SELECT stock FROM products WHERE id = :id FOR UPDATE');
+                $bloqueo->execute([':id' => (int) $id]);
+                $fila = $bloqueo->fetch(PDO::FETCH_ASSOC);
+                if (!$fila) {
+                    // Lo borraron entre la lectura y el bloqueo.
+                    $this->conexion->rollBack();
+                    $transaccionPropia = false;
+                    return ['error', 'Este producto ya no existe; puede que otra persona lo haya eliminado. Cierra la ventana y actualiza la lista.'];
+                }
+                // El saldo de ahora, ya con lo que movieron las ventas en curso.
+                $actual = $fila['stock'] === null ? null : round((float) $fila['stock'], 3);
+            }
             $sql = "UPDATE products SET
                 sku = :sku, nombre = :nombre, descripcion = :descripcion,
                 category_id = :category_id, warehouse_id = :warehouse_id,
@@ -156,10 +269,17 @@ class productModel
                 WHERE id = :id";
             $stmt = $this->conexion->prepare($sql);
             $params = $this->bindParams($data, $warehouseId);
+            $params[':stock'] = self::existenciaAGuardarEnEdicion($estricto, $data->stock ?? null, $actual);
             $params[':id'] = (int) $id;
             $stmt->execute($params);
+            if ($transaccionPropia) {
+                $this->conexion->commit();
+            }
             return ['success', 'Product updated'];
         } catch (PDOException $e) {
+            if ($transaccionPropia && $this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
             $conflicto = $this->mensajeConflicto($e);
             if ($conflicto !== null) {
                 return ['error', $conflicto];
@@ -280,6 +400,106 @@ class productModel
     {
         $u = isset($d->unidad_medida) ? trim((string) $d->unidad_medida) : '';
         return $u === '' ? '43' : $u;
+    }
+
+    /**
+     * Si la empresa tiene encendido «Bloquear ventas sin existencia»
+     * (tenants.inventario_estricto, via TenantResolver). Sin empresa resuelta
+     * (instalacion de un solo tenant, scripts) es false. Publica: el controlador
+     * lo lee por aqui para no repetir la guarda de class_exists.
+     */
+    public static function inventarioEstricto(): bool
+    {
+        // class_exists: el modelo tambien corre en scripts sin empresa resuelta,
+        // como inventoryModel.
+        return class_exists('TenantResolver', false) && TenantResolver::inventarioEstricto();
+    }
+
+    /**
+     * La cantidad que se registra por el libro al CREAR un producto: la existencia
+     * que trae el formulario, solo con el interruptor encendido, para un Bien
+     * (indicador_bien_servicio distinto de 2, como en el INSERT, que por defecto
+     * es 1) y si es un numero distinto de 0 una vez redondeada a 3 decimales (lo
+     * que guarda la columna; el libro descarta lo que queda en 0). En cualquier
+     * otro caso null: nada que registrar y el INSERT queda como hoy.
+     *
+     * Una cantidad negativa se devuelve tal cual: se rechaza antes de guardar
+     * (problemaExistenciaInicial), porque el libro de apertura solo suma.
+     *
+     * @param object $data el payload del formulario (stdClass del JSON)
+     */
+    public static function existenciaInicialDelLibro(object $data, bool $estricto): ?float
+    {
+        if (!$estricto || (int) ($data->indicador_bien_servicio ?? 1) === 2) {
+            return null;
+        }
+        $enviada = $data->stock ?? null;
+        if ($enviada === null || $enviada === '' || !is_numeric($enviada)) {
+            return null;
+        }
+        $cantidad = round((float) $enviada, 3);
+        return $cantidad === 0.0 ? null : $cantidad;
+    }
+
+    /**
+     * El problema, para quien llena el formulario, de la existencia con que se
+     * abre un producto nuevo; null si no hay ninguno. Hoy uno solo: con el
+     * interruptor encendido el libro de apertura solo suma, y un producto que nace
+     * en rojo dejaria sin vender lo que el interruptor quiere proteger. El
+     * controlador lo responde con 422 (es un dato del formulario) y saveProduct lo
+     * vuelve a mirar por si lo llaman sin pasar por el controlador. Con el
+     * interruptor apagado, un servicio o sin existencia, no hay problema: el INSERT
+     * guarda lo que venga, como siempre.
+     *
+     * @param object $data el payload del formulario (stdClass del JSON)
+     */
+    public static function problemaExistenciaInicial(object $data, bool $estricto): ?string
+    {
+        $inicial = self::existenciaInicialDelLibro($data, $estricto);
+        if ($inicial !== null && $inicial < 0) {
+            return 'La existencia inicial no puede ser negativa. Escribe 0 o más; para corregir existencias usa Ajuste de inventario.';
+        }
+        return null;
+    }
+
+    /**
+     * El stock que escribe el UPDATE de la edicion. Con el interruptor encendido,
+     * el que ya tiene el producto: el campo se ignora en silencio (la existencia
+     * solo cambia por el libro). Apagado, lo enviado con 3 decimales o null si
+     * vino vacio, exactamente como lo calcula bindParams.
+     *
+     * @param mixed  $enviada el stock del payload (puede faltar, ser texto o null)
+     * @param ?float $actual  el stock guardado (null si el producto nunca tuvo)
+     */
+    public static function existenciaAGuardarEnEdicion(bool $estricto, $enviada, ?float $actual): ?float
+    {
+        if ($estricto) {
+            return $actual;
+        }
+        return ($enviada === null || $enviada === '') ? null : round((float) $enviada, 3);
+    }
+
+    /**
+     * El cuerpo que la bitacora guarda como `new_values` de un PUT de producto.
+     * Con el interruptor encendido el UPDATE ignora el `stock` enviado y la fila
+     * conserva el suyo (existenciaAGuardarEnEdicion): si la bitacora anotara el que
+     * mando el cliente, un valor viejo o reenviado se leeria como un cambio de
+     * existencia que nunca ocurrio. Por eso lleva el guardado. No se quita el
+     * campo: la vista de la bitacora (public/audit_logs.html, OMITTED_BECOMES) lee
+     * un `stock` que falta en un UPDATE de products como «se vacio». Apagado, o sin
+     * fila guardada, es el cuerpo enviado tal cual, como hoy.
+     *
+     * @param object $enviados el payload del PUT (no se modifica)
+     * @param ?array $guardado la fila de products leida antes de guardar (getProducts)
+     */
+    public static function nuevosValoresParaBitacora(object $enviados, ?array $guardado, bool $estricto): object
+    {
+        if (!$estricto || $guardado === null) {
+            return $enviados;
+        }
+        $valores = clone $enviados;
+        $valores->stock = $guardado['stock'] ?? null;
+        return $valores;
     }
 
     /**

@@ -537,10 +537,26 @@ class facturaModel
 
     /**
      * Crea una factura no electronica con sus lineas.
+     *
+     * $enTransaccion (opcional, spec C2/C20): gancho que el llamador usa para hacer
+     * algo MAS dentro de la misma transaccion; con el interruptor de existencia
+     * encendido es la venta (revisar y descontar el inventario). Se llama despues de
+     * insertar la factura y ANTES de escribir las lineas (y siempre antes del
+     * commit), con function (PDO $conexion, int $facturaId, array $items): ?array:
+     * la conexion del propio modelo (la que tiene la transaccion abierta), el id
+     * recien insertado y las lineas normalizadas, las mismas que insertSimpleItems
+     * va a escribir. Va antes de las lineas a proposito: factura_items.product_id
+     * tiene FK a products, y un producto inexistente haria saltar ese INSERT con un
+     * error de base de datos (el 400 generico) antes de que el gancho pudiera dar su
+     * 422 llano (spec 4.2 y C17); el gancho no lee factura_items, solo necesita el
+     * id y las lineas. Devuelve null, o un ['error', mensaje, 422, datos?] que aqui
+     * se devuelve SIN tocar, despues de deshacer la factura. Sin el (null) el camino
+     * es el de siempre.
+     *
      * @param array $data {no_factura, client_id?, client_name, user_id, date?, NCF?, total?, tipo_pago?, dias_credito?, items[]}
-     * @return array ['success', payload] | ['error', mensaje]
+     * @return array ['success', payload] | ['error', mensaje] | el error del callback
      */
-    public function createFacturaSimple(array $data): array
+    public function createFacturaSimple(array $data, ?callable $enTransaccion = null): array
     {
         $items = $this->normalizeSimpleItems($data['items'] ?? []);
         if (empty($items)) {
@@ -589,6 +605,22 @@ class facturaModel
                 ':NCF' => $data['NCF'] ?? null,
             ]);
             $facturaId = (int) $this->conexion->lastInsertId();
+            // Antes de las lineas (ver el docblock): un producto inexistente tiene
+            // que llegar al callback, que lo rechaza con su 422 llano, y no al FK.
+            if ($enTransaccion !== null) {
+                $rechazo = $enTransaccion($this->conexion, $facturaId, $items);
+                if ($rechazo !== null) {
+                    // Sin commit: la factura no queda, ni lo que el callback haya
+                    // movido dentro de la transaccion. Si el servidor ya deshizo la
+                    // transaccion (interbloqueo: elige una victima), no hay nada que
+                    // deshacer y rollBack() lanzaria 'There is no active transaction',
+                    // que taparia el mensaje del callback con el error generico.
+                    if ($this->conexion->inTransaction()) {
+                        $this->conexion->rollBack();
+                    }
+                    return $rechazo;
+                }
+            }
             $this->insertSimpleItems($facturaId, $items);
             $this->conexion->commit();
 
@@ -917,9 +949,17 @@ class facturaModel
     /**
      * Actualiza una factura no electronica. Campos no enviados conservan su valor.
      * Si se envia `items`, reemplaza todas las lineas. Rechaza e-CF emitidos.
+     *
+     * $enTransaccion: el mismo gancho que en createFacturaSimple (ver ahi), con el
+     * id de la factura que se edita. Solo corre cuando se reemplazan las lineas,
+     * despues de borrar las viejas y ANTES de escribir las nuevas (por la misma razon:
+     * el FK de factura_items.product_id) y antes del commit; un PUT sin `items` no
+     * mueve nada. Un error suyo deshace todo el PUT (datos y lineas) y se devuelve igual.
+     *
      * @return array ['success', payload] | ['error', mensaje] | ['error', mensaje, self::ERROR_NO_ENCONTRADA]
+     *               | el error del callback
      */
-    public function updateFacturaSimple(int $id, array $data): array
+    public function updateFacturaSimple(int $id, array $data, ?callable $enTransaccion = null): array
     {
         try {
             $cur = $this->conexion->prepare('SELECT * FROM facturas WHERE id = :id');
@@ -980,6 +1020,19 @@ class facturaModel
             if ($replaceItems) {
                 $del = $this->conexion->prepare('DELETE FROM factura_items WHERE factura_id = :id');
                 $del->execute([':id' => $id]);
+                // Antes de las lineas nuevas (ver el docblock): un producto inexistente
+                // llega al callback y se rechaza con su 422 llano, no con el FK.
+                if ($enTransaccion !== null) {
+                    $rechazo = $enTransaccion($this->conexion, $id, $items);
+                    if ($rechazo !== null) {
+                        // Igual que en createFacturaSimple: tras un interbloqueo ya
+                        // no hay transaccion que deshacer.
+                        if ($this->conexion->inTransaction()) {
+                            $this->conexion->rollBack();
+                        }
+                        return $rechazo;
+                    }
+                }
                 $this->insertSimpleItems($id, $items);
             }
 

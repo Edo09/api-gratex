@@ -15,6 +15,13 @@
 // Una "factura simple" es una factura interna que NO se emitio a la DGII
 // (tipo_ecf IS NULL). El modelo nunca toca un e-CF emitido por esta via.
 //
+// Existencia: con "Bloquear ventas sin existencia" encendido para la empresa
+// (TenantResolver::inventarioEstricto), POST y PUT (cuando reemplazan las lineas)
+// revisan y descuentan el inventario DENTRO de la transaccion de la factura: si
+// falta existencia no se guarda nada y se responde 422 con codigo STOCK_INSUFICIENTE
+// y data.faltantes (spec 4.4). Apagado, todo sigue como siempre (descuento despues
+// de guardar, sin revision).
+//
 // ?formato=pos (o 80mm/tirilla) devuelve la tirilla termica de 80 mm en vez de
 // la hoja carta; pos76 y pos72, la de ese ancho. Mismo contenido, otro papel.
 // Con format=datos, en vez del PDF de la tirilla devuelve sus datos para
@@ -65,6 +72,21 @@ function fsRespond(bool $ok, $payload, int $code = 200): void
 {
     http_response_code($code);
     echo json_encode($ok ? ['status' => true, 'data' => $payload] : ['status' => false, 'error' => $payload]);
+}
+
+/**
+ * Responde un rechazo de la regla de existencia (spec 4.4): HTTP 422 (el 409 en
+ * esta app significa "la pantalla esta desactualizada") y el cuerpo de
+ * inventoryModel::respuestaExistencia, que lleva `codigo` y `data.faltantes` cuando
+ * hay faltantes y es solo {status, error} en el caso llano (producto inexistente o
+ * cantidad <= 0). fsRespond no puede cargar `codigo` ni `data`, de ahi esta aparte.
+ *
+ * @param array $res ['error', mensaje, 422] | ['error', mensaje, 422, ['codigo' =>, 'faltantes' =>]]
+ */
+function fsRespondExistencia(array $res): void
+{
+    http_response_code(422);
+    echo json_encode(inventoryModel::respuestaExistencia($res));
 }
 
 /**
@@ -164,6 +186,42 @@ function fsInventario(): ?inventoryModel
         error_log('[inventario] factura simple: ' . $e->getMessage());
         return null;
     }
+}
+
+/**
+ * El callback de la venta atomica (spec C2 y C20) que createFacturaSimple y
+ * updateFacturaSimple llaman DENTRO de su transaccion cuando el interruptor de
+ * existencia esta encendido: revisa y descuenta el inventario en la misma conexion y
+ * la misma transaccion que la factura. Si falta existencia (o el producto no existe,
+ * o la cantidad es <= 0), el modelo deshace la factura y devuelve este error tal cual.
+ *
+ * El inventoryModel se arma con la conexion $conexion que le da el modelo, nunca con
+ * fsInventario(): el modelo se construyo ANTES de validateRequest(), cuya resolucion
+ * del tenant reinicia el singleton de Database, asi que un inventoryModel sin
+ * argumentos abriria OTRA conexion. En esa la transaccion de la factura no existe:
+ * el bloqueo de la fila se soltaria al instante y un rollback de la factura no
+ * desharia el descuento.
+ *
+ * @param array|null $itemsViejos lineas guardadas de la factura que se edita (PUT; se
+ *                                devuelven al almacen antes de revisar las nuevas), o
+ *                                null si la factura es nueva
+ * @return Closure|null null si falta el archivo del modelo de inventario: se guarda como
+ *                      sin la regla, igual que fsInventario (la regla es un resguardo,
+ *                      no una dependencia de la venta)
+ */
+function fsMovimientoEnTransaccion(?array $itemsViejos, $userId): ?Closure
+{
+    $ruta = __DIR__ . '/../Models/inventoryModel.php';
+    if (!is_file($ruta)) {
+        error_log('[inventario] factura simple: falta ' . $ruta . '; se guarda sin revisar la existencia');
+        return null;
+    }
+    require_once $ruta;
+    $userId = $userId !== null ? (int) $userId : null;
+    return static function (PDO $conexion, int $facturaId, array $items) use ($itemsViejos, $userId): ?array {
+        $res = (new inventoryModel($conexion))->moverVentaEnTransaccion($facturaId, $items, $userId, $itemsViejos);
+        return $res[0] === 'success' ? null : $res;
+    };
 }
 
 /**
@@ -432,16 +490,39 @@ switch ($_SERVER['REQUEST_METHOD']) {
         $body = fsResolveClientName($body, $clientModel);
         $body['user_id'] = $userId;
 
-        $result = $facturaModel->createFacturaSimple($body);
+        // Con el interruptor de existencia de la empresa encendido, la factura y la
+        // venta del inventario van en UNA transaccion (callback del modelo): si falta
+        // existencia la factura no se guarda. Apagado, $enTransaccion es null y el
+        // descuento sigue siendo el de siempre, despues de guardar.
+        $enTransaccion = TenantResolver::inventarioEstricto() ? fsMovimientoEnTransaccion(null, $userId) : null;
+        $result = $facturaModel->createFacturaSimple($body, $enTransaccion);
+        // Rechazada por la regla (existencia, producto inexistente o cantidad <= 0): el
+        // modelo ya deshizo la factura. Es 422 y es un intento fallido auditado (C12).
+        if ($result[0] === 'error' && ($result[2] ?? null) === 422) {
+            AuditLogger::log([
+                'module' => 'facturas-simples', 'action' => 'CREATE', 'entity_type' => 'factura_simple',
+                'new_values' => [
+                    'client_id' => $body['client_id'] ?? null, 'client_name' => $body['client_name'] ?? null,
+                    'faltantes' => $result[3]['faltantes'] ?? null,
+                ],
+                'success' => false, 'error_message' => $result[1],
+                'description' => 'Factura simple no guardada: la verificación de existencia la rechazó.',
+            ]);
+            fsRespondExistencia($result);
+            break;
+        }
         // Una factura simple no va a DGII, pero la mercancia sale del almacen
-        // igual: descuenta inventario como cualquier venta.
+        // igual: descuenta inventario como cualquier venta. Con el callback ya salio,
+        // dentro de la transaccion: descontarla otra vez aqui la contaria doble.
         if ($result[0] === 'success') {
-            fsInventario()?->registrarVenta(
-                (int) ($result[1]['id'] ?? 0),
-                $result[1]['items'] ?? [],
-                null,
-                $userId
-            );
+            if ($enTransaccion === null) {
+                fsInventario()?->registrarVenta(
+                    (int) ($result[1]['id'] ?? 0),
+                    $result[1]['items'] ?? [],
+                    null,
+                    $userId
+                );
+            }
             AuditLogger::log([
                 'module' => 'facturas-simples', 'action' => 'CREATE',
                 'entity_type' => 'factura_simple', 'entity_id' => $result[1]['id'] ?? null,
@@ -498,11 +579,33 @@ switch ($_SERVER['REQUEST_METHOD']) {
         }
         $body = fsResolveClientName($body, $clientModel);
 
-        $result = $facturaModel->updateFacturaSimple($id, $body);
+        // Con el interruptor de existencia encendido y lineas nuevas, el PUT y el
+        // movimiento del inventario van en UNA transaccion (callback del modelo): se
+        // devuelven las lineas guardadas, se revisan las nuevas y se descuentan, asi
+        // que solo el aumento neto puede faltar (spec C13). Un PUT sin `items` no
+        // mueve nada. Apagado, $enTransaccion es null y todo sigue como siempre.
+        $enTransaccion = null;
+        if (TenantResolver::inventarioEstricto() && isset($body['items'])) {
+            $enTransaccion = fsMovimientoEnTransaccion($previa['items'] ?? [], $authUserId);
+        }
+        $result = $facturaModel->updateFacturaSimple($id, $body, $enTransaccion);
+        // Rechazado por la regla: el modelo ya deshizo todo el PUT (datos y lineas).
+        if ($result[0] === 'error' && ($result[2] ?? null) === 422) {
+            AuditLogger::log([
+                'module' => 'facturas-simples', 'action' => 'UPDATE', 'entity_type' => 'factura_simple',
+                'entity_id' => $id,
+                'new_values' => ['faltantes' => $result[3]['faltantes'] ?? null],
+                'success' => false, 'error_message' => $result[1],
+                'description' => 'Factura simple ' . ($previa['no_factura'] ?? $id) . ' no actualizada: la verificación de existencia la rechazó.',
+            ]);
+            fsRespondExistencia($result);
+            break;
+        }
         // Reemplazar las lineas es devolver la mercancia vieja y sacar la nueva.
         // Quedan los dos movimientos en el kardex (DEVOLUCION + VENTA) en vez de
-        // un salto de saldo sin explicacion.
-        if ($result[0] === 'success' && isset($body['items'])) {
+        // un salto de saldo sin explicacion. Con el callback ya se hicieron dentro de
+        // la transaccion; repetirlos aqui los contaria doble.
+        if ($result[0] === 'success' && isset($body['items']) && $enTransaccion === null) {
             $inventario = fsInventario();
             $inventario?->revertirVenta($id, $previa['items'] ?? [], $authUserId);
             $inventario?->registrarVenta($id, $result[1]['items'] ?? [], null, $authUserId);

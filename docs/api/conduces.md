@@ -442,18 +442,29 @@ Solo se registra lo que se guardó: un `404`, un `422` o un `500` no dejan fila.
 ### Facturar desde un conduce (en el front)
 
 No hay endpoint nuevo. fiscalo arma el borrador de la factura e-CF o de la factura simple con
-la fila del conduce (`GET ?id=`) y lo emite con los endpoints de siempre (`/api/facturas`,
-`/api/facturas-simples`), que no cambian.
+la fila del conduce (`GET ?id=`) y lo emite con los mismos endpoints de siempre (`/api/facturas`,
+`/api/facturas-simples`). No hay contrato nuevo, pero esos endpoints tienen un rechazo posible
+cuando la empresa bloquea las ventas sin existencia (último punto de esta lista).
 
 - Cada línea pasa con su `amount` (precio sin ITBIS), su `indicador_facturacion`, su
   `product_id` y su `unidad_medida`. Con `product_id`, la factura mueve inventario como
-  siempre.
+  siempre: el descuento es el mismo, y con «Bloquear ventas sin existencia» encendido se le
+  suma la revisión previa de existencia.
 - En la factura simple, cada precio lleva su ITBIS dentro, como al facturar una cotización de
   Ferretería.
 - Una línea con `amount` 0 **no se puede emitir ni guardar**: el formulario pide el precio.
   El backend de facturas no rechaza un precio 0 y la DGII rechaza un `MontoItem` 0 después de
   reservar el e-NCF; por eso la guardia está en el front.
 - Facturar no marca el conduce ni lo liga a la factura.
+- **Un conduce no revisa ni reserva existencia.** Crearlo, editarlo o eliminarlo no mira ni
+  mueve `products.stock`, así que puede listar más de lo que hay y no aparta nada para esa
+  entrega. La revisión llega recién al facturar: con la empresa en «Bloquear ventas sin
+  existencia» (apagado por defecto), la factura o la factura simple que sale del conduce puede
+  rechazarse con **`422`** `codigo: "STOCK_INSUFICIENTE"` y `data.faltantes` si la existencia ya
+  no alcanza (otra venta pudo llevársela). Con el bloqueo apagado no hay rechazo. Contrato en
+  [inventario.md](inventario.md#control-de-existencias-en-las-ventas),
+  [facturas.md](facturas.md#422-por-existencia-insuficiente-solo-con-el-bloqueo-encendido) y
+  [facturas-simples.md](facturas-simples.md).
 
 ### Pruebas
 
