@@ -138,20 +138,24 @@ function handleEmitirIntegracion(): void
         'description' => 'e-CF emitido por integracion (' . (string) ($result['estado'] ?? '') . ').',
     ]);
 
-    echo json_encode([
-        'status' => true,
-        'data' => [
-            'e_ncf'            => $result['e_ncf'] ?? null,
-            'tipo_ecf'         => $result['tipo_ecf'] ?? null,
-            'estado'           => $result['estado'] ?? null,
-            'track_id'         => $result['track_id'] ?? null,
-            'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
-            'ambiente'         => $result['ambiente'] ?? null,
-            'fecha_emision'    => $result['fecha_emision_dgii'] ?? null,
-            'xml_firmado'      => $result['signed_xml'] ?? null,
-            'dgii_response'    => $result['dgii_response'] ?? null,
-        ],
-    ]);
+    $data = [
+        'e_ncf'            => $result['e_ncf'] ?? null,
+        'tipo_ecf'         => $result['tipo_ecf'] ?? null,
+        'estado'           => $result['estado'] ?? null,
+        'track_id'         => $result['track_id'] ?? null,
+        'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
+        'ambiente'         => $result['ambiente'] ?? null,
+        'fecha_emision'    => $result['fecha_emision_dgii'] ?? null,
+        'xml_firmado'      => $result['signed_xml'] ?? null,
+        'dgii_response'    => $result['dgii_response'] ?? null,
+    ];
+    // Sandbox: que el cliente no pueda confundir esto con un comprobante real.
+    if (SandboxEcf::activo($tenant['ambiente'] ?? null)) {
+        $data['sandbox'] = true;
+        $data['aviso'] = SandboxEcf::aviso();
+    }
+
+    echo json_encode(['status' => true, 'data' => $data]);
 }
 
 function respondIntegracionEcf(bool $status, string $message, int $code = 200): void

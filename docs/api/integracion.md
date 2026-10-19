@@ -441,6 +441,48 @@ reemplaza al polling**: el cliente debe reconciliar con `GET /recibidos` periód
 
 ---
 
+## Sandbox — probar la API antes de certificarse
+
+`tenants.ambiente = 'sandbox'` (solo tipo `integracion`) deja que el cliente integre contra
+nuestra API **sin certificado ni postulación DGII**. Todo es simulado: nada sale hacia la DGII
+y nada tiene valor fiscal. Lo fija el servidor, igual que el resto de ambientes.
+
+| Endpoint | En sandbox |
+|---|---|
+| `POST /ecf` | Mismas validaciones y mismo builder (los 422 son los reales). Firma con un **certificado autofirmado descartable** (`SandboxEcf::certificado()`), nunca con `CertResolver`: no cae al cert global del `.env` (el de Gratex). `track_id` = `SANDBOX-<uuid>`, `estado` = `ACEPTADO`, `codigo_seguridad` real (sale de la firma, así que la RI y el QR se pueden probar). E32 < 250k sigue el flujo RFCE: `track_id` null y `estado` = `RFCE_ACEPTADO`. No se llama a `autenticar` ni a `recibir` |
+| `GET /estado` | Responde sin consultar la DGII: `track_id` `SANDBOX-…` o un RFCE → aceptado; cualquier otro `track_id` → `NO_ENCONTRADO` |
+| `POST /aprobacion-comercial` | Valida, arma y firma el ACECF y responde aceptado. No se envía y **no se guarda** la decisión |
+| `GET /xml` | Igual que siempre: el respaldo se guarda también en sandbox |
+| `GET /recibidos` · `/aprobaciones` | Sin cambio; salen vacías (la DGII no entrega nada a un RNC sin directorio) |
+
+Las respuestas llevan `"sandbox": true` y un `aviso`. `dgii_response` trae la forma real
+(`codigo`, `estado`, `trackId`, `mensajes`) con `sandbox: true`.
+
+**Lo que NO prueba:** que la DGII acepte el XML. El certificado es falso a propósito, así que
+la validación de firma, XSD y reglas de negocio de la DGII solo se ve en `certecf`.
+
+Alta: `php tools/create_tenant.php --tipo=integracion --ambiente=sandbox --nombre=… --rnc=…`
+(o `onboard.html`, ambiente `sandbox`). No pide `.p12`; si se sube uno se guarda para después.
+`sandbox` con `--tipo=app` se rechaza.
+
+**Pasar a certificación** (en este orden):
+
+1. Cargar el `.p12` real del cliente (`onboard.html` o reemplazando `certificado_dgii/<rnc>/cert.p12`
+   y `cert_pass_encrypted`). Sin cert, `certecf` firmaría con el del `.env`.
+2. Borrar el respaldo de pruebas: el respaldo no guarda ambiente y un e-NCF repetido devolvería
+   el XML de sandbox.
+3. Cambiar el ambiente.
+
+```sql
+DELETE FROM gratex_master.ecf_integracion_backup WHERE tenant_id = <tenant_id>;
+UPDATE gratex_master.tenants SET ambiente = 'certecf' WHERE id = <tenant_id>;
+```
+
+El certificado descartable se cachea en el directorio temporal del servidor
+(`gratex_sandbox_cert_v1.p12`); si no se puede escribir, se regenera en cada llamada.
+
+---
+
 ## Certificación y paso a producción
 
 El tenant arranca en `certecf`. Corre su set de pruebas contra DGII mandando sus e-CF

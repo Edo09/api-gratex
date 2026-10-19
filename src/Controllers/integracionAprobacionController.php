@@ -131,7 +131,12 @@ function handleIntegracionAprobacion(): void
     // Apuntar al mismo ambiente en que se recibio el e-CF (evita codigo 02). El
     // cliente no elige ambiente (igual que en la emision): si lo manda, se pisa.
     $recibido = $store->getRecibidoByENCF($tenantId, (string) $input['rnc_emisor'], (string) $input['e_ncf']);
-    if ($recibido && !empty($recibido['ambiente'])) {
+    // Sandbox: la empresa compradora lo decide (no el ambiente de un recibido).
+    // Nada sale hacia la DGII ni se guarda la decision; ver SandboxEcf.
+    $sandbox = SandboxEcf::activo($tenant['ambiente'] ?? null);
+    if ($sandbox) {
+        $input['ambiente'] = SandboxEcf::AMBIENTE;
+    } elseif ($recibido && !empty($recibido['ambiente'])) {
         $input['ambiente'] = $recibido['ambiente'];
     } else {
         $input['ambiente'] = $tenant['ambiente'] ?: 'ecf';
@@ -145,14 +150,16 @@ function handleIntegracionAprobacion(): void
         $result = (new ACECFEmissionService())->enviar($input);
     } catch (Throwable $e) {
         $dgii = parseDgiiApcResponse($e->getMessage());
-        persistDecision($store, $tenantId, $input, [
-            'aprobacion_comercial' => $decision,
-            'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
-            'aprobacion_comercial_codigo_dgii' => $dgii['codigo'],
-            'aprobacion_comercial_estado_dgii' => $dgii['estado'],
-            'aprobacion_comercial_mensaje_dgii' => $dgii['mensaje'],
-            'aprobacion_comercial_procesada' => 0,
-        ]);
+        if (!$sandbox) {
+            persistDecision($store, $tenantId, $input, [
+                'aprobacion_comercial' => $decision,
+                'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
+                'aprobacion_comercial_codigo_dgii' => $dgii['codigo'],
+                'aprobacion_comercial_estado_dgii' => $dgii['estado'],
+                'aprobacion_comercial_mensaje_dgii' => $dgii['mensaje'],
+                'aprobacion_comercial_procesada' => 0,
+            ]);
+        }
         AuditLogger::log([
             'module' => 'integracion', 'action' => 'INTEGRACION_ACECF',
             'entity_type' => 'aprobacion_comercial', 'entity_id' => $input['e_ncf'] ?? null,
@@ -176,14 +183,16 @@ function handleIntegracionAprobacion(): void
     // para no fallar el flag por el "0" inicial ("01" !== "1" como string).
     $procesada = ($codigoDgii !== null && (int) $codigoDgii === 1) ? 1 : 0;
 
-    persistDecision($store, $tenantId, $input, [
-        'aprobacion_comercial' => $decision,
-        'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
-        'aprobacion_comercial_codigo_dgii' => $codigoDgii,
-        'aprobacion_comercial_estado_dgii' => $estadoDgii,
-        'aprobacion_comercial_mensaje_dgii' => $mensajeDgii,
-        'aprobacion_comercial_procesada' => $procesada,
-    ]);
+    if (!$sandbox) {
+        persistDecision($store, $tenantId, $input, [
+            'aprobacion_comercial' => $decision,
+            'aprobacion_comercial_detalle' => $input['detalle_motivo'] ?? null,
+            'aprobacion_comercial_codigo_dgii' => $codigoDgii,
+            'aprobacion_comercial_estado_dgii' => $estadoDgii,
+            'aprobacion_comercial_mensaje_dgii' => $mensajeDgii,
+            'aprobacion_comercial_procesada' => $procesada,
+        ]);
+    }
 
     AuditLogger::log([
         'module' => 'integracion', 'action' => 'INTEGRACION_ACECF',
@@ -197,23 +206,26 @@ function handleIntegracionAprobacion(): void
         'description' => 'Aprobacion comercial ' . $decision . ' enviada por integracion.',
     ]);
 
-    echo json_encode([
-        'status' => true,
-        'data' => [
-            'rnc_emisor' => $input['rnc_emisor'],
-            'e_ncf' => $input['e_ncf'],
-            // Empresa por la que se aprobo (la elegida o la deducida en un grupo).
-            'rnc_comprador' => (string) $tenant['rnc'],
-            'empresa' => (string) ($tenant['nombre'] ?? ''),
-            'estado_aprobacion' => $input['estado'],
-            'track_id' => $result['track_id'],
-            'estado_dgii' => $result['estado'],
-            'codigo_seguridad' => $result['codigo_seguridad'],
-            'ambiente' => $result['ambiente'],
-            'fecha_envio' => $result['fecha_emision_dgii'],
-            'dgii_response' => $result['dgii_response'],
-        ],
-    ]);
+    $data = [
+        'rnc_emisor' => $input['rnc_emisor'],
+        'e_ncf' => $input['e_ncf'],
+        // Empresa por la que se aprobo (la elegida o la deducida en un grupo).
+        'rnc_comprador' => (string) $tenant['rnc'],
+        'empresa' => (string) ($tenant['nombre'] ?? ''),
+        'estado_aprobacion' => $input['estado'],
+        'track_id' => $result['track_id'],
+        'estado_dgii' => $result['estado'],
+        'codigo_seguridad' => $result['codigo_seguridad'],
+        'ambiente' => $result['ambiente'],
+        'fecha_envio' => $result['fecha_emision_dgii'],
+        'dgii_response' => $result['dgii_response'],
+    ];
+    if ($sandbox) {
+        $data['sandbox'] = true;
+        $data['aviso'] = SandboxEcf::aviso();
+    }
+
+    echo json_encode(['status' => true, 'data' => $data]);
 }
 
 /**

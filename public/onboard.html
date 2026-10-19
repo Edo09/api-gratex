@@ -63,8 +63,9 @@
           <option value="certecf">certecf (certificación)</option>
           <option value="ecf">ecf (producción)</option>
           <option value="testecf">testecf</option>
+          <option value="sandbox">sandbox (simulado, solo integración)</option>
         </select>
-        <div class="hint">certecf mientras certifica; ecf solo si ya está certificada.</div>
+        <div class="hint">certecf mientras certifica; ecf solo si ya está certificada. <b>sandbox</b>: el cliente prueba la API antes de certificarse; no se envía nada a la DGII y no pide .p12.</div>
       </div>
     </div>
 
@@ -202,6 +203,7 @@ function limpiarEmpresa(grupoEnviado, text) {
     }
   }
   ambiente.value = ''; // vuelve a "— elegir —": cada empresa elige el suyo
+  toggle(); // el .p12 vuelve a ser requerido (el sandbox anterior no lo pedia)
 
   // grupo: self -> el tenant recien creado es la cabeza; numero -> se mantiene;
   // vacio -> sigue vacio (aislado).
@@ -338,10 +340,13 @@ function toggle() {
   const isApp = tipo.value === 'app';
   secApp.classList.toggle('hidden', !isApp);   // seccion App solo si tipo=app
   secInt.classList.toggle('hidden', isApp);    // seccion Integracion solo si tipo=integracion
-  certFileLabel.classList.toggle('req', !isApp); // cert requerido solo en integracion
-  certPassLabel.classList.toggle('req', !isApp);
+  // cert requerido solo en integracion, y no en sandbox (firma con un cert descartable)
+  const pideCert = !isApp && ambiente.value !== 'sandbox';
+  certFileLabel.classList.toggle('req', pideCert);
+  certPassLabel.classList.toggle('req', pideCert);
 }
 tipo.addEventListener('change', toggle);
+ambiente.addEventListener('change', toggle);
 toggle();
 
 f.addEventListener('submit', async (e) => {
