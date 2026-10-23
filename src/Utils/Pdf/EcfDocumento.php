@@ -186,14 +186,20 @@ final class EcfDocumento
     }
 
     /**
-     * Vencimiento del e-NCF. Sin el del XML (E32/E34 no lo llevan), el 31 de
-     * diciembre del ano siguiente al de emision, la misma regla que el default
-     * del XML (ECFXmlBuilder::vencimientoSecuenciaPorDefecto). Se calcula sobre
-     * la fecha de la factura, no sobre "hoy", para que reimprimir en enero no
+     * Vencimiento del e-NCF, o '' si el tipo no lo lleva (E32 y E34: su e-CF no
+     * tiene FechaVencimientoSecuencia y la DGII rechaza la RI que la imprime;
+     * quien dibuja omite la linea). Sin el del XML, el 31 de diciembre del ano
+     * siguiente al de emision, la misma regla que el default del XML
+     * (ECFXmlBuilder::vencimientoSecuenciaPorDefecto). Se calcula sobre la
+     * fecha de la factura, no sobre "hoy", para que reimprimir en enero no
      * cambie lo que decia el papel.
      */
     public function fechaVencimiento(): string
     {
+        require_once __DIR__ . '/../FacturacionElectronica/ECFXmlBuilder.php';
+        if (!ECFXmlBuilder::llevaFechaVencimientoSecuencia($this->tipoEcf())) {
+            return '';
+        }
         // La emitida en el e-CF firmado manda: es la que la DGII autorizo para
         // esa secuencia y puede no ser el 31/12 del ano de emision.
         $delXml = $this->campoXml('FechaVencimientoSecuencia');

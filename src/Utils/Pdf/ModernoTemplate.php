@@ -136,6 +136,8 @@ class ModernoTemplate extends FacturaTemplate
             // Bajo la banda de acento (0-26 mm) + regla (28 mm).
             'doc_id_y'      => 32,
             'table_start_y' => 62,
+            // El pie empieza en la regla de acento (y=244).
+            'pie_y'         => 243,
         ]);
     }
 }

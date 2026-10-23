@@ -10,6 +10,34 @@ require_once __DIR__ . '/Pdf/EcfDocumento.php';
  */
 class FacturaPdfGenerator extends FPDF
 {
+    /**
+     * Timbre en la hoja carta (mm): QR de 30 mm en x=8, y=205, con el Codigo
+     * de Seguridad y la Fecha de Firma debajo (texto hasta x~72, celda hasta
+     * x=100). Va en la ultima hoja, en posicion fija; la tabla no baja hasta
+     * ahi (ver tablaInvadeCierre()).
+     */
+    private const QR_X = 8;
+    private const QR_Y = 205;
+    private const QR_LADO = 30;
+    private const TIMBRE_X_FIN = 100;
+
+    /**
+     * Cuadro de totales, tambien fijo en la ultima hoja: cada plantilla pone
+     * la fila Total en y=-40 y apila las demas 5 mm hacia arriba (drawTotals).
+     * Empieza en x=157.9 (153.9 en ferreventura): 150 deja margen.
+     */
+    private const TOTALES_ANCLA = 40;
+    private const TOTALES_FILA = 5;
+    private const TOTALES_X_INICIO = 150;
+
+    /**
+     * Donde termina el texto de la ultima fila dibujada, por zona: 'izq' son
+     * las columnas que caen sobre el QR y el codigo/fecha, 'der' las que caen
+     * sobre el cuadro de totales. null = todavia no hay filas.
+     * @var array{pagina:int,izq:float,der:float}|null
+     */
+    private $ultimaFila = null;
+
     private $factura;
     private $widths;
     private $aligns;
@@ -183,15 +211,36 @@ class FacturaPdfGenerator extends FPDF
     public function Row($data)
     {
         $nb = 0;
+        // Renglones con texto por columna, sin el renglon en blanco ("\n ")
+        // que el motor agrega al final de cada descripcion como aire entre
+        // filas: ese renglon no tiene tinta y puede quedar sobre el pie.
+        $nbTexto = [];
         for ($i = 0; $i < count($data); $i++) {
             if ($data[$i] === null || $data[$i] === '') {
                 $data[$i] = '';
             }
             $width = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
             $nb = max($nb, $this->NbLines($width, $data[$i]));
+            $texto = rtrim($data[$i]);
+            $nbTexto[$i] = $texto === '' ? 0 : $this->NbLines($width, $texto);
         }
         $h = $this->lineHeight * $nb;
-        $this->CheckPageBreak($h);
+        $hTexto = $this->lineHeight * max($nbTexto ?: [0]);
+        // Corta de hoja si el TEXTO no cabe antes del pie de la plantilla.
+        $this->CheckPageBreak($hTexto);
+        $x0 = $this->GetX();
+        $y0 = $this->GetY();
+        // Con el texto dentro de la hoja, la fila se dibuja con el corte
+        // apagado: si no, MultiCell abriria una hoja en el renglon de aire y
+        // partiria la fila. Una fila mas alta que la hoja corta como siempre.
+        $cabe = $y0 + $hTexto <= $this->PageBreakTrigger;
+        $auto = $this->AutoPageBreak;
+        $margen = $this->bMargin;
+        if ($cabe) {
+            $this->SetAutoPageBreak(false);
+        }
+        $izq = $der = $y0;
+        $xCol = $x0;
         for ($i = 0; $i < count($data); $i++) {
             $w = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
             $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
@@ -199,8 +248,24 @@ class FacturaPdfGenerator extends FPDF
             $y = $this->GetY();
             $this->MultiCell($w, $this->lineHeight ?: 4, $data[$i], 0, $a);
             $this->SetXY($x + $w, $y);
+            $finTexto = $y0 + $this->lineHeight * $nbTexto[$i];
+            if ($xCol < self::TIMBRE_X_FIN) {
+                $izq = max($izq, $finTexto);
+            }
+            if ($xCol + $w > self::TOTALES_X_INICIO) {
+                $der = max($der, $finTexto);
+            }
+            $xCol += $w;
+        }
+        if ($cabe) {
+            $this->SetAutoPageBreak($auto, $margen);
         }
         $this->Ln($h);
+        // Una fila partida entre hojas no tiene un fin de texto confiable:
+        // se toma el cursor, como antes, y totales y timbre van a hoja nueva.
+        $this->ultimaFila = $cabe
+            ? ['pagina' => $this->PageNo(), 'izq' => $izq, 'der' => $der]
+            : ['pagina' => $this->PageNo(), 'izq' => $this->GetY(), 'der' => $this->GetY()];
     }
 
     /**
@@ -352,35 +417,62 @@ class FacturaPdfGenerator extends FPDF
         if ($timbre === null) {
             return;
         }
+
+        // Pagina Letter: 215.9 x 279.4 mm. Para reubicar el bloque, QR_X/QR_Y.
+        // Sus dos lineas terminan en y~242.7, antes de lo primero que las
+        // plantillas dibujan en el pie: la regla de moderno (y=244), "Recibido
+        // por:" de ferreventura (245) y el sello de clasico (246).
+        $qrX = self::QR_X;
+        $qrY = self::QR_Y;
+        $qrSize = self::QR_LADO;
+        // Sin la imagen (sin phpqrcode o sin GD) el codigo y la fecha salen
+        // igual: son datos de la norma, como en la tirilla POS.
         $png = EcfDocumento::generarQrPng($timbre['url']);
-        if ($png === null) {
-            return;
+        if ($png !== null) {
+            $this->Image($png, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
+            @unlink($png);
         }
 
-        // Pagina Letter: 215.9 x 279.4 mm. Para reubicar el bloque, estas mm.
-        $qrX = 8;
-        $qrY = 205;
-        $qrSize = 30;
-        $this->Image($png, $qrX, $qrY, $qrSize, $qrSize, 'PNG');
-        @unlink($png);
-
-        // Codigo de Seguridad y Fecha Firma a la derecha del QR (norma DGII).
-        $infoX = $qrX + $qrSize + 4;
+        // Codigo de Seguridad y Fecha de Firma DEBAJO del QR: la DGII observo
+        // la RI que los tenia a la derecha. Etiqueta y valor en la misma linea
+        // para que el bloque quepa sobre el pie.
         $savedY = $this->GetY();
-        $this->SetXY($infoX, $qrY + 4);
-        $this->SetFont($this->fontFamily(), 'B', 8);
-        $this->Cell(70, 4, $this->convertEncoding('Código de Seguridad:'), 0, 1, 'L');
-        $this->SetX($infoX);
-        $this->SetFont($this->fontFamily(), '', 9);
-        $this->Cell(70, 4, $timbre['codigo_seguridad'], 0, 1, 'L');
-        $this->SetX($infoX);
-        $this->SetFont($this->fontFamily(), 'B', 8);
-        $this->Cell(70, 4, 'Fecha Firma:', 0, 1, 'L');
-        $this->SetX($infoX);
-        $this->SetFont($this->fontFamily(), '', 9);
-        $this->Cell(70, 4, $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D', 0, 1, 'L');
+        $y = $qrY + $qrSize + 0.5;
+        $lineas = [
+            ['Código de Seguridad:', $timbre['codigo_seguridad']],
+            ['Fecha de Firma:', $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D'],
+        ];
+        foreach ($lineas as [$etiqueta, $valor]) {
+            $etiqueta = $this->convertEncoding($etiqueta);
+            $this->SetXY($qrX, $y);
+            $this->SetFont($this->fontFamily(), 'B', 8);
+            $this->Cell($this->GetStringWidth($etiqueta) + 1, 3.6, $etiqueta, 0, 0, 'L');
+            $this->SetFont($this->fontFamily(), '', 9);
+            $this->Cell(60, 3.6, $valor, 0, 0, 'L');
+            $y += 3.6;
+        }
 
         $this->SetXY($this->lMargin, $savedY);
+    }
+
+    /**
+     * true si el texto de la tabla en esta hoja llega a donde van los totales
+     * o el timbre, con 2 mm de aire: las columnas de la izquierda contra el QR
+     * (y el codigo/fecha debajo), las de la derecha contra la fila de arriba
+     * del cuadro de totales. La factura simple no lleva timbre.
+     */
+    private function tablaInvadeCierre(int $filasTotales): bool
+    {
+        $fila = $this->ultimaFila;
+        if ($fila === null || $fila['pagina'] !== $this->PageNo()) {
+            return false;
+        }
+        $topeTotales = $this->GetPageHeight() - self::TOTALES_ANCLA
+            - self::TOTALES_FILA * max(0, $filasTotales - 1);
+        if ($fila['der'] > $topeTotales - 2) {
+            return true;
+        }
+        return $this->doc()->timbre() !== null && $fila['izq'] > self::QR_Y - 2;
     }
 
     /**
@@ -394,13 +486,20 @@ class FacturaPdfGenerator extends FPDF
         $tpl->setDocumento($this->doc());
         $style = $tpl->style();
         $layout = $tpl->layout();
-        // Limites del motor: la tabla jamas invade la zona de totales/QR
-        // (anclados abajo) ni el encabezado minimo.
+        // Limites del motor: la tabla no empieza dentro del encabezado minimo
+        // ni su texto baja hasta el pie de la plantilla (pie_y); la zona de
+        // totales/QR de la ultima hoja la reserva tablaInvadeCierre().
         $tableStartY = max(36, min(120, (float) ($layout['table_start_y'] ?? 56)));
         $docIdY = max(6, min(80, (float) ($layout['doc_id_y'] ?? 10)));
+        $pieY = max(150, min($this->GetPageHeight() - 20, (float) ($layout['pie_y'] ?? 243)));
 
         $this->AliasNbPages();
         $this->SetMargins(8, 10, 8);
+        // Las filas pasan a la hoja siguiente antes de que su texto llegue al
+        // pie que la plantilla dibuja en cada hoja (ver Row()). Con el corte
+        // por defecto de FPDF (y=259.4) bajaban por debajo del sello, la regla
+        // de moderno o "Recibido por:".
+        $this->SetAutoPageBreak(true, $this->GetPageHeight() - $pieY);
         $this->AddPage();
 
         $doc = $this->doc();
@@ -438,8 +537,12 @@ class FacturaPdfGenerator extends FPDF
             $this->Cell(70, 3.8, 'e-NCF: ' . $doc->eNcf(), 0, 1, 'L');
             $this->SetX(-73);
             $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
-            $this->SetX(-73);
-            $this->Cell(70, 3.8, 'Fecha de Vencimiento: ' . $doc->fechaVencimiento(), 0, 1, 'L');
+            // E32/E34 no llevan vencimiento: sin linea, ni vacia.
+            $vencimiento = $doc->fechaVencimiento();
+            if ($vencimiento !== '') {
+                $this->SetX(-73);
+                $this->Cell(70, 3.8, 'Fecha de Vencimiento: ' . $vencimiento, 0, 1, 'L');
+            }
         }
         // Venta a credito: cuando vence el pago, en una linea corta y gris que
         // no compite con los datos DGII de arriba (la "Fecha de Vencimiento" es
@@ -578,6 +681,16 @@ class FacturaPdfGenerator extends FPDF
         // (preview) caen a la suma por linea. Etiquetas exactas exigidas por la
         // DGII: Subtotal Gravado, Monto Exento (si aplica), Total ITBIS, Total.
         $filasTotales = $doc->filasTotales();
+
+        // Totales y timbre van en posicion fija al pie de la ultima hoja. Si el
+        // texto de la tabla ya llego a esa zona, van en una hoja nueva: si no,
+        // el QR (que es opaco) y el cuadro de totales tapan las filas.
+        if ($this->tablaInvadeCierre(count($filasTotales))) {
+            $this->AddPage($this->CurOrientation);
+        }
+        // Se dibujan con coordenadas absolutas por debajo del corte de pagina:
+        // sin apagarlo, cada Cell del cuadro de totales abriria una hoja.
+        $this->SetAutoPageBreak(false);
 
         // Cuadro de totales anclado al pie (la plantilla decide colores/fuente;
         // las filas y etiquetas DGII las fija el motor).

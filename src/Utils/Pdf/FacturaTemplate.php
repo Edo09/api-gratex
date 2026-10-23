@@ -132,6 +132,12 @@ abstract class FacturaTemplate
             'doc_id_y'      => 10,
             // Y minima donde puede empezar la tabla de items (mm).
             'table_start_y' => 56,
+            // Y donde empieza lo que drawFooter() dibuja en CADA pagina (sello,
+            // reglas, "Recibido por:", firmas). Las filas de la tabla pasan a
+            // la hoja siguiente antes de que su texto llegue ahi. El motor lo
+            // acota a [150, alto - 20] mm. Default: un pie desde y=244 o mas
+            // abajo, como cualquiera de las plantillas del repo.
+            'pie_y'         => 243,
         ];
     }
 

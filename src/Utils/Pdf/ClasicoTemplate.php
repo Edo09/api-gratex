@@ -82,6 +82,25 @@ class ClasicoTemplate extends FacturaTemplate
         $pdf->Cell(38, 6, 'Firma y sello cliente', 0, 0, 'R');
     }
 
+    /**
+     * El pie de esta clase empieza en el sello (y=246) si el tenant tiene uno;
+     * sin sello, en las lineas de firma (y=259). Con el default (243) una
+     * factura sin sello pasaria filas a la hoja siguiente sin necesidad.
+     *
+     * Solo vale para ESTE pie: una subclase que redibuja drawFooter() (una
+     * Tenant<id> a la medida) se queda con el default del motor hasta que
+     * declare su propio pie_y, para que la tabla no le pase por encima.
+     */
+    public function layout(): array
+    {
+        $layout = parent::layout();
+        $pieDeEstaClase = (new ReflectionMethod($this, 'drawFooter'))->getDeclaringClass()->getName() === self::class;
+        if ($pieDeEstaClase) {
+            $layout['pie_y'] = BrandingResolver::selloPath() !== null ? 245 : 258.5;
+        }
+        return $layout;
+    }
+
     public function drawItemsTableHeader($pdf, array $widths, array $labels): void
     {
         $fill = $this->accentOr([0, 0, 0]);

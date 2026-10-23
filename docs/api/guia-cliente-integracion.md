@@ -502,12 +502,14 @@ La DGII exige que todo e-CF impreso o en PDF contenga, como mínimo:
 
 - **Emisor**: razón social, RNC, dirección, contacto
 - **Identificación del comprobante**: denominación del tipo, e-NCF, fecha de emisión y de
-  vencimiento
+  vencimiento. **E32 y E34 no llevan fecha de vencimiento**: su XML no tiene
+  `FechaVencimientoSecuencia` y la DGII rechaza la Representación Impresa que la muestra
 - **Receptor**: RNC/cédula y razón social (obligatorio en crédito fiscal y en consumo ≥ RD$250,000)
 - **Tabla de ítems** con seis columnas: Cantidad · Descripción · Unidad de Medida · Precio · ITBIS · Valor
 - **Totales**: Subtotal Gravado, Total ITBIS, Total
 - **Pie de seguridad**: código QR de consulta, **Código de Seguridad** (6 caracteres) y
-  **Fecha de Firma** (`DD-MM-AAAA HH:MM:SS`)
+  **Fecha de Firma** (`DD-MM-AAAA HH:MM:SS`). El código y la fecha van **debajo del QR**, no
+  a su lado: la DGII rechaza la Representación Impresa que los pone a la derecha
 - `Página X de Y` si tiene más de una hoja
 - En notas de crédito/débito: el campo **NCF Modificado**
 
@@ -805,7 +807,8 @@ mezclan los dos ambientes.
 - [ ] Las facturas recibidas se reconcilian con las bandejas, aunque use webhook
 - [ ] Si usa webhook: se valida `X-Gratex-Signature` con el WEBHOOK SECRET de cada empresa y se rechazan los avisos sin firma o con firma inválida
 - [ ] El API SECRET está en un gestor de secretos, no en el repositorio, y solo se usa desde su servidor (nunca en el navegador ni en apps móviles)
-- [ ] La Representación Impresa incluye QR, código de seguridad y fecha de firma
+- [ ] La Representación Impresa incluye QR, y debajo de él el código de seguridad y la fecha de firma
+- [ ] La Representación Impresa de E32 y E34 no muestra fecha de vencimiento
 
 ---
 

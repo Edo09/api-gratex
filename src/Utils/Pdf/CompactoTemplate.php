@@ -104,6 +104,8 @@ class CompactoTemplate extends FacturaTemplate
         return array_merge(parent::layout(), [
             'doc_id_y'      => 8,
             'table_start_y' => 48,
+            // Sin sello ni reglas: el pie empieza en las lineas de firma (y=259).
+            'pie_y'         => 258.5,
         ]);
     }
 }

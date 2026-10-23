@@ -19,7 +19,9 @@ Debe ubicarse generalmente en la parte superior derecha:
 *   **Denominación del Tipo de e-CF:** Ejemplo: "Factura de Crédito Fiscal Electrónica".
 *   **e-NCF:** El número de comprobante fiscal electrónico (ej: E310000000001).
 *   **Fecha de Emisión:** Formato DD-MM-AAAA.
-*   **Fecha de Vencimiento:** Requerida para facturas con valor fiscal.
+*   **Fecha de Vencimiento:** Requerida para facturas con valor fiscal. **No** va en E32 ni en E34:
+    su e-CF no lleva `FechaVencimientoSecuencia` y la DGII observa la RI que la imprime (misma
+    tabla que el XML, `ECFXmlBuilder::llevaFechaVencimientoSecuencia`).
 
 ## 3. Información del Receptor (Cliente)
 
@@ -48,6 +50,9 @@ Todo documento electrónico válido debe contener estos tres elementos en su RI:
 *   **Código QR:** Un código de respuesta rápida para validación externa.
 *   **Código de Seguridad:** Una cadena de 6 caracteres generada por la firma electrónica.
 *   **Fecha Firma:** La marca de tiempo exacta de la firma digital con formato DD-MM-AAAA HH:MM:SS.
+
+El Código de Seguridad y la Fecha de Firma van **debajo** del QR, no a su lado: la DGII observó
+la RI que los tenía a la derecha. Vale para la hoja carta y para la tirilla POS.
 
 ## 7. Variaciones según Casos Especiales
 

@@ -74,7 +74,8 @@ require_once __DIR__ . '/../ClasicoTemplate.php';
  *   seguros (layout()).
  *
  * QUE NO (lo fija el motor por norma DGII; no se puede mover/cubrir/quitar):
- *   el QR del timbre (y~205, x=8, 30 mm), el cuadro de totales (anclado a y=-40),
+ *   el QR del timbre (y=205, x=8, 30 mm) con el Codigo de Seguridad y la Fecha
+ *   de Firma debajo (hasta y~243, x 8-100), el cuadro de totales (anclado a y=-40),
  *   las 6 columnas obligatorias de items y la paginacion "Pagina X de Y". Aqui
  *   solo decides COMO se ven; el motor las dibuja en posicion fija.
  *
@@ -155,13 +156,21 @@ class {{CLASS}} extends ClasicoTemplate
         // ]);
     }
 
-    /** Geometria vertical (el motor acota table_start_y a [36, 120] mm). */
+    /**
+     * Geometria vertical (el motor acota table_start_y a [36, 120] mm).
+     * pie_y = Y donde empieza lo que drawFooter() dibuja en cada hoja: las filas
+     * de la tabla pasan a la hoja siguiente antes de que su texto llegue ahi.
+     * Como esta clase redefine drawFooter(), sin pie_y propio el motor usa 243
+     * (el 245 con sello / 258.5 sin sello del clasico solo vale para su pie).
+     * Al calcar el pie del cliente, pon aqui la Y de su primer elemento - 1.
+     */
     public function layout(): array
     {
         return parent::layout();
         // return array_merge(parent::layout(), [
         //     'doc_id_y'      => 10,
         //     'table_start_y' => 56,
+        //     'pie_y'         => 243,
         // ]);
     }
 }

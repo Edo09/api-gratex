@@ -10,7 +10,7 @@ require_once __DIR__ . '/FacturaTemplateFactory.php';
  * Mismo contenido que la RI de carta — lo dicta EcfDocumento, no esta clase —
  * pero en una sola columna y en rollo continuo. Todo lo que la norma DGII exige
  * que aparezca aparece: titulo del documento, e-NCF, RNC y razon social del
- * emisor, fechas de emision y vencimiento, comprador, el detalle con sus seis
+ * emisor, fechas de emision y vencimiento (E32/E34 no llevan), comprador, el detalle con sus seis
  * datos (cantidad, descripcion, unidad, precio, ITBIS, valor), los totales con
  * sus etiquetas exactas, y el timbre (QR + codigo de seguridad + fecha de
  * firma). En una tirilla no caben seis columnas, asi que cada linea se apila en
@@ -481,7 +481,10 @@ final class ReciboPos
             // La norma DGII prohibe rotular el e-NCF como "Factura No.".
             $pares[] = ['e-NCF', $doc->eNcf()];
             $pares[] = ['Fecha de Emisión', $doc->fechaLarga()];
-            $pares[] = ['Fecha de Vencimiento', $doc->fechaVencimiento()];
+            // E32/E34 no llevan vencimiento: sin linea, ni vacia.
+            if ($doc->fechaVencimiento() !== '') {
+                $pares[] = ['Fecha de Vencimiento', $doc->fechaVencimiento()];
+            }
         } else {
             $pares[] = ['Factura No.', $doc->noFactura()];
             if ($doc->ncfTradicional() !== '') {

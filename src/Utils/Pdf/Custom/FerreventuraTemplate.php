@@ -52,6 +52,8 @@ class FerreventuraTemplate extends FacturaTemplate
             'doc_id_y'      => 10,
             // El encabezado centrado es mas alto que el clasico: la tabla baja.
             'table_start_y' => 62,
+            // El pie empieza en "Recibido por:" (y=245).
+            'pie_y'         => 244,
         ];
     }
 

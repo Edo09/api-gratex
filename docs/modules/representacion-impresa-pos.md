@@ -153,7 +153,7 @@ Código de Seguridad y la Fecha de Firma salen igual aunque el QR no se lea.
 |---|---|---|
 | Detalle | 6 columnas en una tabla | 2 renglones por línea: descripción completa arriba; `cant UND × precio (ITBIS)` a la izquierda y el valor a la derecha |
 | Emisor | logo y datos a la izquierda | logo y datos centrados |
-| Timbre | QR 30 mm a la izquierda, datos al lado | QR 26 mm centrado, datos debajo |
+| Timbre | QR 30 mm a la izquierda, datos debajo | QR 26 mm centrado, datos debajo |
 | Paginación | "Página X de Y" | no aplica (una sola página) |
 | Acento del tenant | colorea bandas y totales | no se usa: una térmica imprime en un solo tono y un fondo oscuro solo gasta cabezal |
 | Firmas y sello | sí | no (no caben ni se firman en mostrador) |

@@ -19,6 +19,17 @@ class Tenant1Template extends ClasicoTemplate
      */
     private const SIN_AVISO_DE_PAGO = ['34', '41', '43', '47'];
 
+    /**
+     * Pie del clasico + el aviso de pago, que empieza en y=257.5 (x>=131). Con
+     * sello manda el sello (y=246); sin sello, el aviso.
+     */
+    public function layout(): array
+    {
+        return array_merge(parent::layout(), [
+            'pie_y' => BrandingResolver::selloPath() !== null ? 245 : 257,
+        ]);
+    }
+
     /** El vencimiento ya lo dice el aviso del pie: sin la linea del encabezado. */
     public function mostrarVencimientoPago(): bool
     {

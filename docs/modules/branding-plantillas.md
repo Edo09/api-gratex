@@ -88,7 +88,17 @@ Cuando un cliente pide su propio formato de factura:
    - `drawTotals($pdf, $filas)` — cuadro de totales (filas DGII del motor).
    - `style()` — `body_font_size`, `line_height`, `title_font_size`.
    - `layout()` — `doc_id_y` (inicio del bloque e-NCF/fechas), `table_start_y`
-     (el motor lo acota a [36, 120] mm; la zona de totales/QR es intocable).
+     (el motor lo acota a [36, 120] mm; la zona de totales/QR es intocable) y
+     `pie_y`: la Y donde empieza lo que `drawFooter` dibuja en cada hoja (sello,
+     reglas, "Recibido por:", firmas). Las filas de la tabla pasan a la hoja
+     siguiente antes de que su texto llegue ahí; el motor lo acota a
+     [150, 259.4] mm y, sin la clave, usa 243. Si el pie de la plantilla cambia
+     de altura, `pie_y` cambia con él: si queda por debajo del pie, las filas se
+     imprimen encima. El 245 (con sello) / 258.5 (sin sello) del clásico solo
+     vale para su propio pie: una subclase que redefine `drawFooter` (toda
+     `Tenant<id>` generada) se queda en 243 hasta que declare su `pie_y`.
+     En la última hoja el motor además deja libre la zona del QR y de los
+     totales: si la tabla llega hasta ahí, totales y timbre van en una hoja nueva.
 3. **Activar:** `UPDATE tenants SET pdf_template = 'custom:tenant<id>' WHERE id = <id>;`
    o `PUT /api/branding {"template": "custom:tenant<id>"}` (la API solo acepta
    la custom del propio tenant; las predefinidas son de todos).
@@ -113,7 +123,7 @@ es lo **visual**; el contenido obligatorio DGII lo sigue poniendo el motor (ver
 
 | Se puede calcar (visual) | Fijo por norma (no se mueve/cubre/quita) |
 |---|---|
-| Logo y su posición/tamaño | QR del timbre (y≈205, x=8, 30 mm) |
+| Logo y su posición/tamaño | QR del timbre (y=205, x=8, 30 mm) y, debajo, Código de Seguridad + Fecha de Firma (hasta y≈243, x 8–100) |
 | Colores (acento) y tipografías core | Cuadro de totales (anclado a y=-40) |
 | Disposición del encabezado y del pie | Las 6 columnas obligatorias de items |
 | Firmas/sello, reglas, banda de tabla | Paginación "Página X de Y" |
@@ -173,8 +183,11 @@ explica el límite, no se fuerza.
 - Fuentes: solo core de FPDF (Arial/Helvetica/Times/Courier) + la Arial Narrow
   vendorizada (`vendor/fpdf/font/arial-narrow.php`); cargarla con guard
   (`is_file` + try/catch), como hace `CompactoTemplate::narrowFont()`.
-- No mover/cubrir/escalar la zona del QR del timbre (y≈205, x=8, 30 mm) ni el
-  cuadro de totales (anclado a y=-40): el motor los dibuja en posición fija.
+- No mover/cubrir/escalar la zona del QR del timbre (y=205, x=8, 30 mm), las dos
+  líneas de Código de Seguridad y Fecha de Firma que van debajo (hasta y≈243,
+  x 8–100; la DGII exige que vayan bajo el QR) ni el cuadro de totales (anclado
+  a y=-40): el motor los dibuja en posición fija. Un `drawFooter` no dibuja nada
+  en x < 100 por encima de y=244.
 - Texto sobre acento: usar `textOver()` — nunca un color de texto fijo.
 - DB: el branding vive en **master** (`tenants`), no en la DB del tenant
   (los tenants tipo `integracion` no tienen DB propia).

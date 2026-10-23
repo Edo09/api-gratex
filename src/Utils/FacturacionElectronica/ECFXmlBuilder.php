@@ -763,6 +763,16 @@ class ECFXmlBuilder
         return '31-12-' . ($anio + 1);
     }
 
+    /**
+     * true si el IdDoc del tipo lleva FechaVencimientoSecuencia (E32 y E34 no).
+     * La Representacion Impresa sigue esta misma tabla: la DGII observo RI de
+     * E32/E34 que imprimian una fecha de vencimiento que su e-CF no tiene.
+     */
+    public static function llevaFechaVencimientoSecuencia(string $tipoEcf): bool
+    {
+        return (self::ID_DOC_CONFIG[$tipoEcf] ?? self::ID_DOC_CONFIG['31'])['fecha_vence'];
+    }
+
     private function formatDate(string $date): string
     {
         $date = trim($date);
