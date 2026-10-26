@@ -1783,13 +1783,14 @@ echo "\n== 18) Set de pruebas re-corrido en certecf ==\n";
 $s18Set = ['set_pruebas' => true];
 $s18Cert = ['ambiente' => 'certecf', 'ambiente_secuencia' => 'certecf', 'e_ncf' => 'E310000000034', 'dispensado' => false,
     'rango_id' => null, 'secuencia_valor' => null];
-$s18Previa = static fn(string $estado, ?string $ambiente = 'certecf'): array => [['id' => '2', 'ambiente_dgii' => $ambiente, 'estado_dgii' => $estado]];
+$s18Previa = static fn(string $estado, ?string $ambiente = 'certecf'): array => [['id' => '2', 'ambiente_dgii' => $ambiente,
+    'pos_idempotency_key' => null, 'estado_dgii' => $estado]];
 
 $c = new GuionConexion();
 [, $e] = $reservar($c, $s18Cert, $s18Set);
 $select = (string) $c->sql('estado_dgii FROM facturas');
-wa_chk('18: el SELECT lee tambien ambiente_dgii, con el mismo FOR UPDATE y predicado',
-    str_contains($select, 'SELECT id, ambiente_dgii, estado_dgii FROM facturas') && str_contains($select, 'FOR UPDATE')
+wa_chk('18: el SELECT lee tambien ambiente_dgii y pos_idempotency_key, con el mismo FOR UPDATE y predicado',
+    str_contains($select, 'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii FROM facturas') && str_contains($select, 'FOR UPDATE')
     && str_contains($select, '(ambiente_dgii = :amb OR ambiente_dgii IS NULL)') && $e === null, $select);
 
 foreach (['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO', 'ENVIADO', 'EN_PROCESO', 'RFCE_ENVIADO', 'ERROR', 'RFCE_ERROR'] as $s18Estado) {
@@ -1831,6 +1832,16 @@ $c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO', null);
 wa_chk('18: previa sin ambiente (NULL, puede ser de produccion) bloquea aun en el set',
     $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
 
+foreach (['ENVIADO', 'ACEPTADO'] as $s18Estado) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = [['id' => '2', 'ambiente_dgii' => 'certecf',
+        'pos_idempotency_key' => '6f1c2a9e-0d3b-4e8a-9c71-2b5d8e4f0a13', 'estado_dgii' => $s18Estado]];
+    [, $e] = $reservar($c, $s18Cert, $s18Set);
+    wa_chk("18: venta del POS en certecf ({$s18Estado}) con el numero del set: bloquea (su reenvio automatico la busca)",
+        $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), "fila 2 en {$s18Estado}")
+        && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
+}
+
 $c = new GuionConexion();
 $c->filas['FOR UPDATE'] = $s18Previa('');
 [, $e] = $reservar($c, $s18Cert, $s18Set);
@@ -1871,8 +1882,8 @@ wa_chk('18: archivo sin coincidencia en el set (otra escritura movio la fila): o
 
 $c = new GuionConexion();
 $c->filas['FOR UPDATE'] = [
-    ['id' => '2', 'ambiente_dgii' => 'certecf', 'estado_dgii' => 'ACEPTADO'],
-    ['id' => '3', 'ambiente_dgii' => 'certecf', 'estado_dgii' => 'ENVIO_INCIERTO'],
+    ['id' => '2', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ACEPTADO'],
+    ['id' => '3', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ENVIO_INCIERTO'],
 ];
 [, $e] = $reservar($c, $s18Cert, $s18Set);
 wa_chk('18: si una de las previas esta en vuelo, nada queda archivado (rollBack de toda la transaccion)',

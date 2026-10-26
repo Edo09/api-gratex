@@ -1428,7 +1428,8 @@ class facturaModel
      *     La DGII reinicia el set entero ante un solo rechazo y exige reenviar
      *     los MISMOS e-NCF; en certificacion nada es fiscal;
      *   - cualquier otro estado: EcfNumeroOcupadoException, sin tocar nada. Una
-     *     fila en vuelo (EstadosEcf::EN_VUELO) o sin estado bloquea siempre.
+     *     fila en vuelo (EstadosEcf::EN_VUELO), sin estado o venta del POS
+     *     (pos_idempotency_key) bloquea siempre fuera de los reintentables.
      *
      * SELECT ... FOR UPDATE sobre un e-NCF que no existe toma gap locks que dos
      * sesiones pueden tener a la vez (REPEATABLE READ): el arbitro es la clave
@@ -1494,7 +1495,7 @@ class facturaModel
                 $this->conexion->beginTransaction();
 
                 $previas = $this->conexion->prepare(
-                    'SELECT id, ambiente_dgii, estado_dgii FROM facturas
+                    'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii FROM facturas
                      WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL) FOR UPDATE'
                 );
                 $previas->execute([':e' => $eNcf, ':amb' => $ambiente]);
@@ -1502,9 +1503,12 @@ class facturaModel
                     $estadoPrevio = (string) ($previa['estado_dgii'] ?? '');
                     $reintentable = in_array($estadoPrevio, EstadosEcf::REINTENTABLES, true);
                     // Corrida anterior del set: una fila sin ambiente puede ser de
-                    // produccion y una en vuelo puede estar enviandose ahora mismo.
+                    // produccion, una en vuelo puede estar enviandose ahora mismo y
+                    // una venta del POS (envio_pendiente, su reenvio automatico) no
+                    // es del set.
                     $delSetAnterior = !$reintentable && $setPruebas && $estadoPrevio !== ''
                         && ($previa['ambiente_dgii'] ?? null) === 'certecf'
+                        && ($previa['pos_idempotency_key'] ?? null) === null
                         && !in_array($estadoPrevio, EstadosEcf::EN_VUELO, true);
                     if (!$reintentable && !$delSetAnterior) {
                         $this->deshacer();

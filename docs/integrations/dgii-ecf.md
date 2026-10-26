@@ -351,7 +351,10 @@ respondía "número ocupado" en todos (NUEVAS IDEAS NOTICIAS RD, 2026-10-26). Re
 del mismo e-NCF se archiva (`<estado>_ARCHIVADO`, `e_ncf` NULL, compare-and-set) en cualquier
 estado fuera de vuelo, `ERROR` incluido. Siguen bloqueando: una fila en vuelo
 (`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: se resuelve con el procedimiento de arriba), una sin
-ambiente o sin estado, y todo en `ecf`/`testecf` o sin `strict_input`. No hace falta SQL a mano.
+ambiente o sin estado, una venta del POS (`pos_idempotency_key`: su reenvío automático la
+busca por `envio_pendiente`), y todo en `ecf`/`testecf` o sin `strict_input`. No hace falta SQL
+a mano. La DGII repite e-NCF entre un set y el siguiente (los de Gratex comparten
+E310000000034, E320000000006, E330000000001…), así que esto aplica también con un xlsx nuevo.
 Pruebas: `php tools/test_write_ahead_puro.php`, sección 18.
 
 ### Set de pruebas — notas antes de que su original termine
