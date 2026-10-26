@@ -498,6 +498,9 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
         // Para Notas E33/E34: se persiste para mostrar NCF Modificado + Motivo
         // en la Representacion Impresa (norma DGII).
         'informacion_referencia' => $payload['informacion_referencia'],
+        // Set de pruebas DGII: al re-correrlo en certecf la reserva archiva la fila
+        // de la corrida anterior del mismo e-NCF (ver reservarFacturaECF).
+        'set_pruebas' => $strictInput,
         'items' => array_map(function ($item) use ($preciosConItbis) {
             // `descripcion` viene de mapItemsForXml como '' cuando el front solo
             // envia `nombre_item` (caso comun). `??` no cae con string vacio, asi

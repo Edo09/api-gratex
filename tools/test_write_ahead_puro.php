@@ -1772,6 +1772,121 @@ wa_chk('17 F8: la cabecera de la 030 ya no dice que no estorba ni que sea solo p
     str_contains($s17Mig, 'correr en la base de CADA empresa, use o no el POS. Es OBLIGATORIA en todas') && !str_contains($s17Mig, 'no estorba en las demas'));
 
 // ---------------------------------------------------------------------------
+// 18) Re-correr el set de pruebas DGII en certecf (NUEVAS IDEAS NOTICIAS RD,
+// 2026-10-26): un rechazo reinicio el set y los 22 originales estaban ACEPTADO o
+// RFCE_ACEPTADO y las 3 notas ENVIADO, asi que reenviar el mismo xlsx salia
+// "numero ocupado" en las 25. Con set_pruebas y ambiente certecf la reserva
+// archiva la fila previa certecf en cualquier estado fuera de vuelo.
+// ---------------------------------------------------------------------------
+echo "\n== 18) Set de pruebas re-corrido en certecf ==\n";
+
+$s18Set = ['set_pruebas' => true];
+$s18Cert = ['ambiente' => 'certecf', 'ambiente_secuencia' => 'certecf', 'e_ncf' => 'E310000000034', 'dispensado' => false,
+    'rango_id' => null, 'secuencia_valor' => null];
+$s18Previa = static fn(string $estado, ?string $ambiente = 'certecf'): array => [['id' => '2', 'ambiente_dgii' => $ambiente, 'estado_dgii' => $estado]];
+
+$c = new GuionConexion();
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+$select = (string) $c->sql('estado_dgii FROM facturas');
+wa_chk('18: el SELECT lee tambien ambiente_dgii, con el mismo FOR UPDATE y predicado',
+    str_contains($select, 'SELECT id, ambiente_dgii, estado_dgii FROM facturas') && str_contains($select, 'FOR UPDATE')
+    && str_contains($select, '(ambiente_dgii = :amb OR ambiente_dgii IS NULL)') && $e === null, $select);
+
+foreach (['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO', 'ENVIADO', 'EN_PROCESO', 'RFCE_ENVIADO', 'ERROR', 'RFCE_ERROR'] as $s18Estado) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = $s18Previa($s18Estado);
+    [$r, $e, $log] = $reservar($c, $s18Cert, $s18Set);
+    wa_chk("18: set + certecf, previa {$s18Estado}: se archiva (compare-and-set con ese estado) y se reserva",
+        $e === null && ($r['factura_id'] ?? null) === 41 && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => $s18Estado]
+        && ($c->params('INSERT INTO facturas')[':e_ncf'] ?? null) === 'E310000000034'
+        && count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1 && !$c->inTransaction(),
+        $e?->getMessage() ?? $c->llamadas);
+    wa_chk("18: previa {$s18Estado}: una linea de log que la nombra",
+        substr_count($log, "[ECF e-NCF=E310000000034] reservar: set de pruebas re-corrido, se archiva la fila 2 en {$s18Estado}") === 1, $log);
+}
+$archivo = (string) $c->sql('_ARCHIVADO');
+wa_chk("18: el archivo es el UPDATE de siempre (CONCAT '_ARCHIVADO', e_ncf NULL, WHERE id y estado leido)",
+    str_contains($archivo, "SET e_ncf = NULL, estado_dgii = CONCAT(estado_dgii, '_ARCHIVADO')")
+    && str_contains($archivo, 'WHERE id = :id AND estado_dgii = :visto'), $archivo);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa('RECHAZADO');
+[, $e, $log] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa RECHAZADO en el set: se archiva como reintentable, sin la linea del set',
+    $e === null && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => 'RECHAZADO'] && !str_contains($log, 'set de pruebas'), $log);
+
+foreach ([EstadosEcf::PENDIENTE_ENVIO, EstadosEcf::ENVIO_INCIERTO] as $s18Estado) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = $s18Previa($s18Estado);
+    [, $e] = $reservar($c, $s18Cert, $s18Set);
+    wa_chk("18: previa en vuelo ({$s18Estado}) bloquea aun en el set: ocupado, sin UPDATE ni INSERT",
+        $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), "fila 2 en {$s18Estado}")
+        && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null && $c->de('commit') === [] && !$c->inTransaction(),
+        $e?->getMessage());
+}
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO', null);
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa sin ambiente (NULL, puede ser de produccion) bloquea aun en el set',
+    $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa('');
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa sin estado bloquea (CONCAT con NULL no archivaria nada)',
+    $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null, $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO');
+[, $e] = $reservar($c, $s18Cert);
+wa_chk('18: sin set_pruebas (emision normal en certecf), previa ACEPTADO: ocupado como siempre',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en ACEPTADO') && $c->sql('UPDATE facturas') === null,
+    $e?->getMessage());
+
+foreach (['ecf', 'testecf'] as $s18Amb) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO', $s18Amb);
+    [, $e] = $reservar($c, ['ambiente' => $s18Amb, 'ambiente_secuencia' => $s18Amb] + $s18Cert, $s18Set);
+    wa_chk("18: set_pruebas en {$s18Amb}: nunca archiva un ACEPTADO (ocupado, sin UPDATE)",
+        $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null,
+        $e?->getMessage());
+}
+
+foreach (['1', 1, 'si'] as $s18Flag) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO');
+    [, $e] = $reservar($c, $s18Cert, ['set_pruebas' => $s18Flag]);
+    wa_chk('18: set_pruebas tiene que ser true (bool): ' . var_export($s18Flag, true) . ' no archiva',
+        $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null, $e?->getMessage());
+}
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa('RFCE_ACEPTADO');
+$c->rowCounts['_ARCHIVADO'] = 0;
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: archivo sin coincidencia en el set (otra escritura movio la fila): ocupado, sin INSERT ni commit',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'archivo sin coincidencia')
+    && $c->sql('INSERT INTO') === null && $c->de('commit') === [] && !$c->inTransaction(), $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [
+    ['id' => '2', 'ambiente_dgii' => 'certecf', 'estado_dgii' => 'ACEPTADO'],
+    ['id' => '3', 'ambiente_dgii' => 'certecf', 'estado_dgii' => 'ENVIO_INCIERTO'],
+];
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: si una de las previas esta en vuelo, nada queda archivado (rollBack de toda la transaccion)',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 3 en ENVIO_INCIERTO')
+    && count($c->de('rollBack')) === 1 && $c->de('commit') === [] && $c->sql('INSERT INTO') === null && !$c->inTransaction(),
+    $e?->getMessage());
+
+$s18Ctl = (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php');
+wa_chk('18: facturaController pasa el strict_input del set como set_pruebas a la reserva',
+    str_contains($s18Ctl, "'set_pruebas' => \$strictInput,"));
+$s18Pos = (string) file_get_contents(__DIR__ . '/../src/Pos/PosVenta.php');
+wa_chk('18: el POS nunca manda set_pruebas', !str_contains($s18Pos, 'set_pruebas'));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

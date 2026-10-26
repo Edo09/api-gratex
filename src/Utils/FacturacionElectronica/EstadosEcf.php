@@ -20,7 +20,9 @@ final class EstadosEcf
      * reserva de un intento nuevo archiva la fila vieja (<estado>_ARCHIVADO,
      * e_ncf NULL) y eNcfYaUsado no salta el numero. RFCE_NO_ENCONTRADO entra
      * para que el flujo RFCE (E32 < 250k) se porte igual que el e-CF. ERROR y
-     * RFCE_ERROR quedan fuera: ese numero se quema a proposito.
+     * RFCE_ERROR quedan fuera: ese numero se quema a proposito. Excepcion: al
+     * re-correr el set de pruebas DGII en certecf la reserva archiva cualquier
+     * estado fuera de EN_VUELO (facturaModel::reservarFacturaECF).
      */
     public const REINTENTABLES = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO', 'RFCE_NO_ENCONTRADO'];
 

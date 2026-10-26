@@ -1422,7 +1422,13 @@ class facturaModel
      * Otra fila del mismo ambiente (o sin ambiente) con el mismo e-NCF:
      *   - reintentable (EstadosEcf::REINTENTABLES): se archiva
      *     (<estado>_ARCHIVADO, e_ncf NULL) y se inserta la nueva;
-     *   - cualquier otro estado: EcfNumeroOcupadoException, sin tocar nada.
+     *   - set de pruebas DGII re-corrido ($factura['set_pruebas'] y ambiente
+     *     'certecf', la fila previa tambien 'certecf'): se archiva igual en
+     *     cualquier estado que no este en vuelo (ACEPTADO, ENVIADO, ERROR...).
+     *     La DGII reinicia el set entero ante un solo rechazo y exige reenviar
+     *     los MISMOS e-NCF; en certificacion nada es fiscal;
+     *   - cualquier otro estado: EcfNumeroOcupadoException, sin tocar nada. Una
+     *     fila en vuelo (EstadosEcf::EN_VUELO) o sin estado bloquea siempre.
      *
      * SELECT ... FOR UPDATE sobre un e-NCF que no existe toma gap locks que dos
      * sesiones pueden tener a la vez (REPEATABLE READ): el arbitro es la clave
@@ -1439,11 +1445,12 @@ class facturaModel
      * devuelve el numero a la secuencia, porque ninguna fila lo ocupa.
      *
      * @param array $factura {date, client_id, client_name, total, tipo_pago, user_id, informacion_referencia, items[],
-     *                       pos?: {turno_id, pos_empleado_id, pos_idempotency_key}}
+     *                       pos?: {turno_id, pos_empleado_id, pos_idempotency_key}, set_pruebas?: bool}
      *                       ($facturaInput del controller; sin 'no_factura', que toma el e-NCF). Con 'pos' la
      *                       fila es una venta del POS: el mismo INSERT guarda las columnas de la migracion 030
      *                       y envio_pendiente = 1 (nace sin veredicto; el reenvio del POS la busca). Sin 'pos'
-     *                       el INSERT es el de siempre y no nombra ninguna de ellas.
+     *                       el INSERT es el de siempre y no nombra ninguna de ellas. set_pruebas: el
+     *                       strict_input del set de pruebas DGII (ver arriba); solo cuenta en 'certecf'.
      * @param array $ctx     ctx 'reservar' de ECFEmissionService::emitir: tipo_ecf, e_ncf, ambiente,
      *                       ambiente_secuencia, signed_xml, codigo_seguridad, fecha_emision_dgii, flujo,
      *                       rfce_xml, dispensado, rango_id, secuencia_valor, desde
@@ -1467,6 +1474,8 @@ class facturaModel
                 $eNcf, $ambiente, $ambienteSecuencia));
         }
         $nota = self::normalizarNotaReferencia($factura, (string) ($ctx['tipo_ecf'] ?? ''));
+        // Re-correr el set de pruebas: solo en certificacion, nunca en ecf ni testecf.
+        $setPruebas = ($factura['set_pruebas'] ?? false) === true && $ambiente === 'certecf';
 
         // Venta del POS: el bloque 'pos' agrega al INSERT las columnas de la migracion 030.
         // Sin clave de idempotencia no habria idempotencia ni 1062 que distinguir: se rechaza
@@ -1485,18 +1494,28 @@ class facturaModel
                 $this->conexion->beginTransaction();
 
                 $previas = $this->conexion->prepare(
-                    'SELECT id, estado_dgii FROM facturas
+                    'SELECT id, ambiente_dgii, estado_dgii FROM facturas
                      WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL) FOR UPDATE'
                 );
                 $previas->execute([':e' => $eNcf, ':amb' => $ambiente]);
                 foreach ($previas->fetchAll(PDO::FETCH_ASSOC) as $previa) {
                     $estadoPrevio = (string) ($previa['estado_dgii'] ?? '');
-                    if (!in_array($estadoPrevio, EstadosEcf::REINTENTABLES, true)) {
+                    $reintentable = in_array($estadoPrevio, EstadosEcf::REINTENTABLES, true);
+                    // Corrida anterior del set: una fila sin ambiente puede ser de
+                    // produccion y una en vuelo puede estar enviandose ahora mismo.
+                    $delSetAnterior = !$reintentable && $setPruebas && $estadoPrevio !== ''
+                        && ($previa['ambiente_dgii'] ?? null) === 'certecf'
+                        && !in_array($estadoPrevio, EstadosEcf::EN_VUELO, true);
+                    if (!$reintentable && !$delSetAnterior) {
                         $this->deshacer();
                         throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'fila ' . (int) $previa['id'] . ' en ' . $estadoPrevio);
                     }
-                    // Intento anterior que la DGII no uso: se archiva para guardar
-                    // la historia, y e_ncf NULL libera la clave unica. El estado
+                    if ($delSetAnterior) {
+                        error_log(sprintf('[ECF e-NCF=%s] reservar: set de pruebas re-corrido, se archiva la fila %d en %s',
+                            $eNcf, (int) $previa['id'], $estadoPrevio));
+                    }
+                    // Intento anterior que la DGII no uso (o de un set que reinicio):
+                    // se archiva para guardar la historia, y e_ncf NULL libera la clave unica. El estado
                     // leido va en el WHERE (compare-and-set) aunque el FOR UPDATE
                     // ya lo proteja.
                     $archivo = $this->conexion->prepare(

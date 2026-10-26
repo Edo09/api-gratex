@@ -341,6 +341,19 @@ servicio la deja pasar: el builder firmaba `<TipoIngresos/>`, que no es ningún 
 (`strict_input`) una nota 33/34 que lo trae vacío se firma sin el elemento; en lo demás, vacío
 = `'01'`. Pruebas: `php tools/test_ecf_tipo_ingresos.php`.
 
+### Set de pruebas — re-correrlo en una empresa `app`
+
+Tras un reinicio se reenvía el **mismo xlsx**, con los mismos e-NCF, pero en la BD del tenant
+esos números ya están en `ACEPTADO`, `RFCE_ACEPTADO` o `ENVIADO`, y la reserva del write-ahead
+respondía "número ocupado" en todos (NUEVAS IDEAS NOTICIAS RD, 2026-10-26). Regla de
+`facturaModel::reservarFacturaECF`: con `set_pruebas` (el `strict_input` del runner, que
+`facturaController` pasa en `$facturaInput`) y reserva en `certecf`, la fila previa `certecf`
+del mismo e-NCF se archiva (`<estado>_ARCHIVADO`, `e_ncf` NULL, compare-and-set) en cualquier
+estado fuera de vuelo, `ERROR` incluido. Siguen bloqueando: una fila en vuelo
+(`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: se resuelve con el procedimiento de arriba), una sin
+ambiente o sin estado, y todo en `ecf`/`testecf` o sin `strict_input`. No hace falta SQL a mano.
+Pruebas: `php tools/test_write_ahead_puro.php`, sección 18.
+
 ### Set de pruebas — notas antes de que su original termine
 
 **Cualquier** rechazo reinicia el set: los originales ya aceptados dejan de contar, aunque
