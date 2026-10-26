@@ -348,6 +348,8 @@ function mapRowToPayload(array $row, int $clientId, ?int $userId, ?array $rfceRo
         'fecha_emision' => $row['FechaEmision'] ?? date('d-m-Y'),
         // La del set manda (DGII la compara); vacia -> default del server (31-12 del ano siguiente).
         'fecha_vencimiento_secuencia' => blankToNull($row['FechaVencimientoSecuencia'] ?? null),
+        // Sin blankToNull: el '' del set tiene que llegar al builder (lo omite en
+        // las notas 33/34); un null lo vuelve '01' en el controlador y el servicio.
         'tipo_ingresos' => $row['TipoIngresos'] ?? '01',
         'tipo_pago' => blankToNull($row['TipoPago'] ?? null),
         'fecha_limite_pago' => blankToNull($row['FechaLimitePago'] ?? null),

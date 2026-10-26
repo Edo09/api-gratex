@@ -166,6 +166,9 @@ class ECFXmlBuilder
         '47' => ['fecha_vence' => true,  'ind_nota_credito' => false, 'ind_monto_gravado' => false, 'tipo_ingresos' => false],
     ];
 
+    /** Tipos cuyo XSD trae TipoIngresos con minOccurs=0; en el resto que lo lleva es obligatorio. */
+    private const TIPO_INGRESOS_OPCIONAL = ['33', '34'];
+
     private function buildIdDoc(DOMDocument $doc, array $data): DOMElement
     {
         $tipoEcfStr = (string) $data['tipo_ecf'];
@@ -204,7 +207,18 @@ class ECFXmlBuilder
         }
 
         if ($cfg['tipo_ingresos']) {
-            $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
+            $tipoIngresos = trim((string) ($data['tipo_ingresos'] ?? ''));
+            // Vacio nunca sale como <TipoIngresos/>: no es ningun valor del XSD
+            // (01-06). En modo estricto una nota (33/34, minOccurs=0) que el set
+            // trae vacia se omite; en lo demas, el default historico '01'.
+            $omitir = $tipoIngresos === '' && !empty($data['strict_input'])
+                && in_array($tipoEcfStr, self::TIPO_INGRESOS_OPCIONAL, true);
+            if (!$omitir) {
+                $idDoc->appendChild($doc->createElement(
+                    'TipoIngresos',
+                    $tipoIngresos !== '' ? $tipoIngresos : '01'
+                ));
+            }
         }
 
         $tipoPago = $data['tipo_pago'] ?? null;

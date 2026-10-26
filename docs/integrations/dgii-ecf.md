@@ -329,6 +329,18 @@ xlsx se firman tal cual si cumplen el patrón del XSD; en la emisión normal, `m
 decimales). Cubre `MontoItem`, `DescuentoMonto`, `RecargoMonto`, las subtablas y todo lo que
 pasa por `appendMoneyIfSet`. Pruebas: `php tools/test_ecf_montos_descuento.php`.
 
+### Set de pruebas — `TipoIngresos` vacío en una nota
+
+Rechazo: *"El formato del XML no es válido.. La propiedad TipoIngresos no es válida debido a
+que el valor enviado () no coincide con el valor () del conjunto de datos entregados"*
+(NUEVAS IDEAS NOTICIAS RD, 2026-10-26, E340000000015). El xlsx trae la celda vacía,
+`Fase2XlsxReader` la entrega como `''` (no `null`) y el `?? '01'` de runner, controlador y
+servicio la deja pasar: el builder firmaba `<TipoIngresos/>`, que no es ningún valor del XSD
+(01-06). XSD: obligatorio en 31, 32, 44, 45, 46 y el RFCE; opcional (`minOccurs=0`) en 33 y
+34; no existe en 41, 43, 47. Regla de `ECFXmlBuilder::buildIdDoc()`: en el set
+(`strict_input`) una nota 33/34 que lo trae vacío se firma sin el elemento; en lo demás, vacío
+= `'01'`. Pruebas: `php tools/test_ecf_tipo_ingresos.php`.
+
 ### Set de pruebas — notas antes de que su original termine
 
 **Cualquier** rechazo reinicia el set: los originales ya aceptados dejan de contar, aunque

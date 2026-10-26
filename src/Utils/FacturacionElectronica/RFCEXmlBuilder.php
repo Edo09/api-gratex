@@ -69,7 +69,9 @@ class RFCEXmlBuilder
         $idDoc = $doc->createElement('IdDoc');
         $idDoc->appendChild($doc->createElement('TipoeCF', '32'));
         $idDoc->appendChild($doc->createElement('eNCF', (string) ($data['e_ncf'] ?? '')));
-        $idDoc->appendChild($doc->createElement('TipoIngresos', (string) ($data['tipo_ingresos'] ?? '01')));
+        // Obligatorio en el XSD del RFCE: vacio ('' del set) es '01', como en el e-CF 32.
+        $tipoIngresos = trim((string) ($data['tipo_ingresos'] ?? ''));
+        $idDoc->appendChild($doc->createElement('TipoIngresos', $tipoIngresos !== '' ? $tipoIngresos : '01'));
         $idDoc->appendChild($doc->createElement('TipoPago', (string) ($data['tipo_pago'] ?? 1)));
 
         $formas = $data['formas_pago'] ?? [];
