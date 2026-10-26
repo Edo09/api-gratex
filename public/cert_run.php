@@ -170,6 +170,11 @@ if ($esIntegracion) {
             $argv[] = '--' . $flag . '=' . $_REQUEST[$key];
         }
     }
+    // Fase 4: vencimiento del rango autorizado por la DGII, para que pise el de
+    // ncf_sequences cuando es otro (la DGII rechaza el que no es el de su rango).
+    if ($fase === '4' && (string) ($_REQUEST['fecha_venc_secuencia'] ?? '') !== '') {
+        $argv[] = '--fecha-vencimiento-secuencia=' . $_REQUEST['fecha_venc_secuencia'];
+    }
 }
 // Passthrough de flags opcionales (filtros / control de notas fase 4).
 foreach (['filter', 'case', 'exclude', 'counts', 'nota-wait-accepted', 'nota-poll', 'refs-e31', 'refs-date'] as $k) {

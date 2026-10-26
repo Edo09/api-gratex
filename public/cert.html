@@ -70,6 +70,22 @@
 <script>
 const API = location.origin + '/api';
 
+// Panel de los XML íntegros de los E32 < 250k, compartido por las fases 2 y 4: el RFCE (resumen)
+// ya lo mandó la corrida, pero el portal pide además subir a mano el e-CF firmado completo.
+const RFCE_PANEL = `
+     <div class="panel">
+       <b>XML íntegros de las facturas de consumo &lt; 250k (RFCE)</b>
+       <p class="muted">Baja del server el e-CF firmado completo de cada E32 &lt; 250k que la DGII aceptó
+       (el último envío de cada e-NCF, el de la corrida más reciente) y los empaqueta en un ZIP para subirlos al portal.
+       Usa el <b>Token API del tenant</b> (arriba).</p>
+       <label style="display:flex;gap:8px;align-items:center;color:var(--txt)">
+         <input type="checkbox" class="rfceRnc" style="width:auto">
+         Anteponer el RNC al nombre del archivo (<code>RNCE320000000012.xml</code>)</label>
+       <button class="act ghost" data-rfce="1">Descargar ZIP de XML íntegros (RFCE)</button>
+       <pre class="rfceout" style="display:none"></pre>
+       <p class="muted">Súbelos tal cual se descargan: abrirlos y guardarlos con otro programa puede cambiar el formato e invalidar la firma.</p>
+     </div>`;
+
 // tipo: manual (portal DGII) | auto (lo hace nuestro sistema) | semi (auto + acción manual)
 const STEPS = [
   { n:1,  t:'Datos del contribuyente', tipo:'manual', body:`
@@ -98,7 +114,8 @@ const STEPS = [
        <button class="act ghost" data-run="2" data-xlsx="xlsx2" data-filter="filter2" data-dry="1">Dry-run (no envía)</button>
        <pre class="runout" style="display:none"></pre>
      </div>
-     <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante reinicia el set completo: deben pasar todos en una corrida limpia. Usa el <b>Token API del tenant</b> + <b>CERT_RUN_TOKEN</b> de arriba.</p>` },
+     <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante reinicia el set completo: deben pasar todos en una corrida limpia. Usa el <b>Token API del tenant</b> + <b>CERT_RUN_TOKEN</b> de arriba.</p>
+     ${RFCE_PANEL}` },
 
   { n:3,  t:'Pruebas de Datos Aprobación Comercial', tipo:'auto', body:`
      <p>Envía las Aprobaciones Comerciales (ACECF) de la hoja <code>ACEECF_Generadas</code> del xlsx → <code>POST /api/aprobaciones-comerciales</code>.</p>
@@ -115,12 +132,23 @@ const STEPS = [
      <div class="panel">
        <label>counts (opcional, ej. E31:2,E34:2) — vacío = distribución completa (25)</label>
        <input type="text" id="counts4" placeholder="vacío = 25 casos">
-       <label>nota-wait-accepted (seg., opcional para que las notas esperen E31 aceptados)</label>
-       <input type="text" id="wait4" placeholder="ej. 240">
-       <button class="act" data-run="4" data-counts="counts4" data-wait="wait4">Correr Fase 4</button>
-       <button class="act ghost" data-run="4" data-counts="counts4" data-dry="1">Dry-run</button>
+       <button class="act ghost" type="button" id="soloNotas4" style="margin-top:6px">Solo las notas (E33/E34)</button>
+       <label>nota-wait-accepted (seg.; las notas esperan a que la DGII acepte los E31 de referencia. Vacío = 300, 0 = no esperar)</label>
+       <input type="text" id="wait4" placeholder="vacío = 300">
+       <label>E31 de referencia para las notas (e-NCF separados por coma, opcional)</label>
+       <input type="text" id="refs4" placeholder="vacío = los E31 que emite esta misma corrida. Ej. E310000000005,E310000000006,E310000000007">
+       <label>Fecha de emisión de esos E31 (dd-mm-aaaa; vacío = hoy)</label>
+       <input type="text" id="refsdate4" placeholder="ej. 26-10-2026">
+       <label>Vencimiento de la secuencia (dd-mm-aaaa, opcional)</label>
+       <input type="text" id="venc4" placeholder="vacío = el del rango en ncf_sequences">
+       <p class="muted">Tiene que ser el del <b>rango autorizado</b> por la DGII. Si se omite, se usa el del rango
+       que tiene el tenant en <code>ncf_sequences</code>; si ese no es el que la DGII autorizó, responde
+       <i>"Fecha de vencimiento de secuencia inválida"</i>.</p>
+       <button class="act" data-run="4" data-counts="counts4" data-wait="wait4" data-venc="venc4" data-refs="refs4" data-refsdate="refsdate4">Correr Fase 4</button>
+       <button class="act ghost" data-run="4" data-counts="counts4" data-venc="venc4" data-refs="refs4" data-refsdate="refsdate4" data-dry="1">Dry-run</button>
        <pre class="runout" style="display:none"></pre>
-     </div>` },
+     </div>
+     ${RFCE_PANEL}` },
 
   { n:5,  t:'Simulación Representación Impresa', tipo:'auto', body:`
      <p>Genera la Representación Impresa (PDF con QR de timbre DGII) de cada e-CF emitido y súbela al portal.</p>
@@ -211,6 +239,12 @@ function render() {
   if (s.n === 5) wireStep5();
   if (s.n === 7) wireStep7();
   content.querySelectorAll('[data-run]').forEach(wireRunner);
+  content.querySelectorAll('[data-rfce]').forEach(wireRfce);
+  const soloNotas = document.getElementById('soloNotas4');
+  if (soloNotas) soloNotas.onclick = () => {
+    document.getElementById('counts4').value =
+      'E31:0,E32_gte_250k:0,E32_lt_250k:0,E33:1,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0';
+  };
 }
 
 function wireLogin() {
@@ -276,6 +310,21 @@ function wireRunner(btn) {
       fd.append('counts', document.getElementById(btn.dataset.counts).value.trim());
     if (btn.dataset.wait && document.getElementById(btn.dataset.wait).value.trim())
       fd.append('nota-wait-accepted', document.getElementById(btn.dataset.wait).value.trim());
+    if (btn.dataset.refs && document.getElementById(btn.dataset.refs).value.trim()) {
+      const refs = document.getElementById(btn.dataset.refs).value.trim().toUpperCase().split(/[\s,;]+/).filter(Boolean);
+      if (refs.some(r => !/^E31\d{10}$/.test(r))) { alert('Las referencias son e-NCF de E31 (ej. E310000000005), separados por coma.'); return; }
+      fd.append('refs-e31', refs.join(','));
+    }
+    if (btn.dataset.refsdate && document.getElementById(btn.dataset.refsdate).value.trim()) {
+      const rd = document.getElementById(btn.dataset.refsdate).value.trim();
+      if (!/^\d{2}-\d{2}-\d{4}$/.test(rd)) { alert('La fecha de los E31 va como dd-mm-aaaa (ej. 26-10-2026).'); return; }
+      fd.append('refs-date', rd);
+    }
+    if (btn.dataset.venc && document.getElementById(btn.dataset.venc).value.trim()) {
+      const venc = document.getElementById(btn.dataset.venc).value.trim();
+      if (!/^\d{2}-\d{2}-\d{4}$/.test(venc)) { alert('El vencimiento va como dd-mm-aaaa (ej. 31-12-2027).'); return; }
+      fd.append('fecha_venc_secuencia', venc);
+    }
 
     const buttons = btn.closest('.panel').querySelectorAll('button');
     buttons.forEach(b => b.disabled = true);
@@ -297,6 +346,66 @@ function wireRunner(btn) {
       buttons.forEach(b => b.disabled = false);
     }
   });
+}
+
+// ZIP con el e-CF firmado COMPLETO de cada E32 < 250k aceptado como RFCE. La lista sale de
+// GET /facturas?tipo_ecf=32 (solo las filas vivas: una archivada por una re-corrida del set
+// ya no tiene e_ncf) y cada XML de GET /facturas/{id}/xml, que sin ?type=rfce es el e-CF entero.
+function wireRfce(btn) {
+  btn.onclick = async () => {
+    const token = apiTokenEl.value.trim();
+    if (!token) { alert('Pon el Token API del tenant (arriba).'); return; }
+    const panel = btn.closest('.panel');
+    const out = panel.querySelector('.rfceout');
+    const conRnc = panel.querySelector('.rfceRnc').checked;
+    const headers = { 'X-API-KEY': token };
+    btn.disabled = true; out.style.display = 'block'; out.textContent = 'Buscando los E32 con resumen RFCE...\n';
+    try {
+      const filas = [];
+      for (let page = 1; page <= 50; page++) {
+        const r = await fetch(`${API}/facturas?tipo_ecf=32&pageSize=100&page=${page}`, { headers });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.status) { out.textContent += 'No se pudo listar: ' + (j.error || ('HTTP ' + r.status)) + '\n'; return; }
+        filas.push(...j.data);
+        if (page >= ((j.pagination && j.pagination.totalPages) || 1)) break;
+      }
+      const rfce = filas.filter(f => f.e_ncf && f.rfce_estado);
+      if (!rfce.length) { out.textContent += 'No hay E32 < 250k con resumen RFCE en este tenant (corre antes la fase).\n'; return; }
+      out.textContent += rfce.length + ' E32 con RFCE.\n';
+      const zip = new JSZip();
+      let ok = 0, fail = 0;
+      for (const f of rfce.sort((a, b) => a.e_ncf.localeCompare(b.e_ncf))) {
+        if (!/^ACEPTADO/.test(f.rfce_estado)) {
+          out.textContent += `  ${f.e_ncf}: RFCE ${f.rfce_estado}, no se baja (la DGII tiene que aceptarlo; corre la fase de nuevo).\n`; fail++; continue;
+        }
+        try {
+          const r = await fetch(`${API}/facturas/${f.id}/xml?format=base64`, { headers });
+          const j = await r.json().catch(() => ({}));
+          if (!r.ok || !j.data || !j.data.content) { out.textContent += `  ${f.e_ncf}: ${(j && j.error) || ('HTTP ' + r.status)}\n`; fail++; continue; }
+          const bin = atob(j.data.content);
+          const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+          const texto = new TextDecoder().decode(bytes);
+          if (!/<ECF[\s>]/.test(texto)) { out.textContent += `  ${f.e_ncf}: la respuesta no es un e-CF completo\n`; fail++; continue; }
+          const rnc = ((texto.match(/<RNCEmisor>\s*(\d+)\s*<\/RNCEmisor>/) || [])[1]) || '';
+          zip.file((conRnc ? rnc : '') + f.e_ncf + '.xml', bytes);
+          out.textContent += `  ${f.e_ncf}: OK\n`; ok++;
+        } catch (e) { out.textContent += `  ${f.e_ncf}: ${e.message}\n`; fail++; }
+      }
+      if (ok > 0) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(await zip.generateAsync({ type: 'blob' }));
+        a.download = 'xml_integros_rfce.zip';
+        a.click();
+        out.textContent += `\nZIP descargado: ${ok} XML (${fail} sin bajar).\n`;
+      } else {
+        out.textContent += '\nNo se pudo bajar ningún XML.\n';
+      }
+    } catch (e) {
+      out.textContent += 'Error de red: ' + e.message + '\n';
+    } finally {
+      btn.disabled = false;
+    }
+  };
 }
 
 function wireStep7() {

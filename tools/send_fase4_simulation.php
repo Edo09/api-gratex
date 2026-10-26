@@ -24,9 +24,11 @@
  * del rango que DGII te autorizo. Se numera por tipo: E31 0000000007,
  * E31 0000000008, ... Repetir un e-NCF ya usado lo rechaza DGII.
  *
- * Opcionales de integracion: --fecha-vencimiento-secuencia=31-12-2026 (la del
- * rango autorizado; sin ella el server usa el 31-12 del ano siguiente a la
- * emision, que DGII rechaza si el rango vence otro dia) y --comprador-rnc /
+ * --fecha-vencimiento-secuencia=31-12-2026 (integracion y app): la del rango
+ * autorizado. Sin ella el server usa la del rango en ncf_sequences (app) o el
+ * 31-12 del ano siguiente a la emision (integracion), y la DGII rechaza la que
+ * no es la del rango ("Fecha de vencimiento de secuencia invalida").
+ * Opcionales de integracion: --comprador-rnc /
  * --comprador-razon-social (default: el comprador de prueba de DGII 131880681). El comprador se inyecta en los casos que el plan
  * no lo trae, porque en la ruta app lo aportaba client_id.
  *
@@ -64,6 +66,14 @@
  *
  * Para reenviar solo E33/E34 contra E31 ya aceptados:
  *   --refs-e31-file=tools/fase4_no_notes_estados.json --refs-date=27-05-2026
+ *   o, por e-NCF (la fecha es la de emision de esos E31):
+ *   --counts=E31:0,E32_gte_250k:0,E32_lt_250k:0,E33:1,E34:2,E41:0,E43:0,E44:0,E45:0,E46:0,E47:0 \
+ *   --refs-e31=E310000000005,E310000000006,E310000000007 --refs-date=26-10-2026
+ *
+ * --nota-wait-accepted=N (default 300; 0 = no esperar): antes de la primera nota consulta
+ * a la DGII cada E31 de referencia hasta ACEPTADO. Esa consulta es la que actualiza su
+ * estado en nuestra BD, y sin ella la nota sale "La DGII todavia no ha aceptado la
+ * factura ..." aunque la DGII ya la acepto.
  */
 
 require_once __DIR__ . '/cert_empresa_preflight.php';
@@ -74,6 +84,7 @@ const DEFAULT_USER_ID = 2;
 const DEFAULT_OUTPUT = __DIR__ . '/fase4_results.json';
 const DEFAULT_XML_DIR = __DIR__ . '/xml_integracion';
 const DEFAULT_TIMEOUT_SECONDS = 60;
+const DEFAULT_NOTA_WAIT_SECONDS = 300;
 
 function main(array $argv): int
 {
@@ -109,6 +120,26 @@ function main(array $argv): int
             . "   Verifica antes: SELECT ambiente FROM tenants WHERE id=<id>;  -> tiene que decir 'certecf'.\n");
         return 2;
     }
+    // Vencimiento de la secuencia (--fecha-vencimiento-secuencia=dd-mm-aaaa). Sin
+    // DB (integracion) hay que decirlo: el default del server (31-12 del ano
+    // siguiente) solo sirve si el rango vence ese dia; si no, "Fecha de
+    // vencimiento de secuencia invalida". En la ruta app sale del rango en
+    // ncf_sequences, y esta fecha lo pisa (para un rango que la DGII autorizo con otra).
+    $fechaVencSecuencia = isset($opts['fecha-vencimiento-secuencia'])
+        ? trim((string) $opts['fecha-vencimiento-secuencia'])
+        : null;
+    if ($fechaVencSecuencia === '') {
+        $fechaVencSecuencia = null;
+    }
+    if ($fechaVencSecuencia !== null && !preg_match('/^[0-9]{2}-[0-9]{2}-[0-9]{4}$/', $fechaVencSecuencia)) {
+        fwrite(STDERR, "ERROR: --fecha-vencimiento-secuencia tiene que ser dd-mm-aaaa (ej. 31-12-2027).\n");
+        return 2;
+    }
+    echo 'Vencimiento de secuencia: ' . ($fechaVencSecuencia
+        ?? ($integracion
+            ? '31-12-' . ((int) date('Y') + 1) . ' (default del server: 31-12 del ano siguiente)'
+            : 'el del rango autorizado (ncf_sequences)')) . "\n";
+
     $secuencias = [];
     if ($integracion) {
         if (!isset($opts['encf-start'])) {
@@ -142,19 +173,6 @@ function main(array $argv): int
             'rnc' => trim((string) ($opts['comprador-rnc'] ?? '131880681')),
             'razon_social' => trim((string) ($opts['comprador-razon-social'] ?? 'CLIENTE COMPROBANTE TEST SRL')),
         ];
-        // Vencimiento del rango autorizado. En la ruta app sale de ncf_sequences;
-        // sin DB hay que decirlo: el default del server (31-12 del ano siguiente)
-        // solo sirve si el rango vence ese dia; si no, "Fecha de vencimiento de
-        // secuencia invalida".
-        $fechaVencSecuencia = isset($opts['fecha-vencimiento-secuencia'])
-            ? trim((string) $opts['fecha-vencimiento-secuencia'])
-            : null;
-        if ($fechaVencSecuencia === '') {
-            $fechaVencSecuencia = null;
-        }
-        echo 'Vencimiento de secuencia: ' . ($fechaVencSecuencia
-            ?? '31-12-' . ((int) date('Y') + 1) . ' (default del server: 31-12 del ano siguiente)') . "\n";
-
         $emisor = array_filter([
             'rnc' => trim((string) $opts['emisor-rnc']),
             'razon_social' => trim((string) $opts['emisor-razon-social']),
@@ -175,9 +193,26 @@ function main(array $argv): int
         }
     }
     $notaDelay = isset($opts['nota-delay']) ? (int) $opts['nota-delay'] : 0;
-    $notaWaitAccepted = isset($opts['nota-wait-accepted']) ? max(0, (int) $opts['nota-wait-accepted']) : 0;
+    // Antes de las notas se consulta a la DGII cada E31 hasta ACEPTADO (default 300 s, como
+    // la fase 2; 0 = no esperar). Es lo que actualiza facturas.estado_dgii de la referencia:
+    // sin esa consulta sigue en ENVIADO y la nota sale "La DGII todavia no ha aceptado la
+    // factura ..." (nuestra validacion, antes de reservar nada) aunque la DGII ya la acepto.
+    $notaWaitAccepted = isset($opts['nota-wait-accepted']) ? max(0, (int) $opts['nota-wait-accepted']) : DEFAULT_NOTA_WAIT_SECONDS;
     $notaPoll = isset($opts['nota-poll']) ? max(1, (int) $opts['nota-poll']) : 10;
     $preloadedE31Refs = loadPreloadedE31References($opts);
+    if (!$integracion && !$dryRun) {
+        // --refs-e31 trae solo e-NCF: la consulta de estado de la app cuelga del factura_id.
+        foreach ($preloadedE31Refs as $k => $ref) {
+            if (empty($ref['factura_id'])) {
+                $id = buscarFacturaIdPorENcf($apiBase, $apiKey, (string) $ref['e_ncf']);
+                if ($id === null) {
+                    fwrite(STDERR, "WARN: no encontre la factura de {$ref['e_ncf']} en este tenant; no se puede consultar su estado.\n");
+                    continue;
+                }
+                $preloadedE31Refs[$k]['factura_id'] = $id;
+            }
+        }
+    }
 
     $cases = buildPlan($countsOverride);
     fwrite(STDOUT, "==> " . count($cases) . " casos planificados\n");
@@ -274,9 +309,9 @@ function main(array $argv): int
             // "El elemento Encabezado tiene un elemento hijo Totales invalido;
             // se esperaba Comprador".
             $case['payload']['comprador'] ??= $compradorPrueba;
-            if ($fechaVencSecuencia !== null) {
-                $case['payload']['fecha_vencimiento_secuencia'] ??= $fechaVencSecuencia;
-            }
+        }
+        if ($fechaVencSecuencia !== null) {
+            $case['payload']['fecha_vencimiento_secuencia'] ??= $fechaVencSecuencia;
         }
 
         $payload = $integracion
@@ -946,6 +981,32 @@ function consultarEstadoIntegracion(string $apiBase, string $apiKey, string $api
         'http_status' => $status,
         'body' => is_array($decoded) ? $decoded : ['status' => false, 'error' => 'no-json: ' . substr($raw, 0, 300)],
     ];
+}
+
+/** factura_id de un e-NCF en la app (GET /facturas?query=): solo la fila viva, que es la que tiene e_ncf. */
+function buscarFacturaIdPorENcf(string $apiBase, string $apiKey, string $eNcf): ?int
+{
+    $ch = curl_init($apiBase . '/facturas?' . http_build_query(['query' => $eNcf, 'pageSize' => 20]));
+    $opts = [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
+        CURLOPT_HTTPHEADER => ['Accept: application/json', 'X-API-KEY: ' . $apiKey],
+    ];
+    if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
+        $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
+    }
+    curl_setopt_array($ch, $opts);
+    $raw = curl_exec($ch);
+    if ($raw === false) {
+        return null;
+    }
+    $json = json_decode($raw, true);
+    foreach (is_array($json['data'] ?? null) ? $json['data'] : [] as $fila) {
+        if (is_array($fila) && ($fila['e_ncf'] ?? null) === $eNcf && (int) ($fila['id'] ?? 0) > 0) {
+            return (int) $fila['id'];
+        }
+    }
+    return null;
 }
 
 function consultarEstadoFactura(string $apiBase, string $apiKey, int $facturaId): array

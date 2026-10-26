@@ -357,6 +357,22 @@ a mano. La DGII repite e-NCF entre un set y el siguiente (los de Gratex comparte
 E310000000034, E320000000006, E330000000001…), así que esto aplica también con un xlsx nuevo.
 Pruebas: `php tools/test_write_ahead_puro.php`, sección 18.
 
+### Wizard `cert.html` — vencimiento de la secuencia y XML íntegros de los RFCE
+
+- **Fase 4, «Vencimiento de la secuencia»:** `cert_run.php` lo pasa como `--fecha-vencimiento-secuencia`
+  y el runner lo pone en `fecha_vencimiento_secuencia` de cada payload (ahora también en empresas `app`,
+  no solo integración). Pisa el del rango en `ncf_sequences`; vacío = el del rango. Úsalo cuando la DGII
+  responde «Fecha de vencimiento de secuencia inválida» porque el rango autorizado vence otro día.
+- **Fase 4, notas E33/E34:** antes de la primera nota el runner consulta a la DGII cada E31 de referencia
+  hasta `ACEPTADO` (`--nota-wait-accepted`, default 300 s; 0 = no esperar). Esa consulta es la que pasa
+  `facturas.estado_dgii` de `ENVIADO` a `ACEPTADO` en nuestra BD, y la validación de la nota lee ese
+  estado: sin consulta sale «La DGII todavía no ha aceptado la factura …» aunque el panel de la DGII ya
+  la muestre aceptada (tenant 9, 2026-10-26). Para mandar solo las notas: botón «Solo las notas
+  (E33/E34)», los e-NCF de los E31 en «E31 de referencia» y su fecha de emisión.
+- **Pasos 2 y 4, «XML íntegros (RFCE)»:** baja un ZIP con el e-CF firmado completo de cada E32 < 250k cuyo
+  RFCE la DGII aceptó (lista `GET /api/facturas?tipo_ecf=32`, XML `GET /api/facturas/{id}/xml`). Solo las
+  filas vivas, o sea el último envío de cada e-NCF: una archivada por una re-corrida no tiene `e_ncf`.
+
 ### Set de pruebas — notas antes de que su original termine
 
 **Cualquier** rechazo reinicia el set: los originales ya aceptados dejan de contar, aunque
