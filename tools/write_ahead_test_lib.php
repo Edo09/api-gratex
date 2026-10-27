@@ -143,8 +143,15 @@ function wa_puerto_abierto(int $puerto): bool
  * $raiz es el directorio de trabajo del servidor y de donde se lee $router: por
  * defecto la raiz de este API; tools/test_pos_scratch.php --api-root pasa la de
  * otro checkout (la linea base de origin/master).
+ *
+ * $flagsPhp son argumentos extra para el php hijo, tal cual (p. ej.
+ * ['-d', 'output_buffering=4096']). php -S no bufferiza la salida (output_buffering=0
+ * si el php.ini no dice otra cosa): con eso, un "echo ...; http_response_code(405);"
+ * deja el estado en 200 y agrega un Warning al cuerpo; con un php.ini de produccion
+ * (4096) el estado es 405. tools/express_golden.php lo usa para ver los estados que
+ * ve un cliente real.
  */
-function wa_servidor(string $nombre, string $router, int $puerto, array $env = [], string $raiz = ''): string
+function wa_servidor(string $nombre, string $router, int $puerto, array $env = [], string $raiz = '', array $flagsPhp = []): string
 {
     $puerto += (int) getenv('WA_PUERTO_OFFSET');
     $url = 'http://127.0.0.1:' . $puerto;
@@ -159,7 +166,7 @@ function wa_servidor(string $nombre, string $router, int $puerto, array $env = [
         return $url;
     }
     $log = $tmp . "wa_{$nombre}_{$puerto}.log";
-    $cmd = array_merge([PHP_BINARY], wa_php_flags(), ['-d', 'variables_order=EGPCS', '-S', "127.0.0.1:{$puerto}", $router]);
+    $cmd = array_merge([PHP_BINARY], wa_php_flags(), $flagsPhp, ['-d', 'variables_order=EGPCS', '-S', "127.0.0.1:{$puerto}", $router]);
     $entorno = array_merge(getenv(), array_map('strval', $env));
     $nulo = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
     $proc = proc_open($cmd, [0 => ['file', $nulo, 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, $raiz !== '' ? $raiz : dirname(__DIR__), $entorno);
