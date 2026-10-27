@@ -2,10 +2,11 @@
 /**
  * test_express_p0_spikes_puro.php — pruebas puras (sin red, sin base de datos,
  * sin servidor) de las herramientas de los spikes de la fase P0 de Express.
- * Hoy cubre la sonda del host (S2): quien puede entrar, como se prepara la
- * copia que se sube a mano al hosting y que la sonda avise cuando no pudo
- * escribir su latido. Las secciones de los demas spikes se agregan arriba de
- * wa_fin().
+ * Cubre la sonda del host (S2): quien puede entrar, como se prepara la copia
+ * que se sube a mano al hosting y que la sonda avise cuando no pudo escribir
+ * su latido; y los armadores de payload y las guardas del script de los spikes
+ * contra la DGII (S1, S2c, S3). Las secciones de los demas spikes se agregan
+ * arriba de wa_fin().
  *
  * Uso:
  *   php tools/test_express_p0_spikes_puro.php
@@ -76,4 +77,17 @@ require_once __DIR__ . '/express_p0/preparar_probe.php';
 $salidaInclude = (string) ob_get_clean();
 wa_chk('incluir preparar_probe.php no corre su CLI (ni imprime ni sale)', $salidaInclude === '' && function_exists('probe_preparar_cli'), $salidaInclude);
 wa_chk('probe_horas: 3 por defecto, de 1 a 24; todo lo demas null', probe_horas([]) === 3 && probe_horas(['--horas=1']) === 1 && probe_horas(['--horas=24']) === 24 && probe_horas(['--horas=0']) === null && probe_horas(['--horas=25']) === null && probe_horas(['--basura']) === null);
+
+require_once __DIR__ . '/express_p0/spike_e34_certecf.php';
+echo "\n== 2) spikes DGII (S1, S2c, S3) ==\n";
+$o = spike_payload_original(7);
+wa_chk('E31 a client_id 7, una linea libre de 1000', $o['tipo_ecf'] === '31' && $o['client_id'] === 7 && count($o['items']) === 1 && (float) $o['items'][0]['precio_unitario'] === 1000.0 && !isset($o['items'][0]['product_id']));
+$n = spike_payload_nota(7, 'E310000000001', '27-10-2026');
+wa_chk('E34 codigo 1, rnc_otro_contribuyente null, mismas lineas', $n['tipo_ecf'] === '34' && $n['items'] === $o['items'] && $n['informacion_referencia'] === ['ncf_modificado' => 'E310000000001', 'rnc_otro_contribuyente' => null, 'fecha_ncf_modificado' => '27-10-2026', 'codigo_modificacion' => '1', 'razon_modificacion' => 'Spike P0: anulacion']);
+wa_chk('sin fecha forzada no va fecha_vencimiento_secuencia', !array_key_exists('fecha_vencimiento_secuencia', $n));
+wa_chk('con fecha forzada va tal cual', spike_payload_nota(7, 'E310000000001', '27-10-2026', '31-12-2000')['fecha_vencimiento_secuencia'] === '31-12-2000');
+wa_chk('solo certecf y testecf se emiten', spike_ambiente_permitido('certecf') && spike_ambiente_permitido('testecf') && !spike_ambiente_permitido('ecf') && !spike_ambiente_permitido(null));
+wa_chk('rechazo forzado: solo RECHAZADO vale, un ACEPTADO deja el spike inconcluso', spike_rechazo_valido('RECHAZADO') && !spike_rechazo_valido('ACEPTADO') && !spike_rechazo_valido('ERROR') && !spike_rechazo_valido(null));
+$lat = json_decode(str_replace('__CLIENT_ID__', '7', (string) file_get_contents(__DIR__ . '/express_p0/e31_minimo.json')), true);
+wa_chk('payload de latencia valido tras sustituir client_id', ($lat['tipo_ecf'] ?? '') === '31' && ($lat['client_id'] ?? 0) === 7 && count($lat['items'] ?? []) === 1);
 wa_fin();
