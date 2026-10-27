@@ -3,7 +3,8 @@
  * test_express_baseline_puro.php — Piezas puras de la linea base de Express (P0):
  * el lector del resumen de una suite (baseline_resumen), la comparacion de
  * conteos exactos (baseline_comparar) y la prueba de arbol limpio de git
- * (p0_arbol_limpio). Sin base de datos, sin red, sin correr las suites.
+ * (p0_arbol_limpio), mas los rechazos del CLI que no llegan a correr ninguna
+ * suite (--capturar con --suites). Sin base de datos, sin red, sin correr las suites.
  *
  * Uso:
  *   php tools/test_express_baseline_puro.php      (sale con 1 si algo falla)
@@ -55,4 +56,20 @@ wa_chk('modificado o sin seguimiento: sucio', !p0_arbol_limpio(" M src/Permissio
 wa_chk('el prefijo ignorado no ensucia', p0_arbol_limpio("?? tools/express_golden/golden.json\n M tools/express_golden/baseline_suites.json\n", ['tools/express_golden/']));
 wa_chk('el prefijo ignorado vale tambien en la PRIMERA linea, que empieza con espacio', p0_arbol_limpio(" M tools/express_golden/baseline_suites.json\n", ['tools/express_golden/']));
 wa_chk('un renombre hacia fuera del prefijo ensucia', !p0_arbol_limpio("R  tools/express_golden/a.json -> src/a.json\n", ['tools/express_golden/']));
+
+// ---------------------------------------------------------------------------
+// 4) CLI: --capturar no admite --suites (capturar siempre escribe la base completa)
+// ---------------------------------------------------------------------------
+echo "\n== 4) CLI de express_baseline.php: rechazos que no corren ninguna suite ==\n";
+$cli = static fn (string ...$args): array => wa_correr(array_merge([PHP_BINARY], wa_php_flags(), [__DIR__ . '/express_baseline.php'], $args));
+$archivoBase = dirname(__DIR__) . '/' . BASELINE_ARCHIVO;
+$huella = static fn (): ?string => is_file($archivoBase) ? md5_file($archivoBase) : null;
+$antes = $huella();
+$r = $cli('--capturar', '--suites=test_integracion_xml');
+wa_chk('--capturar con --suites: rechazado con 2 y sin correr nada', $r['codigo'] === 2 && str_contains($r['salida'], '--suites solo sirve con --comparar') && !str_contains($r['salida'], 'total'), $r);
+$r = $cli('--capturar', '--suites');
+wa_chk('--capturar con --suites vacio tambien se rechaza', $r['codigo'] === 2 && str_contains($r['salida'], '--suites solo sirve con --comparar'), $r);
+wa_chk('el rechazo no toca la base guardada', $huella() === $antes);
+$r = $cli('--comparar', '--suites=no_existe');
+wa_chk('--comparar con una suite desconocida: 2', $r['codigo'] === 2 && str_contains($r['salida'], 'Suite desconocida'), $r);
 wa_fin();

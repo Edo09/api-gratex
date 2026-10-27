@@ -23,11 +23,12 @@
  *   corren 8.3, el local puede ser otro: una diferencia solo avisa).
  *
  * Uso (desde la raiz del API):
- *   php tools/express_baseline.php --capturar [--suites=a,b]   escribe la base (exige arbol limpio)
+ *   php tools/express_baseline.php --capturar                  escribe la base completa (exige arbol limpio)
  *   php tools/express_baseline.php --comparar [--suites=a,b]   compara contra la base
  *   Salida: 0 igual, 1 diferencias, 2 rechazado (arbol sucio al capturar, sin base, uso).
- *   --suites acepta nombres con o sin ".php"; con --capturar solo reescribe esas
- *   suites dentro de una base existente del mismo PHP.
+ *   --suites (nombres con o sin ".php") solo sirve con --comparar: capturar siempre
+ *   reescribe todas las suites, asi una base nunca queda a medias; con --capturar
+ *   se rechaza (salida 2).
  */
 
 require_once __DIR__ . '/write_ahead_test_lib.php';
@@ -269,7 +270,8 @@ function baseline_leer(string $ruta): ?array
     return $json;
 }
 
-function baseline_capturar(string $raiz, array $suites, bool $parcial): never
+/** Captura TODAS las suites de BASELINE_SUITES y escribe la base completa. */
+function baseline_capturar(string $raiz): never
 {
     $sha = p0_git(['rev-parse', 'HEAD'], $raiz);
     if ($sha === '') {
@@ -282,26 +284,11 @@ function baseline_capturar(string $raiz, array $suites, bool $parcial): never
         exit(2);
     }
     $ruta = $raiz . '/' . BASELINE_ARCHIVO;
-    $previo = null;
-    if ($parcial) {
-        $previo = baseline_leer($ruta);
-        if ($previo === null || ($previo['php'] ?? null) !== baseline_php()) {
-            fwrite(STDERR, "Rechazado: --suites con --capturar necesita una base existente capturada con este mismo PHP (" . baseline_php() . ").\n");
-            exit(2);
-        }
-    }
     echo "PHP " . PHP_VERSION . " | " . substr($sha, 0, 7) . "\n";
-    $registros = $previo['suites'] ?? [];
-    foreach ($suites as $s) {
-        $registros[$s['archivo']] = baseline_correr($s, $raiz);
-        echo baseline_fila($s['archivo'], $registros[$s['archivo']]) . "\n";
-    }
-    // En el orden de BASELINE_SUITES, no en el de captura.
     $ordenadas = [];
     foreach (BASELINE_SUITES as $s) {
-        if (isset($registros[$s['archivo']])) {
-            $ordenadas[$s['archivo']] = $registros[$s['archivo']];
-        }
+        $ordenadas[$s['archivo']] = baseline_correr($s, $raiz);
+        echo baseline_fila($s['archivo'], $ordenadas[$s['archivo']]) . "\n";
     }
     $doc = ['version' => 1, 'git_sha' => $sha, 'php' => baseline_php(), 'capturado' => date('c'), 'suites' => $ordenadas];
     if (!is_dir(dirname($ruta)) && !mkdir(dirname($ruta), 0777, true)) {
@@ -350,16 +337,20 @@ function baseline_comparar_cli(string $raiz, array $suites): never
 if (PHP_SAPI === 'cli' && realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__) {
     $raiz = dirname(__DIR__);
     $pedidas = wa_arg('suites');
+    if (wa_arg('capturar') !== null) {
+        if ($pedidas !== null) {
+            fwrite(STDERR, "Rechazado: --capturar siempre escribe la base completa; --suites solo sirve con --comparar.\n");
+            exit(2);
+        }
+        baseline_capturar($raiz);
+    }
     $suites = baseline_elegir($pedidas);
     if ($suites === null) {
         exit(2);
     }
-    if (wa_arg('capturar') !== null) {
-        baseline_capturar($raiz, $suites, $pedidas !== null && $pedidas !== '');
-    }
     if (wa_arg('comparar') !== null) {
         baseline_comparar_cli($raiz, $suites);
     }
-    echo "Uso: php tools/express_baseline.php --capturar|--comparar [--suites=a,b]\n";
+    echo "Uso: php tools/express_baseline.php --capturar | --comparar [--suites=a,b]\n";
     exit(2);
 }
