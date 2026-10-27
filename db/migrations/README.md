@@ -38,6 +38,35 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 - Cambios al **master** (`gratex_master`): `db/master_migrations/` (+ reflejar
   en `db/master_schema.sql` para instalaciones nuevas).
 
+## Números reservados (2026-10-27)
+
+Fiscalpoint Express reserva dos números antes de que existan sus archivos, para
+que ningún otro plan los tome:
+
+- **Tenant 036**: `db/migrations/036_facturas_idempotency.sql`. Agrega a
+  `facturas` las columnas `idempotency_key CHAR(36) NULL` e
+  `idempotency_hash CHAR(64) NULL`, y el índice
+  `UNIQUE KEY uk_facturas_idem (idempotency_key)`.
+- **Master 014**: `db/master_migrations/014_tenants_edicion.sql`. Agrega a
+  `tenants` las columnas `edicion ENUM('completa','express') NOT NULL DEFAULT 'completa'`,
+  `modulos_habilitados TEXT NULL`, `tipos_ecf_habilitados VARCHAR(64) NULL` y
+  `cert_vence DATE NULL`.
+- El plan ITBIS de facturas simples (todavía sin mergear) pidió master 013 (ya
+  ocupada por `013_tenants_inventario_estricto.sql`) y tenant 036, así que al
+  aterrizar toma master 015 y tenant 037.
+- Antes de crear una migración: `git fetch` y
+  `git ls-tree --name-only origin/master db/migrations/ db/master_migrations/ | tail -4`
+  (con la barra final, que lista los archivos y no los dos directorios).
+- El tenant tiene dos 014 (`014_add_factura_items_unidad_medida.sql` y
+  `014_ncf_rangos_autorizados.sql`) y ninguna 015; el master es otra serie, con
+  su propia numeración.
+- Los encabezados que dicen "hasta la 035" (este README, `db/tenant_schema.sql`,
+  `tools/verificar_migraciones_tenant.sql`) no se tocan todavía: un snapshot o un
+  verificador no debe nombrar una migración cuyo archivo no existe. Los planes de
+  Express que crean la master 014 y la tenant 036 los suben junto con el SQL;
+  mientras tanto, este bloque y `tools/test_express_reservas.php` llevan la
+  reserva.
+
 ## deprecated/
 
 Migraciones 001–011, ya consolidadas dentro de `tenant_schema.sql` (2026-06-09).
