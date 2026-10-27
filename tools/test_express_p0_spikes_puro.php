@@ -88,6 +88,17 @@ wa_chk('sin fecha forzada no va fecha_vencimiento_secuencia', !array_key_exists(
 wa_chk('con fecha forzada va tal cual', spike_payload_nota(7, 'E310000000001', '27-10-2026', '31-12-2000')['fecha_vencimiento_secuencia'] === '31-12-2000');
 wa_chk('solo certecf y testecf se emiten', spike_ambiente_permitido('certecf') && spike_ambiente_permitido('testecf') && !spike_ambiente_permitido('ecf') && !spike_ambiente_permitido(null));
 wa_chk('rechazo forzado: solo RECHAZADO vale, un ACEPTADO deja el spike inconcluso', spike_rechazo_valido('RECHAZADO') && !spike_rechazo_valido('ACEPTADO') && !spike_rechazo_valido('ERROR') && !spike_rechazo_valido(null));
+$sinAcept = spike_resultado_sin_rechazo('ACEPTADO');
+wa_chk('forzada ACEPTADA: INCONCLUSO, la DGII acepto la secuencia de 2000', $sinAcept['veredicto'] === 'inconcluso' && $sinAcept['mensaje'] === 'INCONCLUSO: la DGII acepto la secuencia de 2000');
+$sinOtros = true;
+foreach (['ERROR', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', 'NO_ENCONTRADO'] as $est) {
+    $r = spike_resultado_sin_rechazo($est);
+    $sinOtros = $sinOtros && $r['veredicto'] === 'sin_veredicto' && str_starts_with($r['mensaje'], 'SIN VEREDICTO') && str_contains($r['mensaje'], 'estado_dgii=' . $est)
+        && !str_contains($r['mensaje'], 'INCONCLUSO') && !str_contains($r['mensaje'], 'acepto la secuencia');
+}
+wa_chk('forzada ERROR, en proceso o condicional: SIN VEREDICTO con el estado observado, sin decir que la DGII acepto', $sinOtros);
+$sinNull = spike_resultado_sin_rechazo(null);
+wa_chk('forzada sin estado conocido: SIN VEREDICTO, estado desconocido', $sinNull['veredicto'] === 'sin_veredicto' && str_contains($sinNull['mensaje'], 'estado_dgii=desconocido') && !str_contains($sinNull['mensaje'], 'INCONCLUSO'));
 $lat = json_decode(str_replace('__CLIENT_ID__', '7', (string) file_get_contents(__DIR__ . '/express_p0/e31_minimo.json')), true);
 wa_chk('payload de latencia valido tras sustituir client_id', ($lat['tipo_ecf'] ?? '') === '31' && ($lat['client_id'] ?? 0) === 7 && count($lat['items'] ?? []) === 1);
 wa_fin();

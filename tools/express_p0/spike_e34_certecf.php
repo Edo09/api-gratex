@@ -22,9 +22,13 @@
  *   reintento  emite la E34 con la secuencia vencida y, solo si la DGII la
  *              RECHAZA, una E34 normal por el monto completo. Lee el saldo de la
  *              original (GET /api/facturas/modificables) antes, entre y despues.
- *              Si la DGII acepta la de 2000 el spike es INCONCLUSO (sale con 3).
- * Codigos de salida: 0 bien, 1 fallo o sin veredicto, 2 uso o ambiente no
- * permitido, 3 inconcluso.
+ *              Si la de 2000 no queda RECHAZADA no hay segunda E34 y sale con 3:
+ *              con ACEPTADO imprime INCONCLUSO (la DGII acepto la secuencia de
+ *              2000); con cualquier otro estado (ERROR, ACEPTADO_CONDICIONAL, en
+ *              proceso tras los 10 min) imprime SIN VEREDICTO y el estado_dgii
+ *              observado, que tambien va en estado_dgii_forzada de la linea resultado.
+ * Codigos de salida: 0 bien, 1 fallo o sin veredicto de una emision, 2 uso o
+ * ambiente no permitido, 3 la nota de 2000 no quedo RECHAZADA (el spike no sigue).
  *
  * Incluirlo solo define funciones y constantes (las prueba
  * tools/test_express_p0_spikes_puro.php): el CLI corre unicamente cuando este es
@@ -44,6 +48,7 @@ const SPIKE_ESPERA_INTERVALO_S = 15;
 const SPIKE_ESPERA_MAXIMA_S = 600;
 const SPIKE_VENCIMIENTO_FORZADO = '31-12-2000';
 const SPIKE_INCONCLUSO = 'INCONCLUSO: la DGII acepto la secuencia de 2000';
+const SPIKE_SIN_VEREDICTO = 'SIN VEREDICTO';
 const SPIKE_USO = 'Uso: EXPRESS_P0_TOKEN=<token> php -d extension=curl tools/express_p0/spike_e34_certecf.php --api=<base que termina en /api> '
     . '--client-id=<id> --fase=original|nota|reintento [--original=<e-NCF>] [--fecha-original=DD-MM-YYYY] [--forzar-rechazo] [--seco]';
 
@@ -106,6 +111,28 @@ function spike_ambiente_permitido(?string $ambiente): bool
 function spike_rechazo_valido(?string $estadoDgii): bool
 {
     return $estadoDgii === 'RECHAZADO';
+}
+
+/**
+ * Que se imprime (y que 'veredicto' lleva la linea resultado) cuando la E34 de
+ * secuencia vencida NO quedo RECHAZADA. Solo un ACEPTADO es "la DGII acepto la
+ * secuencia de 2000" (INCONCLUSO). Cualquier otro estado (ERROR, ACEPTADO_CONDICIONAL,
+ * EN_PROCESO o ENVIADO tras los 10 min, null) es SIN VEREDICTO y dice el
+ * estado_dgii observado: no se puede afirmar que la DGII aceptara nada, y con ERROR
+ * la nota ni siquiera cuenta en el saldo de la original (ESTADOS_NOTA_VIGENTE).
+ *
+ * @return array{veredicto:string,mensaje:string}
+ */
+function spike_resultado_sin_rechazo(?string $estadoDgii): array
+{
+    if ($estadoDgii === 'ACEPTADO') {
+        return ['veredicto' => 'inconcluso', 'mensaje' => SPIKE_INCONCLUSO];
+    }
+    return [
+        'veredicto' => 'sin_veredicto',
+        'mensaje' => SPIKE_SIN_VEREDICTO . ': la nota de la secuencia de 2000 termino con estado_dgii=' . ($estadoDgii ?? 'desconocido')
+            . ', no RECHAZADO; no se manda la segunda E34. Mira estado_dgii_forzada en la linea resultado.',
+    ];
 }
 
 function spike_estado_final(?string $estado): bool
@@ -346,8 +373,9 @@ function spike_fase_reintento(array $ctx, array $o): int
     $estadoForzada = spike_esperar_veredicto($ctx, $forzada['factura_id'], $forzada['estado']);
     spike_saldo($ctx, 'entre', $o['original']);
     if (!spike_rechazo_valido($estadoForzada)) {
-        spike_linea(['evento' => 'resultado', 'fase' => 'reintento', 'e_ncf_forzada' => $forzada['e_ncf'], 'estado_dgii_forzada' => $estadoForzada, 'veredicto' => 'inconcluso']);
-        echo SPIKE_INCONCLUSO . "\n";
+        $sin = spike_resultado_sin_rechazo($estadoForzada);
+        spike_linea(['evento' => 'resultado', 'fase' => 'reintento', 'e_ncf_forzada' => $forzada['e_ncf'], 'estado_dgii_forzada' => $estadoForzada, 'veredicto' => $sin['veredicto']]);
+        echo $sin['mensaje'] . "\n";
         return 3;
     }
     $normal = spike_emitir($ctx, 'nota_normal', spike_payload_nota($ctx['client_id'], $o['original'], $fecha));
