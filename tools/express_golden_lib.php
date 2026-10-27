@@ -28,11 +28,19 @@ const GOLDEN_VERSION = 1;
 /**
  * Sondas de escritura de la matriz de la compuerta (solo modo enforce). Cuerpo
  * vacio ('' o '{}'): ninguna lleva datos ni un id existente, asi que cada una se
- * rechaza (405 o error de validacion) antes de tocar una fila.
- *   - facturas: el controlador responde 405 a todos (facturaController.php:157-171).
- *   - clients, products y users: sin id, error de validacion antes de tocar nada
- *     (clientController.php:173,225; productController.php:316; userController.php:139).
- *   - ncf: "Factura ID is required" (ncfController.php:159-166).
+ * rechaza (405 o error de validacion) antes de tocar una fila. Lineas de
+ * src/controllers/ revisadas contra el codigo:
+ *   - facturas: PUT y DELETE responden 405 a todos (facturaController.php:157-171).
+ *     El POST con {} no es 405: llega a emitirFacturaEcf (145-154, 175-182) y se
+ *     rechaza con 422 "Elige el tipo de comprobante." (194-203) antes de emitir.
+ *   - clients: POST sin client_name (clientController.php:103,123-124); PUT y
+ *     DELETE sin id (173,176; 225,228).
+ *   - products: POST sin nombre, por validateProduct (productController.php:256,
+ *     261-266, 116-118); PUT y DELETE sin id (283,290-291; 316,318-319).
+ *   - users: POST sin datos (userController.php:75,82-83); PUT y DELETE con
+ *     id <= 0 (108,110-111; 139,141-142). Todos 422.
+ *   - ncf: POST a /api/ncf/rangos con campos vacios, 422 (ncfController.php:89,
+ *     93,104-106); PUT legacy a /api/ncf, "Factura ID is required" (159-166).
  */
 const GOLDEN_ESCRITURAS = [
     ['metodo' => 'POST', 'ruta' => '/api/facturas', 'cuerpo' => '{}', 'roles' => ['user', 'anonimo']],
