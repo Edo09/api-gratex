@@ -10,7 +10,9 @@
  * Por cada modo (sombra = PERMISSIONS_ENFORCE=false en el 8399, enforce = true en el
  * 8397; el simulador de la DGII, tools/mock_dgii.php, en el 8398; todos mas
  * WA_PUERTO_OFFSET) la herramienta:
- *   1. deja el tenant como recien sembrado (wa_limpiar) y corre el flujo: login de
+ *   1. deja el tenant en un estado fijo (golden_normalizar_tenant: wa_limpiar, vacia
+ *      clients, products, ncf_sequences y emisor_config y los vuelve a sembrar con
+ *      pos_scratch_preparar) y corre el flujo: login de
  *      admin y user, me, traspaso al POS y su canje, emision E31 aceptada y rechazada,
  *      detalle del rechazo, reenvio, lista, stats, avisos, estado, catalogos por
  *      defecto, usuarios, rangos de NCF y signout (ids de paso: pasos[].id);
@@ -28,6 +30,15 @@
  *   {version, meta:{git_sha, php, capturado}, rutas:[claves de routes],
  *    modos:{sombra:{pasos:[golden_paso...], gate:[{metodo, ruta, rol, http}]}, enforce:{...}}}
  * Solo lleva estados y formas: ningun token, clave ni valor de la base.
+ *
+ * Estado fijo: la forma de una lista es la union de las formas de sus filas, y las otras
+ * suites de las bases scratch dejan filas (clientes sin direccion, productos con categoria,
+ * rangos sin vencimiento) que cambian esa union. Por eso cada flujo parte de un tenant A con
+ * EXACTAMENTE la siembra de wa_sembrar y de pos_scratch_preparar (un cliente, un producto,
+ * rangos certecf E31-E34 y testecf E31/E32, el emisor id=1) y nada mas: la captura no
+ * depende de lo que otra suite haya dejado, ni de si corrio antes. Lo que no se normaliza,
+ * a proposito: los usuarios y roles del master (ninguna columna que el API devuelve de
+ * ellos admite NULL, asi que la forma de /api/users no cambia con las filas).
  *
  * Las dos bases scratch (usuario limitado a *_scratch) son las que devuelve
  * pos_scratch_preparar(); la herramienta no toca ninguna otra. Antes de nada se
@@ -145,10 +156,9 @@ function golden_flujo(array $c, string $modo): array
 {
     $api = $c['api'][$modo];
     wa_mock_modo($c['mock'], 'acepta');
-    $pdo = golden_pdo($c);
-    wa_limpiar($pdo);
+    golden_normalizar_tenant($c);
     wa_mock_log($c['mock'], true);
-    $clienteId = wa_sembrar($pdo)['client_id'];
+    $clienteId = wa_sembrar(golden_pdo($c))['client_id'];
 
     $pasos = [];
     // $ruta es la plantilla que se guarda ({id} en vez del id: cambia en cada corrida);
@@ -224,6 +234,39 @@ function golden_flujo(array $c, string $modo): array
 function golden_pdo(array $c): PDO
 {
     return wa_pdo($c['dbA']);
+}
+
+/**
+ * Deja el tenant A en el estado fijo del que parte cada flujo (solo bases scratch:
+ * wa_pdo y wa_limpiar exigen la marca zz_write_ahead_scratch, y pos_scratch_preparar la
+ * guarda de pos_scratch_exigir):
+ *   1. wa_limpiar: sin facturas, items, movimientos ni auditoria; contadores al inicio;
+ *   2. vacia GOLDEN_TABLAS_NORMALIZADAS (clients, products, ncf_sequences, emisor_config) en
+ *      una transaccion: lo que dejaron otras suites, incluidas las filas que trae el esquema;
+ *   3. pos_scratch_preparar() (idempotente, unos segundos): vuelve a sembrar el tenant A con
+ *      wa_sembrar y los rangos testecf E31/E32 que el ambiente testecf del tenant necesita
+ *      para emitir; el golden queda definido por esa siembra y no repite su SQL.
+ * Los ids de las filas sembradas cambian en cada corrida; no importan (las formas no los miran).
+ * La transaccion termina antes de preparar(): este abre sus propias conexiones y esperaria
+ * los candados de las filas borradas.
+ */
+function golden_normalizar_tenant(array $c): void
+{
+    $pdo = golden_pdo($c);
+    wa_limpiar($pdo);
+    $pdo->beginTransaction();
+    try {
+        foreach (GOLDEN_TABLAS_NORMALIZADAS as $tabla) {
+            $pdo->exec("DELETE FROM {$tabla}");
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    pos_scratch_preparar();
 }
 
 /** @return array<string,int> filas de las tablas vigiladas del tenant A */

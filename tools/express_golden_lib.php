@@ -12,6 +12,8 @@
  *     de la compuerta; las escrituras son sondas con cuerpo vacio que se
  *     rechazan antes de tocar una fila.
  *   - golden_aviso_php: aviso cuando la base se capturo con otra version de PHP.
+ *   - GOLDEN_TABLAS_NORMALIZADAS: las tablas del tenant que la captura deja como recien
+ *     sembradas antes de cada flujo (la herramienta, no esta biblioteca, las toca).
  *
  * Incluirlo solo define constantes y funciones: no corre nada, no abre
  * conexiones, no arranca servidores. PHP 8.3, sin dependencias.
@@ -24,6 +26,16 @@
 
 /** Version del formato de golden.json. */
 const GOLDEN_VERSION = 1;
+
+/**
+ * Tablas del tenant A que la captura vacia antes de cada flujo y vuelve a sembrar
+ * (express_golden.php, golden_normalizar_tenant). Son las que alimentan las respuestas
+ * de lista y de configuracion del flujo (clientes_lista, productos_lista, stats,
+ * rangos_get, emisor): la forma de una lista es la union de sus filas, asi que una fila
+ * que dejo otra suite con otra nulidad cambiaria la captura. Solo estas cuatro: nunca
+ * usuarios, tokens ni tablas del master.
+ */
+const GOLDEN_TABLAS_NORMALIZADAS = ['clients', 'products', 'ncf_sequences', 'emisor_config'];
 
 /**
  * Sondas de escritura de la matriz de la compuerta (solo modo enforce). Cuerpo

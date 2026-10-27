@@ -56,4 +56,28 @@ wa_chk('escrituras: user y anonimo prueban POST a rangos y el PUT legacy de ncf'
 echo "\n== 4) golden_aviso_php ==\n";
 wa_chk('mismo PHP: sin aviso', golden_aviso_php('8.5', '8.5') === null);
 wa_chk('otro PHP: aviso con las dos versiones (Review Focus 2)', golden_aviso_php('8.5', '8.3') === 'PHP 8.5 en la base, 8.3 ahora');
+echo "\n== 5) estado fijo del tenant (la captura no depende de lo que dejo otra suite) ==\n";
+// La normalizacion toca una base remota y no se puede correr aqui: se fija su contrato.
+wa_chk('normalizadas: clients, products, ncf_sequences y emisor_config, y nada mas',
+    GOLDEN_TABLAS_NORMALIZADAS === ['clients', 'products', 'ncf_sequences', 'emisor_config'], GOLDEN_TABLAS_NORMALIZADAS);
+wa_chk('normalizadas: nunca el master ni los usuarios, tokens, facturas o la auditoria',
+    array_intersect(GOLDEN_TABLAS_NORMALIZADAS, ['users', 'api_tokens', 'tenants', 'roles', 'role_permissions', 'facturas', 'audit_logs']) === []);
+$fuente = (string) file_get_contents(__DIR__ . '/express_golden.php');
+$cuerpo = static function (string $funcion) use ($fuente): string {
+    return preg_match('/^function ' . preg_quote($funcion, '/') . '\(.*?^\}\r?$/ms', $fuente, $m) === 1 ? $m[0] : '';
+};
+$flujo = $cuerpo('golden_flujo');
+$posNormalizar = strpos($flujo, 'golden_normalizar_tenant(');
+$posPrimerPaso = strpos($flujo, "\$paso('login_admin'");
+wa_chk('golden_flujo normaliza el tenant antes de su primer paso',
+    $posNormalizar !== false && $posPrimerPaso !== false && $posNormalizar < $posPrimerPaso);
+$norm = $cuerpo('golden_normalizar_tenant');
+$pos = [];
+foreach (['wa_limpiar(', 'DELETE FROM', '->commit()', 'pos_scratch_preparar('] as $aguja) {
+    $pos[$aguja] = strpos($norm, $aguja);
+}
+wa_chk('normalizar: limpia, vacia las tablas, confirma y SOLO despues vuelve a sembrar (preparar abre otras conexiones)',
+    !in_array(false, $pos, true) && array_values($pos) === array_values(array_unique($pos)) && $pos === (static function (array $p): array { asort($p); return $p; })($pos), $pos);
+wa_chk('normalizar: borra solo las tablas de la constante, sin nombres de tabla sueltos',
+    str_contains($norm, 'GOLDEN_TABLAS_NORMALIZADAS') && preg_match_all('/DELETE FROM (?!\{\$tabla\})/', $norm) === 0);
 wa_fin();
