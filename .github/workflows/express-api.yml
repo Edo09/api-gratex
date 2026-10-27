@@ -1,0 +1,33 @@
+name: express-api
+# CI minimo de la API (2026-10-27): antes no habia ninguno. Solo corre lo que no necesita base ni red.
+# Las suites con MySQL scratch (test_*_scratch.php, express_golden.php) NO corren aqui: se corren a mano.
+on:
+  pull_request:
+  push:
+    branches: [master, 'feat/express-**']
+permissions:
+  contents: read
+jobs:
+  php83:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: mbstring, dom, simplexml, xml, curl, openssl, pdo_sqlite, pdo_mysql, gd, fileinfo
+          coverage: none
+      - name: php -l (sintaxis 8.3) en src, tools, config, public
+        run: |
+          find index.php check_schema.php src tools config public -name '*.php' \
+            -not -path 'tools/produccion-lectura/*' -not -path 'tools/xml_integracion/*' -print0 \
+            | xargs -0 -n1 php -l > /tmp/lint.txt 2>&1 \
+            || { grep -v '^No syntax errors detected' /tmp/lint.txt; exit 1; }
+      - name: Suites existentes sin base (tools/express_golden/baseline_suites.json)
+        run: php tools/express_baseline.php --comparar
+      - name: Suites puras de Express (los planes 02 a 05 agregan las suyas aqui)
+        run: |
+          for f in tools/test_express_baseline_puro.php tools/test_express_reservas.php tools/test_express_golden_puro.php tools/test_express_p0_spikes_puro.php; do
+            php "$f" || exit 1
+          done
