@@ -1,0 +1,113 @@
+{
+    "version": 1,
+    "git_sha": "f336b12c3cc2feaf679d369e0a3a29e77c983d42",
+    "php": "8.5",
+    "capturado": "2026-10-27T16:14:59+00:00",
+    "suites": {
+        "test_write_ahead_puro.php": {
+            "total": 336,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": true,
+            "estado": "OK"
+        },
+        "test_integracion_alcance.php": {
+            "total": 28,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": true,
+            "estado": "OK"
+        },
+        "test_pos_scratch_puro.php": {
+            "total": 19,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": true,
+            "estado": "OK"
+        },
+        "test_consultar_ecf_dgii.php": {
+            "total": 73,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_ecf_montos_descuento.php": {
+            "total": 33,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_ecf_tipo_ingresos.php": {
+            "total": 37,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_integracion_xml.php": {
+            "total": 6,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_notas_vinculadas.php": {
+            "total": 62,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_precios_itbis_incluido.php": {
+            "total": 45,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_send_fase2_espera.php": {
+            "total": 60,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_tenant_mail.php": {
+            "total": 35,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_conduces.php": {
+            "total": 413,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_cotizacion_ferreteria.php": {
+            "total": 474,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_inventario_stock.php": {
+            "total": 424,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_grupo_multiempresa.php": {
+            "total": 10,
+            "fallos": 0,
+            "saltadas": 2,
+            "pinned": false,
+            "estado": "OK"
+        }
+    }
+}
