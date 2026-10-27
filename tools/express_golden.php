@@ -145,9 +145,10 @@ function golden_flujo(array $c, string $modo): array
 {
     $api = $c['api'][$modo];
     wa_mock_modo($c['mock'], 'acepta');
-    wa_limpiar($c['pdo']);
+    $pdo = golden_pdo($c);
+    wa_limpiar($pdo);
     wa_mock_log($c['mock'], true);
-    $clienteId = wa_sembrar($c['pdo'])['client_id'];
+    $clienteId = wa_sembrar($pdo)['client_id'];
 
     $pasos = [];
     // $ruta es la plantilla que se guarda ({id} en vez del id: cambia en cada corrida);
@@ -216,9 +217,19 @@ function golden_flujo(array $c, string $modo): array
     return $pasos;
 }
 
-/** @return array<string,int> filas de las tablas vigiladas del tenant A */
-function golden_conteos(PDO $pdo): array
+/**
+ * Conexion NUEVA a la base del tenant A. No se guarda una abierta: el flujo y la matriz
+ * tardan minutos con la conexion ociosa y el MySQL remoto la cierra (errno 2006).
+ */
+function golden_pdo(array $c): PDO
 {
+    return wa_pdo($c['dbA']);
+}
+
+/** @return array<string,int> filas de las tablas vigiladas del tenant A */
+function golden_conteos(array $c): array
+{
+    $pdo = golden_pdo($c);
     $n = [];
     foreach (GOLDEN_TABLAS_VIGILADAS as $tabla) {
         $n[$tabla] = (int) $pdo->query("SELECT COUNT(*) FROM {$tabla}")->fetchColumn();
@@ -255,12 +266,12 @@ function golden_compuerta(array $c, string $modo, array $claves): array
     }
     $lecturas = count($filas);
     if ($modo === 'enforce') {
-        $antes = golden_conteos($c['pdo']);
+        $antes = golden_conteos($c);
         foreach (golden_matriz_escrituras() as $f) {
             $r = golden_pedir($c, $f['metodo'], $api . $f['ruta'], $f['cuerpo'] === '' ? null : $f['cuerpo'], $tokens[$f['rol']]);
             $filas[] = ['metodo' => $f['metodo'], 'ruta' => $f['ruta'], 'rol' => $f['rol'], 'http' => $r['status']];
         }
-        $despues = golden_conteos($c['pdo']);
+        $despues = golden_conteos($c);
         foreach ($antes as $tabla => $n) {
             if ($despues[$tabla] !== $n) {
                 golden_abortar($c, "una sonda de escritura cambio el conteo de {$tabla} ({$n} -> {$despues[$tabla]}): una sonda debe rechazarse antes de tocar una fila");
@@ -342,7 +353,7 @@ function golden_contexto(string $raiz): array
     return [
         'api' => $api,
         'mock' => $mock,
-        'pdo' => wa_pdo($info['dbA']),
+        'dbA' => $info['dbA'],
         'clave' => $secretos['clave_usuarios'],
         'ocultos' => [$cred['pass'], $cred['user'], $cred['host'], $secretos['clave_usuarios'],
             $secretos['clave_maestra'], $secretos['pepper'], $cert['password']],
