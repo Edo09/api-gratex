@@ -1,0 +1,2671 @@
+{
+    "version": 1,
+    "meta": {
+        "git_sha": "56874251d4465d3f01791cd79ed4299ee9cd1339",
+        "php": "8.5",
+        "capturado": "2026-10-27T18:39:55+00:00"
+    },
+    "rutas": [
+        "auth",
+        "landing",
+        "clients",
+        "products",
+        "proveedores",
+        "unidades-medida",
+        "tipos-bienes-servicios",
+        "provincias-municipios",
+        "rnc",
+        "categories",
+        "warehouses",
+        "inventario",
+        "cotizaciones",
+        "conduces",
+        "facturas",
+        "facturas-simples",
+        "gastos",
+        "ncf",
+        "facturacion-electronica",
+        "aprobaciones-comerciales",
+        "reportes",
+        "emisor",
+        "branding",
+        "users",
+        "roles",
+        "audit-logs",
+        "ecf/autenticacion",
+        "ecf",
+        "integracion",
+        "pos",
+        "pos-admin"
+    ],
+    "modos": {
+        "sombra": {
+            "pasos": [
+                {
+                    "id": "login_admin",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/login",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "login_user",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/login",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "me_admin",
+                    "metodo": "GET",
+                    "ruta": "/api/auth/me",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "handoff",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/pos-handoff",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "code": "string",
+                            "expira_en": "number",
+                            "url": "string"
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "canje",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/pos-handoff/canje",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "emitir_e31",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "emitir_rechazada",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "http": 422,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "error": "string",
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "detalle_rechazada",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas?id={id}",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "NCF": "null",
+                                "ambiente_dgii": "string",
+                                "client_id": "number",
+                                "client_name": "string",
+                                "cliente": {
+                                    "client_name": "string",
+                                    "company_name": "string",
+                                    "descuento": "string",
+                                    "direccion": "string",
+                                    "email": "string",
+                                    "id": "number",
+                                    "municipio": "null",
+                                    "permitir_credito": "number",
+                                    "phone_number": "string",
+                                    "provincia": "null",
+                                    "razon_social": "string",
+                                    "rnc": "string"
+                                },
+                                "codigo_modificacion": "null",
+                                "codigo_seguridad": "string",
+                                "company_name": "string",
+                                "date": "string",
+                                "description": "string",
+                                "dias_credito": "null",
+                                "e_ncf": "string",
+                                "emisor": {
+                                    "actividad_economica": "null",
+                                    "correo": "string",
+                                    "direccion": "string",
+                                    "fecha_vencimiento_secuencia": "string",
+                                    "id": "number",
+                                    "municipio": "null",
+                                    "nombre_comercial": "string",
+                                    "provincia": "null",
+                                    "razon_social": "string",
+                                    "rnc": "string",
+                                    "sucursal": "null",
+                                    "telefono": "string",
+                                    "website": "null"
+                                },
+                                "envio_pendiente": "number",
+                                "estado_dgii": "string",
+                                "fecha_emision_dgii": "string",
+                                "fecha_ncf_modificado": "null",
+                                "id": "number",
+                                "items": {
+                                    "__lista__": {
+                                        "amount": "string",
+                                        "description": "string",
+                                        "descuento_monto": "string",
+                                        "id": "number",
+                                        "indicador_bien_servicio": "number",
+                                        "indicador_facturacion": "number",
+                                        "itbis_amount": "string",
+                                        "product_id": "null",
+                                        "quantity": "string",
+                                        "subtotal": "string",
+                                        "unidad_medida": "string"
+                                    }
+                                },
+                                "modifica": "null",
+                                "monto_exento": "string",
+                                "monto_gravado": "string",
+                                "ncf_modificado": "null",
+                                "no_factura": "string",
+                                "notas": {
+                                    "__lista__": null
+                                },
+                                "pos_empleado_id": "null",
+                                "pos_idempotency_key": "null",
+                                "razon_modificacion": "null",
+                                "respuesta_dgii": "string",
+                                "rfce_estado": "null",
+                                "rfce_respuesta": "null",
+                                "rfce_track_id": "null",
+                                "rfce_xml": "null",
+                                "secuencia_utilizada": "number",
+                                "tipo_ecf": "string",
+                                "tipo_pago": "number",
+                                "total": "string",
+                                "total_itbis": "string",
+                                "track_id": "string",
+                                "turno_id": "null",
+                                "user_id": "number",
+                                "xml_firmado": "string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "reenviar",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas/{id}/reenviar",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "reenvio_de": "number",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "lista",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas?pageSize=15",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "NCF": "null",
+                                "ambiente_dgii": "string",
+                                "client_id": "number",
+                                "client_name": "string",
+                                "codigo_modificacion": "null",
+                                "codigo_seguridad": "string",
+                                "company_name": "string",
+                                "date": "string",
+                                "description": "string",
+                                "dias_credito": "null",
+                                "e_ncf": "null|string",
+                                "envio_pendiente": "number",
+                                "estado_dgii": "string",
+                                "fecha_emision_dgii": "string",
+                                "fecha_ncf_modificado": "null",
+                                "id": "number",
+                                "modifica": "null",
+                                "monto_exento": "string",
+                                "monto_gravado": "string",
+                                "ncf_modificado": "null",
+                                "no_factura": "string",
+                                "notas": {
+                                    "__lista__": null
+                                },
+                                "pos_empleado_id": "null",
+                                "pos_idempotency_key": "null",
+                                "razon_modificacion": "null",
+                                "respuesta_dgii": "string",
+                                "rfce_estado": "null",
+                                "rfce_respuesta": "null",
+                                "rfce_track_id": "null",
+                                "rfce_xml": "null",
+                                "secuencia_utilizada": "number",
+                                "tipo_ecf": "string",
+                                "tipo_pago": "number",
+                                "total": "string",
+                                "total_itbis": "string",
+                                "track_id": "string",
+                                "turno_id": "null",
+                                "user_id": "number",
+                                "xml_firmado": "string"
+                            }
+                        },
+                        "pagination": {
+                            "page": "number",
+                            "pageSize": "number",
+                            "total": "number",
+                            "totalPages": "number"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "stats",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/stats",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente_activo": "string",
+                            "por_estado": {
+                                "__lista__": {
+                                    "estado": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "por_mes": {
+                                "__lista__": {
+                                    "mes": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "por_tipo": {
+                                "__lista__": {
+                                    "aceptados": "number",
+                                    "enviados": "number",
+                                    "monto_total": "number",
+                                    "nombre": "string",
+                                    "rechazados": "number",
+                                    "rfce": "number",
+                                    "tipo_ecf": "string",
+                                    "total": "number",
+                                    "ultimo_emitido": "string"
+                                }
+                            },
+                            "resumen": {
+                                "monto_neto": "string",
+                                "monto_total": "number",
+                                "primer_ecf": "string",
+                                "tipos_distintos": "number",
+                                "total_ecf": "number",
+                                "ultimo_ecf": "string"
+                            },
+                            "secuencias": {
+                                "__lista__": {
+                                    "nombre": "string",
+                                    "restantes": "null",
+                                    "secuencia_actual": "number",
+                                    "total_emitidos": "number",
+                                    "type": "string",
+                                    "vencimiento": "null|string"
+                                }
+                            },
+                            "ventas_por_dia": {
+                                "__lista__": {
+                                    "dia": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "ventas_por_mes": {
+                                "__lista__": {
+                                    "mes": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "avisos",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/avisos",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "certificado_fallo": {
+                                "ventas_hoy": "number"
+                            },
+                            "secuencias": {
+                                "__lista__": null
+                            },
+                            "sin_rango": {
+                                "ventas": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "estado",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/{id}/estado",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "consulta": {
+                                "codigo": "string",
+                                "encf": "string",
+                                "estado": "string",
+                                "fechaRecepcion": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "rnc": "string",
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "secuencia_utilizada": "bool",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "clientes_lista",
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "client_name": "string",
+                                "company_name": "string",
+                                "descuento": "string",
+                                "direccion": "null|string",
+                                "email": "string",
+                                "id": "number",
+                                "municipio": "null|string",
+                                "permitir_credito": "number",
+                                "phone_number": "string",
+                                "provincia": "null|string",
+                                "razon_social": "string",
+                                "rnc": "null|string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "productos_lista",
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "activo": "number",
+                                "almacen_nombre": "string",
+                                "categoria_nombre": "null|string",
+                                "category_id": "null|number",
+                                "costo": "string",
+                                "created_at": "string",
+                                "descripcion": "null",
+                                "id": "number",
+                                "imagen_path": "null",
+                                "indicador_bien_servicio": "number",
+                                "indicador_facturacion": "number",
+                                "nombre": "string",
+                                "precio": "string",
+                                "precio_2": "null",
+                                "precio_3": "null",
+                                "precio_4": "null",
+                                "sku": "string",
+                                "stock": "null|number",
+                                "stock_minimo": "null|number",
+                                "unidad_medida": "string",
+                                "updated_at": "string",
+                                "warehouse_id": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "modificables",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/modificables?client_id={client_id}",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "client_id": "number",
+                                "e_ncf": "string",
+                                "estado_dgii": "string",
+                                "fecha_emision": "string",
+                                "id": "number",
+                                "notas_credito": "number",
+                                "notas_debito": "number",
+                                "saldo": "number",
+                                "tipo_ecf": "string",
+                                "total": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "emisor",
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "actividad_economica": "null",
+                            "ambiente": "string",
+                            "correo": "string",
+                            "direccion": "string",
+                            "fecha_vencimiento_secuencia": "string",
+                            "fuente": "string",
+                            "municipio": "null",
+                            "nombre_comercial": "string",
+                            "provincia": "null",
+                            "razon_social": "string",
+                            "rnc": "string",
+                            "sucursal": "null",
+                            "telefono": "string",
+                            "website": "null"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "usuarios",
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "created_at": "string",
+                                "email": "string",
+                                "id": "number",
+                                "last_name": "string",
+                                "name": "string",
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "rangos_get",
+                    "metodo": "GET",
+                    "ruta": "/api/ncf/rangos",
+                    "http": 200,
+                    "forma": {
+                        "ambiente": "string",
+                        "data": {
+                            "__lista__": {
+                                "ambiente": "string",
+                                "created_at": "string",
+                                "current_value": "number",
+                                "description": "string",
+                                "estado": "string",
+                                "fecha_vencimiento": "null|string",
+                                "id": "number",
+                                "no_autorizacion": "null",
+                                "no_solicitud": "null",
+                                "numero_desde": "number",
+                                "numero_hasta": "null",
+                                "prefix": "string",
+                                "restantes": "null",
+                                "type": "string",
+                                "updated_at": "string",
+                                "usados": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "rangos_post_invalido",
+                    "metodo": "POST",
+                    "ruta": "/api/ncf/rangos",
+                    "http": 422,
+                    "forma": {
+                        "error": "string",
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "signout",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/signout",
+                    "http": 200,
+                    "forma": {
+                        "message": "string",
+                        "success": "bool"
+                    }
+                }
+            ],
+            "gate": [
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "admin",
+                    "http": 422
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "user",
+                    "http": 422
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "admin",
+                    "http": 405
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "user",
+                    "http": 405
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "anonimo",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "admin",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "user",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "anonimo",
+                    "http": 401
+                }
+            ]
+        },
+        "enforce": {
+            "pasos": [
+                {
+                    "id": "login_admin",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/login",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "login_user",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/login",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "me_admin",
+                    "metodo": "GET",
+                    "ruta": "/api/auth/me",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "handoff",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/pos-handoff",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "code": "string",
+                            "expira_en": "number",
+                            "url": "string"
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "canje",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/pos-handoff/canje",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "token": "string",
+                            "user": {
+                                "email": "string",
+                                "id": "number",
+                                "name": "string",
+                                "permissions": {
+                                    "__lista__": "string"
+                                },
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "success": "bool"
+                    }
+                },
+                {
+                    "id": "emitir_e31",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "emitir_rechazada",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "http": 422,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "error": "string",
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "detalle_rechazada",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas?id={id}",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "NCF": "null",
+                                "ambiente_dgii": "string",
+                                "client_id": "number",
+                                "client_name": "string",
+                                "cliente": {
+                                    "client_name": "string",
+                                    "company_name": "string",
+                                    "descuento": "string",
+                                    "direccion": "string",
+                                    "email": "string",
+                                    "id": "number",
+                                    "municipio": "null",
+                                    "permitir_credito": "number",
+                                    "phone_number": "string",
+                                    "provincia": "null",
+                                    "razon_social": "string",
+                                    "rnc": "string"
+                                },
+                                "codigo_modificacion": "null",
+                                "codigo_seguridad": "string",
+                                "company_name": "string",
+                                "date": "string",
+                                "description": "string",
+                                "dias_credito": "null",
+                                "e_ncf": "string",
+                                "emisor": {
+                                    "actividad_economica": "null",
+                                    "correo": "string",
+                                    "direccion": "string",
+                                    "fecha_vencimiento_secuencia": "string",
+                                    "id": "number",
+                                    "municipio": "null",
+                                    "nombre_comercial": "string",
+                                    "provincia": "null",
+                                    "razon_social": "string",
+                                    "rnc": "string",
+                                    "sucursal": "null",
+                                    "telefono": "string",
+                                    "website": "null"
+                                },
+                                "envio_pendiente": "number",
+                                "estado_dgii": "string",
+                                "fecha_emision_dgii": "string",
+                                "fecha_ncf_modificado": "null",
+                                "id": "number",
+                                "items": {
+                                    "__lista__": {
+                                        "amount": "string",
+                                        "description": "string",
+                                        "descuento_monto": "string",
+                                        "id": "number",
+                                        "indicador_bien_servicio": "number",
+                                        "indicador_facturacion": "number",
+                                        "itbis_amount": "string",
+                                        "product_id": "null",
+                                        "quantity": "string",
+                                        "subtotal": "string",
+                                        "unidad_medida": "string"
+                                    }
+                                },
+                                "modifica": "null",
+                                "monto_exento": "string",
+                                "monto_gravado": "string",
+                                "ncf_modificado": "null",
+                                "no_factura": "string",
+                                "notas": {
+                                    "__lista__": null
+                                },
+                                "pos_empleado_id": "null",
+                                "pos_idempotency_key": "null",
+                                "razon_modificacion": "null",
+                                "respuesta_dgii": "string",
+                                "rfce_estado": "null",
+                                "rfce_respuesta": "null",
+                                "rfce_track_id": "null",
+                                "rfce_xml": "null",
+                                "secuencia_utilizada": "number",
+                                "tipo_ecf": "string",
+                                "tipo_pago": "number",
+                                "total": "string",
+                                "total_itbis": "string",
+                                "track_id": "string",
+                                "turno_id": "null",
+                                "user_id": "number",
+                                "xml_firmado": "string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "reenviar",
+                    "metodo": "POST",
+                    "ruta": "/api/facturas/{id}/reenviar",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente": "string",
+                            "codigo_seguridad": "string",
+                            "dgii_response": {
+                                "codigo": "number",
+                                "encf": "string",
+                                "estado": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "fecha_emision_dgii": "string",
+                            "reenvio_de": "number",
+                            "tipo_ecf": "string",
+                            "total": "number",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "lista",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas?pageSize=15",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "NCF": "null",
+                                "ambiente_dgii": "string",
+                                "client_id": "number",
+                                "client_name": "string",
+                                "codigo_modificacion": "null",
+                                "codigo_seguridad": "string",
+                                "company_name": "string",
+                                "date": "string",
+                                "description": "string",
+                                "dias_credito": "null",
+                                "e_ncf": "null|string",
+                                "envio_pendiente": "number",
+                                "estado_dgii": "string",
+                                "fecha_emision_dgii": "string",
+                                "fecha_ncf_modificado": "null",
+                                "id": "number",
+                                "modifica": "null",
+                                "monto_exento": "string",
+                                "monto_gravado": "string",
+                                "ncf_modificado": "null",
+                                "no_factura": "string",
+                                "notas": {
+                                    "__lista__": null
+                                },
+                                "pos_empleado_id": "null",
+                                "pos_idempotency_key": "null",
+                                "razon_modificacion": "null",
+                                "respuesta_dgii": "string",
+                                "rfce_estado": "null",
+                                "rfce_respuesta": "null",
+                                "rfce_track_id": "null",
+                                "rfce_xml": "null",
+                                "secuencia_utilizada": "number",
+                                "tipo_ecf": "string",
+                                "tipo_pago": "number",
+                                "total": "string",
+                                "total_itbis": "string",
+                                "track_id": "string",
+                                "turno_id": "null",
+                                "user_id": "number",
+                                "xml_firmado": "string"
+                            }
+                        },
+                        "pagination": {
+                            "page": "number",
+                            "pageSize": "number",
+                            "total": "number",
+                            "totalPages": "number"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "stats",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/stats",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "ambiente_activo": "string",
+                            "por_estado": {
+                                "__lista__": {
+                                    "estado": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "por_mes": {
+                                "__lista__": {
+                                    "mes": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "por_tipo": {
+                                "__lista__": {
+                                    "aceptados": "number",
+                                    "enviados": "number",
+                                    "monto_total": "number",
+                                    "nombre": "string",
+                                    "rechazados": "number",
+                                    "rfce": "number",
+                                    "tipo_ecf": "string",
+                                    "total": "number",
+                                    "ultimo_emitido": "string"
+                                }
+                            },
+                            "resumen": {
+                                "monto_neto": "string",
+                                "monto_total": "number",
+                                "primer_ecf": "string",
+                                "tipos_distintos": "number",
+                                "total_ecf": "number",
+                                "ultimo_ecf": "string"
+                            },
+                            "secuencias": {
+                                "__lista__": {
+                                    "nombre": "string",
+                                    "restantes": "null",
+                                    "secuencia_actual": "number",
+                                    "total_emitidos": "number",
+                                    "type": "string",
+                                    "vencimiento": "null|string"
+                                }
+                            },
+                            "ventas_por_dia": {
+                                "__lista__": {
+                                    "dia": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            },
+                            "ventas_por_mes": {
+                                "__lista__": {
+                                    "mes": "string",
+                                    "monto_total": "number",
+                                    "total": "number"
+                                }
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "avisos",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/avisos",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "certificado_fallo": {
+                                "ventas_hoy": "number"
+                            },
+                            "secuencias": {
+                                "__lista__": null
+                            },
+                            "sin_rango": {
+                                "ventas": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "estado",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/{id}/estado",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "consulta": {
+                                "codigo": "string",
+                                "encf": "string",
+                                "estado": "string",
+                                "fechaRecepcion": "string",
+                                "mensajes": {
+                                    "__lista__": {
+                                        "codigo": "number",
+                                        "valor": "string"
+                                    }
+                                },
+                                "rnc": "string",
+                                "secuenciaUtilizada": "bool",
+                                "trackId": "string"
+                            },
+                            "e_ncf": "string",
+                            "estado_dgii": "string",
+                            "factura_id": "number",
+                            "secuencia_utilizada": "bool",
+                            "track_id": "string"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "clientes_lista",
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "client_name": "string",
+                                "company_name": "string",
+                                "descuento": "string",
+                                "direccion": "null|string",
+                                "email": "string",
+                                "id": "number",
+                                "municipio": "null|string",
+                                "permitir_credito": "number",
+                                "phone_number": "string",
+                                "provincia": "null|string",
+                                "razon_social": "string",
+                                "rnc": "null|string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "productos_lista",
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "activo": "number",
+                                "almacen_nombre": "string",
+                                "categoria_nombre": "null|string",
+                                "category_id": "null|number",
+                                "costo": "string",
+                                "created_at": "string",
+                                "descripcion": "null",
+                                "id": "number",
+                                "imagen_path": "null",
+                                "indicador_bien_servicio": "number",
+                                "indicador_facturacion": "number",
+                                "nombre": "string",
+                                "precio": "string",
+                                "precio_2": "null",
+                                "precio_3": "null",
+                                "precio_4": "null",
+                                "sku": "string",
+                                "stock": "null|number",
+                                "stock_minimo": "null|number",
+                                "unidad_medida": "string",
+                                "updated_at": "string",
+                                "warehouse_id": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "modificables",
+                    "metodo": "GET",
+                    "ruta": "/api/facturas/modificables?client_id={client_id}",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "client_id": "number",
+                                "e_ncf": "string",
+                                "estado_dgii": "string",
+                                "fecha_emision": "string",
+                                "id": "number",
+                                "notas_credito": "number",
+                                "notas_debito": "number",
+                                "saldo": "number",
+                                "tipo_ecf": "string",
+                                "total": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "emisor",
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "actividad_economica": "null",
+                            "ambiente": "string",
+                            "correo": "string",
+                            "direccion": "string",
+                            "fecha_vencimiento_secuencia": "string",
+                            "fuente": "string",
+                            "municipio": "null",
+                            "nombre_comercial": "string",
+                            "provincia": "null",
+                            "razon_social": "string",
+                            "rnc": "string",
+                            "sucursal": "null",
+                            "telefono": "string",
+                            "website": "null"
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "usuarios",
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "http": 200,
+                    "forma": {
+                        "data": {
+                            "__lista__": {
+                                "created_at": "string",
+                                "email": "string",
+                                "id": "number",
+                                "last_name": "string",
+                                "name": "string",
+                                "role": "string",
+                                "username": "string"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "rangos_get",
+                    "metodo": "GET",
+                    "ruta": "/api/ncf/rangos",
+                    "http": 200,
+                    "forma": {
+                        "ambiente": "string",
+                        "data": {
+                            "__lista__": {
+                                "ambiente": "string",
+                                "created_at": "string",
+                                "current_value": "number",
+                                "description": "string",
+                                "estado": "string",
+                                "fecha_vencimiento": "null|string",
+                                "id": "number",
+                                "no_autorizacion": "null",
+                                "no_solicitud": "null",
+                                "numero_desde": "number",
+                                "numero_hasta": "null",
+                                "prefix": "string",
+                                "restantes": "null",
+                                "type": "string",
+                                "updated_at": "string",
+                                "usados": "number"
+                            }
+                        },
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "rangos_post_invalido",
+                    "metodo": "POST",
+                    "ruta": "/api/ncf/rangos",
+                    "http": 422,
+                    "forma": {
+                        "error": "string",
+                        "status": "bool"
+                    }
+                },
+                {
+                    "id": "signout",
+                    "metodo": "POST",
+                    "ruta": "/api/auth/signout",
+                    "http": 200,
+                    "forma": {
+                        "message": "string",
+                        "success": "bool"
+                    }
+                }
+            ],
+            "gate": [
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/auth",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/landing",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/clients",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/products",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/proveedores",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/unidades-medida",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/tipos-bienes-servicios",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/provincias-municipios",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/rnc",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/categories",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/warehouses",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/inventario",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/cotizaciones",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "admin",
+                    "http": 422
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "user",
+                    "http": 422
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/conduces",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturas-simples",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/gastos",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ncf",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/facturacion-electronica",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "admin",
+                    "http": 405
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "user",
+                    "http": 405
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/aprobaciones-comerciales",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/reportes",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/emisor",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/branding",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/users",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/roles",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/audit-logs",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "admin",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf/autenticacion",
+                    "rol": "anonimo",
+                    "http": 200
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/ecf",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "user",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/integracion",
+                    "rol": "anonimo",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "admin",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "user",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "admin",
+                    "http": 404
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "GET",
+                    "ruta": "/api/pos-admin",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "rol": "user",
+                    "http": 422
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/facturas",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/facturas/5",
+                    "rol": "admin",
+                    "http": 405
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/facturas/5",
+                    "rol": "user",
+                    "http": 405
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/facturas/5",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/facturas/5",
+                    "rol": "admin",
+                    "http": 405
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/facturas/5",
+                    "rol": "user",
+                    "http": 405
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/facturas/5",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/clients",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/clients",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/clients",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/clients",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/clients",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/clients",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/products",
+                    "rol": "user",
+                    "http": 422
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/products",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/products",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/products",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/products",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/products",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/users",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/users",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/users",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/users",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/users",
+                    "rol": "user",
+                    "http": 403
+                },
+                {
+                    "metodo": "DELETE",
+                    "ruta": "/api/users",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/ncf/rangos",
+                    "rol": "user",
+                    "http": 422
+                },
+                {
+                    "metodo": "POST",
+                    "ruta": "/api/ncf/rangos",
+                    "rol": "anonimo",
+                    "http": 401
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/ncf",
+                    "rol": "user",
+                    "http": 200
+                },
+                {
+                    "metodo": "PUT",
+                    "ruta": "/api/ncf",
+                    "rol": "anonimo",
+                    "http": 401
+                }
+            ]
+        }
+    }
+}
