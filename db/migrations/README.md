@@ -54,9 +54,12 @@ que ningún otro plan los tome:
 - El plan ITBIS de facturas simples (todavía sin mergear) pidió master 013 (ya
   ocupada por `013_tenants_inventario_estricto.sql`) y tenant 036, así que al
   aterrizar toma master 015 y tenant 037.
-- Antes de crear una migración: `git fetch` y
-  `git ls-tree --name-only origin/master db/migrations/ db/master_migrations/ | tail -4`
-  (con la barra final, que lista los archivos y no los dos directorios).
+- Antes de crear una migración: `git fetch` y las dos listas, una por serie (con
+  la barra final, que lista los archivos y no el directorio):
+  `git ls-tree --name-only origin/master db/migrations/ | tail -4` (tenant) y
+  `git ls-tree --name-only origin/master db/master_migrations/ | tail -2` (master).
+  Un solo comando con los dos directorios no sirve: `git ls-tree` lista el master
+  primero y `tail -4` solo alcanza el final del tenant.
 - El tenant tiene dos 014 (`014_add_factura_items_unidad_medida.sql` y
   `014_ncf_rangos_autorizados.sql`) y ninguna 015; el master es otra serie, con
   su propia numeración.
