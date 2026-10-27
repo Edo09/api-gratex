@@ -1,9 +1,9 @@
 {
     "version": 1,
     "meta": {
-        "git_sha": "56874251d4465d3f01791cd79ed4299ee9cd1339",
+        "git_sha": "27b749ba3bdd49e56db96fef5cbdb406a996beac",
         "php": "8.5",
-        "capturado": "2026-10-27T18:39:55+00:00"
+        "capturado": "2026-10-27T19:07:41+00:00"
     },
     "rutas": [
         "auth",
@@ -451,7 +451,7 @@
                                     "secuencia_actual": "number",
                                     "total_emitidos": "number",
                                     "type": "string",
-                                    "vencimiento": "null|string"
+                                    "vencimiento": "string"
                                 }
                             },
                             "ventas_por_dia": {
@@ -534,15 +534,15 @@
                                 "client_name": "string",
                                 "company_name": "string",
                                 "descuento": "string",
-                                "direccion": "null|string",
+                                "direccion": "string",
                                 "email": "string",
                                 "id": "number",
-                                "municipio": "null|string",
+                                "municipio": "null",
                                 "permitir_credito": "number",
                                 "phone_number": "string",
-                                "provincia": "null|string",
+                                "provincia": "null",
                                 "razon_social": "string",
-                                "rnc": "null|string"
+                                "rnc": "string"
                             }
                         },
                         "status": "bool"
@@ -558,8 +558,8 @@
                             "__lista__": {
                                 "activo": "number",
                                 "almacen_nombre": "string",
-                                "categoria_nombre": "null|string",
-                                "category_id": "null|number",
+                                "categoria_nombre": "null",
+                                "category_id": "null",
                                 "costo": "string",
                                 "created_at": "string",
                                 "descripcion": "null",
@@ -573,8 +573,8 @@
                                 "precio_3": "null",
                                 "precio_4": "null",
                                 "sku": "string",
-                                "stock": "null|number",
-                                "stock_minimo": "null|number",
+                                "stock": "number",
+                                "stock_minimo": "null",
                                 "unidad_medida": "string",
                                 "updated_at": "string",
                                 "warehouse_id": "number"
@@ -665,7 +665,7 @@
                                 "current_value": "number",
                                 "description": "string",
                                 "estado": "string",
-                                "fecha_vencimiento": "null|string",
+                                "fecha_vencimiento": "string",
                                 "id": "number",
                                 "no_autorizacion": "null",
                                 "no_solicitud": "null",
@@ -1675,7 +1675,7 @@
                                     "secuencia_actual": "number",
                                     "total_emitidos": "number",
                                     "type": "string",
-                                    "vencimiento": "null|string"
+                                    "vencimiento": "string"
                                 }
                             },
                             "ventas_por_dia": {
@@ -1758,15 +1758,15 @@
                                 "client_name": "string",
                                 "company_name": "string",
                                 "descuento": "string",
-                                "direccion": "null|string",
+                                "direccion": "string",
                                 "email": "string",
                                 "id": "number",
-                                "municipio": "null|string",
+                                "municipio": "null",
                                 "permitir_credito": "number",
                                 "phone_number": "string",
-                                "provincia": "null|string",
+                                "provincia": "null",
                                 "razon_social": "string",
-                                "rnc": "null|string"
+                                "rnc": "string"
                             }
                         },
                         "status": "bool"
@@ -1782,8 +1782,8 @@
                             "__lista__": {
                                 "activo": "number",
                                 "almacen_nombre": "string",
-                                "categoria_nombre": "null|string",
-                                "category_id": "null|number",
+                                "categoria_nombre": "null",
+                                "category_id": "null",
                                 "costo": "string",
                                 "created_at": "string",
                                 "descripcion": "null",
@@ -1797,8 +1797,8 @@
                                 "precio_3": "null",
                                 "precio_4": "null",
                                 "sku": "string",
-                                "stock": "null|number",
-                                "stock_minimo": "null|number",
+                                "stock": "number",
+                                "stock_minimo": "null",
                                 "unidad_medida": "string",
                                 "updated_at": "string",
                                 "warehouse_id": "number"
@@ -1889,7 +1889,7 @@
                                 "current_value": "number",
                                 "description": "string",
                                 "estado": "string",
-                                "fecha_vencimiento": "null|string",
+                                "fecha_vencimiento": "string",
                                 "id": "number",
                                 "no_autorizacion": "null",
                                 "no_solicitud": "null",
