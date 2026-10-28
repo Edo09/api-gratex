@@ -80,4 +80,18 @@ wa_chk('normalizar: limpia, vacia las tablas, confirma y SOLO despues vuelve a s
     !in_array(false, $pos, true) && array_values($pos) === array_values(array_unique($pos)) && $pos === (static function (array $p): array { asort($p); return $p; })($pos), $pos);
 wa_chk('normalizar: borra solo las tablas de la constante, sin nombres de tabla sueltos',
     str_contains($norm, 'GOLDEN_TABLAS_NORMALIZADAS') && preg_match_all('/DELETE FROM (?!\{\$tabla\})/', $norm) === 0);
+echo "\n== 6) salidas: 1 es solo \"hay diferencias\" (contrato 4.5) ==\n";
+// El arranque de los servidores y el error a media corrida necesitan una base y no corren aqui: se fija su cableado.
+// Su comportamiento, con procesos reales, lo prueba tools/test_express_p0_guardas.php.
+require_once __DIR__ . '/express_golden.php';
+wa_chk('rechazado sale con 2 (el 1 queda para las diferencias)', GOLDEN_SALIDA_RECHAZADO === 2);
+$contexto = $cuerpo('golden_contexto');
+$llamadas = preg_match_all('/wa_servidor\(([^;]*)\);/s', $contexto, $m) === 2 ? $m[1] : [];
+wa_chk('golden_contexto arranca el simulador de la DGII y (en su bucle) los dos API con la salida de rechazo, no con el 1 por defecto',
+    count($llamadas) === 2 && count(array_filter($llamadas, static fn (string $a): bool => preg_match('/,\s*GOLDEN_SALIDA_RECHAZADO\s*$/', $a) === 1)) === 2, $llamadas);
+$principal = $cuerpo('golden_main');
+wa_chk('golden_main corre golden_correr dentro de un try y sale por golden_fallo_inesperado con cualquier Throwable',
+    preg_match('/try\s*\{\s*golden_correr\(\);\s*\}\s*catch\s*\(Throwable \$e\)\s*\{\s*golden_fallo_inesperado\(\$e\);\s*\}/', $principal) === 1, $principal);
+wa_chk('el punto de entrada de la herramienta es golden_main (no golden_correr a secas, que no atrapa nada)',
+    preg_match('/PHP_SAPI === \'cli\'[^\n]*\n\s*golden_main\(\);/', $fuente) === 1);
 wa_fin();

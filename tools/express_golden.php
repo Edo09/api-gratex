@@ -43,15 +43,27 @@
  * Las dos bases scratch (usuario limitado a *_scratch) son las que devuelve
  * pos_scratch_preparar(); la herramienta no toca ninguna otra. Antes de nada se
  * rechaza (salida 2) una raiz con un .env (Database lo cargaria: una peticion sin
- * tenant podria caer en otra base), un arbol sucio al capturar (la base debe
- * describir un commit; tools/express_golden/ no cuenta) y --comparar sin
- * golden.json. Un fallo al arrancar los servidores lo informa wa_servidor con su
- * propia linea [FALLO] y salida 1 (puerto ocupado, otra raiz en el mismo puerto).
+ * tenant podria caer en otra base), la falta de las extensiones curl, openssl y
+ * pdo_mysql, un arbol sucio al capturar (la base debe describir un commit;
+ * tools/express_golden/ no cuenta) y --comparar sin golden.json. Un fallo al arrancar
+ * los servidores (puerto ocupado, otra raiz en el mismo puerto) lo informa wa_servidor
+ * con su propia linea [FALLO] y salida 2: aqui 1 es "hay diferencias" (contrato 4.5) y un
+ * puerto ocupado no es una regresion.
+ *
+ * Un error que ninguna guarda preveia (una consulta que falla a media corrida, un
+ * TypeError) imprime UNA linea enmascarada, con la clase y los codigos SQLSTATE/errno y
+ * nunca el mensaje de la excepcion (el de PDO trae usuario y host), y sale con 2: sin
+ * eso PHP lo imprime crudo y sale con 255, y el manejador de write_ahead_test_lib.php
+ * saldria con 1. Lo unico que sigue saliendo con 1 sin ser una diferencia son los [FALLO]
+ * de esa libreria al preparar el entorno (faltan WA_DB_*, la base no responde, no es de
+ * prueba, el certificado de prueba no se genera): los imprime ella, con su propia linea,
+ * como en todas sus pruebas.
  *
  * Uso (desde la raiz del API):
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/express_golden.php --capturar
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/express_golden.php --comparar
- *   Salida: 0 igual o capturado, 1 diferencias (hasta 40 lineas), 2 rechazado.
+ *   Salida: 0 igual o capturado, 1 diferencias (hasta 40 lineas), 2 rechazado o error
+ *   inesperado (arriba).
  *   --comparar avisa con "NOTA: ..." si la base se capturo con otro PHP (round()
  *   cambia entre menores; produccion corre 8.3): el codigo de salida no cambia.
  */
@@ -76,6 +88,12 @@ const GOLDEN_MODOS = ['sombra' => 8399, 'enforce' => 8397];
  * captura que ningun cliente real ve.
  */
 const GOLDEN_FLAGS_API = ['-d', 'output_buffering=4096'];
+
+/** Salida de una corrida rechazada (guardas, entorno, error inesperado): 1 queda para "hay diferencias". */
+const GOLDEN_SALIDA_RECHAZADO = 2;
+
+/** Extensiones de PHP que la herramienta necesita (se piden con -d en la linea de comandos de la cabecera). */
+const GOLDEN_EXTENSIONES = ['curl', 'openssl', 'pdo_mysql'];
 
 const GOLDEN_ROLES = ['admin', 'user', 'anonimo'];
 
@@ -109,6 +127,43 @@ function golden_decir(array $c, string $linea): void
 function golden_abortar(array $c, string $motivo): never
 {
     fwrite(STDERR, pos_scratch_enmascarar('Rechazado: ' . $motivo, $c['ocultos']) . "\n");
+    exit(2);
+}
+
+/**
+ * Los secretos de esta corrida (los fija golden_contexto): lo que golden_fallo_inesperado
+ * enmascara cuando ya no hay un $c a mano.
+ *
+ * @param list<string>|null $nuevos
+ * @return list<string>
+ */
+function golden_ocultos(?array $nuevos = null): array
+{
+    static $ocultos = [];
+    if ($nuevos !== null) {
+        $ocultos = $nuevos;
+    }
+    return $ocultos;
+}
+
+/**
+ * Un Throwable que ninguna guarda preveia: UNA linea en stderr y salida 2 (rechazado),
+ * nunca 1 (diferencias) ni 255. wa_describir_excepcion da la clase, archivo:linea y los
+ * codigos de la excepcion y de sus previas, sin el mensaje de una excepcion (el de PDO trae
+ * usuario y host) ni la traza; todo pasa ademas por pos_scratch_enmascarar con los secretos
+ * conocidos (los de golden_contexto y los WA_DB_* del entorno). Ni --capturar ni --comparar
+ * escriben golden.json antes del final: aqui no se toco.
+ */
+function golden_fallo_inesperado(Throwable $e): never
+{
+    $secretos = golden_ocultos();
+    foreach (['WA_DB_PASS', 'WA_DB_USER', 'WA_DB_HOST'] as $var) {
+        $valor = getenv($var);
+        if (is_string($valor) && $valor !== '') {
+            $secretos[] = $valor;
+        }
+    }
+    fwrite(STDERR, pos_scratch_enmascarar('Rechazado: error inesperado, la corrida se detuvo y golden.json no se toco: ' . wa_describir_excepcion($e), $secretos) . "\n");
     exit(2);
 }
 
@@ -381,25 +436,29 @@ function golden_contexto(string $raiz): array
     $cred = $info['cred'];
     $secretos = pos_scratch_secretos($cred['pass']);
     $cert = wa_cert_prueba();
+    $ocultos = [$cred['pass'], $cred['user'], $cred['host'], $secretos['clave_usuarios'],
+        $secretos['clave_maestra'], $secretos['pepper'], $cert['password']];
+    golden_ocultos($ocultos); // para golden_fallo_inesperado, que ya no tiene este $c a mano
     // El nombre del servidor lleva la raiz (como test_pos_scratch.php): uno viejo de otra
     // raiz en el mismo puerto se rechaza en vez de reutilizarse con el codigo equivocado.
     $e = substr(md5($raiz), 0, 6);
-    $mock = wa_servidor('golden_mock_' . $e, 'tools/mock_dgii.php', GOLDEN_PUERTO_MOCK, [], $raiz);
+    // El ultimo argumento de wa_servidor es su salida si el servidor no queda listo: 2, no el 1 de
+    // "hay diferencias" (ver la cabecera).
+    $mock = wa_servidor('golden_mock_' . $e, 'tools/mock_dgii.php', GOLDEN_PUERTO_MOCK, [], $raiz, [], GOLDEN_SALIDA_RECHAZADO);
     $api = [];
     foreach (GOLDEN_MODOS as $modo => $puerto) {
         $env = array_merge(
             pos_scratch_env_api($cred, $info['master'], $secretos, $mock, $cert, $modo === 'enforce'),
             pos_scratch_env_base_por_defecto($cred, $info['master'])
         );
-        $api[$modo] = wa_servidor('golden_' . $modo . '_' . $e, 'index.php', $puerto, $env, $raiz, GOLDEN_FLAGS_API);
+        $api[$modo] = wa_servidor('golden_' . $modo . '_' . $e, 'index.php', $puerto, $env, $raiz, GOLDEN_FLAGS_API, GOLDEN_SALIDA_RECHAZADO);
     }
     return [
         'api' => $api,
         'mock' => $mock,
         'dbA' => $info['dbA'],
         'clave' => $secretos['clave_usuarios'],
-        'ocultos' => [$cred['pass'], $cred['user'], $cred['host'], $secretos['clave_usuarios'],
-            $secretos['clave_maestra'], $secretos['pepper'], $cert['password']],
+        'ocultos' => $ocultos,
     ];
 }
 
@@ -485,24 +544,46 @@ function golden_comparar(string $raiz): never
     exit(1);
 }
 
-function golden_main(): never
+/** Las guardas, en orden, y luego la captura o la comparacion. Cada rechazo sale con 2. */
+function golden_correr(): never
 {
     $raiz = dirname(__DIR__);
     $capturar = wa_arg('capturar') !== null;
     $comparar = wa_arg('comparar') !== null;
     if ($capturar === $comparar) {
         fwrite(STDERR, "Uso: php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/express_golden.php --capturar | --comparar\n");
-        exit(2);
+        exit(GOLDEN_SALIDA_RECHAZADO);
     }
     $problema = pos_scratch_revisar_raiz($raiz);
     if ($problema !== '') {
         fwrite(STDERR, "Rechazado: la raiz del API no sirve para la captura dorada: {$problema}\n");
-        exit(2);
+        exit(GOLDEN_SALIDA_RECHAZADO);
+    }
+    $faltan = array_values(array_filter(GOLDEN_EXTENSIONES, static fn (string $ext): bool => !extension_loaded($ext)));
+    if ($faltan !== []) {
+        fwrite(STDERR, 'Rechazado: faltan extensiones de PHP (' . implode(', ', $faltan) . '). Corre con: php '
+            . implode(' ', array_map(static fn (string $ext): string => '-d extension=' . $ext, GOLDEN_EXTENSIONES))
+            . " tools/express_golden.php --capturar | --comparar\n");
+        exit(GOLDEN_SALIDA_RECHAZADO);
     }
     if ($capturar) {
         golden_capturar($raiz);
     }
     golden_comparar($raiz);
+}
+
+/**
+ * Punto de entrada: golden_correr dentro de un try. exit() no es una excepcion (pasa de largo y
+ * conserva su codigo); cualquier Throwable que ninguna guarda preveia sale por
+ * golden_fallo_inesperado con una linea enmascarada y el codigo 2.
+ */
+function golden_main(): never
+{
+    try {
+        golden_correr();
+    } catch (Throwable $e) {
+        golden_fallo_inesperado($e);
+    }
 }
 
 // CLI propio: solo cuando se ejecuta este archivo, nunca al incluirlo.
