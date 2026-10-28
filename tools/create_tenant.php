@@ -572,7 +572,7 @@ if ($certIlegible) {
 }
 if ($certReservado) {
     echo "\n  >> SIN CERTIFICADO: la ruta {$certPathRel} quedo reservada y no hay archivo; emitir un e-CF falla hasta cargarlo.\n";
-    echo "     Cuando llegue el .p12: tools/set_tenant_cert.php (web: public/set_tenant_cert.php) con id={$tenantId}\n";
+    echo "     Cuando llegue el .p12: /api/public/set_tenant_cert.html (tools/set_tenant_cert.php) con id={$tenantId}\n";
     echo "     (docs/integrations/alta-tenant-runbook.md, 'Alta sin certificado').\n";
 }
 if ($ambiente === 'sandbox') {

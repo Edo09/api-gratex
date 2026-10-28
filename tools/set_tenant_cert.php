@@ -30,8 +30,10 @@
  *   php tools/set_tenant_cert.php --id=6 --reservar
  *   php tools/set_tenant_cert.php --id=6 --cert-path=ruta/cert.p12 --cert-pass=CLAVE
  *
- * Web (hosting compartido sin shell): wrapper public/set_tenant_cert.php, solo POST, con
- * ONBOARD_TOKEN. El archivo sube en el campo `cert`; --form-string evita que curl
+ * Web (hosting compartido sin shell): pantalla public/set_tenant_cert.html, que es lo que se
+ * usa normalmente (abre el .p12 y convierte el legacy en el navegador antes de subirlo). Por
+ * debajo llama al wrapper public/set_tenant_cert.php, solo POST, con
+ * ONBOARD_TOKEN. Sin pantalla, el mismo POST con curl: el archivo sube en el campo `cert`; --form-string evita que curl
  * interprete @ , < o ; dentro del token o la clave. Desde PowerShell:
  *   curl.exe -A "Mozilla/5.0" https://gratex.net/api/public/set_tenant_cert.php `
  *     --form-string "token=ONBOARD_TOKEN" --form-string "id=6" --form-string "reservar=1"
@@ -318,9 +320,9 @@ if ((string) $tenant['ambiente'] === 'sandbox') {
     }
 }
 echo "  >> Probar la firma contra la DGII (no emite ni gasta e-NCF):\n";
-echo "     https://<server>/api/public/diagnostico_dgii.php?token=<CERT_RUN_TOKEN>&rnc={$rnc}\n";
+echo "     https://<server>/api/public/diagnostico_dgii.html (token CERT_RUN_TOKEN, RNC {$rnc})\n";
 echo "  >> Si el .p12 es de una persona fisica, la empresa debe delegarla en la Oficina Virtual de la DGII.\n";
-echo "  >> Borre public/set_tenant_cert.php del server cuando termine.\n";
+echo "  >> Borre public/set_tenant_cert.php y public/set_tenant_cert.html del server cuando termine.\n";
 exit(0);
 
 // =============================================================================

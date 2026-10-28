@@ -360,7 +360,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 |---|---|---|
 | `GET /api/public/onboard.html` | UI alta de tenant (app/integración): datos, cert `.p12`, logo, usuario admin | el form pide el token |
 | `POST /api/public/create_tenant.php` | Handler del onboarding. Crea tenant + (app) DB con `tenant_schema.sql` (esquema completo consolidado) + `emisor_config` + usuario admin + logo | `ONBOARD_TOKEN` |
-| `POST /api/public/set_tenant_cert.php` | Carga, reemplaza o reserva el `.p12` de un tenant que ya existe (valida el archivo con su clave y cifra la clave). Para el alta sin certificado: [alta-tenant-runbook.md](alta-tenant-runbook.md#alta-sin-certificado-el-p12-llega-después). **Borrar del server al terminar** | `ONBOARD_TOKEN` |
+| `GET /api/public/set_tenant_cert.html` → `set_tenant_cert.php` (POST) | UI para cargar, reemplazar o reservar el `.p12` de un tenant que ya existe (valida el archivo con su clave, convierte el legacy en el navegador y cifra la clave). Para el alta sin certificado: [alta-tenant-runbook.md](alta-tenant-runbook.md#alta-sin-certificado-el-p12-llega-después). **Borrar del server al terminar** | `ONBOARD_TOKEN` |
 | `GET/POST /api/public/create_user.php` | Alta de usuarios extra de un tenant (form + handler) | `CREATE_USER_TOKEN` |
 | `GET/POST /api/public/upload_logo.php` | Subir/cambiar el logo de un tenant | `UPLOAD_LOGO_TOKEN` |
 | `GET /api/public/plantillas.html` → `plantillas.php` | Plantilla PDF y color de acento de cualquier tenant: ver branding, previsualizar (con rejilla de calibración) y activar — sin el token del tenant. Ver [../modules/branding-plantillas.md](../modules/branding-plantillas.md) | `PLANTILLAS_TOKEN` |
@@ -371,6 +371,7 @@ existentes ahí; el resto de `/api/*` lo enruta `index.php` → `src/Router.php`
 |---|---|---|
 | `GET /api/public/cert.html` | Wizard de 15 pasos (mini-login, correr fases 2/3/4, bajar Representación Impresa, URLs) | usa los de abajo |
 | `POST /api/public/cert_run.php` | Corre los runners fase 2/3/4 (lo invoca el wizard; reusa `tools/send_faseX.php`) | `CERT_RUN_TOKEN` (.env) |
+| `GET /api/public/diagnostico_dgii.html` → `diagnostico_dgii.php` (POST) | Diagnóstico de comunicación con la DGII desde el server (conectividad, lectura del `.p12`, semilla, firma, token), por tenant. Solo lectura: no emite ni gasta e-NCF. La salida aparece en vivo | `CERT_RUN_TOKEN` (.env) |
 
 ### Recepción / operación
 

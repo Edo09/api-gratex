@@ -6,6 +6,8 @@
  * se pueden correr ahi. Esto sirve directo bajo /api/public/ (el .htaccess deja
  * pasar los archivos existentes de esa carpeta) y ejecuta el mismo diagnostico
  * DESDE EL SERVER, que es lo unico que responde "sale este server a DGII?".
+ * Pantalla: diagnostico_dgii.html (misma carpeta); llama a este archivo por POST para que
+ * el token no quede en la URL.
  *
  *   GET /api/public/diagnostico_dgii.php
  *     token             = CERT_RUN_TOKEN (del .env)

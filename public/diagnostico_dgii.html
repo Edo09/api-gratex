@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Diagnóstico DGII</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); display:flex; justify-content:center; padding:24px; }
+  .wrap { width:100%; max-width:720px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:12px 0 4px; }
+  input, select { width:100%; padding:10px 12px; background:#0b1220; color:var(--txt);
+                  border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .chk input { width:auto; }
+  .chk label { margin:0; color:var(--txt); font-size:14px; }
+  .btns { display:flex; gap:12px; }
+  button { flex:1; margin-top:20px; padding:12px; background:var(--accent); color:#06283d;
+           border:none; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; }
+  button.sec { background:transparent; color:var(--txt); border:1px solid var(--line); }
+  button:disabled { opacity:.6; cursor:not-allowed; }
+  h2 { font-size:14px; margin:18px 0 0; color:var(--accent); border-top:1px solid var(--line); padding-top:14px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px;
+        white-space:pre-wrap; word-break:break-word; font-size:13px; max-height:560px; overflow:auto; }
+  .result.ok { border-color:var(--ok); }
+  .result.err { border-color:var(--err); }
+  .hidden { display:none; }
+  .req::after { content:" *"; color:var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Diagnóstico DGII</h1>
+  <p class="sub">Prueba, desde el servidor, en qué paso falla la comunicación con la DGII: conectividad, lectura del .p12,
+    semilla, firma y token. Es de solo lectura: <b>no emite comprobantes ni gasta e-NCF</b> (sí contacta a la DGII).</p>
+
+  <form id="f" class="card">
+    <label class="req">Token de certificación</label>
+    <input type="password" name="token" required autocomplete="off">
+    <div class="hint">El valor de CERT_RUN_TOKEN del .env.</div>
+
+    <h2>Tenant a probar</h2>
+    <div class="row">
+      <div><label>RNC</label><input name="rnc" id="rnc" inputmode="numeric"></div>
+      <div><label>tenant_id</label><input name="tenant_id" id="tenant_id" inputmode="numeric" placeholder="alternativa al RNC"></div>
+    </div>
+    <div class="hint">Usa el certificado y el ambiente de ese tenant. Sin RNC ni tenant_id usa el certificado global del .env.</div>
+
+    <div class="row">
+      <div>
+        <label>Ambiente</label>
+        <select name="ambiente">
+          <option value="" selected>El del tenant</option>
+          <option value="certecf">certecf</option>
+          <option value="testecf">testecf</option>
+          <option value="ecf">ecf</option>
+        </select>
+      </div>
+      <div><label>Repeticiones</label><input name="repeticiones" type="number" min="1" value="1"></div>
+      <div><label>Timeout (s)</label><input name="timeout" type="number" min="1" value="20"></div>
+    </div>
+    <div class="hint">Repeticiones: cuántas veces pedir la semilla, para ver si el fallo es intermitente.</div>
+
+    <div class="chk">
+      <input type="checkbox" name="solo_conectividad" id="solo" value="1">
+      <label for="solo">Solo conectividad (sin certificado ni firma)</label>
+    </div>
+
+    <div class="btns">
+      <button type="submit" id="btn">Ejecutar diagnóstico</button>
+      <button type="button" id="cancel" class="sec hidden">Cancelar</button>
+    </div>
+  </form>
+
+  <div id="resultCard" class="card hidden">
+    <h2 style="border:none;padding:0;margin:0 0 10px">Resultado</h2>
+    <pre id="out" class="result"></pre>
+  </div>
+</div>
+
+<script>
+const f = document.getElementById('f');
+const btn = document.getElementById('btn');
+const cancel = document.getElementById('cancel');
+const resultCard = document.getElementById('resultCard');
+const out = document.getElementById('out');
+let abort = null;
+
+cancel.addEventListener('click', () => { if (abort) abort.abort(); });
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  btn.disabled = true; btn.textContent = 'Ejecutando...';
+  cancel.classList.remove('hidden');
+  out.textContent = '';
+  out.classList.remove('ok', 'err');
+  resultCard.classList.remove('hidden');
+
+  // POST (no GET): el token no queda en la URL ni en los access logs. Solo los campos con valor.
+  const body = new URLSearchParams();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') { if (el.checked) body.append(el.name, el.value); }
+    else if (el.value !== '') body.append(el.name, el.value);
+  }
+
+  abort = new AbortController();
+  try {
+    const res = await fetch('diagnostico_dgii.php', { method: 'POST', body, signal: abort.signal });
+    // El diagnostico va escribiendo mientras corre (los timeouts de la DGII pueden tardar):
+    // se muestra a medida que llega en vez de esperar al final.
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      out.textContent += dec.decode(value, { stream: true });
+      out.scrollTop = out.scrollHeight;
+    }
+    out.classList.add(res.ok ? 'ok' : 'err');
+  } catch (err) {
+    out.textContent += (out.textContent ? '\n\n' : '')
+      + (err.name === 'AbortError' ? 'Cancelado (el servidor puede seguir unos segundos).' : 'Error de red: ' + err.message);
+    out.classList.add('err');
+  } finally {
+    abort = null;
+    btn.disabled = false; btn.textContent = 'Ejecutar diagnóstico';
+    cancel.classList.add('hidden');
+  }
+});
+</script>
+</body>
+</html>
