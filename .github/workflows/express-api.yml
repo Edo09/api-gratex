@@ -28,6 +28,6 @@ jobs:
         run: php tools/express_baseline.php --comparar
       - name: Suites puras de Express (los planes 02 a 05 agregan las suyas aqui)
         run: |
-          for f in tools/test_express_baseline_puro.php tools/test_express_reservas.php tools/test_express_golden_puro.php tools/test_express_p0_spikes_puro.php; do
+          for f in tools/test_express_baseline_puro.php tools/test_express_reservas.php tools/test_express_golden_puro.php tools/test_express_p0_spikes_puro.php tools/test_express_p0_guardas.php; do
             php "$f" || exit 1
           done
