@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "f336b12c3cc2feaf679d369e0a3a29e77c983d42",
+    "git_sha": "b8c387f1ec4ae5602e76b769ffe784613eb0f211",
     "php": "8.5",
-    "capturado": "2026-10-27T16:14:59+00:00",
+    "capturado": "2026-10-28T19:07:06+00:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 336,
@@ -103,9 +103,9 @@
             "estado": "OK"
         },
         "test_grupo_multiempresa.php": {
-            "total": 10,
+            "total": 28,
             "fallos": 0,
-            "saltadas": 2,
+            "saltadas": 0,
             "pinned": false,
             "estado": "OK"
         }
