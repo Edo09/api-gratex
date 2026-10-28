@@ -238,36 +238,47 @@ $shaRaiz = p0_git(['rev-parse', 'HEAD'], $rb);
 wa_chk('--capturar sobre un arbol limpio (con algo sin confirmar solo bajo tools/express_golden/): 0 y escribe la base completa',
     $r['codigo'] === 0 && str_contains($r['salida'], 'Línea base escrita') && is_array($doc) && ($doc['version'] ?? null) === 1
     && array_keys($doc['suites'] ?? []) === array_column(BASELINE_SUITES, 'archivo') && ($doc['git_sha'] ?? null) === $shaRaiz && ($doc['php'] ?? null) === baseline_php(), $r);
-$primera = $doc['suites']['test_write_ahead_puro.php'] ?? [];
-wa_chk('la base guarda el total, los fallos, las saltadas, si esta fijada y OK de cada suite',
-    $primera === ['total' => 3, 'fallos' => 0, 'saltadas' => 0, 'pinned' => true, 'estado' => 'OK'] && ($doc['suites']['test_grupo_multiempresa.php']['total'] ?? null) === 17 && ($doc['suites']['test_grupo_multiempresa.php']['pinned'] ?? null) === false, $primera);
+$distintas = [];
+foreach (BASELINE_SUITES as $i => $s) { // cada suite de mentira dice 3+i pruebas: la base tiene que traer exactamente eso
+    $esperada = ['total' => 3 + $i, 'fallos' => 0, 'saltadas' => 0, 'pinned' => $s['pinned'], 'estado' => 'OK'];
+    if (($doc['suites'][$s['archivo']] ?? null) !== $esperada) {
+        $distintas[$s['archivo']] = $doc['suites'][$s['archivo']] ?? null;
+    }
+}
+wa_chk('la base guarda de cada suite el total, los fallos, las saltadas, si esta fijada y el estado OK', is_array($doc) && $distintas === [], $distintas);
 wa_chk('despues de capturar el arbol sigue limpio para la herramienta (la base se commitea aparte)', p0_arbol_limpio(p0_git(['status', '--porcelain'], $rb), ['tools/express_golden/']));
 
 $r = $bl('--comparar');
 wa_chk('--comparar sobre lo recien capturado: 0, "Sin diferencias" y ningun aviso', $r['codigo'] === 0 && str_contains($r['salida'], 'Sin diferencias con la linea base') && !str_contains($r['salida'], 'AVISO') && !str_contains($r['salida'], 'DIFERENCIA'), $r);
 
+// Las suites que se alteran abajo: cuatro no fijadas cualquiera de la constante (la prueba no depende de cual lista hoy).
+$noFijadas = array_values(array_column(array_filter(BASELINE_SUITES, static fn (array $s): bool => !$s['pinned']), 'archivo'));
+[$conMenos, $muda, $caida, $ausente] = $noFijadas;
+$total = static fn (string $archivo): int => 3 + (int) array_search($archivo, array_column(BASELINE_SUITES, 'archivo'), true);
+$primeraFijada = BASELINE_SUITES[0]['archivo'];
+
 // La base guarda una suite que la constante ya no lista y otra con mas pruebas de las que hay ahora.
 $base = $doc;
 $base['suites']['test_quitada_de_la_constante.php'] = ['total' => 9, 'fallos' => 0, 'saltadas' => 0, 'pinned' => true, 'estado' => 'OK'];
-$base['suites']['test_cotizacion_ferreteria.php']['total'] += 5;
+$base['suites'][$conMenos]['total'] += 5;
 file_put_contents($archivoBase, json_encode($base, JSON_PRETTY_PRINT) . "\n");
 $r = $bl('--comparar');
-$perdidas = $base['suites']['test_cotizacion_ferreteria.php']['total'] . ' -> ' . ($base['suites']['test_cotizacion_ferreteria.php']['total'] - 5);
+$perdidas = ($total($conMenos) + 5) . ' -> ' . $total($conMenos);
 wa_chk('--comparar completo espera TODO lo que la base guarda: la suite quitada de la constante da "no corrio" y 1; las pruebas perdidas, "total A -> B"',
-    $r['codigo'] === 1 && str_contains($r['salida'], 'DIFERENCIA test_quitada_de_la_constante.php: no corrio') && str_contains($r['salida'], "DIFERENCIA test_cotizacion_ferreteria.php: total {$perdidas}") && str_contains($r['salida'], '2 diferencia(s) con la linea base'), $r);
-$r = $bl('--comparar', '--suites=test_write_ahead_puro');
+    $r['codigo'] === 1 && str_contains($r['salida'], 'DIFERENCIA test_quitada_de_la_constante.php: no corrio') && str_contains($r['salida'], "DIFERENCIA {$conMenos}: total {$perdidas}") && str_contains($r['salida'], '2 diferencia(s) con la linea base'), $r);
+$r = $bl('--comparar', '--suites=' . $primeraFijada);
 wa_chk('--comparar --suites=<una>: solo se espera lo pedido, el resto de la base no estorba', $r['codigo'] === 0 && !str_contains($r['salida'], 'test_quitada') && !str_contains($r['salida'], 'DIFERENCIA'), $r);
 file_put_contents($archivoBase, json_encode($doc, JSON_PRETTY_PRINT) . "\n");
 
 // Una suite que no prueba nada no es verde: muda, caida con resumen o ausente.
-file_put_contents($rb . '/tools/test_tenant_mail.php', "<?php\n");
-$nConduces = 3 + (int) array_search('test_conduces.php', array_column(BASELINE_SUITES, 'archivo'), true); // el total de la base: solo cambia el codigo de salida
-file_put_contents($rb . '/tools/test_conduces.php', "<?php\necho \"{$nConduces}/{$nConduces} OK\\n\";\nexit(1);\n");
-unlink($rb . '/tools/test_inventario_stock.php');
-$r = $bl('--comparar', '--suites=test_tenant_mail,test_conduces,test_inventario_stock');
+file_put_contents($rb . '/tools/' . $muda, "<?php\n");
+$tCaida = $total($caida);
+file_put_contents($rb . '/tools/' . $caida, "<?php\necho \"{$tCaida}/{$tCaida} OK\\n\";\nexit(1);\n"); // dice el mismo total que la base: solo cambia el codigo de salida
+unlink($rb . '/tools/' . $ausente);
+$r = $bl('--comparar', "--suites={$muda},{$caida},{$ausente}");
 wa_chk('una suite muda (exit 0 sin resumen), una que sale con error aunque diga OK y una que ya no existe: cada una es diferencia, nunca verde',
-    $r['codigo'] === 1 && str_contains($r['salida'], 'DIFERENCIA test_tenant_mail.php: sin resumen') && str_contains($r['salida'], 'DIFERENCIA test_conduces.php: salio con error')
-    && str_contains($r['salida'], 'DIFERENCIA test_inventario_stock.php: sin resumen') && str_contains($r['salida'], '3 diferencia(s)'), $r);
+    $r['codigo'] === 1 && str_contains($r['salida'], "DIFERENCIA {$muda}: sin resumen") && str_contains($r['salida'], "DIFERENCIA {$caida}: salio con error")
+    && str_contains($r['salida'], "DIFERENCIA {$ausente}: sin resumen") && str_contains($r['salida'], '3 diferencia(s)'), $r);
 $antes = md5_file($archivoBase);
 $r = $bl('--capturar');
 wa_chk('con suites cambiadas sin commitear, --capturar se niega (2) y la base no se toca', $r['codigo'] === 2 && str_contains($r['salida'], 'cambios sin confirmar') && md5_file($archivoBase) === $antes, $r);
@@ -298,8 +309,14 @@ rename($rg . '/tools/mock_dgii_local.php', $rg . '/tools/mock_dgii_local.off');
 $r = $g('--comparar');
 wa_chk('una raiz que no es la de un API (sin el simulador de la DGII): 2', $rechazo($r, 'no es la raiz de un API'), $r);
 rename($rg . '/tools/mock_dgii_local.off', $rg . '/tools/mock_dgii_local.php');
-$r = $golden($rg, ['-n'], [], '--comparar');
-wa_chk('sin las extensiones curl, openssl o pdo_mysql (php -n): 2 y dice con que flags correr', $rechazo($r, 'faltan extensiones de PHP') && str_contains($r['salida'], '-d extension=curl'), $r);
+// La rama "faltan extensiones" se prueba pidiendo a la copia una extension que no existe (un php -n no sirve: que curl y
+// pdo_mysql queden fuera depende de como este compilado el php de cada maquina).
+$fuenteGolden = (string) file_get_contents(__DIR__ . '/express_golden.php');
+$conExtensionFalsa = str_replace("const GOLDEN_EXTENSIONES = ['curl', 'openssl', 'pdo_mysql'];", "const GOLDEN_EXTENSIONES = ['curl', 'openssl', 'pdo_mysql', 'extension_que_no_existe'];", $fuenteGolden, $cambios);
+$rgExt = guardas_raiz('golden_extension', $archivosGolden, $raizApi + ['tools/express_golden.php' => $conExtensionFalsa]);
+$r = $golden($rgExt, wa_php_flags(), [], '--comparar');
+wa_chk('sin una de las extensiones que pide (curl, openssl y pdo_mysql): 2, nombra la que falta y dice con que flags correr',
+    $cambios === 1 && $rechazo($r, 'faltan extensiones de PHP (extension_que_no_existe)') && str_contains($r['salida'], '-d extension=curl -d extension=openssl -d extension=pdo_mysql'), [$cambios, $r]);
 $r = $g('--comparar');
 wa_chk('--comparar sin golden.json: 2 y dice como capturar', $rechazo($r, 'no hay captura dorada') && str_contains($r['salida'], '--capturar'), $r);
 mkdir(dirname($gDorada), 0777, true);
@@ -352,8 +369,9 @@ $r = $golden($rf, wa_php_flags(), $secretos + ['GUARDAS_FALLA' => 'error'], '--c
 wa_chk('un \Error cuyo mensaje trae un secreto conocido: sale con 2 y el secreto sale tapado', $r['codigo'] === 2 && str_contains($r['salida'], 'Error') && str_contains($r['salida'], '***') && $sinSecretos($r['salida']), $r);
 
 // wa_servidor: el codigo con el que sale cuando el puerto es de otro proceso.
-$ocupado = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr);
-$puertoOcupado = (int) substr((string) stream_socket_get_name($ocupado, false), (int) strrpos((string) stream_socket_get_name($ocupado, false), ':') + 1);
+$ocupado = stream_socket_server('tcp://127.0.0.1:0', $errno, $errstr); // alguien escuchando en el puerto, que no es un servidor de wa_servidor
+$nombreOcupado = (string) stream_socket_get_name($ocupado, false);
+$puertoOcupado = (int) substr($nombreOcupado, (int) strrpos($nombreOcupado, ':') + 1);
 $hijo = guardas_dir('wa_servidor') . DIRECTORY_SEPARATOR . 'hijo.php';
 file_put_contents($hijo, "<?php\nrequire_once " . var_export(__DIR__ . '/write_ahead_test_lib.php', true) . ";\n"
     . "\$p = (int) \$argv[1];\nif (\$argv[2] === 'defecto') { wa_servidor('guardas_x', 'index.php', \$p, [], sys_get_temp_dir()); }\n"
