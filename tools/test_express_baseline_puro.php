@@ -2,9 +2,12 @@
 /**
  * test_express_baseline_puro.php — Piezas puras de la linea base de Express (P0):
  * el lector del resumen de una suite (baseline_resumen), la comparacion de
- * conteos exactos (baseline_comparar) y la prueba de arbol limpio de git
- * (p0_arbol_limpio), mas los rechazos del CLI que no llegan a correr ninguna
- * suite (--capturar con --suites). Sin base de datos, sin red, sin correr las suites.
+ * conteos exactos (baseline_comparar), lo que una comparacion completa espera de la
+ * base (baseline_esperado), el entorno de las suites (pdo_sqlite) y la prueba de
+ * arbol limpio de git (p0_arbol_limpio), mas los rechazos del CLI que no llegan a
+ * correr ninguna suite (--capturar con --suites). Sin base de datos, sin red, sin
+ * correr las suites. Las guardas del CLI de punta a punta (arbol sucio, base
+ * ausente, suites mudas) las prueba tools/test_express_p0_guardas.php.
  *
  * Uso:
  *   php tools/test_express_baseline_puro.php      (sale con 1 si algo falla)
@@ -46,6 +49,23 @@ wa_chk('suite que no corrio: diferencia', in_array('b.php: no corrio', $cmp(['a.
 wa_chk('suite con fallos: diferencia', in_array('a.php: fallos 2', $cmp($con('a.php', ['fallos' => 2]))['diferencias'], true));
 $otro = $cmp($base, '8.3');
 wa_chk('otro PHP: aviso con las dos versiones aunque todo coincida (Review Focus 2)', $otro['ok'] === true && $otro['avisos'] === ['PHP 8.5 en la base, 8.3 ahora']);
+
+// ---------------------------------------------------------------------------
+// 2b) baseline_esperado y el entorno de las suites
+// ---------------------------------------------------------------------------
+echo "\n== 2b) --comparar espera todo lo que la base guarda, y las suites corren con pdo_sqlite (Review Focus 3) ==\n";
+$guardadas = ['a.php' => $ok, 'b.php' => $ok, 'quitada.php' => ['total' => 50] + $ok];
+$corridas = [['archivo' => 'a.php', 'pinned' => true], ['archivo' => 'b.php', 'pinned' => false], ['archivo' => 'nueva.php', 'pinned' => false]];
+wa_chk('completa: todas las entradas guardadas, tambien la que la constante ya no lista', array_keys(baseline_esperado($guardadas, $corridas, true)) === ['a.php', 'b.php', 'quitada.php']);
+wa_chk('con --suites: solo las pedidas que la base conoce', array_keys(baseline_esperado($guardadas, [$corridas[0]], false)) === ['a.php']);
+wa_chk('con --suites: una pedida que la base no conoce no se espera (se corre y se avisa)', baseline_esperado($guardadas, [$corridas[2]], false) === []);
+$cmp = baseline_comparar(baseline_esperado($guardadas, $corridas, true), ['a.php' => $ok, 'b.php' => $ok, 'nueva.php' => $ok], '8.5', '8.5');
+wa_chk('una suite fijada que se quito de la constante: diferencia "no corrio", nunca verde', $cmp['ok'] === false && $cmp['diferencias'] === ['quitada.php: no corrio'] && $cmp['avisos'] === ['nueva.php: sin base (recapturar)'], $cmp);
+$cmp = baseline_comparar(baseline_esperado($guardadas, [$corridas[0]], false), ['a.php' => $ok], '8.5', '8.5');
+wa_chk('con --suites la suite quitada no estorba', $cmp === ['ok' => true, 'diferencias' => [], 'avisos' => []], $cmp);
+wa_chk('wa_php_flags sin argumentos sigue siendo curl, openssl y pdo_mysql (no agrega pdo_sqlite a las demas pruebas)', !in_array('extension=pdo_sqlite', wa_php_flags(), true));
+$hijo = wa_correr(array_merge([PHP_BINARY], wa_php_flags(BASELINE_EXTENSIONES), ['-r', 'echo extension_loaded("pdo_sqlite") ? "si" : "no";']));
+wa_chk('las suites corren con pdo_sqlite cargado: sin ella test_grupo_multiempresa salta las Partes 2 y 3 y el CI mediria otra cosa', in_array('pdo_sqlite', BASELINE_EXTENSIONES, true) && $hijo['salida'] === 'si', $hijo);
 
 // ---------------------------------------------------------------------------
 // 3) p0_arbol_limpio

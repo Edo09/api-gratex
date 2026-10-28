@@ -22,6 +22,13 @@
  *   estado: OK | falla_en_base | sin_resumen. php es "mayor.menor" (produccion y CI
  *   corren 8.3, el local puede ser otro: una diferencia solo avisa).
  *
+ * Mismo entorno en cualquier maquina: cada suite corre con pdo_sqlite cargado
+ * (BASELINE_EXTENSIONES, por -d si el php.ini no la trae). test_grupo_multiempresa salta
+ * sus Partes 2 y 3 sin ella; una base capturada sin la extension (10 pruebas, 2 saltadas)
+ * dejaba pasar en el CI, que si la carga, que se borraran pruebas de esas partes: el total
+ * solo tenia que quedar en 10 o mas. Ahora la base y el CI miden lo mismo (28, 0 saltadas) y,
+ * si la extension no se puede cargar, la suite salta y sale la diferencia, no un aviso.
+ *
  * Uso (desde la raiz del API):
  *   php tools/express_baseline.php --capturar                  escribe la base completa (exige arbol limpio)
  *   php tools/express_baseline.php --comparar [--suites=a,b]   compara contra la base
@@ -29,6 +36,10 @@
  *   --suites (nombres con o sin ".php") solo sirve con --comparar: capturar siempre
  *   reescribe todas las suites, asi una base nunca queda a medias; con --capturar
  *   se rechaza (salida 2).
+ *   --comparar sin --suites espera TODO lo que la base guarda, no solo lo que BASELINE_SUITES
+ *   lista hoy: una suite que se quita (o se renombra) en la constante sigue esperandose y sale
+ *   como "<suite>: no corrio" (salida 1) hasta que alguien recapture a proposito. Con --suites
+ *   solo se espera lo pedido.
  */
 
 require_once __DIR__ . '/write_ahead_test_lib.php';
@@ -51,6 +62,13 @@ const BASELINE_SUITES = [
     ['archivo' => 'test_inventario_stock.php', 'pinned' => false],
     ['archivo' => 'test_grupo_multiempresa.php', 'pinned' => false],
 ];
+
+/**
+ * Extensiones con las que corre cada suite (wa_php_flags agrega un -d solo a las que el
+ * php.ini no carga). Las tres de siempre mas pdo_sqlite, de la que depende
+ * test_grupo_multiempresa: ver la cabecera.
+ */
+const BASELINE_EXTENSIONES = ['curl', 'openssl', 'pdo_mysql', 'pdo_sqlite'];
 
 /** Segundos que se le da a una suite antes de matarla. */
 const BASELINE_TIMEOUT = 300;
@@ -162,8 +180,8 @@ function baseline_comparar(array $esperado, array $actual, string $phpEsperado, 
 }
 
 /**
- * Corre una suite como PHP_BINARY + wa_php_flags() + archivo, con $raiz de
- * directorio de trabajo, y devuelve su registro {total, fallos, saltadas,
+ * Corre una suite como PHP_BINARY + wa_php_flags(BASELINE_EXTENSIONES) + archivo, con
+ * $raiz de directorio de trabajo, y devuelve su registro {total, fallos, saltadas,
  * pinned, estado}. Salida y errores van a un archivo temporal (sin pipes: en
  * Windows no hay lecturas con tiempo limite) y se mata la suite pasado
  * BASELINE_TIMEOUT segundos. estado: OK solo con codigo 0, resumen y sin fallos.
@@ -178,7 +196,7 @@ function baseline_correr(array $suite, string $raiz): array
     $codigo = -1;
     if ($fh !== false) {
         $proc = proc_open(
-            array_merge([PHP_BINARY], wa_php_flags(), [$raiz . '/tools/' . $suite['archivo']]),
+            array_merge([PHP_BINARY], wa_php_flags(BASELINE_EXTENSIONES), [$raiz . '/tools/' . $suite['archivo']]),
             [0 => ['pipe', 'r'], 1 => $fh, 2 => $fh],
             $pipes,
             $raiz
@@ -305,23 +323,52 @@ function baseline_capturar(string $raiz): never
     exit(0);
 }
 
-function baseline_comparar_cli(string $raiz, array $suites): never
+/**
+ * Lo que la base guardada espera de esta corrida: sus entradas ($guardadas, el
+ * "suites" del JSON) cruzadas con las suites que se corrieron.
+ *
+ *   - $completa (--comparar sin --suites): TODAS las entradas guardadas, no solo las que
+ *     BASELINE_SUITES lista hoy. Una suite que se quito de la constante (o se renombro)
+ *     sigue esperandose y baseline_comparar la da como "<suite>: no corrio": una prueba
+ *     no puede desaparecer en silencio (Review Focus 3).
+ *   - Con --suites: solo las pedidas que la base conoce. Una pedida que la base no conoce
+ *     se corre igual y baseline_comparar la avisa como "sin base".
+ *
+ * @param array<string, array<string, mixed>> $guardadas
+ * @param list<array{archivo: string, pinned: bool}> $suites las que se corren
+ * @return array<string, array<string, mixed>>
+ */
+function baseline_esperado(array $guardadas, array $suites, bool $completa): array
+{
+    if ($completa) {
+        return $guardadas;
+    }
+    $esperado = [];
+    foreach ($suites as $s) {
+        if (isset($guardadas[$s['archivo']])) {
+            $esperado[$s['archivo']] = $guardadas[$s['archivo']];
+        }
+    }
+    return $esperado;
+}
+
+/**
+ * @param list<array{archivo: string, pinned: bool}> $suites las que se corren
+ * @param bool $completa true sin --suites: ver baseline_esperado
+ */
+function baseline_comparar_cli(string $raiz, array $suites, bool $completa = false): never
 {
     $base = baseline_leer($raiz . '/' . BASELINE_ARCHIVO);
     if ($base === null) {
         exit(2);
     }
-    $esperado = [];
     $actual = [];
     echo "PHP " . PHP_VERSION . "\n";
     foreach ($suites as $s) {
         $actual[$s['archivo']] = baseline_correr($s, $raiz);
         echo baseline_fila($s['archivo'], $actual[$s['archivo']]) . "\n";
-        // Una suite de la lista que la base no conoce se corre igual: baseline_comparar la avisa.
-        if (isset($base['suites'][$s['archivo']])) {
-            $esperado[$s['archivo']] = $base['suites'][$s['archivo']];
-        }
     }
+    $esperado = baseline_esperado($base['suites'], $suites, $completa);
     $cmp = baseline_comparar($esperado, $actual, (string) ($base['php'] ?? ''), baseline_php());
     foreach ($cmp['avisos'] as $a) {
         echo "AVISO {$a}\n";
@@ -349,7 +396,7 @@ if (PHP_SAPI === 'cli' && realpath((string) ($_SERVER['SCRIPT_FILENAME'] ?? ''))
         exit(2);
     }
     if (wa_arg('comparar') !== null) {
-        baseline_comparar_cli($raiz, $suites);
+        baseline_comparar_cli($raiz, $suites, $pedidas === null || $pedidas === '');
     }
     echo "Uso: php tools/express_baseline.php --capturar | --comparar [--suites=a,b]\n";
     exit(2);
