@@ -85,27 +85,31 @@ function wa_con_log(callable $fn): array
  * Flags -d para un php hijo: solo las extensiones que el php.ini NO carga.
  * Se le pregunta a un php sin flags (lo que vera el hijo), no a este proceso:
  * este pudo arrancar con -d extension=... y el hijo no lo hereda.
+ *
+ * $extensiones son las que el hijo necesita: por defecto curl, openssl y pdo_mysql
+ * (servidores y bases de las pruebas). La linea base de suites (express_baseline.php)
+ * pide ademas pdo_sqlite, para que sus conteos no dependan del php.ini de quien la
+ * corre. Se le pregunta al php una sola vez por proceso, pida lo que pida cada llamada.
  */
-function wa_php_flags(): array
+function wa_php_flags(array $extensiones = ['curl', 'openssl', 'pdo_mysql']): array
 {
-    static $flags = null;
-    if ($flags !== null) {
-        return $flags;
-    }
-    $cargadas = [];
-    $proc = proc_open(
-        [PHP_BINARY, '-r', 'echo implode(",", array_map("strtolower", get_loaded_extensions()));'],
-        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
-        $pipes
-    );
-    if (is_resource($proc)) {
-        $cargadas = explode(',', trim((string) stream_get_contents($pipes[1])));
-        fclose($pipes[1]);
-        fclose($pipes[2]);
-        proc_close($proc);
+    static $cargadas = null;
+    if ($cargadas === null) {
+        $cargadas = [];
+        $proc = proc_open(
+            [PHP_BINARY, '-r', 'echo implode(",", array_map("strtolower", get_loaded_extensions()));'],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        if (is_resource($proc)) {
+            $cargadas = explode(',', trim((string) stream_get_contents($pipes[1])));
+            fclose($pipes[1]);
+            fclose($pipes[2]);
+            proc_close($proc);
+        }
     }
     $flags = [];
-    foreach (['curl', 'openssl', 'pdo_mysql'] as $ext) {
+    foreach ($extensiones as $ext) {
         if (!in_array($ext, $cargadas, true)) {
             array_push($flags, '-d', 'extension=' . $ext);
         }
@@ -150,8 +154,13 @@ function wa_puerto_abierto(int $puerto): bool
  * deja el estado en 200 y agrega un Warning al cuerpo; con un php.ini de produccion
  * (4096) el estado es 405. tools/express_golden.php lo usa para ver los estados que
  * ve un cliente real.
+ *
+ * $salidaFallo es el codigo con el que se sale si el servidor no se puede dejar
+ * listo (puerto de otro, no lanza, no arranca en 10 s): 1 por defecto, como todas las
+ * pruebas. tools/express_golden.php pasa 2, porque alli 1 quiere decir "hay diferencias"
+ * (contrato 4.5) y un puerto ocupado no es una regresion.
  */
-function wa_servidor(string $nombre, string $router, int $puerto, array $env = [], string $raiz = '', array $flagsPhp = []): string
+function wa_servidor(string $nombre, string $router, int $puerto, array $env = [], string $raiz = '', array $flagsPhp = [], int $salidaFallo = 1): string
 {
     $puerto += (int) getenv('WA_PUERTO_OFFSET');
     $url = 'http://127.0.0.1:' . $puerto;
@@ -161,7 +170,7 @@ function wa_servidor(string $nombre, string $router, int $puerto, array $env = [
         $dueno = is_file($anotado) ? trim((string) file_get_contents($anotado)) : '';
         if ($dueno !== $nombre) {
             echo "[FALLO] el puerto {$puerto} ya lo usa otro proceso ('{$dueno}'), no '{$nombre}'. Detenlo y vuelve a correr.\n";
-            exit(1);
+            exit($salidaFallo);
         }
         return $url;
     }
@@ -172,7 +181,7 @@ function wa_servidor(string $nombre, string $router, int $puerto, array $env = [
     $proc = proc_open($cmd, [0 => ['file', $nulo, 'r'], 1 => ['file', $log, 'a'], 2 => ['file', $log, 'a']], $pipes, $raiz !== '' ? $raiz : dirname(__DIR__), $entorno);
     if (!is_resource($proc)) {
         echo "[FALLO] no se pudo lanzar php -S para {$nombre}\n";
-        exit(1);
+        exit($salidaFallo);
     }
     file_put_contents($anotado, $nombre);
     register_shutdown_function(static function () use ($proc, $anotado): void {
@@ -189,7 +198,7 @@ function wa_servidor(string $nombre, string $router, int $puerto, array $env = [
         usleep(100000);
     }
     echo "[FALLO] {$nombre} no arranco en 127.0.0.1:{$puerto} en 10 s (ver {$log})\n";
-    exit(1);
+    exit($salidaFallo);
 }
 
 /**
@@ -314,6 +323,17 @@ const WA_BASE_SIN_MARCA = 'wa_sin_marca';
  */
 function wa_manejar_excepcion(Throwable $e): never
 {
+    echo '[FALLO] excepcion sin atrapar: ' . wa_describir_excepcion($e) . "\n";
+    exit(1);
+}
+
+/**
+ * El texto que imprime wa_manejar_excepcion, sin salir: la clase, archivo:linea y los
+ * codigos de la excepcion y de sus previas (el mensaje solo de un \Error). Quien necesita
+ * otro codigo de salida lo imprime con su propio formato (express_golden.php sale con 2).
+ */
+function wa_describir_excepcion(Throwable $e): string
+{
     $partes = [];
     for ($x = $e; $x !== null; $x = $x->getPrevious()) {
         $txt = get_class($x) . ' (' . basename($x->getFile()) . ':' . $x->getLine() . ')';
@@ -327,8 +347,7 @@ function wa_manejar_excepcion(Throwable $e): never
         }
         $partes[] = $txt;
     }
-    echo '[FALLO] excepcion sin atrapar: ' . implode(' <- ', $partes) . "\n";
-    exit(1);
+    return implode(' <- ', $partes);
 }
 
 /** Credenciales de la base de prueba (entorno o tools/.env). Nunca se imprimen. */
