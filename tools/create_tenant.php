@@ -46,6 +46,10 @@
  *     [--admin-email=admin@b.com --admin-pass=clave1234 --admin-name="Admin B" --admin-username=admin_b] `
  *     [--cert-path=... --cert-pass=...] [--ambiente=certecf] [--db-host=localhost] [--skip-create-db]
  *
+ * App sin --cert-path (el .p12 llega despues): el alta deja tenants.cert_path apuntando a
+ * <CERT_DIR>/<rnc>/cert.p12 SIN archivo, para que no firme con el cert global del .env
+ * (el de Gratex). El .p12 se carga luego con tools/set_tenant_cert.php.
+ *
  * MySQL admin (privilegio CREATE DATABASE, solo tipo app): ADMIN_DB_USER/PASS del
  * .env, o si faltan MASTER_DB_USER/PASS. En hosting compartido usar --skip-create-db.
  */
@@ -334,6 +338,15 @@ if ($tipo === 'app') {
 $certPathRel = null;
 $certIguales = []; // tenants con el mismo certificado; solo para avisar
 $certIlegible = false; // este PHP no abre el .p12 con esa clave: la firma va a fallar
+$certReservado = false; // app sin .p12: cert_path apunta a donde va a quedar, sin archivo
+// Carpeta raiz de certificados, relativa a la raiz del proyecto. Se puede
+// sobreescribir con CERT_DIR en el .env cuando el deploy la tiene con otro
+// nombre; lo que importa es que coincida con lo que se graba en
+// tenants.cert_path (CertResolver lo resuelve desde la raiz).
+$certDir = trim((string) (getenv('CERT_DIR') ?: 'certificado_dgii'), '/ ');
+if ($certDir === '') {
+    $certDir = 'certificado_dgii';
+}
 if ($certPathArg !== null && $certPathArg !== '') {
     if (!is_file($certPathArg)) {
         fail("cert-path no existe: {$certPathArg}");
@@ -348,14 +361,6 @@ if ($certPathArg !== null && $certPathArg !== '') {
     $certFp = certFingerprint($certPathArg, $certPass);
     $certIlegible = $certFp === null;
     $certIguales = tenantsConMismoCert($masterPdo, $certHash, $certFp);
-    // Carpeta raiz de certificados, relativa a la raiz del proyecto. Se puede
-    // sobreescribir con CERT_DIR en el .env cuando el deploy la tiene con otro
-    // nombre; lo que importa es que coincida con lo que se graba en
-    // tenants.cert_path (CertResolver lo resuelve desde la raiz).
-    $certDir = trim((string) (getenv('CERT_DIR') ?: 'certificado_dgii'), '/ ');
-    if ($certDir === '') {
-        $certDir = 'certificado_dgii';
-    }
     $destDir = __DIR__ . '/../' . $certDir . '/' . $rnc;
     if (!is_dir($destDir) && !mkdir($destDir, 0700, true) && !is_dir($destDir)) {
         fail("No se pudo crear directorio de certificado: {$destDir}" . PHP_EOL
@@ -379,6 +384,20 @@ if ($certPathArg !== null && $certPathArg !== '') {
         echo "   La emision va a fallar con 'Unable to read certificate'. O la clave esta mal, o el" . PHP_EOL;
         echo "   .p12 viene con cifrado legacy (RC2-40): onboard.html lo convierte solo; por CLI," . PHP_EOL;
         echo "   convertirlo con convertir_cert.ps1 y reemplazar {$certPathRel} (misma clave)." . PHP_EOL;
+    }
+} elseif ($tipo === 'app') {
+    // Sin .p12 todavia: se reserva la ruta donde va a quedar, SIN archivo. Un tenant app con
+    // cert_path vacio firma con el certificado global del .env (el de Gratex) en vez de
+    // fallar (CertResolver), asi que una factura emitida antes de cargar el suyo saldria
+    // firmada por otro. Con la ruta puesta, CertResolver no encuentra el archivo y emitir
+    // falla antes de firmar o enviar nada. Se carga despues con tools/set_tenant_cert.php.
+    // Un demo que SI deba firmar con el cert del .env se libera tras el alta:
+    //   UPDATE tenants SET cert_path = NULL WHERE id = <tenant_id>;
+    $certPathRel = $certDir . '/' . $rnc . '/cert.p12';
+    $certReservado = true;
+    echo "-> sin .p12: ruta reservada {$certPathRel} (emitir falla hasta cargar el certificado)\n";
+    if (is_file(__DIR__ . '/../' . $certPathRel)) {
+        echo "   OJO: ya hay un archivo en esa ruta (de un tenant anterior con este RNC?): reviselo antes de cargar el certificado.\n";
     }
 }
 
@@ -550,6 +569,11 @@ foreach ($certIguales as $igual) {
 }
 if ($certIlegible) {
     echo "  !! El servidor no pudo abrir el .p12 con esa clave: ver WARNING arriba.\n";
+}
+if ($certReservado) {
+    echo "\n  >> SIN CERTIFICADO: la ruta {$certPathRel} quedo reservada y no hay archivo; emitir un e-CF falla hasta cargarlo.\n";
+    echo "     Cuando llegue el .p12: tools/set_tenant_cert.php (web: public/set_tenant_cert.php) con id={$tenantId}\n";
+    echo "     (docs/integrations/alta-tenant-runbook.md, 'Alta sin certificado').\n";
 }
 if ($ambiente === 'sandbox') {
     echo "\n  >> SANDBOX: los e-CF se firman con un certificado de prueba y no se envian a la DGII.\n";

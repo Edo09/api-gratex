@@ -261,29 +261,35 @@ necesita es firmar e-CF.
 > certificado **global del `.env`**, que es el de Gratex. Una factura emitida antes de
 > tiempo saldría firmada con el certificado de Gratex y el RNC del tenant nuevo. Lo esperable
 > es que la DGII la rechace, pero ya habría una fila guardada y un e-NCF gastado. Por eso el
-> paso 2 no es opcional.
+> alta de un tenant app sin `.p12` **reserva la ruta sola** (paso 2).
 
-Las dos operaciones son `tools/set_tenant_cert.php`, que en el server se usa por su wrapper
-`public/set_tenant_cert.php` (solo POST, `ONBOARD_TOKEN`; **bórralo del server al terminar**).
-El ejemplo usa `curl.exe` desde PowerShell; el `User-Agent` de navegador evita el `406` del
-WAF y `--form-string` evita que curl interprete `@`, `<` o `;` dentro del token o la clave.
+Para cargar el certificado después se usa `tools/set_tenant_cert.php`, que en el server va por
+su wrapper `public/set_tenant_cert.php` (solo POST, `ONBOARD_TOKEN`; **bórralo del server al
+terminar**). Los ejemplos usan `curl.exe` desde PowerShell; el `User-Agent` de navegador evita
+el `406` del WAF y `--form-string` evita que curl interprete `@`, `<` o `;` dentro del token o
+la clave.
 
 **1. Alta.** Fases 0, 2, 3 y 4 de arriba, saltando la Fase 1 y dejando `cert` y `cert-pass`
 vacíos. El ambiente se elige como siempre (`certecf` si va a certificar, `ecf` si ya está
 certificado): las secuencias e-NCF son por ambiente. Guarda el `tenant_id` del resumen.
 
-**2. Reservar la ruta, justo después del alta:**
+**2. La ruta queda reservada sola.** Sin `.p12`, `create_tenant.php` deja
+`tenants.cert_path = <CERT_DIR>/<rnc>/cert.p12` **sin archivo**, y el resumen lo dice («SIN
+CERTIFICADO: la ruta … quedó reservada»). Desde ese momento emitir responde «No se encontró el
+certificado digital de tu empresa. Avisa a soporte.» antes de firmar o enviar nada, y el e-NCF
+se devuelve. Mientras tanto, no abras caja en su POS.
+
+- **Un tenant app que ya existía sin `cert_path`** (creado antes de este cambio) no quedó
+  protegido. Resérvale la ruta a mano:
 
 ```bash
 curl.exe -A "Mozilla/5.0" https://gratex.net/api/public/set_tenant_cert.php --form-string "token=<ONBOARD_TOKEN>" --form-string "id=<tenant_id>" --form-string "reservar=1"
 ```
 
-Deja `tenants.cert_path = <CERT_DIR>/<rnc>/cert.p12` **sin archivo**. Desde ese momento
-emitir responde «No se encontró el certificado digital de tu empresa. Avisa a soporte.» antes
-de firmar o enviar nada, y el e-NCF se devuelve. No lo uses en un tenant que firma a
-propósito con el certificado del `.env` (Gratex, #1, o una empresa DEMO como la de
-[multi-tenant-onboarding.md](multi-tenant-onboarding.md#empresa-demo-funcional-testecf)):
-quedaría sin poder emitir. Mientras tanto, no abras caja en su POS.
+- **Un tenant que debe firmar a propósito con el certificado del `.env`** (una empresa DEMO
+  como la de [multi-tenant-onboarding.md](multi-tenant-onboarding.md#empresa-demo-funcional-testecf);
+  Gratex, #1, ya lo hace con `cert_path` vacío): después del alta, en el master,
+  `UPDATE tenants SET cert_path = NULL WHERE id = <tenant_id>;`. Y no le corras `reservar`.
 
 **3. Cuando llegue el `.p12`:**
 
@@ -324,7 +330,7 @@ curl.exe -A "Mozilla/5.0" https://gratex.net/api/public/set_tenant_cert.php --fo
 | `Unable to read certificate ... mac verify failure` | Contraseña incorrecta o `cert_pass_encrypted` NULL | Re-cifrarla con `public/encrypt_credential.php` y actualizar `tenants` |
 | `El RNC <cédula> del certificado no está delegado para realizar transaciones` (HTTP 400 en validarsemilla) | El `.p12` es de una persona física y la empresa no la delegó en la Oficina Virtual de la DGII para ese ambiente. El certificado y la firma están bien: es configuración de la DGII | El representante de la empresa delega esa cédula (como firmante de e-CF) en la OFV; luego reintentar `diagnostico_dgii.php` |
 | Emitir responde «No se encontró el certificado digital de tu empresa. Avisa a soporte.» (en el log: `No se pudo leer el certificado del tenant: …`) | El tenant tiene `cert_path` pero no hay archivo ahí: se reservó la ruta ([Alta sin certificado](#alta-sin-certificado-el-p12-llega-después)) y el `.p12` aún no se cargó, o se movió | Cargarlo con `set_tenant_cert` (paso 3 de esa sección) |
-| Una factura de un tenant recién creado salió firmada con el certificado de Gratex, o la DGII la rechazó por el firmante | El tenant se creó sin `.p12` y no se reservó la ruta: sin `cert_path` se firma con el certificado global del `.env` | Reservar la ruta o cargar su `.p12` con `set_tenant_cert`; las filas que quedaron se resuelven como cualquier rechazo (ver [dgii-ecf.md](dgii-ecf.md)) |
+| Una factura de un tenant recién creado salió firmada con el certificado de Gratex, o la DGII la rechazó por el firmante | El tenant app se creó sin `.p12` antes de que el alta reservara la ruta (o se le puso `cert_path = NULL` a propósito): sin `cert_path` se firma con el certificado global del `.env` | Reservar la ruta o cargar su `.p12` con `set_tenant_cert`; las filas que quedaron se resuelven como cualquier rechazo (ver [dgii-ecf.md](dgii-ecf.md)) |
 | `set_tenant_cert`: «La clave no abre este .p12» o «usa cifrado legacy (RC2-40)» | Clave mal escrita, archivo dañado sin llave privada, o `.p12` de la CA sin convertir | Revisar la clave; si es legacy, `convertir_cert.ps1` (misma clave) y volver a cargar. No escribió nada |
 | El PDF muestra datos de Gratex | `emisor_config` incompleto y/o tenant sin logo (Fase 4 saltada) | El `UPDATE` de la Fase 4 + subir el logo |
 | Clientes de prueba DGII duplicados | El schema se aplicó dos veces sobre la misma DB | `DELETE FROM clients WHERE rnc IN ('131880681','533445861');` y dejar una corrida limpia |

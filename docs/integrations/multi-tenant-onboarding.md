@@ -305,7 +305,10 @@ producción. Útil para demos de venta con flujo completo.
    - RNC: uno real distinto al de Gratex (`tenants.rnc` es UNIQUE; no puede
      repetir 131256432). Si DGII testecf rechaza un RNC no habilitado, el demo
      igual muestra todo el flujo hasta la respuesta de DGII.
-   - cert: el `.p12` propio, o vacío (cae al cert global del `.env`).
+   - cert: el `.p12` propio, o vacío para firmar con el cert global del `.env`. Vacío, el
+     alta reserva la ruta del cert y emitir falla: tras el alta,
+     `UPDATE tenants SET cert_path = NULL WHERE id = <tenant_id>;` (ver
+     [alta-tenant-runbook.md](alta-tenant-runbook.md#alta-sin-certificado-el-p12-llega-después)).
    - usuario demo (email/password para el login del demo).
 3. El schema ya siembra secuencias e-NCF en `testecf` (ademas de certecf/ecf),
    así que la emisión funciona de una.

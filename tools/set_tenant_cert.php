@@ -7,8 +7,9 @@
  * agrega aqui cuando llegue. Los dos modos:
  *
  *  - reservar : fija tenants.cert_path a <CERT_DIR>/<rnc>/cert.p12 SIN subir el archivo.
- *               Hacerlo justo despues del alta: un tenant app con cert_path vacio firma
- *               con el certificado GLOBAL del .env (el de Gratex) en vez de fallar
+ *               create_tenant.php ya lo hace solo en el alta de un app sin .p12; esto es
+ *               para los que se crearon antes de eso. Un tenant app con cert_path vacio
+ *               firma con el certificado GLOBAL del .env (el de Gratex) en vez de fallar
  *               (CertResolver). Con la ruta reservada, emitir responde "No se encontro el
  *               certificado digital de tu empresa" antes de firmar o enviar nada.
  *               No usarlo en un tenant que firma A PROPOSITO con el cert del .env (Gratex,
