@@ -34,6 +34,10 @@
  * tools/test_express_p0_spikes_puro.php): el CLI corre unicamente cuando este es
  * el archivo que se ejecuta.
  *
+ * El token no vence y viaja en la cabecera X-API-KEY: --api tiene que ser https (http
+ * solo hacia 127.0.0.1, localhost o [::1], para probar contra un API local), y las
+ * redirecciones no se siguen. Con un http hacia otro equipo el token saldria en claro.
+ *
  * Uso:
  *   export EXPRESS_P0_TOKEN=<token de la app del tenant>
  *   php -d extension=curl tools/express_p0/spike_e34_certecf.php --api=https://<host>/api \
@@ -49,8 +53,10 @@ const SPIKE_ESPERA_MAXIMA_S = 600;
 const SPIKE_VENCIMIENTO_FORZADO = '31-12-2000';
 const SPIKE_INCONCLUSO = 'INCONCLUSO: la DGII acepto la secuencia de 2000';
 const SPIKE_SIN_VEREDICTO = 'SIN VEREDICTO';
-const SPIKE_USO = 'Uso: EXPRESS_P0_TOKEN=<token> php -d extension=curl tools/express_p0/spike_e34_certecf.php --api=<base que termina en /api> '
+const SPIKE_USO = 'Uso: EXPRESS_P0_TOKEN=<token> php -d extension=curl tools/express_p0/spike_e34_certecf.php --api=<base https que termina en /api> '
     . '--client-id=<id> --fase=original|nota|reintento [--original=<e-NCF>] [--fecha-original=DD-MM-YYYY] [--forzar-rechazo] [--seco]';
+/** Hosts de este equipo: el unico destino al que el token puede ir por http. */
+const SPIKE_HOSTS_LOOPBACK = ['127.0.0.1', 'localhost', '[::1]'];
 
 /** La unica linea de los spikes de nota: un servicio libre (sin product_id) de 1000, para que original y notas sumen lo mismo. */
 function spike_items(): array
@@ -140,6 +146,21 @@ function spike_estado_final(?string $estado): bool
     return in_array($estado, SPIKE_ESTADOS_FINALES, true);
 }
 
+/**
+ * true si el token de la app puede viajar a $url: https, o http solo hacia este equipo
+ * (127.0.0.1, localhost o [::1]). El origen tiene que ser host[:puerto] pelado: un
+ * "usuario@" delante ("http://127.0.0.1@otro.com/api") pasaria por loopback y mandaria el
+ * token a otro host. El token no vence y va en la cabecera X-API-KEY: por http saldria en
+ * claro, y una redireccion de un http cualquiera lo reenviaria al host nuevo.
+ */
+function spike_url_segura(string $url): bool
+{
+    if (preg_match('#^(https?)://(\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::\d{1,5})?(?:[/?\#]|$)#', $url, $m) !== 1) {
+        return false;
+    }
+    return $m[1] === 'https' || in_array(strtolower($m[2]), SPIKE_HOSTS_LOOPBACK, true);
+}
+
 /** Una linea JSON por evento, con el texto del servidor sin tocar. */
 function spike_linea(array $datos): void
 {
@@ -164,15 +185,21 @@ function spike_opciones(array $args): array|string
         } elseif (preg_match('/^--(api|client-id|fase|original|fecha-original)=(.*)$/s', $a, $m) === 1) {
             $o[str_replace('-', '_', $m[1])] = $m[2];
         } else {
-            // Solo el nombre: un valor mal puesto podria ser un token.
-            return 'Argumento desconocido: ' . explode('=', $a, 2)[0];
+            // Solo el nombre de una opcion --nombre: un valor mal puesto, o un argumento suelto, podria ser un token.
+            return str_starts_with($a, '--')
+                ? 'Argumento desconocido: ' . explode('=', $a, 2)[0]
+                : 'Argumento desconocido: un valor suelto (las opciones van como --nombre=valor).';
         }
     }
     $o['api'] = rtrim((string) $o['api'], '/');
-    if (preg_match('#^https?://[^/\s]+(?:/\S*)?/api$#', $o['api']) !== 1) {
+    if (preg_match('#^https?://[^/\s]+(?:/\S*)?/api\z#', $o['api']) !== 1) {
         return '--api es obligatorio: la base del API, que termina en /api (por ejemplo https://<host>/api).';
     }
-    if (preg_match('/^[1-9]\d*$/', (string) $o['client_id']) !== 1) {
+    if (!spike_url_segura($o['api'])) {
+        return '--api debe ser https: el token de la app viaja en la cabecera X-API-KEY, no vence y por http saldria en claro. '
+            . 'http solo se acepta hacia 127.0.0.1, localhost o [::1] (un API local), y sin usuario@ delante.';
+    }
+    if (preg_match('/^[1-9]\d*\z/', (string) $o['client_id']) !== 1) {
         return '--client-id es obligatorio: el id (entero positivo) del cliente de los spikes.';
     }
     $o['client_id'] = (int) $o['client_id'];
@@ -185,10 +212,10 @@ function spike_opciones(array $args): array|string
         }
         return $o;
     }
-    if (preg_match('/^E\d{12}$/', (string) $o['original']) !== 1) {
+    if (preg_match('/^E\d{12}\z/', (string) $o['original']) !== 1) {
         return 'La fase ' . $o['fase'] . ' necesita --original=<e-NCF de la factura a anular> (E y 12 digitos).';
     }
-    if ($o['fecha_original'] !== null && preg_match('/^\d{2}-\d{2}-\d{4}$/', $o['fecha_original']) !== 1) {
+    if ($o['fecha_original'] !== null && preg_match('/^\d{2}-\d{2}-\d{4}\z/', $o['fecha_original']) !== 1) {
         return '--fecha-original va como DD-MM-YYYY.';
     }
     if ($o['fase'] === 'reintento' && $o['forzar_rechazo']) {
@@ -205,11 +232,16 @@ function spike_opciones(array $args): array|string
  */
 function spike_http(string $metodo, string $url, string $token, ?array $cuerpo = null, int $timeout = 90): array
 {
+    // Ultima defensa: aunque quien llame se salte spike_opciones, el token no sale en claro hacia otro equipo.
+    if (!spike_url_segura($url)) {
+        return ['status' => 0, 'json' => null, 'crudo' => '', 'error' => 'URL rechazada: el token de la app solo viaja por https (http solo hacia este equipo)'];
+    }
     $cabeceras = ['X-API-KEY: ' . $token, 'Accept: application/json'];
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_CUSTOMREQUEST => $metodo,
         CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_FOLLOWLOCATION => false, // una redireccion reenviaria X-API-KEY al host nuevo
         CURLOPT_CONNECTTIMEOUT => 15,
         CURLOPT_TIMEOUT => $timeout,
     ]);
@@ -316,7 +348,7 @@ function spike_esperar_veredicto(array $ctx, int $facturaId, ?string $estado, in
 function spike_fecha_original(array $o, ?array $fila): ?string
 {
     $fecha = $o['fecha_original'] ?? ($fila['fecha_emision'] ?? null);
-    return is_string($fecha) && preg_match('/^\d{2}-\d{2}-\d{4}$/', $fecha) === 1 ? $fecha : null;
+    return is_string($fecha) && preg_match('/^\d{2}-\d{2}-\d{4}\z/', $fecha) === 1 ? $fecha : null;
 }
 
 /** Fase original: E31 y espera a ACEPTADO. Sale con 0 solo si la DGII la acepto. */

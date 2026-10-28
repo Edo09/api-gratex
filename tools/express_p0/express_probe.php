@@ -106,7 +106,7 @@ function probe_segundos(array $q): ?int
 function probe_id(array $q): ?string
 {
     $v = $q['id'] ?? null;
-    return (is_string($v) && preg_match('/^[0-9a-f]{8}$/', $v) === 1) ? $v : null;
+    return (is_string($v) && preg_match('/^[0-9a-f]{8}\z/', $v) === 1) ? $v : null;
 }
 
 function probe_ruta_latido(string $id, ?string $dir = null): string
