@@ -2316,6 +2316,528 @@ try {
 wa_chk('la copia del arbol de la prueba del controller se borro al terminar', !is_dir($s7Arbol), $s7Arbol);
 
 // ---------------------------------------------------------------------------
+// 8) Biblioteca de preflight de la edicion (tools/express_edicion_lib.php): hechos, evaluacion y plan
+// ---------------------------------------------------------------------------
+echo "\n== 8) Biblioteca de preflight de la edicion (hechos, evaluacion y plan) ==\n";
+require_once __DIR__ . '/express_edicion_lib.php';
+require_once __DIR__ . '/../src/CertResolver.php';
+
+$s8Lib = __DIR__ . '/express_edicion_lib.php';
+$s8Contrato = ['express_conectar_tenant', 'express_leer_certificado', 'express_preflight_hechos', 'express_preflight_evaluar', 'express_plan'];
+
+// --- el contrato: incluirla no imprime ni abre conexion, las cinco firmas y la fuente (sin salida, sin sintaxis de PHP 8.4) --------
+// Un php limpio, para que lo que ya cargaron las secciones de arriba no tape un echo suelto ni una conexion al incluir.
+$s8Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_lib_');
+file_put_contents($s8Hijo, <<<'PHP'
+<?php
+// Hijo de la seccion 8: incluye la biblioteca dentro de un buffer y cuenta lo que dejo.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+require $argv[1];
+$salida = (string) ob_get_clean();
+$instancia = static fn (string $clase): bool => class_exists($clase, false) && (new ReflectionProperty($clase, 'instance'))->getValue() !== null;
+echo json_encode([
+    'salida' => $salida,
+    'database' => $instancia('Database'),
+    'master' => $instancia('MasterDatabase'),
+    'credenciales' => class_exists('Database', false) && Database::hasCredentials(),
+    'funciones' => array_values(array_filter(get_defined_functions()['user'], static fn (string $f): bool => str_starts_with($f, 'express_'))),
+]);
+PHP);
+$s8R = wa_correr([PHP_BINARY, $s8Hijo, $s8Lib]);
+@unlink($s8Hijo);
+$s8J = json_decode(trim($s8R['salida']), true);
+wa_chk('incluir la biblioteca en un php limpio no imprime nada y no abre conexion (Database y MasterDatabase sin instancia, Database sin credenciales)',
+    is_array($s8J) && $s8J['salida'] === '' && $s8J['database'] === false && $s8J['master'] === false && $s8J['credenciales'] === false, $s8R);
+wa_chk('la biblioteca declara las cinco funciones del contrato (conectar, leer certificado, hechos, evaluar y plan)',
+    is_array($s8J) && array_diff($s8Contrato, $s8J['funciones']) === [], $s8J['funciones'] ?? $s8R);
+
+/** La firma de una funcion como texto: "nombre(tipo $param, ?tipo $otro = NULL): retorno". */
+$s8Firma = static function (string $funcion): string {
+    $ref = new ReflectionFunction($funcion);
+    $partes = array_map(
+        static fn (ReflectionParameter $p): string => ($p->hasType() ? $p->getType() . ' ' : '') . '$' . $p->getName()
+            . ($p->isOptional() ? ' = ' . var_export($p->getDefaultValue(), true) : ''),
+        $ref->getParameters()
+    );
+    return $funcion . '(' . implode(', ', $partes) . '): ' . $ref->getReturnType();
+};
+wa_chk('las firmas son las del contrato que consumen tenant_edicion.php y create_tenant.php',
+    array_map($s8Firma, $s8Contrato) === [
+        'express_conectar_tenant(array $tenant): PDO',
+        'express_leer_certificado(array $tenant, ?int $ahora = NULL): array',
+        'express_preflight_hechos(PDO $master, ?PDO $tenantDb, array $tenant, array $pedido): array',
+        'express_preflight_evaluar(array $hechos): array',
+        'express_plan(array $hechos, array $evaluacion): array',
+    ], array_map($s8Firma, $s8Contrato));
+
+$s8Fuente = (string) file_get_contents($s8Lib);
+$s8Tokens = token_get_all($s8Fuente);
+$s8Imprime = [];
+$s8Codigo = '';
+foreach ($s8Tokens as $s8T) {
+    if (!is_array($s8T)) {
+        $s8Codigo .= $s8T;
+        continue;
+    }
+    if (!in_array($s8T[0], [T_COMMENT, T_DOC_COMMENT], true)) {
+        $s8Codigo .= $s8T[1];
+    }
+    if (in_array($s8T[0], [T_ECHO, T_PRINT, T_EXIT, T_INLINE_HTML, T_OPEN_TAG_WITH_ECHO], true)
+        || ($s8T[0] === T_STRING && in_array(strtolower($s8T[1]), ['printf', 'vprintf', 'print_r', 'var_dump', 'var_export', 'error_log', 'fwrite', 'fputs', 'file_put_contents', 'header'], true))) {
+        $s8Imprime[] = token_name($s8T[0]) . ' ' . trim($s8T[1]) . ' (linea ' . $s8T[2] . ')';
+    }
+}
+wa_chk('la fuente de la biblioteca no imprime ni escribe en ninguna parte (ni echo, ni exit, ni HTML suelto, ni error_log) y empieza en <?php sin BOM',
+    $s8Imprime === [] && str_starts_with($s8Fuente, '<?php'), $s8Imprime);
+$s8Ocho4 = [];
+foreach (['/\b(array_find|array_find_key|array_any|array_all|mb_trim|mb_ltrim|mb_rtrim)\s*\(/i' => 'funcion nueva de PHP 8.4',
+          '/\bnew\s+[\w\\\\]+\s*\([^()]*\)\s*->/' => 'new X()->m() sin parentesis',
+          '/\b(public|protected|private)\(set\)/' => 'visibilidad asimetrica',
+          '/\{\s*(get|set)\s*(=>|\{|\()/' => 'ganchos de propiedad'] as $s8Patron => $s8Que) {
+    if (preg_match($s8Patron, $s8Codigo) === 1) {
+        $s8Ocho4[] = $s8Que;
+    }
+}
+wa_chk('la fuente usa solo sintaxis y funciones de PHP 8.3 (produccion y CI): nada de array_find, array_any, mb_trim, new X()->m(), visibilidad asimetrica ni ganchos', $s8Ocho4 === [], $s8Ocho4);
+// php -l con deprecaciones al maximo: un parametro con null implicito (Tipo $x = null) avisa "Deprecated" desde PHP 8.4.
+$s8Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s8Lib]);
+wa_chk('php -l de la biblioteca: sin errores de sintaxis ni deprecaciones', $s8Lint['codigo'] === 0 && str_starts_with(trim($s8Lint['salida']), 'No syntax errors detected')
+    && !str_contains($s8Lint['salida'], 'Deprecated'), $s8Lint);
+
+// --- express_ruta_absoluta: la ruta del certificado se resuelve como CertResolver::toAbsolute (que es privada) ------------------------
+$s8Resuelve = new ReflectionMethod('CertResolver', 'toAbsolute');
+$s8Distintas = [];
+foreach (['certificado_dgii/131000001/cert.p12', 'certificado_dgii\\131000001\\cert.p12', 'cert.p12', './cert.p12', '../fuera/cert.p12',
+          '/var/certs/cert.p12', 'C:\\certs\\cert.p12', 'D:/certs/cert.p12'] as $s8Ruta) {
+    if (express_ruta_absoluta($s8Ruta) !== $s8Resuelve->invoke(null, $s8Ruta)) {
+        $s8Distintas[$s8Ruta] = [express_ruta_absoluta($s8Ruta), $s8Resuelve->invoke(null, $s8Ruta)];
+    }
+}
+wa_chk('express_ruta_absoluta resuelve igual que CertResolver::toAbsolute: relativa a la raiz del proyecto, y absoluta (posix o con unidad) tal cual', $s8Distintas === [], $s8Distintas);
+
+// --- express_leer_certificado, lo que no necesita openssl: sin ruta, sin archivo, sin clave o con una clave que no descifra ---------------
+$s8P12 = (string) tempnam(sys_get_temp_dir(), 'ent_p12_');
+file_put_contents($s8P12, 'esto no es un p12');
+$s8Falta = ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null];
+ob_start();
+[$s8Obtenido, $s8Error, $s8Log] = wa_con_log(static fn (): array => [
+    'cert_path vacio' => express_leer_certificado(['cert_path' => '', 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'cert_path NULL' => express_leer_certificado(['cert_path' => null, 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'sin la clave cert_path (master sin certificado)' => express_leer_certificado(['cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'cert_path de solo espacios' => express_leer_certificado(['cert_path' => "  \t ", 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'un archivo que no existe' => express_leer_certificado(['cert_path' => $s8P12 . '.no-existe', 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'una carpeta en lugar de un archivo' => express_leer_certificado(['cert_path' => sys_get_temp_dir(), 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'un archivo legible sin cert_pass_encrypted' => express_leer_certificado(['cert_path' => $s8P12, 'cert_pass_encrypted' => '']),
+    'un archivo legible con cert_pass_encrypted NULL' => express_leer_certificado(['cert_path' => $s8P12, 'cert_pass_encrypted' => null]),
+    'un archivo legible con una clave que no se descifra' => express_leer_certificado(['cert_path' => $s8P12, 'cert_pass_encrypted' => 'MARCA-clave-cifrada']),
+    'una fila vacia' => express_leer_certificado([]),
+]);
+$s8Salida = (string) ob_get_clean();
+@unlink($s8P12);
+foreach (is_array($s8Obtenido) ? $s8Obtenido : [] as $s8Desc => $s8R) {
+    wa_chk("express_leer_certificado, {$s8Desc}: CERT_FALTA con ok false y vence null (sin cert_path, sin archivo legible o sin clave que lo abra)",
+        $s8R === $s8Falta, $s8R);
+}
+wa_chk('express_leer_certificado no lanza, no imprime y no escribe en el log con ninguna de esas filas (ni el warning de un archivo que no existe)',
+    $s8Error === null && is_array($s8Obtenido) && count($s8Obtenido) === 10 && $s8Salida === '' && $s8Log === '', [$s8Error?->getMessage(), $s8Salida, $s8Log]);
+
+// --- express_conectar_tenant: lo que se niega antes de abrir nada (la conexion real se prueba en la suite scratch) -----------------
+foreach ([
+    "tipo 'integracion' (no tiene base propia)" => ['id' => 5, 'tipo' => 'integracion', 'db_host' => 'host-marca', 'db_name' => 'base_marca', 'db_user' => 'usuario_marca', 'db_pass_encrypted' => 'MARCA-clave-de-la-base'],
+    'una fila app sin db_name' => ['id' => 5, 'tipo' => 'app', 'db_host' => 'host-marca', 'db_user' => 'usuario_marca', 'db_pass_encrypted' => 'MARCA-clave-de-la-base'],
+    'una fila app sin db_host' => ['id' => 5, 'tipo' => 'app', 'db_name' => 'base_marca', 'db_user' => 'usuario_marca', 'db_pass_encrypted' => 'MARCA-clave-de-la-base'],
+    'una fila app sin db_user' => ['id' => 5, 'tipo' => 'app', 'db_host' => 'host-marca', 'db_name' => 'base_marca', 'db_pass_encrypted' => 'MARCA-clave-de-la-base'],
+] as $s8Desc => $s8Fila) {
+    try {
+        express_conectar_tenant($s8Fila);
+        $s8Error = null;
+    } catch (Throwable $s8Error) {
+    }
+    wa_chk("express_conectar_tenant, {$s8Desc}: lanza InvalidArgumentException con el id de la empresa y sin la clave ni el host ni el usuario ni la base en el texto",
+        $s8Error instanceof InvalidArgumentException && str_contains($s8Error->getMessage(), '#5')
+        && !preg_match('/MARCA|host-marca|base_marca|usuario_marca/', $s8Error->getMessage()), $s8Error === null ? null : get_class($s8Error) . ': ' . $s8Error->getMessage());
+}
+
+// --- evaluar: la base y la tabla de mutaciones del plan ---------------------------------------------------------------------------
+// Una empresa NUEVA (sin facturas ni contadores en ecf) en testecf que lo cumple todo salvo la credencial de integracion, que el plan
+// deja en blanco. Los permisos del Facturador se escriben a mano: la tabla no se deriva de la config que se prueba.
+$s8Hoy = '2026-10-29';
+$s8Rol = ['facturas', 'clients', 'products', 'unidades'];
+$s8Vence = strtotime('2027-03-15 12:00:00');
+$s8Base = [
+    'tenant' => [
+        'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'activo' => 1, 'ambiente' => 'testecf',
+        'pos_enabled' => 0, 'inventario_estricto' => 0, 'api_secret_hash' => 'MARCA-hash-de-integracion',
+        'cert_path' => 'certificado_dgii/131000001/MARCA-ruta-del-p12.p12', 'cert_pass_encrypted' => 'MARCA-clave-cifrada',
+        'db_pass_encrypted' => 'MARCA-clave-de-la-base',
+    ],
+    'columnas_014' => true,
+    'm036' => true,
+    'cert' => ['ok' => true, 'codigo' => null, 'vence' => $s8Vence],
+    'emisor' => ['rnc' => '131000001', 'razon_social' => 'CONSTRUCTORA X SRL', 'direccion' => 'Av. Winston Churchill 10', 'telefono' => '809-555-1234'],
+    'almacen' => true,
+    'pedido' => ['edicion' => 'express', 'tipos' => ['45'], 'modulos' => null],
+    'rangos_ecf' => [],
+    'ecf_facturas' => 0,
+    'clientes_prueba' => ['ids' => [31, 32], 'refs_ecf' => 0, 'refs_total' => 2],
+    'rol_user' => $s8Rol,
+    'hoy' => $s8Hoy,
+];
+/** Los hechos base con los cambios dados, 'ruta.con.puntos' => valor: el valor reemplaza lo que haya (una lista entera no se mezcla con la de la base). */
+$s8Con = static function (array $cambios) use ($s8Base): array {
+    $h = $s8Base;
+    foreach ($cambios as $ruta => $valor) {
+        $ref = &$h;
+        foreach (explode('.', (string) $ruta) as $clave) {
+            $ref = &$ref[$clave];
+        }
+        $ref = $valor;
+        unset($ref);
+    }
+    return $h;
+};
+$s8Ev = static fn (array $cambios = []): array => express_preflight_evaluar($s8Con($cambios));
+/** El estado de un item de la evaluacion de la base con los cambios dados. */
+$s8Estado = static fn (string $id, array $cambios = []): ?string => $s8Ev($cambios)['items'][$id]['estado'] ?? null;
+
+$s8Ids = ['tenant', 'columnas', 'm036', 'tipos', 'modulos', 'clientes_modulo', 'cert', 'emisor', 'almacen', 'pos', 'inventario', 'rangos', 'ilimitados',
+          'clientes_prueba', 'integracion', 'roles'];
+$s8E0 = express_preflight_evaluar($s8Base);
+wa_chk('evaluar (base): devuelve exactamente items, nuevo, rechazos y acciones, y los 16 items de la tabla del plan en ese orden, cada uno con solo estado y detalle',
+    array_keys($s8E0) === ['items', 'nuevo', 'rechazos', 'acciones'] && array_keys($s8E0['items']) === $s8Ids
+    && array_filter($s8E0['items'], static fn (array $i): bool => array_keys($i) !== ['estado', 'detalle']
+        || !in_array($i['estado'], ['ok', 'corregir', 'rechazar'], true) || !is_string($i['detalle']) || $i['detalle'] === '') === [], $s8E0);
+wa_chk('evaluar (base): una empresa nueva que lo cumple todo; solo integracion es corregir y todo lo demas ok, sin rechazos',
+    $s8E0['nuevo'] === true && $s8E0['rechazos'] === [] && $s8E0['acciones'] === ['integracion']
+    && array_keys(array_filter($s8E0['items'], static fn (array $i): bool => $i['estado'] !== 'ok')) === ['integracion']
+    && $s8E0['items']['integracion']['estado'] === 'corregir', $s8E0);
+
+// Cada linea es [mutacion, cambios a la base, id del item, estado esperado]; cada una es una prueba.
+$s8Rangos45 = [['type' => 'E45', 'numero_hasta' => 500, 'current_value' => 0, 'fecha_vencimiento' => '2027-01-31']];
+$s8Ilimitada = ['type' => 'E31', 'numero_hasta' => null, 'current_value' => 0, 'fecha_vencimiento' => null];
+$s8Tabla = [
+    ["tenant.tipo 'integracion'", ['tenant.tipo' => 'integracion'], 'tenant', 'rechazar'],
+    ['tenant.activo 0', ['tenant.activo' => 0], 'tenant', 'rechazar'],
+    ['columnas_014 false', ['columnas_014' => false], 'columnas', 'rechazar'],
+    ['m036 false', ['m036' => false], 'm036', 'rechazar'],
+    ["pedido.tipos ['44']", ['pedido.tipos' => ['44']], 'tipos', 'rechazar'],
+    ['pedido.tipos []', ['pedido.tipos' => []], 'tipos', 'rechazar'],
+    ["pedido.tipos ['e45']", ['pedido.tipos' => ['e45']], 'tipos', 'rechazar'],
+    ["pedido.modulos ['facturacion','cliente']", ['pedido.modulos' => ['facturacion', 'cliente']], 'modulos', 'rechazar'],
+    ["pedido.tipos ['31'] con pedido.modulos ['facturacion']", ['pedido.tipos' => ['31'], 'pedido.modulos' => ['facturacion']], 'clientes_modulo', 'rechazar'],
+    ['cert.codigo CERT_VENCIDO', ['cert' => ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $s8Vence - 86400 * 400]], 'cert', 'rechazar'],
+    ['cert.codigo CERT_FALTA', ['cert' => ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null]], 'cert', 'rechazar'],
+    ['emisor.rnc distinto del de la empresa', ['emisor.rnc' => '000000000'], 'emisor', 'rechazar'],
+    ["emisor.razon_social 'PENDIENTE ONBOARDING'", ['emisor.razon_social' => 'PENDIENTE ONBOARDING'], 'emisor', 'rechazar'],
+    ["emisor.direccion 'Pendiente'", ['emisor.direccion' => 'Pendiente'], 'emisor', 'rechazar'],
+    ["emisor.direccion 'N/D'", ['emisor.direccion' => 'N/D'], 'emisor', 'rechazar'],
+    ["emisor.telefono ''", ['emisor.telefono' => ''], 'emisor', 'rechazar'],
+    ['un emisor completo (lo que create_tenant.php escribe con --razon-social, --direccion y --telefono)',
+        ['emisor' => ['rnc' => '131000001', 'razon_social' => 'Constructora X SRL', 'direccion' => 'Av. X #1', 'telefono' => '809-555-1234']], 'emisor', 'ok'],
+    ['almacen false', ['almacen' => false], 'almacen', 'rechazar'],
+    ['pos_enabled 1 con ecf_facturas 0', ['tenant.pos_enabled' => 1], 'pos', 'corregir'],
+    ['pos_enabled 1 con ecf_facturas 3', ['tenant.pos_enabled' => 1, 'ecf_facturas' => 3], 'pos', 'rechazar'],
+    ['inventario_estricto 1 con ecf_facturas 0', ['tenant.inventario_estricto' => 1], 'inventario', 'corregir'],
+    ['inventario_estricto 1 con ecf_facturas 3', ['tenant.inventario_estricto' => 1, 'ecf_facturas' => 3], 'inventario', 'rechazar'],
+    ["ambiente 'ecf' sin un rango E34 (solo hay el E45)", ['tenant.ambiente' => 'ecf', 'rangos_ecf' => $s8Rangos45], 'rangos', 'rechazar'],
+    ["ambiente 'testecf' con esos mismos rangos", ['tenant.ambiente' => 'testecf', 'rangos_ecf' => $s8Rangos45], 'rangos', 'ok'],
+    ['un rango ecf sin limite con current_value 0 en una empresa nueva', ['rangos_ecf' => [$s8Ilimitada]], 'ilimitados', 'corregir'],
+    ['ese mismo rango con ecf_facturas 3', ['rangos_ecf' => [$s8Ilimitada], 'ecf_facturas' => 3], 'ilimitados', 'rechazar'],
+    ['ese mismo rango con current_value 5', ['rangos_ecf' => [['current_value' => 5] + $s8Ilimitada]], 'ilimitados', 'rechazar'],
+    ['clientes_prueba.refs_ecf 1', ['clientes_prueba.refs_ecf' => 1], 'clientes_prueba', 'rechazar'],
+    ['clientes_prueba.refs_total 0 en una empresa nueva', ['clientes_prueba.refs_total' => 0], 'clientes_prueba', 'corregir'],
+    ['clientes_prueba.refs_total 2 con refs_ecf 0 en una empresa nueva', ['clientes_prueba.refs_total' => 2, 'clientes_prueba.refs_ecf' => 0], 'clientes_prueba', 'ok'],
+    ['clientes_prueba.refs_total 0 con ecf_facturas 3', ['clientes_prueba.refs_total' => 0, 'ecf_facturas' => 3], 'clientes_prueba', 'ok'],
+    ['rol_user null (el rol user no existe)', ['rol_user' => null], 'roles', 'rechazar'],
+    ["rol_user con un permiso de mas ('users')", ['rol_user' => array_merge($s8Rol, ['users'])], 'roles', 'corregir'],
+];
+foreach ($s8Tabla as [$s8Mut, $s8Cambios, $s8Id, $s8Esperado]) {
+    $s8H = $s8Con($s8Cambios);
+    $s8E = express_preflight_evaluar($s8H);
+    $s8Obtenido = $s8E['items'][$s8Id]['estado'] ?? null;
+    // El estado, y que rechazos y acciones lo cuenten igual: un rechazo frena el plan, una correccion es una accion y un ok no es ninguna.
+    $s8Coherente = match ($s8Esperado) {
+        'rechazar' => in_array($s8Id, $s8E['rechazos'], true) && express_plan($s8H, $s8E) === [],
+        'corregir' => in_array($s8Id, $s8E['acciones'], true) && !in_array($s8Id, $s8E['rechazos'], true),
+        default => !in_array($s8Id, $s8E['rechazos'], true) && !in_array($s8Id, $s8E['acciones'], true),
+    };
+    wa_chk("{$s8Mut} -> {$s8Id}: {$s8Esperado}", $s8Obtenido === $s8Esperado && $s8Coherente, [$s8Obtenido, $s8E['rechazos'], $s8E['acciones']]);
+}
+
+// --- nuevo: ecf_facturas 0 y ningun rango ecf con current_value mayor que 0 (lo que certecf y testecf hayan hecho no cuenta) -------------
+foreach ([
+    'ecf_facturas 0 y ningun rango ecf' => [[], true],
+    'ecf_facturas 0 y un rango ecf en 0' => [['rangos_ecf' => $s8Rangos45], true],
+    'ecf_facturas 3' => [['ecf_facturas' => 3], false],
+    'ecf_facturas 0 pero un rango ecf con current_value 1' => [['rangos_ecf' => [['current_value' => 1] + $s8Rangos45[0]]], false],
+    'ecf_facturas null (no se pudo leer la base de la empresa)' => [['ecf_facturas' => null], false],
+] as $s8Desc => [$s8Cambios, $s8Nuevo]) {
+    wa_chk("nuevo: {$s8Desc} es " . ($s8Nuevo ? 'true' : 'false'), $s8Ev($s8Cambios)['nuevo'] === $s8Nuevo, $s8Ev($s8Cambios)['nuevo']);
+}
+
+// --- RF2: los typos se nombran en el detalle, y los tipos y modulos validos pasan --------------------------------------------------
+$s8Tipos = $s8Ev(['pedido.tipos' => ['31', '44', '46', '41', '43', '47', 'e45', '34']])['items']['tipos'];
+wa_chk('tipos: el detalle nombra cada token que no es de venta (44, 46, 41, 43, 47, e45 y 34) y no el 31, que si lo es',
+    $s8Tipos['estado'] === 'rechazar' && array_filter(['44', '46', '41', '43', '47', 'e45', '34'], static fn (string $t): bool => !str_contains($s8Tipos['detalle'], "'{$t}'")) === []
+    && !str_contains($s8Tipos['detalle'], "'31'"), $s8Tipos);
+// Lo que el operador teclea entra a un detalle que se imprime: solo ASCII imprimible (el resto, "?") y a lo mas 24 caracteres por token.
+$s8Raro = $s8Ev(['pedido.tipos' => ["4\x005\n" . str_repeat('x', 40)]])['items']['tipos']['detalle'];
+wa_chk('tipos: un token con un NUL, un salto de linea y 40 letras sale en el detalle con "?" en su lugar y cortado a 24 caracteres, sin saltos de linea ni NUL',
+    str_contains($s8Raro, "'4?5?" . str_repeat('x', 20) . "'") && !str_contains($s8Raro, "\n") && !str_contains($s8Raro, "\0"), $s8Raro);
+wa_chk('tipos: 31, 32, 45 y 33 (el opcional) pasan, solos y todos juntos',
+    $s8Estado('tipos', ['pedido.tipos' => ['31']]) === 'ok' && $s8Estado('tipos', ['pedido.tipos' => ['32']]) === 'ok'
+    && $s8Estado('tipos', ['pedido.tipos' => ['45', '33']]) === 'ok' && $s8Estado('tipos', ['pedido.tipos' => ['31', '32', '45', '33']]) === 'ok');
+wa_chk('tipos: el 34 solo (se deriva, no se pide) y un token con espacios (" 45") se rechazan: la lista llega ya limpia de quien la parsea',
+    $s8Estado('tipos', ['pedido.tipos' => ['34']]) === 'rechazar' && $s8Estado('tipos', ['pedido.tipos' => [' 45']]) === 'rechazar');
+$s8Modulos = $s8Ev(['pedido.modulos' => ['facturacion', 'cliente', 'Productos']])['items']['modulos'];
+wa_chk('modulos: el detalle nombra los tokens que no estan en el preset (cliente y Productos) y no facturacion',
+    $s8Modulos['estado'] === 'rechazar' && str_contains($s8Modulos['detalle'], "'cliente'") && str_contains($s8Modulos['detalle'], "'Productos'")
+    && !str_contains($s8Modulos['detalle'], "'facturacion'"), $s8Modulos);
+wa_chk('modulos: ausente (null), una lista vacia, un subconjunto y el preset entero en otro orden pasan',
+    $s8Estado('modulos', ['pedido.modulos' => null]) === 'ok' && $s8Estado('modulos', ['pedido.modulos' => []]) === 'ok'
+    && $s8Estado('modulos', ['pedido.modulos' => ['facturacion', 'clientes']]) === 'ok'
+    && $s8Estado('modulos', ['pedido.modulos' => ['configuracion', 'usuarios', 'productos', 'clientes', 'facturacion']]) === 'ok');
+wa_chk('clientes_modulo: el 32 no pide clientes; el 45 con clientes, y el 31 sin lista de modulos (el preset trae clientes), pasan; el 45 con solo facturacion no',
+    $s8Estado('clientes_modulo', ['pedido.tipos' => ['32'], 'pedido.modulos' => ['facturacion']]) === 'ok'
+    && $s8Estado('clientes_modulo', ['pedido.tipos' => ['45'], 'pedido.modulos' => ['facturacion', 'clientes']]) === 'ok'
+    && $s8Estado('clientes_modulo', ['pedido.tipos' => ['31'], 'pedido.modulos' => null]) === 'ok'
+    && $s8Estado('clientes_modulo', ['pedido.tipos' => ['45'], 'pedido.modulos' => ['facturacion']]) === 'rechazar');
+wa_chk("clientes_modulo: un modulo mal escrito (cliente) no suma: con el 31 pedido, ['facturacion','cliente'] se rechaza",
+    $s8Estado('clientes_modulo', ['pedido.tipos' => ['31'], 'pedido.modulos' => ['facturacion', 'cliente']]) === 'rechazar');
+
+// --- cert: solo ok pasa (y un codigo con ok en true tampoco: se falla cerrado) --------------------------------------------------------
+$s8CertVencido = $s8Ev(['cert' => ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => strtotime('2026-10-01 12:00:00')]])['items']['cert'];
+$s8CertFalta = $s8Ev(['cert' => ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null]])['items']['cert'];
+wa_chk('cert: el detalle dice el codigo (CERT_VENCIDO con la fecha en que vencio; CERT_FALTA) y nunca la ruta del certificado',
+    str_contains($s8CertVencido['detalle'], 'CERT_VENCIDO') && str_contains($s8CertVencido['detalle'], '2026-10-01')
+    && str_contains($s8CertFalta['detalle'], 'CERT_FALTA') && !str_contains($s8CertVencido['detalle'] . $s8CertFalta['detalle'], 'MARCA'), [$s8CertVencido, $s8CertFalta]);
+wa_chk('cert: ok en true con un codigo (dato incoherente) y una clave cert ausente o vacia se rechazan',
+    $s8Estado('cert', ['cert' => ['ok' => true, 'codigo' => 'CERT_VENCIDO', 'vence' => $s8Vence]]) === 'rechazar'
+    && $s8Estado('cert', ['cert' => []]) === 'rechazar' && $s8Estado('cert', ['cert' => null]) === 'rechazar');
+
+// --- emisor: cada campo pendiente se nombra; la razon social y la direccion se comparan sin mayusculas ni espacios -----------------------
+$s8Emisor = $s8Ev(['emisor' => ['rnc' => '000000000', 'razon_social' => 'PENDIENTE ONBOARDING', 'direccion' => 'Pendiente', 'telefono' => '']])['items']['emisor'];
+wa_chk('emisor: con todo pendiente el detalle nombra rnc, razon_social, direccion y telefono',
+    $s8Emisor['estado'] === 'rechazar' && array_filter(['rnc', 'razon_social', 'direccion', 'telefono'], static fn (string $c): bool => !str_contains($s8Emisor['detalle'], $c)) === [],
+    $s8Emisor);
+wa_chk('emisor: " pendiente onboarding ", "pendiente", " n/d " y "" tambien son placeholders; sin fila de emisor_config (null) y telefono NULL se rechazan',
+    $s8Estado('emisor', ['emisor.razon_social' => ' pendiente onboarding ']) === 'rechazar' && $s8Estado('emisor', ['emisor.direccion' => 'pendiente']) === 'rechazar'
+    && $s8Estado('emisor', ['emisor.direccion' => ' n/d ']) === 'rechazar' && $s8Estado('emisor', ['emisor.direccion' => '']) === 'rechazar'
+    && $s8Estado('emisor', ['emisor' => null]) === 'rechazar' && $s8Estado('emisor', ['emisor.telefono' => null]) === 'rechazar');
+
+// --- rangos en ecf: un rango acotado, con capacidad y sin vencer para cada tipo efectivo (el pedido mas el 34, y el 33 si se pide) ------
+$s8Rango = static fn (string $tipo, array $o = []): array => $o + ['type' => $tipo, 'numero_hasta' => 500, 'current_value' => 0, 'fecha_vencimiento' => '2027-01-31'];
+$s8Ecf = static fn (array $rangos, array $o = []): array => ['tenant.ambiente' => 'ecf', 'rangos_ecf' => $rangos] + $o;
+foreach ([
+    'E45 y E34 acotados, con capacidad y sin vencer' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34')]), 'ok'],
+    'solo el E45 (falta el E34 derivado)' => [$s8Ecf([$s8Rango('E45')]), 'rechazar'],
+    'solo el E34 (falta el E45 pedido)' => [$s8Ecf([$s8Rango('E34')]), 'rechazar'],
+    'el E45 agotado (current_value igual a numero_hasta)' => [$s8Ecf([$s8Rango('E45', ['current_value' => 500, 'numero_hasta' => 500]), $s8Rango('E34')]), 'rechazar'],
+    'el E34 vencido ayer' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34', ['fecha_vencimiento' => '2026-10-28'])]), 'rechazar'],
+    'el E34 que vence hoy (no esta vencido antes de hoy)' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34', ['fecha_vencimiento' => $s8Hoy])]), 'ok'],
+    'el E34 sin fecha de vencimiento' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34', ['fecha_vencimiento' => null])]), 'ok'],
+    'el E45 sin limite (numero_hasta NULL no cuenta como autorizado)' => [$s8Ecf([$s8Rango('E45', ['numero_hasta' => null]), $s8Rango('E34')]), 'rechazar'],
+    'un E45 agotado y otro con capacidad' => [$s8Ecf([$s8Rango('E45', ['current_value' => 500]), $s8Rango('E45', ['current_value' => 10]), $s8Rango('E34')]), 'ok'],
+    'E45 y E34 pero se pide tambien el 33 sin su rango' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34')], ['pedido.tipos' => ['45', '33']]), 'rechazar'],
+    'E45, E34 y E33 acotados con el 33 pedido' => [$s8Ecf([$s8Rango('E45'), $s8Rango('E34'), $s8Rango('E33')], ['pedido.tipos' => ['45', '33']]), 'ok'],
+    'ningun rango ecf (el esquema solo siembra rangos sin limite)' => [$s8Ecf([]), 'rechazar'],
+] as $s8Desc => [$s8Cambios, $s8Esperado]) {
+    wa_chk("rangos en ecf, {$s8Desc} -> {$s8Esperado}", $s8Estado('rangos', $s8Cambios) === $s8Esperado, $s8Ev($s8Cambios)['items']['rangos']);
+}
+$s8Detalle = $s8Ev($s8Ecf([$s8Rango('E45')]))['items']['rangos']['detalle'];
+wa_chk('rangos en ecf: el detalle nombra el tipo que falta (E34) y no el que tiene (E45)', str_contains($s8Detalle, 'E34') && !str_contains($s8Detalle, 'E45'), $s8Detalle);
+
+// --- rechazos y acciones: los ids, en el orden de los items --------------------------------------------------------------------------
+$s8Varias = $s8Ev(['tenant.tipo' => 'integracion', 'm036' => false, 'cert' => ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null],
+    'tenant.pos_enabled' => 1, 'rol_user' => array_merge($s8Rol, ['users'])]);
+wa_chk('rechazos son los ids de los items rechazar y acciones los de los corregir, cada lista en el orden de los items (todos se evaluan, no se corta en el primero)',
+    $s8Varias['rechazos'] === ['tenant', 'm036', 'cert'] && $s8Varias['acciones'] === ['pos', 'integracion', 'roles'], [$s8Varias['rechazos'], $s8Varias['acciones']]);
+
+// --- evaluar es pura: no imprime, no escribe en el log, no toca los hechos y da lo mismo cada vez; y no copia nada de la fila ----------
+$s8Antes = serialize($s8Base);
+ob_start();
+[$s8Dos, $s8Error, $s8Log] = wa_con_log(static fn (): array => [express_preflight_evaluar($s8Base), express_preflight_evaluar($s8Base)]);
+$s8Salida = (string) ob_get_clean();
+wa_chk('evaluar: no lanza, no imprime ni escribe en el log, no modifica los hechos y evaluar dos veces da lo mismo',
+    $s8Error === null && $s8Salida === '' && $s8Log === '' && serialize($s8Base) === $s8Antes && is_array($s8Dos) && $s8Dos[0] === $s8Dos[1], [$s8Error?->getMessage(), $s8Salida, $s8Log]);
+// Una clave que falte en los hechos cuenta como el peor caso: nada de avisos ni excepciones, rechaza lo que no se puede dar por bueno y el plan sale vacio.
+ob_start();
+[$s8Vacio, $s8Error, $s8Log] = wa_con_log(static fn (): array => [express_preflight_evaluar([]), express_plan([], express_preflight_evaluar([]))]);
+$s8Salida = (string) ob_get_clean();
+wa_chk('evaluar([]): sin ninguna clave rechaza tenant, columnas, m036, tipos, cert, emisor, almacen y roles, sin avisos ni excepciones, y express_plan([]) es []',
+    $s8Error === null && $s8Salida === '' && $s8Log === '' && is_array($s8Vacio)
+    && array_diff(['tenant', 'columnas', 'm036', 'tipos', 'cert', 'emisor', 'almacen', 'roles'], $s8Vacio[0]['rechazos']) === []
+    && $s8Vacio[0]['nuevo'] === false && $s8Vacio[1] === [], [$s8Error?->getMessage(), $s8Salida, $s8Log]);
+$s8Json = (string) json_encode([$s8E0, $s8Varias, $s8Emisor, $s8CertVencido, $s8CertFalta]);
+// Los VALORES de la fila (la ruta del certificado, el hash y las claves cifradas) no salen; los nombres de las columnas si pueden salir en un detalle.
+$s8Fugas = array_values(array_filter(
+    ['MARCA-ruta-del-p12', 'certificado_dgii', 'MARCA-hash-de-integracion', 'MARCA-clave-cifrada', 'MARCA-clave-de-la-base'],
+    static fn (string $marca): bool => str_contains($s8Json, $marca)
+));
+wa_chk('el JSON de la evaluacion no lleva el valor de cert_path ni el de api_secret_hash (ni la clave de la base ni la del certificado)', $s8Fugas === [], $s8Fugas);
+
+// --- express_plan -------------------------------------------------------------------------------------------------------------------
+// El plan de la empresa nueva de la base, escrito a mano: las dos bajas de la base de la empresa, el UPDATE de la master, y el reseteo del rol user.
+$s8Insert = "INSERT INTO role_permissions (role_id, permission) SELECT id, :p FROM roles WHERE tenant_id = :id AND name = 'user'";
+$s8PlanBase = [
+    ['tenant', "DELETE FROM ncf_sequences WHERE ambiente = 'ecf' AND numero_hasta IS NULL", []],
+    ['tenant', 'DELETE FROM clients WHERE rnc IN (:r1, :r2) AND NOT EXISTS (SELECT 1 FROM facturas f WHERE f.client_id = clients.id)', [':r1' => '131880681', ':r2' => '533445861']],
+    ['master', "UPDATE tenants SET edicion = 'express', tipos_ecf_habilitados = :t, modulos_habilitados = :m, cert_vence = :v, pos_enabled = 0, inventario_estricto = 0, api_secret_hash = '' WHERE id = :id AND tipo = 'app'",
+        [':t' => '45', ':m' => null, ':v' => date('Y-m-d', $s8Vence), ':id' => 12]],
+    ['master', "DELETE FROM role_permissions WHERE role_id IN (SELECT id FROM roles WHERE tenant_id = :id AND name = 'user')", [':id' => 12]],
+    ['master', $s8Insert, [':p' => 'facturas', ':id' => 12]],
+    ['master', $s8Insert, [':p' => 'clients', ':id' => 12]],
+    ['master', $s8Insert, [':p' => 'products', ':id' => 12]],
+    ['master', $s8Insert, [':p' => 'unidades', ':id' => 12]],
+];
+/** Un plan como lista de [donde, sql, params]: lo que se compara con la tabla escrita a mano (la descripcion `que` se prueba aparte). */
+$s8Resumen = static fn (array $plan): array => array_map(static fn (array $p): array => [$p['donde'], $p['sql'], $p['params']], $plan);
+$s8Plan = express_plan($s8Base, $s8E0);
+wa_chk('express_plan (empresa nueva): en orden, baja de los rangos ecf sin limite y de los clientes de prueba sin facturas (en la base de la empresa), el UPDATE de tenants y el reseteo del rol user (en la master)',
+    $s8Resumen($s8Plan) === $s8PlanBase, $s8Resumen($s8Plan));
+wa_chk('express_plan: cada paso trae exactamente donde, que, sql y params, con la descripcion en texto, y los de la base de la empresa van antes que los de la master',
+    array_filter($s8Plan, static fn (array $p): bool => array_keys($p) !== ['donde', 'que', 'sql', 'params'] || !is_string($p['que']) || trim($p['que']) === ''
+        || !in_array($p['donde'], ['tenant', 'master'], true)) === []
+    && array_column($s8Plan, 'donde') === ['tenant', 'tenant', 'master', 'master', 'master', 'master', 'master', 'master'], array_column($s8Plan, 'donde'));
+$s8Param = static fn (array $plan, int $i, string $k): mixed => array_key_exists($k, $plan[$i]['params'] ?? []) ? $plan[$i]['params'][$k] : '(sin ese parametro)';
+wa_chk('express_plan: un INSERT por cada token del rol Facturador (cuatro) y todo SQL con sus valores en parametros, ninguno pegado al texto',
+    count(array_filter($s8Plan, static fn (array $p): bool => str_starts_with($p['sql'], 'INSERT INTO role_permissions'))) === count($s8Rol)
+    && array_filter($s8Plan, static fn (array $p): bool => preg_match('/(131880681|533445861|\b12\b|MARCA|2027)/', $p['sql']) === 1) === [], array_column($s8Plan, 'sql'));
+/** El plan de la base con los cambios dados, armado con la evaluacion de esos mismos hechos. */
+$s8PlanDe = static function (array $cambios) use ($s8Con): array {
+    $hechos = $s8Con($cambios);
+    return express_plan($hechos, express_preflight_evaluar($hechos));
+};
+$s8Modulos2 = $s8PlanDe(['pedido.tipos' => ['31', '45'], 'pedido.modulos' => ['facturacion', 'clientes']]);
+wa_chk('express_plan: tipos_ecf_habilitados y modulos_habilitados salen del pedido, separados por coma (y NULL cuando no se angosta el preset: sin lista o con una vacia)',
+    $s8Param($s8Modulos2, 2, ':t') === '31,45' && $s8Param($s8Modulos2, 2, ':m') === 'facturacion,clientes' && $s8Param($s8Plan, 2, ':m') === null
+    && $s8Param($s8PlanDe(['pedido.modulos' => []]), 2, ':m') === null, [$s8Modulos2[2]['params'] ?? null]);
+wa_chk('express_plan: un token repetido en el pedido se escribe una sola vez y se respeta el orden en que se pidio (45,31,45 queda 45,31)',
+    $s8Param($s8PlanDe(['pedido.tipos' => ['45', '31', '45']]), 2, ':t') === '45,31');
+$s8Rechazo = $s8Con(['m036' => false]);
+wa_chk('express_plan: es [] cuando la evaluacion trae algun rechazo, aunque lo demas se pueda corregir',
+    express_plan($s8Rechazo, express_preflight_evaluar($s8Rechazo)) === [] && express_plan($s8Base, ['items' => [], 'nuevo' => true, 'rechazos' => ['tipos'], 'acciones' => []]) === []);
+// Una empresa que ya emitio en ecf (no nueva) y que no trae nada que rechazar: el plan no borra rangos ni clientes (eso es de la tarea 14).
+$s8Vieja = $s8Con(['ecf_facturas' => 3]);
+$s8PlanVieja = express_plan($s8Vieja, express_preflight_evaluar($s8Vieja));
+wa_chk('express_plan (empresa que ya emitio en ecf, sin rechazos): ni baja de rangos ni baja de clientes; solo el UPDATE y el reseteo del rol, en la master',
+    $s8PlanVieja !== [] && $s8Resumen($s8PlanVieja) === array_slice($s8PlanBase, 2) && array_unique(array_column($s8PlanVieja, 'donde')) === ['master'], $s8Resumen($s8PlanVieja));
+$s8Fugas = array_values(array_filter(
+    ['MARCA-ruta-del-p12', 'certificado_dgii', 'MARCA-hash-de-integracion', 'MARCA-clave-cifrada', 'MARCA-clave-de-la-base'],
+    static fn (string $marca): bool => str_contains((string) json_encode($s8Plan), $marca)
+));
+wa_chk('express_plan no lleva el valor de cert_path ni el de api_secret_hash (ni las claves cifradas) en ningun paso', $s8Fugas === [], $s8Fugas);
+ob_start();
+[$s8Dos, $s8Error, $s8Log] = wa_con_log(static fn (): array => [express_plan($s8Base, $s8E0), express_plan($s8Base, $s8E0)]);
+$s8Salida = (string) ob_get_clean();
+wa_chk('express_plan: no lanza, no imprime ni escribe en el log y dos llamadas dan el mismo plan', $s8Error === null && $s8Salida === '' && $s8Log === '' && is_array($s8Dos) && $s8Dos[0] === $s8Dos[1]);
+
+// --- express_preflight_hechos contra dobles de PDO: solo SELECT, la forma de los hechos y que sin base de la empresa todo lo suyo falla -----
+// ExpPdoMaster (seccion 6) anota cada consulta que llega a execute() y entrega las filas que le da la funcion de respuesta; una consulta que
+// la prueba no espera lanza, asi que la biblioteca no puede pedir nada que esta tabla no conozca.
+/** Reune los hechos de la empresa de la base contra dobles; $o cambia lo que contestan. @return array{0:array,1:list<array>,2:list<array>} hechos, consultas de la master y de la base */
+$s8Reunir = static function (array $o = [], bool $conBase = true) use ($s8Base): array {
+    $master = new ExpPdoMaster();
+    $master->respuesta = static function (string $sql, array $params) use ($o): array {
+        if (str_contains($sql, 'information_schema.COLUMNS')) {
+            return [['n' => (string) ($o['columnas'] ?? 4)]];
+        }
+        if (str_contains($sql, 'FROM roles')) {
+            return ($o['rol'] ?? true) === false ? [] : [['id' => '5']];
+        }
+        if (str_contains($sql, 'FROM role_permissions')) {
+            return array_map(static fn (string $p): array => ['permission' => $p], $o['permisos'] ?? ['clients', 'facturas', 'products', 'unidades']);
+        }
+        throw new RuntimeException('consulta inesperada en la master: ' . $sql);
+    };
+    $base = null;
+    if ($conBase) {
+        $base = new ExpPdoMaster();
+        $base->respuesta = static function (string $sql, array $params) use ($o): array {
+            if (str_contains($sql, 'information_schema.COLUMNS')) {
+                return [['n' => (string) ($o['m036'] ?? 1)]];
+            }
+            if (str_contains($sql, 'FROM emisor_config')) {
+                return [['rnc' => '131000001', 'razon_social' => 'CONSTRUCTORA X SRL', 'direccion' => 'Av. X #1', 'telefono' => null]];
+            }
+            if (str_contains($sql, 'FROM warehouses')) {
+                return ($o['almacen'] ?? true) === false ? [] : [['id' => '1']];
+            }
+            if (str_contains($sql, 'FROM ncf_sequences')) {
+                return $o['rangos'] ?? [
+                    ['type' => 'E31', 'numero_hasta' => null, 'current_value' => '0', 'fecha_vencimiento' => null],
+                    ['type' => 'E45', 'numero_hasta' => '500', 'current_value' => '7', 'fecha_vencimiento' => '2027-01-31'],
+                ];
+            }
+            if (str_contains($sql, 'COUNT(DISTINCT')) {
+                return [['n' => (string) (str_contains($sql, "ambiente_dgii = 'ecf'") ? ($o['refs_ecf'] ?? 0) : ($o['refs_total'] ?? 2))]];
+            }
+            if (str_contains($sql, 'FROM facturas')) {
+                return [['n' => (string) ($o['ecf_facturas'] ?? 0)]];
+            }
+            if (str_contains($sql, 'FROM clients')) {
+                return array_map(static fn ($id): array => ['id' => (string) $id], $o['clientes'] ?? [31, 32]);
+            }
+            throw new RuntimeException('consulta inesperada en la base de la empresa: ' . $sql);
+        };
+    }
+    $hechos = express_preflight_hechos($master, $base, $s8Base['tenant'], $s8Base['pedido']);
+    return [$hechos, $master->consultas, $base?->consultas ?? []];
+};
+$s8Antes = date('Y-m-d');
+ob_start();
+[$s8Resultado, $s8Error, $s8Log] = wa_con_log(static fn (): array => $s8Reunir());
+$s8Salida = (string) ob_get_clean();
+[$s8Hechos, $s8CMaster, $s8CBase] = is_array($s8Resultado) ? $s8Resultado : [[], [], []];
+$s8Despues = date('Y-m-d');
+wa_chk('hechos (dobles): no lanza, no imprime ni escribe en el log; las claves son las del contrato y en ese orden',
+    $s8Error === null && $s8Salida === '' && $s8Log === '' && array_keys($s8Hechos) === ['tenant', 'columnas_014', 'm036', 'cert', 'emisor', 'almacen', 'pedido',
+        'rangos_ecf', 'ecf_facturas', 'clientes_prueba', 'rol_user', 'hoy'], [$s8Error?->getMessage(), $s8Salida, $s8Log, array_keys($s8Hechos)]);
+$s8Todas = array_merge($s8CMaster, $s8CBase);
+wa_chk('hechos (dobles): todo lo que pide es SELECT (ni una sentencia de escritura), y la master y la base de la empresa reciben cada una las suyas',
+    $s8Todas !== [] && array_filter($s8Todas, static fn (array $c): bool => preg_match('/^\s*SELECT\b/i', $c['sql']) !== 1) === []
+    && array_filter($s8CMaster, static fn (array $c): bool => preg_match('/FROM (emisor_config|warehouses|ncf_sequences|facturas|clients)\b/', $c['sql']) === 1) === []
+    && array_filter($s8CBase, static fn (array $c): bool => preg_match('/FROM (roles|role_permissions)\b|TABLE_NAME = \'tenants\'/', $c['sql']) === 1) === [], array_column($s8Todas, 'sql'));
+wa_chk('hechos (dobles): tenant y pedido son los recibidos, columnas_014 sale de contar cuatro columnas, m036 de que exista la columna, hoy es la fecha de hoy',
+    ($s8Hechos['tenant'] ?? null) === $s8Base['tenant'] && ($s8Hechos['pedido'] ?? null) === $s8Base['pedido'] && ($s8Hechos['columnas_014'] ?? null) === true
+    && ($s8Hechos['m036'] ?? null) === true && in_array($s8Hechos['hoy'] ?? null, [$s8Antes, $s8Despues], true), $s8Hechos);
+wa_chk('hechos (dobles): el emisor sale con sus cuatro campos como texto (NULL es ""), el almacen como bool, y el certificado de la fila (un archivo que no existe) es CERT_FALTA',
+    ($s8Hechos['emisor'] ?? null) === ['rnc' => '131000001', 'razon_social' => 'CONSTRUCTORA X SRL', 'direccion' => 'Av. X #1', 'telefono' => '']
+    && ($s8Hechos['almacen'] ?? null) === true && ($s8Hechos['cert'] ?? null) === ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null],
+    [$s8Hechos['emisor'] ?? null, $s8Hechos['almacen'] ?? null, $s8Hechos['cert'] ?? null]);
+wa_chk('hechos (dobles): los rangos ecf salen con numero_hasta y current_value enteros (o null) y la fecha como texto, y ecf_facturas es un entero',
+    ($s8Hechos['rangos_ecf'] ?? null) === [
+        ['type' => 'E31', 'numero_hasta' => null, 'current_value' => 0, 'fecha_vencimiento' => null],
+        ['type' => 'E45', 'numero_hasta' => 500, 'current_value' => 7, 'fecha_vencimiento' => '2027-01-31'],
+    ] && ($s8Hechos['ecf_facturas'] ?? null) === 0, [$s8Hechos['rangos_ecf'] ?? null, $s8Hechos['ecf_facturas'] ?? null]);
+wa_chk('hechos (dobles): clientes_prueba trae los ids de los clientes de prueba, y cuantos estan en una factura ecf y en una de cualquier ambiente (enteros)',
+    ($s8Hechos['clientes_prueba'] ?? null) === ['ids' => [31, 32], 'refs_ecf' => 0, 'refs_total' => 2], $s8Hechos['clientes_prueba'] ?? null);
+wa_chk('hechos (dobles): rol_user es la lista de permisos del rol user de ESA empresa (la consulta lleva su id)',
+    ($s8Hechos['rol_user'] ?? null) === ['clients', 'facturas', 'products', 'unidades']
+    && array_filter($s8CMaster, static fn (array $c): bool => str_contains($c['sql'], 'FROM roles') && in_array(12, array_map('intval', array_values($c['params'])), true)) !== [], $s8Hechos['rol_user'] ?? null);
+[$s8H2] = $s8Reunir(['columnas' => 3, 'm036' => 0, 'almacen' => false, 'rol' => false, 'ecf_facturas' => 3, 'refs_ecf' => 1, 'refs_total' => 1, 'clientes' => [31]]);
+wa_chk('hechos (dobles): con tres columnas es columnas_014 false, sin la columna es m036 false, sin almacen false, sin rol user es null, y los conteos salen tal cual',
+    $s8H2['columnas_014'] === false && $s8H2['m036'] === false && $s8H2['almacen'] === false && $s8H2['rol_user'] === null && $s8H2['ecf_facturas'] === 3
+    && $s8H2['clientes_prueba'] === ['ids' => [31], 'refs_ecf' => 1, 'refs_total' => 1], $s8H2);
+[$s8H3, , $s8C3] = $s8Reunir(['clientes' => []]);
+wa_chk('hechos (dobles): sin clientes de prueba sembrados no pregunta por sus facturas y trae ids [] con cero referencias',
+    $s8H3['clientes_prueba'] === ['ids' => [], 'refs_ecf' => 0, 'refs_total' => 0]
+    && array_filter($s8C3, static fn (array $c): bool => str_contains($c['sql'], 'COUNT(DISTINCT')) === [], $s8H3['clientes_prueba']);
+[$s8H4, $s8C4m, $s8C4b] = $s8Reunir([], false);
+$s8E4 = express_preflight_evaluar($s8H4);
+wa_chk('hechos (sin base de la empresa, null): nada se pregunta a la base; m036, almacen y emisor fallan, ecf_facturas es null (nunca "nueva") y la evaluacion rechaza con plan []',
+    $s8C4b === [] && $s8C4m !== [] && $s8H4['m036'] === false && $s8H4['almacen'] === false && $s8H4['emisor'] === null && $s8H4['rangos_ecf'] === []
+    && $s8H4['ecf_facturas'] === null && $s8E4['nuevo'] === false
+    && array_diff(['m036', 'almacen', 'emisor'], $s8E4['rechazos']) === [] && express_plan($s8H4, $s8E4) === [], [$s8H4, $s8E4['rechazos']]);
+// Los hechos que salen de la base se evaluan igual que los de mano: la empresa de los dobles (telefono NULL, rango E31 sin limite) tiene que salir rechazada por el emisor.
+$s8E2 = express_preflight_evaluar($s8Hechos);
+wa_chk('hechos (dobles) -> evaluar: el telefono NULL rechaza el emisor y, con el rango E45 en current_value 7, la empresa ya no es nueva, asi que el rango E31 sin limite se rechaza (no se borra)',
+    $s8E2['items']['emisor']['estado'] === 'rechazar' && $s8E2['nuevo'] === false && $s8E2['items']['ilimitados']['estado'] === 'rechazar'
+    && $s8E2['items']['pos']['estado'] === 'ok' && $s8E2['items']['inventario']['estado'] === 'ok', $s8E2['items']);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

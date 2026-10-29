@@ -17,6 +17,10 @@
  *   3) el bloque certificado de GET /api/emisor, por HTTP: la empresa A Express lo recibe (por vencer a 45 dias, sin la ruta
  *      del certificado ni ninguna clave cert_), lo toma de la fila viva en cada peticion y, aun vencido, no bloquea nada; la
  *      B, completa, no lo recibe.
+ *   4) la biblioteca de preflight (tools/express_edicion_lib.php) sobre la empresa A: express_conectar_tenant abre su base,
+ *      express_leer_certificado abre el .p12 desechable (bueno, con otra clave, sin archivo, sin clave y vencido), express_preflight_hechos
+ *      lee los hechos de A y cada uno coincide con una lectura independiente de la base, y D4: lo que certificacion dejo en certecf (una
+ *      factura, un contador) no cambia ningun hecho de ecf ni suma ningun rechazo.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -662,6 +666,206 @@ wa_chk('sin cert_path en la fila (con cert_vence): certificado no_configurado, c
     $s3R['status'] === 200 && ($s3R['json']['data']['certificado'] ?? null) === ['estado' => 'no_configurado', 'vence' => null, 'dias' => null],
     [$s3R['status'], $s3R['body']]);
 $s3Poner(null, null);   // la ruta de prueba no pasa a las secciones que siguen
+
+// ---------------------------------------------------------------------------
+// 4) La biblioteca de preflight (tools/express_edicion_lib.php) sobre la empresa A
+// ---------------------------------------------------------------------------
+echo "\n== 4) La biblioteca de preflight sobre la empresa A ==\n";
+require_once __DIR__ . '/express_edicion_lib.php';
+$s4Master = $ctx['pdo'];
+$s4IdA = (int) $ctx['tenantA'];
+// La clave maestra de prueba: express_conectar_tenant descifra con ella la clave de la base de A (como la API), y encrypt() cifra con ella.
+express_usar_master($ctx);
+// A como empresa completa y sin certificado (la seccion 3 la dejo Express): lo que el preflight convierte es una empresa completa.
+express_edicion($ctx, 'A', null, null, null);
+/** La fila de A en master.tenants, completa (SELECT *, como la lee MasterDatabase). */
+$s4FilaA = static function () use ($s4Master, $s4IdA): array {
+    $st = $s4Master->prepare('SELECT * FROM tenants WHERE id = :id');
+    $st->execute([':id' => $s4IdA]);
+    return (array) $st->fetch();
+};
+$s4Fila = $s4FilaA();
+
+// --- express_conectar_tenant -----------------------------------------------------------------------------------------------------
+$s4Pdo = express_conectar_tenant($s4Fila);
+// Lo que escribe esta seccion va a la base de A: si no es de prueba (sin la marca), se corta antes de tocar nada.
+wa_exigir_marca($s4Pdo);
+wa_chk('express_conectar_tenant(A): un PDO sobre la base de A (wa_scratch, con la marca de las bases de prueba), con excepciones y FETCH_ASSOC',
+    $s4Pdo instanceof PDO && $s4Pdo->query('SELECT DATABASE()')->fetchColumn() === $ctx['dbA']
+    && $s4Pdo->getAttribute(PDO::ATTR_ERRMODE) === PDO::ERRMODE_EXCEPTION && $s4Pdo->getAttribute(PDO::ATTR_DEFAULT_FETCH_MODE) === PDO::FETCH_ASSOC);
+// Sin servidor (el puerto 1 de loopback no tiene a nadie) y con una clave que no se descifra: el error dice la empresa y nada mas.
+$s4Mala = ['id' => $s4IdA, 'tipo' => 'app', 'db_host' => '127.0.0.1', 'db_port' => '1', 'db_name' => 'zz_marca_base', 'db_user' => 'zz_marca_usuario',
+    'db_pass_encrypted' => TenantResolver::encrypt('zz-marca-clave')];
+ob_start();
+try {
+    express_conectar_tenant($s4Mala);
+    $s4Error = null;
+} catch (Throwable $s4Error) {
+}
+$s4Salida = (string) ob_get_clean();
+wa_chk('express_conectar_tenant: sin servidor lanza RuntimeException con el id de la empresa, sin imprimir y sin nombrar el servidor, el usuario, la base ni la clave',
+    $s4Error instanceof RuntimeException && str_contains($s4Error->getMessage(), "#{$s4IdA}") && $s4Salida === ''
+    && !preg_match('/zz_marca|zz-marca|127\.0\.0\.1/', $s4Error->getMessage() . $s4Salida), [$s4Error === null ? null : get_class($s4Error) . ': ' . $s4Error->getMessage(), $s4Salida]);
+try {
+    express_conectar_tenant(['db_pass_encrypted' => 'zz-marca-basura-que-no-se-descifra'] + $s4Mala);
+    $s4Error = null;
+} catch (Throwable $s4Error) {
+}
+wa_chk('express_conectar_tenant: una clave de base que no se descifra lanza RuntimeException (no abre nada) y el texto no lleva la clave',
+    $s4Error instanceof RuntimeException && !str_contains($s4Error->getMessage(), 'zz-marca'), $s4Error === null ? null : get_class($s4Error) . ': ' . $s4Error->getMessage());
+
+// --- express_leer_certificado ---------------------------------------------------------------------------------------------------
+$s4Cert = wa_cert_prueba();   // un .p12 desechable en el temp del sistema, valido dos dias, con una clave al azar
+/** La fila de una empresa con el certificado de prueba y su clave cifrada por TenantResolver::encrypt; $o pisa lo que cada caso cambia. */
+$s4FilaCert = static fn (array $o = []): array => $o + ['cert_path' => $s4Cert['path'], 'cert_pass_encrypted' => TenantResolver::encrypt($s4Cert['password'])];
+$s4Bien = express_leer_certificado($s4FilaCert());
+wa_chk('express_leer_certificado: el .p12 de wa_cert_prueba() con su clave cifrada da ok, sin codigo, y vence dentro de tres dias (el certificado dura dos)',
+    array_keys($s4Bien) === ['ok', 'codigo', 'vence'] && $s4Bien['ok'] === true && $s4Bien['codigo'] === null
+    && is_int($s4Bien['vence']) && $s4Bien['vence'] > time() && $s4Bien['vence'] < time() + 3 * 86400, $s4Bien);
+wa_chk('express_leer_certificado: el resultado no lleva la ruta del archivo ni la clave del certificado',
+    !str_contains((string) json_encode($s4Bien), basename($s4Cert['path'])) && !str_contains((string) json_encode($s4Bien), $s4Cert['password']), $s4Bien);
+$s4Falta = ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null];
+wa_chk('express_leer_certificado: con otra clave (el .p12 no se abre) da CERT_FALTA',
+    express_leer_certificado($s4FilaCert(['cert_pass_encrypted' => TenantResolver::encrypt('otra-clave-que-no-es')])) === $s4Falta);
+wa_chk('express_leer_certificado: con un archivo que no existe da CERT_FALTA',
+    express_leer_certificado($s4FilaCert(['cert_path' => $s4Cert['path'] . '.no-existe'])) === $s4Falta);
+wa_chk('express_leer_certificado: con cert_pass_encrypted vacio (o NULL) da CERT_FALTA',
+    express_leer_certificado($s4FilaCert(['cert_pass_encrypted' => ''])) === $s4Falta && express_leer_certificado($s4FilaCert(['cert_pass_encrypted' => null])) === $s4Falta);
+wa_chk('express_leer_certificado: el mismo certificado bueno con $ahora diez dias despues da CERT_VENCIDO, con ok false y su notAfter en vence',
+    express_leer_certificado($s4FilaCert(), time() + 10 * 86400) === ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $s4Bien['vence']]);
+wa_chk('express_leer_certificado: en la marca exacta del notAfter ya esta vencido y un segundo antes todavia vale ($ahora, el limite incluido en el vencimiento)',
+    express_leer_certificado($s4FilaCert(), $s4Bien['vence'])['codigo'] === 'CERT_VENCIDO' && express_leer_certificado($s4FilaCert(), $s4Bien['vence'] - 1)['ok'] === true);
+// Sin cert_path la empresa no firma con el certificado global del .env: la biblioteca tampoco lo cuenta (CertResolver si caeria en el).
+$s4EnvAntes = getenv('DGII_ECF_CERT_PATH');
+putenv('DGII_ECF_CERT_PATH=' . $s4Cert['path']);
+try {
+    $s4SinFallback = express_leer_certificado($s4FilaCert(['cert_path' => '']));
+} finally {
+    putenv($s4EnvAntes === false ? 'DGII_ECF_CERT_PATH' : 'DGII_ECF_CERT_PATH=' . $s4EnvAntes);
+}
+wa_chk('express_leer_certificado: con cert_path vacio da CERT_FALTA aunque DGII_ECF_CERT_PATH apunte a un certificado bueno (no hay respaldo con el del .env)', $s4SinFallback === $s4Falta, $s4SinFallback);
+
+// --- express_preflight_hechos sobre A: cada hecho se compara con una lectura independiente de la base --------------------------------
+$s4Pedido = ['edicion' => 'express', 'tipos' => ['45'], 'modulos' => null];
+/** Un escalar de una consulta sobre la base de A (lectura independiente: no pasa por la biblioteca). */
+$s4Uno = static function (string $sql, array $p = []) use ($s4Pdo): mixed {
+    $st = $s4Pdo->prepare($sql);
+    $st->execute($p);
+    return $st->fetchColumn();
+};
+/** ¿Tiene la tabla de A esa columna? (information_schema, sin pasar por la biblioteca). */
+$s4Columna = static fn (string $tabla, string $columna): bool => (int) $s4Uno(
+    'SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :t AND COLUMN_NAME = :c', [':t' => $tabla, ':c' => $columna]
+) === 1;
+$s4Hechos = express_preflight_hechos($s4Master, $s4Pdo, $s4Fila, $s4Pedido);
+$s4RolIndependiente = $s4Master->prepare("SELECT rp.permission FROM role_permissions rp JOIN roles r ON r.id = rp.role_id WHERE r.tenant_id = :t AND r.name = 'user'");
+$s4RolIndependiente->execute([':t' => $s4IdA]);
+$s4RolA = array_column($s4RolIndependiente->fetchAll(), 'permission');
+$s4Ordenada = static function (?array $lista): ?array {
+    if ($lista !== null) {
+        sort($lista);
+    }
+    return $lista;
+};
+wa_chk('express_preflight_hechos(A): las claves del contrato en su orden; tenant y pedido son los recibidos; hoy es la fecha de hoy',
+    array_keys($s4Hechos) === ['tenant', 'columnas_014', 'm036', 'cert', 'emisor', 'almacen', 'pedido', 'rangos_ecf', 'ecf_facturas', 'clientes_prueba', 'rol_user', 'hoy']
+    && $s4Hechos['tenant'] === $s4Fila && $s4Hechos['pedido'] === $s4Pedido && in_array($s4Hechos['hoy'], [date('Y-m-d'), date('Y-m-d', time() - 5)], true), array_keys($s4Hechos));
+wa_chk('express_preflight_hechos(A): columnas_014 es true (la master scratch trae las cuatro columnas de la 014)',
+    $s4Hechos['columnas_014'] === true && (int) $s4Master->query(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+         AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')"
+    )->fetchColumn() === 4, $s4Hechos['columnas_014']);
+wa_chk('express_preflight_hechos(A): m036 es lo que dice information_schema de facturas.idempotency_key (el plan 04 la agrega a la base scratch mas adelante: no se supone que falte)',
+    $s4Hechos['m036'] === $s4Columna('facturas', 'idempotency_key'), [$s4Hechos['m036'], $s4Columna('facturas', 'idempotency_key')]);
+wa_chk('express_preflight_hechos(A): rol_user son los permisos del rol user de A en la master (sin importar el orden)',
+    is_array($s4Hechos['rol_user']) && $s4Hechos['rol_user'] !== [] && $s4Ordenada($s4Hechos['rol_user']) === $s4Ordenada($s4RolA), [$s4Hechos['rol_user'], $s4RolA]);
+$s4SinRol = express_preflight_hechos($s4Master, $s4Pdo, ['id' => 2147483000] + $s4Fila, $s4Pedido);
+wa_chk('express_preflight_hechos: una empresa sin rol user en la master (id que no existe) da rol_user null',
+    $s4SinRol['rol_user'] === null, $s4SinRol['rol_user']);
+$s4EmisorA = $s4Pdo->query('SELECT rnc, razon_social, direccion, telefono FROM emisor_config WHERE id = 1')->fetch();
+wa_chk('express_preflight_hechos(A): emisor es la fila 1 de emisor_config (texto), almacen es "Almacen Principal" y el certificado de A (sin cert_path) es CERT_FALTA',
+    $s4Hechos['emisor'] === array_map(static fn ($v): string => (string) $v, $s4EmisorA)
+    && $s4Hechos['almacen'] === ((int) $s4Uno('SELECT COUNT(*) FROM warehouses WHERE nombre = :n', [':n' => 'Almacén Principal']) > 0)
+    && $s4Hechos['cert'] === $s4Falta, [$s4Hechos['emisor'], $s4Hechos['almacen'], $s4Hechos['cert']]);
+$s4RangosEcfA = $s4Pdo->query("SELECT type, numero_hasta, current_value, fecha_vencimiento FROM ncf_sequences WHERE ambiente = 'ecf' ORDER BY type, numero_desde")->fetchAll();
+$s4EnteroONull = static fn ($v): ?int => $v === null ? null : (int) $v;
+wa_chk('express_preflight_hechos(A): rangos_ecf son las filas ecf de ncf_sequences (solo ecf, nunca certecf ni testecf), ecf_facturas cuenta las facturas ecf y clientes_prueba los dos clientes de prueba de la DGII',
+    $s4Hechos['rangos_ecf'] === array_map(static fn (array $r): array => [
+        'type' => (string) $r['type'], 'numero_hasta' => $s4EnteroONull($r['numero_hasta']), 'current_value' => (int) $r['current_value'],
+        'fecha_vencimiento' => $r['fecha_vencimiento'] === null ? null : (string) $r['fecha_vencimiento'],
+    ], $s4RangosEcfA)
+    && $s4Hechos['ecf_facturas'] === (int) $s4Uno("SELECT COUNT(*) FROM facturas WHERE ambiente_dgii = 'ecf'")
+    && $s4Hechos['clientes_prueba']['ids'] === array_map('intval', $s4Pdo->query("SELECT id FROM clients WHERE rnc IN ('131880681', '533445861') ORDER BY id")->fetchAll(PDO::FETCH_COLUMN)),
+    [$s4Hechos['rangos_ecf'], $s4Hechos['ecf_facturas'], $s4Hechos['clientes_prueba']]);
+
+// --- los hechos de A se evaluan: lo que tiene A hoy (sin certificado, emisor con otro RNC, POS prendido, hash de integracion) ---------------
+$s4Ev = express_preflight_evaluar($s4Hechos);
+wa_chk('evaluar(hechos de A): tenant, columnas, tipos, modulos, clientes_modulo y almacen pasan; cert (sin certificado) y emisor (otro RNC) se rechazan; m036 sigue a la columna',
+    $s4Ev['items']['tenant']['estado'] === 'ok' && $s4Ev['items']['columnas']['estado'] === 'ok' && $s4Ev['items']['tipos']['estado'] === 'ok'
+    && $s4Ev['items']['modulos']['estado'] === 'ok' && $s4Ev['items']['clientes_modulo']['estado'] === 'ok' && $s4Ev['items']['almacen']['estado'] === 'ok'
+    && $s4Ev['items']['cert']['estado'] === 'rechazar' && $s4Ev['items']['emisor']['estado'] === 'rechazar'
+    && $s4Ev['items']['m036']['estado'] === ($s4Hechos['m036'] ? 'ok' : 'rechazar')
+    && in_array('cert', $s4Ev['rechazos'], true) && in_array('emisor', $s4Ev['rechazos'], true) && express_plan($s4Hechos, $s4Ev) === [],
+    array_map(static fn (array $i): string => $i['estado'], $s4Ev['items']));
+wa_chk('evaluar(hechos de A): A tiene el POS prendido (pos_enabled 1), el hash de integracion y un rol user que no es el del Facturador: pos y inventario siguen a "nueva", integracion y roles se corrigen, y A es testecf (rangos no se evalua)',
+    $s4Ev['items']['pos']['estado'] === ($s4Ev['nuevo'] ? 'corregir' : 'rechazar') && $s4Ev['items']['integracion']['estado'] === 'corregir'
+    && $s4Ev['items']['roles']['estado'] === 'corregir' && $s4Ev['items']['rangos']['estado'] === 'ok', array_map(static fn (array $i): string => $i['estado'], $s4Ev['items']));
+
+// --- D4: lo que certificacion dejo en certecf nunca bloquea la conversion (solo se leen filas ecf) -----------------------------------
+// Una factura certecf que usa un cliente de prueba de la DGII y un rango certecf con current_value 9: ecf_facturas no cambia, los rangos ecf
+// tampoco, y la evaluacion no gana ningun rechazo. Todo lo que se crea o se cambia aqui se deshace en el finally.
+$s4Marca = 'ZZ-EXPRESS-D4';
+$s4NcfD4 = 'E319999999999';
+$s4ClienteNuevo = null;
+$s4Rango = null;
+try {
+    $s4Pdo->prepare('DELETE FROM facturas WHERE no_factura = :m')->execute([':m' => $s4Marca]);   // por si una corrida anterior murio a medias
+    $s4Rango = $s4Pdo->query("SELECT id, current_value FROM ncf_sequences WHERE ambiente = 'certecf' AND type = 'E31' ORDER BY numero_desde LIMIT 1")->fetch();
+    wa_chk('precondicion D4: A tiene un rango certecf E31 al que subirle el contador', is_array($s4Rango), $s4Rango);
+    $s4Antes = express_preflight_hechos($s4Master, $s4Pdo, $s4Fila, $s4Pedido);
+    $s4EvAntes = express_preflight_evaluar($s4Antes);
+
+    $s4Cliente = (int) $s4Uno("SELECT id FROM clients WHERE rnc = '131880681' ORDER BY id LIMIT 1");
+    if ($s4Cliente === 0) {   // wa_scratch no trae los clientes que siembra tenant_schema.sql: se crea uno y se borra al terminar
+        $s4Pdo->prepare(
+            "INSERT INTO clients (email, client_name, company_name, rnc, razon_social, direccion, phone_number)
+             VALUES ('d4-prueba@example.com', 'D4 cliente de prueba DGII', 'D4 cliente de prueba DGII', '131880681', 'D4 CLIENTE DE PRUEBA DGII', 'Direccion de prueba', '')"
+        )->execute();
+        $s4Cliente = $s4ClienteNuevo = (int) $s4Pdo->lastInsertId();
+    }
+    $s4Pdo->prepare(
+        "INSERT INTO facturas (no_factura, client_id, client_name, tipo_ecf, e_ncf, ambiente_dgii, estado_dgii)
+         VALUES (:m, :c, 'D4 cliente de prueba DGII', '31', :n, 'certecf', 'ACEPTADO')"
+    )->execute([':m' => $s4Marca, ':c' => $s4Cliente, ':n' => $s4NcfD4]);
+    if (is_array($s4Rango)) {
+        $s4Pdo->prepare('UPDATE ncf_sequences SET current_value = 9 WHERE id = :id')->execute([':id' => $s4Rango['id']]);
+    }
+
+    $s4Despues = express_preflight_hechos($s4Master, $s4Pdo, $s4Fila, $s4Pedido);
+    $s4EvDespues = express_preflight_evaluar($s4Despues);
+    $s4Estados = static fn (array $ev): array => array_map(static fn (array $i): string => $i['estado'], $ev['items']);
+    wa_chk('D4: con la factura certecf y el contador certecf en 9, la factura se ve como referencia del cliente de prueba (refs_total) pero no como referencia ecf',
+        $s4Despues['clientes_prueba']['refs_total'] >= 1 && $s4Despues['clientes_prueba']['refs_ecf'] === $s4Antes['clientes_prueba']['refs_ecf']
+        && in_array($s4Cliente, $s4Despues['clientes_prueba']['ids'], true), [$s4Antes['clientes_prueba'], $s4Despues['clientes_prueba']]);
+    wa_chk('D4: ecf_facturas y los rangos ecf quedan como estaban (certecf no se lee), y A sigue siendo nueva o no igual que antes',
+        $s4Despues['ecf_facturas'] === $s4Antes['ecf_facturas'] && $s4Despues['rangos_ecf'] === $s4Antes['rangos_ecf']
+        && $s4EvDespues['nuevo'] === $s4EvAntes['nuevo'], [$s4Antes['ecf_facturas'], $s4Despues['ecf_facturas']]);
+    wa_chk('D4: la evaluacion no gana ningun rechazo ni cambia el estado de ningun item por lo que hay en certecf',
+        $s4EvDespues['rechazos'] === $s4EvAntes['rechazos'] && $s4Estados($s4EvDespues) === $s4Estados($s4EvAntes)
+        && $s4EvDespues['items']['clientes_prueba']['estado'] !== 'rechazar', [$s4EvAntes['rechazos'], $s4EvDespues['rechazos']]);
+} finally {
+    $s4Pdo->prepare('DELETE FROM facturas WHERE no_factura = :m')->execute([':m' => $s4Marca]);
+    if (is_array($s4Rango)) {
+        $s4Pdo->prepare('UPDATE ncf_sequences SET current_value = :v WHERE id = :id')->execute([':v' => $s4Rango['current_value'], ':id' => $s4Rango['id']]);
+    }
+    if ($s4ClienteNuevo !== null) {
+        $s4Pdo->prepare('DELETE FROM clients WHERE id = :id')->execute([':id' => $s4ClienteNuevo]);
+    }
+}
+wa_chk('D4: al terminar no queda la factura de prueba, el contador certecf vuelve a su valor y el cliente que creo la prueba se borro',
+    (int) $s4Uno('SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s4Marca]) === 0
+    && (!is_array($s4Rango) || (int) $s4Uno('SELECT current_value FROM ncf_sequences WHERE id = :id', [':id' => $s4Rango['id']]) === (int) $s4Rango['current_value'])
+    && ($s4ClienteNuevo === null || (int) $s4Uno('SELECT COUNT(*) FROM clients WHERE id = :id', [':id' => $s4ClienteNuevo]) === 0));
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
