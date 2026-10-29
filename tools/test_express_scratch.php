@@ -35,6 +35,13 @@
  *      (edicion, y por separado cert_vence) sale con 1 antes de crear nada y nombra db/master_migrations/014_tenants_edicion.sql y la columna
  *      que falta; con las cuatro puestas la misma orden ya no dice nada de la 014. La base de la empresa de la prueba no existe, asi que ni una
  *      corrida sin la comprobacion puede dejar una empresa.
+ *   6) tools/verificar_express.php sobre la empresa A, en un hijo (express_cli), y la Consulta 4 de tools/verificar_migraciones_master.sql: con A
+ *      Express, tipos vacios, POS prendido y sin certificado sale con 1 y nombra TIPOS_VACIOS, POS_ACTIVO y SIN_CERTIFICADO para A sin listar a B;
+ *      con A corregida imprime Sin problemas. y sale con 0; lee de las columnas un certificado por vencer, sin fecha, los typos de tipos y
+ *      modulos y una edicion desconocida (un ENUM sin modo estricto guarda '': la unica linea de A es EDICION_DESCONOCIDA y queda una linea en
+ *      el log); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 014 sale con 2; y
+ *      ninguna corrida escribe nada ni imprime un secreto. La Consulta 4 se saca del archivo (sin el "-- " de sus lineas) y se corre en la master
+ *      scratch: con A Express y tipos NULL devuelve a A con tipos_vacios 1 y no a B; con A completa, ninguna fila de A.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -46,8 +53,9 @@
  * pos_scratch_exigir() una que no se llame wa_scratch o wa_scratch_sin_gate. Las credenciales salen de
  * tools/.env (o del entorno) y no se imprimen.
  *
- * La seccion 1 quita y vuelve a crear columnas de tenants en la master scratch (y deja a las dos empresas de
- * prueba como completas al terminar): no corras a la vez otra suite que use esas bases.
+ * Las secciones 1, 5b y 6 quitan y vuelven a crear columnas de tenants en la master scratch (y al terminar el
+ * proceso A y B quedan como completas): no corras a la vez otra suite que use esas bases. La 6 ademas quita de la
+ * base de A sus rangos de ecf mientras corre y los repone en un finally.
  *
  * Las APIs que levanta express_api() (php -S, un puerto cada una; este plan usa del 8291 al 8294) corren con
  * PERMISSIONS_ENFORCE=false (modo sombra) o, con --enforce, en true: lo que prueba la suite tiene que valer en
@@ -1679,6 +1687,272 @@ foreach ($s5bSalidas as $s5bI => $s5bSalida) {
 }
 wa_chk('ninguna de las corridas de create_tenant.php imprimio una credencial (la clave ni el usuario de la base, el servidor ni los secretos derivados)',
     count($s5bSalidas) === 3 && $s5bFugas === [], $s5bFugas);
+
+// ---------------------------------------------------------------------------
+// 6) tools/verificar_express.php y la consulta 4 del verificador de la master, sobre la master scratch
+// ---------------------------------------------------------------------------
+echo "\n== 6) verificar_express.php y la consulta 4 de verificar_migraciones_master.sql ==\n";
+$s6Master = $ctx['pdo'];
+$s6IdA = (int) $ctx['tenantA'];
+$s6IdB = (int) $ctx['tenantB'];
+$s6Cred = $ctx['cred'];
+$s6Secretos = pos_scratch_secretos($s6Cred['pass']);
+$s6Cert = wa_cert_prueba();   // el .p12 desechable de este proceso: su ruta se pone en la fila de A y no debe salir en ninguna corrida
+express_usar_master($ctx);    // la master de prueba y su clave maestra, por el entorno, para el hijo de express_cli
+$s6Pdo = wa_pdo(POS_SCRATCH_BASE_A);   // la base de A, con la guarda de la marca de las bases de prueba
+
+/** La fila completa de una empresa en master.tenants (SELECT *). */
+$s6Fila = static function (int $id) use ($s6Master): array {
+    $st = $s6Master->prepare('SELECT * FROM tenants WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return (array) $st->fetch();
+};
+/** Una huella de todo lo que el verificador podria tocar: las filas de tenants, cuantas hay en audit_logs y los rangos de ncf_sequences de la base de A. serialize: las claves son binarias. */
+$s6Huella = static fn (): string => md5(serialize([
+    $s6Master->query('SELECT * FROM tenants ORDER BY id')->fetchAll(),
+    (int) $s6Master->query('SELECT COUNT(*) FROM audit_logs')->fetchColumn(),
+    $s6Pdo->query('SELECT * FROM ncf_sequences ORDER BY id')->fetchAll(),
+]));
+$s6Fila0 = $s6Fila($s6IdA);
+$s6FilaB0 = $s6Fila($s6IdB);
+// Lo que nunca debe salir en lo que imprime la herramienta: las credenciales de las bases, los secretos derivados, el certificado de A (su ruta y su clave) y la credencial de integracion.
+$s6Prohibidos = [
+    'la clave de la base' => $s6Cred['pass'], 'el usuario de la base' => $s6Cred['user'], 'el servidor' => $s6Cred['host'],
+    'la clave maestra' => $s6Secretos['clave_maestra'], 'el pepper' => $s6Secretos['pepper'], 'la clave de los usuarios' => $s6Secretos['clave_usuarios'],
+    'la clave del certificado' => $s6Cert['password'], 'la ruta del certificado' => $s6Cert['path'], 'el archivo del certificado' => basename($s6Cert['path']),
+    'el hash de la credencial de integracion de A' => (string) $s6Fila0['api_secret_hash'], 'la api key de A' => (string) $s6Fila0['api_key'],
+];
+$s6Salidas = [];
+$s6Cambios = [];   // los numeros de las corridas despues de las cuales algo cambio en las bases
+/** Corre la herramienta (sin opciones) en un hijo contra la master scratch, guarda su salida para la revision de secretos y anota si la corrida cambio algo en las bases. */
+$s6Corre = static function () use ($s6Huella, &$s6Salidas, &$s6Cambios): array {
+    $antes = $s6Huella();
+    $r = express_cli(['tools/verificar_express.php']);
+    if ($s6Huella() !== $antes) {
+        $s6Cambios[] = count($s6Salidas);
+    }
+    $s6Salidas[] = $r['salida'];
+    return $r;
+};
+/** Lo que se muestra de una corrida cuando una prueba falla: el codigo y la salida enmascarada y acotada. */
+$s6Ver = static fn (array $r): array => ['codigo' => $r['codigo'], 'salida' => pos_scratch_enmascarar(substr($r['salida'], 0, 1800), array_values($s6Prohibidos))];
+/** ¿Trae la salida una linea "tenant #<id> (<nombre>): <codigo> <detalle>" de esa empresa con ese codigo? */
+$s6Tiene = static fn (array $r, int $id, string $codigo): bool => preg_match('/^tenant #' . $id . ' \([^\n]*\): ' . $codigo . ' \S/m', $r['salida']) === 1;
+/** Las lineas de la salida que son de esa empresa. */
+$s6Lineas = static fn (array $r, int $id): array => array_values(array_filter(
+    preg_split('/\R/', $r['salida']) ?: [],
+    static fn (string $l): bool => str_starts_with($l, "tenant #{$id} (")
+));
+/** Deja a A como se pide; lo que no se dice queda como una empresa Express sin nada puesto (tipos y modulos NULL, POS prendido, sin certificado, en testecf). */
+$s6PonerA = static function (array $c = []) use ($ctx, $s6Master, $s6IdA): void {
+    $c += ['edicion' => 'express', 'tipos' => null, 'modulos' => null, 'vence' => null, 'pos' => 1, 'cert' => null, 'ambiente' => 'testecf'];
+    express_edicion($ctx, 'A', $c['edicion'], $c['tipos'], $c['modulos'], $c['vence']);
+    $s6Master->prepare('UPDATE tenants SET pos_enabled = :p, cert_path = :c, ambiente = :a WHERE id = :id')
+        ->execute([':p' => $c['pos'], ':c' => $c['cert'], ':a' => $c['ambiente'], ':id' => $s6IdA]);
+};
+/** Una empresa Express bien puesta (tipo 45, POS apagado, certificado con fecha a 120 dias): sin problemas hasta que una prueba le estropee algo. */
+$s6BienA = static fn (array $c = []): array => $c + ['tipos' => '45', 'vence' => date('Y-m-d', strtotime('+120 days')), 'pos' => 0, 'cert' => $s6Cert['path']];
+/** Un rango de ecf en la base de A (numero_desde 1: la llave unica es tipo, ambiente y numero_desde). */
+$s6PonerRango = static function (string $tipo, ?int $hasta, int $actual = 0, ?string $vence = null) use ($s6Pdo): void {
+    $s6Pdo->prepare(
+        "INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, fecha_vencimiento, description, ambiente)
+         VALUES (:t, :p, :a, 1, :h, :v, 'Express T11', 'ecf')"
+    )->execute([':t' => $tipo, ':p' => $tipo, ':a' => $actual, ':h' => $hasta, ':v' => $vence]);
+};
+$s6Rangos0 = $s6Pdo->query("SELECT * FROM ncf_sequences WHERE ambiente = 'ecf' ORDER BY id")->fetchAll();   // como estaban: el finally los repone
+
+// La consulta 4 del verificador de la master: las lineas comentadas que siguen al encabezado de guiones, sin su "-- " del principio.
+$s6Texto = preg_split('/\R/', (string) file_get_contents(__DIR__ . '/verificar_migraciones_master.sql')) ?: [];
+$s6Inicio = null;
+foreach ($s6Texto as $s6I => $s6L) {
+    if (str_contains($s6L, 'Consulta 4')) {
+        $s6Inicio = $s6I;
+        break;
+    }
+}
+$s6Consulta = '';
+if ($s6Inicio !== null) {
+    $s6Bloque = array_slice($s6Texto, $s6Inicio);
+    $s6Cierre = null;
+    foreach ($s6Bloque as $s6I => $s6L) {
+        if (preg_match('/^-- -{20,}$/', rtrim($s6L)) === 1) {
+            $s6Cierre = $s6I;   // la ultima linea de guiones: cierra el encabezado
+        }
+    }
+    if ($s6Cierre !== null) {
+        $s6Consulta = implode("\n", array_map(
+            static fn (string $l): string => (string) preg_replace('/^-- ?/', '', $l),
+            array_filter(array_slice($s6Bloque, $s6Cierre + 1), static fn (string $l): bool => trim($l) !== '')
+        ));
+    }
+}
+/** Las filas que la consulta 4 devuelve ahora en la master scratch, por id. */
+$s6Filas = static function () use ($s6Master, $s6Consulta): array {
+    $filas = [];
+    foreach (correrSql($s6Master, $s6Consulta) as $fila) {
+        $filas[(int) $fila['id']] = $fila;
+    }
+    return $filas;
+};
+
+try {
+    wa_chk('precondicion: ninguna empresa de la master scratch es distinta de completa (express_scratch_preparar() acaba de dejar a A y a B asi), y A y B existen',
+        (int) $s6Master->query("SELECT COUNT(*) FROM tenants WHERE edicion <> 'completa'")->fetchColumn() === 0 && $s6IdA > 0 && $s6IdB > 0 && $s6Fila0['ambiente'] === 'testecf',
+        ['no_completas' => (int) $s6Master->query("SELECT COUNT(*) FROM tenants WHERE edicion <> 'completa'")->fetchColumn(), 'ambiente_de_A' => $s6Fila0['ambiente']]);
+
+    // --- (1) el caso del plan: A Express con tipos vacios, el POS prendido y sin certificado --------------------------------------------------------------
+    $s6PonerA();
+    $r = $s6Corre();
+    wa_chk('(1) A Express con tipos vacios, pos_enabled 1 y sin cert_path: sale con 1 y nombra TIPOS_VACIOS, POS_ACTIVO y SIN_CERTIFICADO para A, cada uno en una linea "tenant #<id> (POS Prueba A): <CODIGO> <detalle>"',
+        $r['codigo'] === 1 && $s6Tiene($r, $s6IdA, 'TIPOS_VACIOS') && $s6Tiene($r, $s6IdA, 'POS_ACTIVO') && $s6Tiene($r, $s6IdA, 'SIN_CERTIFICADO')
+        && preg_match('/^tenant #' . $s6IdA . ' \(POS Prueba A\): TIPOS_VACIOS /m', $r['salida']) === 1, $s6Ver($r));
+    wa_chk('(1) ...solo esos tres para A (lo demas de su fila esta bien), no lista a B (completa) y no dice Sin problemas.',
+        count($s6Lineas($r, $s6IdA)) === 3 && !str_contains($r['salida'], "tenant #{$s6IdB} ") && !str_contains($r['salida'], 'Sin problemas.'), $s6Ver($r));
+
+    // --- (2) A corregida: tipos 45, certificado con fecha lejana, POS apagado ---------------------------------------------------------------------------
+    $s6PonerA($s6BienA());
+    $r = $s6Corre();
+    wa_chk('(2) con A corregida (tipos 45, certificado con fecha a 120 dias, POS apagado) imprime Sin problemas. y sale con 0, sin nada mas en la salida (ni un aviso de PHP)',
+        $r['codigo'] === 0 && trim($r['salida']) === 'Sin problemas.', $s6Ver($r));
+
+    // --- (3) lo que se lee de verdad de las columnas: un certificado por vencer, ya vencido o sin fecha, y los typos de tipos y modulos (RF2) ----------------
+    foreach ([
+        'cert_vence a 10 dias' => [$s6BienA(['vence' => date('Y-m-d', strtotime('+10 days'))]), ['CERT_POR_VENCER']],
+        'cert_vence de hace 3 dias (ya vencio)' => [$s6BienA(['vence' => date('Y-m-d', strtotime('-3 days'))]), ['CERT_POR_VENCER']],
+        'cert_vence NULL con certificado' => [$s6BienA(['vence' => null]), ['CERT_SIN_FECHA']],
+        "tipos 'e45' y modulos 'facturacion,cliente' (los typos de un operador)" => [$s6BienA(['tipos' => 'e45', 'modulos' => 'facturacion,cliente']), ['TIPOS_INVALIDOS', 'MODULOS_INVALIDOS']],
+        "tipos '33' (solo la nota de debito)" => [$s6BienA(['tipos' => '33']), ['TIPOS_SIN_VENTA']],
+        "tipos '' (vacio, no NULL)" => [$s6BienA(['tipos' => '']), ['TIPOS_VACIOS']],
+    ] as $s6Desc => [$s6Estado, $s6Codigos]) {
+        $s6PonerA($s6Estado);
+        $r = $s6Corre();
+        wa_chk("(3) {$s6Desc}: sale con 1 y las lineas de A son " . implode(' y ', $s6Codigos) . ', en ese orden',
+            $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === count($s6Codigos)
+            && array_filter($s6Codigos, static fn (string $c): bool => !$s6Tiene($r, $s6IdA, $c)) === []
+            && array_map(static fn (string $l): string => explode(' ', (string) strstr($l, '): '), 3)[1] ?? '', $s6Lineas($r, $s6IdA)) === $s6Codigos, $s6Ver($r));
+    }
+
+    // --- (4) una edicion desconocida (el ENUM sin modo estricto guarda '' por un valor que no esta en su lista) ---------------------------------------------
+    $s6PonerA();   // con tipos vacios y POS prendido: nada de eso debe salir si la edicion es desconocida
+    $s6NoEstricto = wa_pdo(POS_SCRATCH_BASE_MASTER);   // conexion propia: el sql_mode no se queda en $s6Master
+    $s6NoEstricto->exec("SET SESSION sql_mode = ''");
+    $s6NoEstricto->prepare("UPDATE tenants SET edicion = 'basico' WHERE id = :id")->execute([':id' => $s6IdA]);
+    unset($s6NoEstricto);
+    wa_chk("precondicion: sin modo estricto la edicion de A quedo en '' (lo que guarda el servidor por un valor fuera de la lista del ENUM)", $s6Fila($s6IdA)['edicion'] === '', $s6Fila($s6IdA)['edicion']);
+    $r = $s6Corre();
+    wa_chk("(4) con la edicion de A en '' sale con 1 y la unica linea de A es EDICION_DESCONOCIDA (la API la trata como completa: no suma los tipos vacios ni el POS), sin listar a B",
+        $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 1 && $s6Tiene($r, $s6IdA, 'EDICION_DESCONOCIDA') && !str_contains($r['salida'], "tenant #{$s6IdB} "), $s6Ver($r));
+    wa_chk("(4) y la herramienta deja en el log (stderr en la consola) UNA linea de TenantEntitlements::normalizarEdicion con el valor: [TenantEntitlements] edicion desconocida \"\" ... se trata como completa",
+        substr_count($r['salida'], '[TenantEntitlements] edicion desconocida ""') === 1 && str_contains($r['salida'], 'se trata como completa'), $s6Ver($r));
+
+    // --- (5) en ecf la herramienta abre la base de A, lee sus rangos de ecf y los revisa --------------------------------------------------------------------
+    $s6Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf'");   // se parte de cero: el finally repone los que estaban
+    $s6PonerA($s6BienA(['ambiente' => 'testecf']));
+    $r = $s6Corre();
+    wa_chk('(5) en testecf, sin ningun rango de ecf en la base de A: Sin problemas. (los rangos solo se revisan en ecf)', $r['codigo'] === 0 && trim($r['salida']) === 'Sin problemas.', $s6Ver($r));
+    $s6PonerA($s6BienA(['ambiente' => 'ecf']));
+    $r = $s6Corre();
+    wa_chk('(5) la misma A en ecf y sin rangos: sale con 1 y la unica linea de A es RANGO_FALTANTE, que nombra el E45 y el E34 (el que se deriva)',
+        $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 1 && $s6Tiene($r, $s6IdA, 'RANGO_FALTANTE') && str_contains($r['salida'], 'E45') && str_contains($r['salida'], 'E34'), $s6Ver($r));
+    $s6PonerRango('E45', null);
+    $r = $s6Corre();
+    wa_chk('(5) con un E45 sin limite (numero_hasta NULL) como unico rango: RANGO_FALTANTE (no esta autorizado) y RANGO_ILIMITADO',
+        $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 2 && $s6Tiene($r, $s6IdA, 'RANGO_FALTANTE') && $s6Tiene($r, $s6IdA, 'RANGO_ILIMITADO') && str_contains($r['salida'], "'E45'"), $s6Ver($r));
+    $s6Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf'");
+    $s6Vence = date('Y-m-d', strtotime('+1 year'));
+    $s6PonerRango('E45', 1000, 0, $s6Vence);
+    $s6PonerRango('E34', 1000, 0, $s6Vence);
+    $r = $s6Corre();
+    wa_chk('(5) con el E45 y el E34 acotados (numero_hasta 1000, con capacidad y sin vencer): Sin problemas. y sale con 0', $r['codigo'] === 0 && trim($r['salida']) === 'Sin problemas.', $s6Ver($r));
+    $s6PonerRango('E31', null);
+    $r = $s6Corre();
+    wa_chk('(5) ...y con ademas un E31 sin limite: la unica linea de A es RANGO_ILIMITADO y nombra el E31',
+        $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 1 && $s6Tiene($r, $s6IdA, 'RANGO_ILIMITADO') && str_contains($r['salida'], "'E31'"), $s6Ver($r));
+    foreach ([
+        'agotado (current_value igual a numero_hasta)' => [1000, 1000, null],
+        'vencido ayer (fecha_vencimiento)' => [1000, 0, date('Y-m-d', strtotime('-1 day'))],
+    ] as $s6Desc => [$s6Hasta, $s6Actual, $s6VenceE45]) {
+        $s6Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf'");
+        $s6PonerRango('E45', $s6Hasta, $s6Actual, $s6VenceE45);
+        $s6PonerRango('E34', 1000, 0, $s6Vence);
+        $r = $s6Corre();
+        wa_chk("(5) con el E45 {$s6Desc} y el E34 bien: la unica linea de A es RANGO_FALTANTE y nombra el E45",
+            $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 1 && $s6Tiene($r, $s6IdA, 'RANGO_FALTANTE') && str_contains($r['salida'], 'E45'), $s6Ver($r));
+    }
+
+    // --- (6) sin una columna de la 014 sale con 2 y no lista nada (como create_tenant.php: nombra la migracion y la columna que falta) --------------------------
+    $s6PonerA($s6BienA());   // con A bien puesta: si la herramienta siguiera adelante diria Sin problemas.
+    $s6Master->exec('ALTER TABLE tenants DROP COLUMN cert_vence');
+    try {
+        $r = $s6Corre();
+    } finally {
+        correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_014));   // la 014 es idempotente: vuelve a poner la columna que falta
+    }
+    wa_chk('(6) sin tenants.cert_vence sale con 2, nombra db/master_migrations/014_tenants_edicion.sql y la columna que falta, y no lista ni dice Sin problemas.',
+        $r['codigo'] === 2 && str_contains($r['salida'], 'db/master_migrations/014_tenants_edicion.sql') && str_contains($r['salida'], 'Faltan en tenants: cert_vence.')
+        && !str_contains($r['salida'], 'tenant #') && !str_contains($r['salida'], 'Sin problemas.'), $s6Ver($r));
+    wa_chk('(6) ...y la 014 repuso la columna (las cuatro estan otra vez)',
+        (int) $s6Master->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')")->fetchColumn() === 4);
+
+    // --- (7) la consulta 4 del verificador de la master, tal como se corre en phpMyAdmin (sin el "-- " de sus lineas) sobre la master scratch ----------------------
+    wa_chk('(7) la consulta 4 existe en tools/verificar_migraciones_master.sql, comentada, y se puede sacar del archivo (lineas "-- " despues de su encabezado de guiones)',
+        $s6Consulta !== '' && str_contains($s6Consulta, "WHERE edicion <> 'completa'") && str_contains($s6Consulta, 'AS tipos_vacios'), $s6Consulta);
+    if ($s6Consulta !== '') {
+        $s6PonerA();   // Express con tipos NULL
+        $s6Dos = $s6Filas();
+        wa_chk('(7) con A Express y tipos NULL devuelve la fila de A (el id de tenantA) con tipos_vacios 1, y no devuelve a B (completa)',
+            isset($s6Dos[$s6IdA]) && (int) $s6Dos[$s6IdA]['tipos_vacios'] === 1 && $s6Dos[$s6IdA]['edicion'] === 'express' && !isset($s6Dos[$s6IdB]), array_keys($s6Dos));
+        wa_chk('(7) las columnas son las del contrato: id, nombre, rnc, edicion, tipos_ecf_habilitados, modulos_habilitados, pos_enabled, cert_vence y tipos_vacios',
+            array_keys($s6Dos[$s6IdA] ?? []) === ['id', 'nombre', 'rnc', 'edicion', 'tipos_ecf_habilitados', 'modulos_habilitados', 'pos_enabled', 'cert_vence', 'tipos_vacios'], array_keys($s6Dos[$s6IdA] ?? []));
+        $s6PonerA(['tipos' => '']);
+        $s6ConVacio = (int) ($s6Filas()[$s6IdA]['tipos_vacios'] ?? -1);
+        $s6PonerA(['tipos' => '45']);
+        $s6Con45 = (int) ($s6Filas()[$s6IdA]['tipos_vacios'] ?? -1);
+        wa_chk("(7) con tipos '' (vacio, no NULL) tipos_vacios tambien es 1; con tipos '45', 0 (y la fila sigue ahi: A es Express)", $s6ConVacio === 1 && $s6Con45 === 0, [$s6ConVacio, $s6Con45]);
+        $s6PonerA(['edicion' => 'completa']);
+        wa_chk('(7) con A completa no devuelve ninguna fila de A (ni de B): la consulta solo lista lo que no es completa', !isset($s6Filas()[$s6IdA]) && !isset($s6Filas()[$s6IdB]), array_keys($s6Filas()));
+        $s6PonerA();
+        $s6NoEstricto = wa_pdo(POS_SCRATCH_BASE_MASTER);
+        $s6NoEstricto->exec("SET SESSION sql_mode = ''");
+        $s6NoEstricto->prepare("UPDATE tenants SET edicion = 'basico' WHERE id = :id")->execute([':id' => $s6IdA]);
+        unset($s6NoEstricto);
+        wa_chk("(7) con la edicion de A en '' (desconocida) la consulta tambien devuelve a A: '' es distinto de completa", ($s6Filas()[$s6IdA]['edicion'] ?? null) === '', array_keys($s6Filas()));
+    }
+} finally {
+    // Todo vuelve a su sitio: la columna cert_vence (la 014 es idempotente), los rangos de ecf de A como estaban, y A y B como completas, en testecf, con el POS prendido y sin certificado
+    // (express_scratch_preparar() llama a pos_scratch_preparar() y repone las columnas de la 014).
+    correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_014));
+    $s6Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf'");
+    if ($s6Rangos0 !== []) {
+        $s6Columnas = array_keys($s6Rangos0[0]);
+        $s6Reponer = $s6Pdo->prepare('INSERT INTO ncf_sequences (' . implode(', ', array_map(static fn (string $c): string => "`{$c}`", $s6Columnas)) . ') VALUES ('
+            . implode(', ', array_fill(0, count($s6Columnas), '?')) . ')');
+        foreach ($s6Rangos0 as $s6F) {
+            $s6Reponer->execute(array_values($s6F));
+        }
+    }
+    express_scratch_preparar();
+}
+wa_chk('ninguna corrida del verificador cambio nada: ni una fila de tenants, ni la auditoria, ni los rangos de la base de A (la huella de antes y la de despues de cada corrida es la misma)',
+    count($s6Salidas) === 17 && $s6Cambios === [], ['corridas' => count($s6Salidas), 'cambiaron' => $s6Cambios]);
+$s6Fugas = [];
+foreach ($s6Salidas as $s6I => $s6Salida) {
+    foreach ($s6Prohibidos as $s6Que => $s6Valor) {
+        if ($s6Valor !== '' && str_contains($s6Salida, $s6Valor)) {
+            $s6Fugas[] = "corrida {$s6I}: {$s6Que}";
+        }
+    }
+}
+wa_chk('ninguna corrida imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base', count($s6Salidas) === 17 && $s6Fugas === [], $s6Fugas);
+$s6Final = $s6Fila($s6IdA);
+$s6FinalB = $s6Fila($s6IdB);
+wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendido y sin certificado ni listas; los rangos de ecf de A como estaban; y las cuatro columnas de la 014 estan',
+    $s6Final['edicion'] === 'completa' && $s6FinalB['edicion'] === 'completa' && $s6Final['ambiente'] === 'testecf' && (int) $s6Final['pos_enabled'] === 1
+    && $s6Final['tipos_ecf_habilitados'] === null && $s6Final['modulos_habilitados'] === null && $s6Final['cert_vence'] === null && $s6Final['cert_path'] === null
+    && $s6Final['api_secret_hash'] === $s6Fila0['api_secret_hash']
+    && $s6Pdo->query("SELECT * FROM ncf_sequences WHERE ambiente = 'ecf' ORDER BY id")->fetchAll() === $s6Rangos0
+    && (int) $s6Master->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')")->fetchColumn() === 4,
+    array_intersect_key($s6Final, array_flip(['edicion', 'ambiente', 'pos_enabled', 'tipos_ecf_habilitados', 'cert_vence', 'cert_path'])));
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

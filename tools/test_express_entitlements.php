@@ -3998,6 +3998,354 @@ wa_chk('php -l de create_tenant.php: sin errores de sintaxis ni deprecaciones', 
     && !str_contains($s10Lint['salida'], 'Deprecated'), $s10Lint);
 
 // ---------------------------------------------------------------------------
+// 11) tools/verificar_express.php (solo lectura) y la consulta 4 de tools/verificar_migraciones_master.sql
+// ---------------------------------------------------------------------------
+echo "\n== 11) verificar_express.php y la consulta 4 del verificador de la master ==\n";
+$s11Herramienta = __DIR__ . '/verificar_express.php';
+// Incluirla solo define funciones: su programa principal corre unicamente cuando es ese archivo el que se ejecuta. Dentro de un buffer, para medir que no imprime nada.
+ob_start();
+require_once $s11Herramienta;
+$s11Incluida = (string) ob_get_clean();
+wa_chk('incluir tools/verificar_express.php no imprime nada ni arranca su programa principal', $s11Incluida === '', $s11Incluida);
+
+$s11Hoy = strtotime('2026-10-29 12:00:00');   // un mediodia fijo: los dias que faltan no dependen de la hora a la que corre la suite
+/** La fecha 'Y-m-d' que cae $dias dias despues del dia de $s11Hoy (antes, si es negativo). */
+$s11Dia = static fn (int $dias): string => date('Y-m-d', strtotime(sprintf('%+d days', $dias), $s11Hoy));
+/** Una fila de master.tenants de una empresa Express limpia (en testecf, con un tipo de venta y un certificado con fecha lejana); $o pisa lo que cada caso cambia. */
+$s11Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'testecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'pos_enabled' => 0,
+    'cert_path' => 'certificado_dgii/131000001/cert.p12', 'cert_vence' => $s11Dia(120),
+];
+/** Una fila de ncf_sequences de ecf, en la forma que lee el verificador (la de los rangos_ecf de los hechos de la biblioteca). Sin $hasta, el rango no tiene limite. */
+$s11Rango = static fn (string $tipo, ?int $hasta = 5000, int $actual = 10, ?string $vence = null): array => [
+    'type' => $tipo, 'numero_hasta' => $hasta, 'current_value' => $actual, 'fecha_vencimiento' => $vence,
+];
+$s11Buenos = [$s11Rango('E45'), $s11Rango('E34')];   // lo que pide un tipo 45: el 45 y el 34 que se deriva de el
+
+// --- express_problemas_tenant: una tabla de filas y los codigos exactos que devuelve (en el orden de la lista de codigos) ------------------------
+$s11Casos = [
+    'una fila Express limpia (testecf, tipo 45, sin POS, certificado con fecha lejana)' => [$s11Fila(), null, []],
+    // La edicion: solo se revisa lo que no es completa, y un valor desconocido no suma los problemas de Express (la API lo trata como completa).
+    "edicion '' (lo que MySQL guarda en un ENUM sin modo estricto)" => [$s11Fila(['edicion' => '']), null, ['EDICION_DESCONOCIDA']],
+    "edicion 'basico'" => [$s11Fila(['edicion' => 'basico']), null, ['EDICION_DESCONOCIDA']],
+    'una edicion desconocida con tipos vacios, POS y sin certificado: solo EDICION_DESCONOCIDA' => [$s11Fila(['edicion' => '', 'tipos_ecf_habilitados' => null, 'pos_enabled' => 1, 'cert_path' => null]), null, ['EDICION_DESCONOCIDA']],
+    "edicion ' Express ' (con espacios y mayusculas la API la trata como express)" => [$s11Fila(['edicion' => ' Express ']), null, []],
+    'una fila completa no se lista: sin tipos, con modulos mal escritos, con POS, sin certificado y sin rangos en ecf' => [
+        $s11Fila(['edicion' => 'completa', 'tipos_ecf_habilitados' => null, 'modulos_habilitados' => 'cliente', 'pos_enabled' => 1, 'cert_path' => null, 'cert_vence' => null, 'ambiente' => 'ecf']), [], []],
+    "una fila 'Completa' (con mayusculas) tampoco" => [$s11Fila(['edicion' => 'Completa', 'tipos_ecf_habilitados' => null]), null, []],
+    'una fila sin la columna edicion (una master sin la 014) no se revisa' => [array_diff_key($s11Fila(['tipos_ecf_habilitados' => null]), ['edicion' => 1]), null, []],
+    'una fila con edicion NULL no se revisa' => [$s11Fila(['edicion' => null, 'tipos_ecf_habilitados' => null]), null, []],
+    // Los tipos de e-CF.
+    'tipos NULL' => [$s11Fila(['tipos_ecf_habilitados' => null]), null, ['TIPOS_VACIOS']],
+    "tipos ''" => [$s11Fila(['tipos_ecf_habilitados' => '']), null, ['TIPOS_VACIOS']],
+    "tipos ' , ' (solo separadores)" => [$s11Fila(['tipos_ecf_habilitados' => ' , ']), null, ['TIPOS_VACIOS']],
+    "tipos 'e45' (un typo)" => [$s11Fila(['tipos_ecf_habilitados' => 'e45']), null, ['TIPOS_INVALIDOS']],
+    "tipos '45,44' (uno bueno y uno que Express no vende)" => [$s11Fila(['tipos_ecf_habilitados' => '45,44']), null, ['TIPOS_INVALIDOS']],
+    "tipos 'E45' (se escriben exactos)" => [$s11Fila(['tipos_ecf_habilitados' => 'E45']), null, ['TIPOS_INVALIDOS']],
+    "tipos '34' (la nota de credito se deriva sola, no se lista)" => [$s11Fila(['tipos_ecf_habilitados' => '34']), null, ['TIPOS_INVALIDOS']],
+    "tipos '44' (un tipo que Express no vende)" => [$s11Fila(['tipos_ecf_habilitados' => '44']), null, ['TIPOS_INVALIDOS']],
+    "tipos '45, 31,' (a mano, con espacios y coma al final)" => [$s11Fila(['tipos_ecf_habilitados' => '45, 31,']), null, []],
+    "tipos '31,32,45,33' (todos)" => [$s11Fila(['tipos_ecf_habilitados' => '31,32,45,33']), null, []],
+    "tipos '33' (solo la nota de debito: no puede vender)" => [$s11Fila(['tipos_ecf_habilitados' => '33']), null, ['TIPOS_SIN_VENTA']],
+    "tipos '33,45'" => [$s11Fila(['tipos_ecf_habilitados' => '33,45']), null, []],
+    "tipos '33,e45' (el 33 y un typo: no queda ningun tipo de venta)" => [$s11Fila(['tipos_ecf_habilitados' => '33,e45']), null, ['TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA']],
+    // Los modulos (RF2: un typo angosta, nunca ensancha).
+    "modulos 'facturacion,cliente' (RF2: cliente por clientes)" => [$s11Fila(['modulos_habilitados' => 'facturacion,cliente']), null, ['MODULOS_INVALIDOS']],
+    "modulos 'Facturacion' (se escriben exactos)" => [$s11Fila(['modulos_habilitados' => 'Facturacion']), null, ['MODULOS_INVALIDOS']],
+    "modulos 'cliente' (no queda ninguno)" => [$s11Fila(['modulos_habilitados' => 'cliente']), null, ['MODULOS_INVALIDOS']],
+    "modulos 'facturacion, clientes,' (a mano, con espacios y coma al final)" => [$s11Fila(['modulos_habilitados' => 'facturacion, clientes,']), null, []],
+    "modulos '' (todo el preset)" => [$s11Fila(['modulos_habilitados' => '']), null, []],
+    "modulos ' , ' (solo separadores: todo el preset)" => [$s11Fila(['modulos_habilitados' => ' , ']), null, []],
+    // El POS.
+    'pos_enabled 1' => [$s11Fila(['pos_enabled' => 1]), null, ['POS_ACTIVO']],
+    "pos_enabled '1' (como lo da PDO sin tipos nativos)" => [$s11Fila(['pos_enabled' => '1']), null, ['POS_ACTIVO']],
+    "pos_enabled '0'" => [$s11Fila(['pos_enabled' => '0']), null, []],
+    // El certificado: sin ruta, sin fecha y por vencer (a 30 dias o menos, o ya vencido).
+    "cert_path ''" => [$s11Fila(['cert_path' => '']), null, ['SIN_CERTIFICADO']],
+    'cert_path NULL' => [$s11Fila(['cert_path' => null]), null, ['SIN_CERTIFICADO']],
+    'cert_path de solo espacios' => [$s11Fila(['cert_path' => '   ']), null, ['SIN_CERTIFICADO']],
+    'sin cert_path, aunque cert_vence este a 5 dias: solo SIN_CERTIFICADO' => [$s11Fila(['cert_path' => '', 'cert_vence' => $s11Dia(5)]), null, ['SIN_CERTIFICADO']],
+    'cert_vence NULL (con certificado)' => [$s11Fila(['cert_vence' => null]), null, ['CERT_SIN_FECHA']],
+    "cert_vence ''" => [$s11Fila(['cert_vence' => '']), null, ['CERT_SIN_FECHA']],
+    "cert_vence '0000-00-00' (la fecha cero de MySQL)" => [$s11Fila(['cert_vence' => '0000-00-00']), null, ['CERT_SIN_FECHA']],
+    "cert_vence '2026-02-30' (no existe en el calendario)" => [$s11Fila(['cert_vence' => '2026-02-30']), null, ['CERT_SIN_FECHA']],
+    "cert_vence 'pronto'" => [$s11Fila(['cert_vence' => 'pronto']), null, ['CERT_SIN_FECHA']],
+    'cert_vence a 29 dias' => [$s11Fila(['cert_vence' => $s11Dia(29)]), null, ['CERT_POR_VENCER']],
+    'cert_vence a 30 dias (el limite: todavia avisa)' => [$s11Fila(['cert_vence' => $s11Dia(30)]), null, ['CERT_POR_VENCER']],
+    'cert_vence a 31 dias: nada' => [$s11Fila(['cert_vence' => $s11Dia(31)]), null, []],
+    'cert_vence hoy' => [$s11Fila(['cert_vence' => $s11Dia(0)]), null, ['CERT_POR_VENCER']],
+    'cert_vence ayer (ya vencio)' => [$s11Fila(['cert_vence' => $s11Dia(-1)]), null, ['CERT_POR_VENCER']],
+    'cert_vence hace 400 dias' => [$s11Fila(['cert_vence' => $s11Dia(-400)]), null, ['CERT_POR_VENCER']],
+    'cert_vence a un ano: nada' => [$s11Fila(['cert_vence' => $s11Dia(365)]), null, []],
+    // Los rangos de ecf: solo con ambiente ecf y solo si se leyeron (null los salta); piden un rango autorizado para cada tipo que la empresa emite, el 34 derivado incluido.
+    'ecf con los rangos sin leer (null): se saltan' => [$s11Fila(['ambiente' => 'ecf']), null, []],
+    'ecf sin ningun rango' => [$s11Fila(['ambiente' => 'ecf']), [], ['RANGO_FALTANTE']],
+    'ecf con el E45 y sin el E34 que se deriva' => [$s11Fila(['ambiente' => 'ecf']), [$s11Rango('E45')], ['RANGO_FALTANTE']],
+    'ecf con el E45 y el E34 acotados' => [$s11Fila(['ambiente' => 'ecf']), $s11Buenos, []],
+    'ecf con un E45 sin limite como unico rango: no es un rango autorizado y ademas esta sin limite' => [$s11Fila(['ambiente' => 'ecf']), [$s11Rango('E45', null)], ['RANGO_FALTANTE', 'RANGO_ILIMITADO']],
+    'ecf con los dos rangos acotados y ademas un E31 sin limite' => [$s11Fila(['ambiente' => 'ecf']), array_merge($s11Buenos, [$s11Rango('E31', null)]), ['RANGO_ILIMITADO']],
+    'ecf con el E45 agotado (current_value igual a numero_hasta)' => [$s11Fila(['ambiente' => 'ecf']), [$s11Rango('E45', 5000, 5000), $s11Rango('E34')], ['RANGO_FALTANTE']],
+    'ecf con el E45 vencido ayer' => [$s11Fila(['ambiente' => 'ecf']), [$s11Rango('E45', 5000, 10, $s11Dia(-1)), $s11Rango('E34')], ['RANGO_FALTANTE']],
+    'ecf con el E45 que vence hoy (todavia vale)' => [$s11Fila(['ambiente' => 'ecf']), [$s11Rango('E45', 5000, 10, $s11Dia(0)), $s11Rango('E34')], []],
+    'testecf sin rangos: los rangos solo se revisan en ecf' => [$s11Fila(['ambiente' => 'testecf']), [], []],
+    "ambiente 'ECF ' (mayusculas y espacio) cuenta como ecf" => [$s11Fila(['ambiente' => 'ECF ']), [], ['RANGO_FALTANTE']],
+    'ecf con el 33 listado: tambien pide el E33' => [$s11Fila(['ambiente' => 'ecf', 'tipos_ecf_habilitados' => '45,33']), $s11Buenos, ['RANGO_FALTANTE']],
+    'ecf con el 33 listado y los tres rangos acotados' => [$s11Fila(['ambiente' => 'ecf', 'tipos_ecf_habilitados' => '45,33']), array_merge($s11Buenos, [$s11Rango('E33')]), []],
+    'ecf sin tipos: no hay tipo que pida rango, solo TIPOS_VACIOS' => [$s11Fila(['ambiente' => 'ecf', 'tipos_ecf_habilitados' => null]), [], ['TIPOS_VACIOS']],
+    'ecf sin tipos y con un rango sin limite: TIPOS_VACIOS y RANGO_ILIMITADO' => [$s11Fila(['ambiente' => 'ecf', 'tipos_ecf_habilitados' => null]), [$s11Rango('E31', null)], ['TIPOS_VACIOS', 'RANGO_ILIMITADO']],
+    // Varios a la vez: en el orden de la lista de codigos.
+    'tipos vacios, POS prendido y sin certificado (lo que dice el plan)' => [$s11Fila(['tipos_ecf_habilitados' => null, 'pos_enabled' => 1, 'cert_path' => null]), null, ['TIPOS_VACIOS', 'POS_ACTIVO', 'SIN_CERTIFICADO']],
+];
+$s11Vistos = [];
+foreach ($s11Casos as $s11Desc => [$s11Row, $s11Rangos, $s11Esperados]) {
+    $s11Obtenidos = array_column(express_problemas_tenant($s11Row, $s11Rangos, $s11Hoy), 'codigo');
+    $s11Vistos = array_merge($s11Vistos, $s11Obtenidos);
+    wa_chk("express_problemas_tenant: {$s11Desc}: " . ($s11Esperados === [] ? 'sin problemas' : implode(', ', $s11Esperados)), $s11Obtenidos === $s11Esperados, $s11Obtenidos);
+}
+$s11Codigos = ['EDICION_DESCONOCIDA', 'TIPOS_VACIOS', 'TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'SIN_CERTIFICADO', 'CERT_SIN_FECHA', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'];
+wa_chk('la tabla ejercita los once codigos de la lista y ninguno mas', array_values(array_unique($s11Vistos)) !== [] && array_diff($s11Codigos, $s11Vistos) === [] && array_diff($s11Vistos, $s11Codigos) === [],
+    ['sin ejercitar' => array_values(array_diff($s11Codigos, $s11Vistos)), 'de mas' => array_values(array_diff($s11Vistos, $s11Codigos))]);
+
+// --- la forma de lo que devuelve: dos claves, un texto ASCII de una linea que dice lo que pasa y nada de lo secreto que trae la fila -------------------
+$s11Todo = $s11Fila([
+    'tipos_ecf_habilitados' => '33,e45', 'modulos_habilitados' => 'cliente', 'pos_enabled' => 1, 'cert_vence' => $s11Dia(5), 'ambiente' => 'ecf',
+    'cert_path' => 'MARCA-RUTA-DEL-CERTIFICADO.p12', 'cert_pass_encrypted' => 'MARCA-CLAVE-DEL-CERTIFICADO', 'db_pass_encrypted' => 'MARCA-CLAVE-DE-LA-BASE',
+    'api_secret_hash' => 'MARCA-HASH-DE-INTEGRACION', 'db_user' => 'MARCA-USUARIO-DE-LA-BASE', 'db_host' => 'MARCA-SERVIDOR-DE-LA-BASE',
+]);
+$s11Problemas = express_problemas_tenant($s11Todo, [$s11Rango('E31', null)], $s11Hoy);
+wa_chk('una fila con todo mal devuelve los siete codigos que le tocan, en el orden de la lista',
+    array_column($s11Problemas, 'codigo') === ['TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'], array_column($s11Problemas, 'codigo'));
+$s11MalFormados = [];
+foreach (array_merge($s11Problemas, express_problemas_tenant($s11Fila(['edicion' => '']), null, $s11Hoy), express_problemas_tenant($s11Fila(['tipos_ecf_habilitados' => null, 'cert_path' => null]), null, $s11Hoy),
+    express_problemas_tenant($s11Fila(['cert_vence' => null]), null, $s11Hoy)) as $s11P) {
+    if (array_keys($s11P) !== ['codigo', 'detalle'] || !is_string($s11P['codigo']) || !is_string($s11P['detalle'])
+        || preg_match('/^[\x20-\x7E]{20,600}$/D', $s11P['detalle']) !== 1) {
+        $s11MalFormados[] = $s11P;
+    }
+}
+wa_chk('cada problema trae solo codigo y detalle, y el detalle es un texto de una linea en ASCII imprimible (de 20 a 600 caracteres)', $s11MalFormados === [], $s11MalFormados);
+wa_chk('ningun detalle lleva la ruta ni la clave del certificado, la clave, el usuario o el servidor de la base ni el hash de integracion de la fila',
+    !str_contains(implode("\n", array_column($s11Problemas, 'detalle')), 'MARCA-'), array_column($s11Problemas, 'detalle'));
+$s11Detalle = static fn (array $problemas, string $codigo): string => (string) (array_column($problemas, 'detalle', 'codigo')[$codigo] ?? '');
+wa_chk('los detalles dicen lo que hay que saber: los tokens que sobran, lo que queda de los modulos, la fecha y los dias que faltan, el tipo sin rango y los que no tienen limite',
+    str_contains($s11Detalle($s11Problemas, 'TIPOS_INVALIDOS'), "'e45'") && str_contains($s11Detalle($s11Problemas, 'TIPOS_INVALIDOS'), '31, 32, 45, 33')
+    && str_contains($s11Detalle($s11Problemas, 'MODULOS_INVALIDOS'), "'cliente'") && str_contains($s11Detalle($s11Problemas, 'MODULOS_INVALIDOS'), 'ninguno')
+    && str_contains($s11Detalle($s11Problemas, 'CERT_POR_VENCER'), $s11Dia(5)) && str_contains($s11Detalle($s11Problemas, 'CERT_POR_VENCER'), '5 dias')
+    && str_contains($s11Detalle($s11Problemas, 'RANGO_FALTANTE'), 'E33') && str_contains($s11Detalle($s11Problemas, 'RANGO_ILIMITADO'), "'E31'"), $s11Problemas);
+$s11Angosto = express_problemas_tenant($s11Fila(['modulos_habilitados' => 'facturacion,cliente']), null, $s11Hoy);
+wa_chk("MODULOS_INVALIDOS con 'facturacion,cliente' dice que la empresa queda con facturacion (lo que de verdad rige)",
+    str_contains($s11Detalle($s11Angosto, 'MODULOS_INVALIDOS'), "'cliente'") && str_contains($s11Detalle($s11Angosto, 'MODULOS_INVALIDOS'), 'queda con facturacion'), $s11Angosto);
+$s11Vencido = express_problemas_tenant($s11Fila(['cert_vence' => $s11Dia(-3)]), null, $s11Hoy);
+wa_chk('CERT_POR_VENCER con un certificado ya vencido dice la fecha y cuantos dias hace, y no la ruta',
+    str_contains($s11Detalle($s11Vencido, 'CERT_POR_VENCER'), $s11Dia(-3)) && str_contains($s11Detalle($s11Vencido, 'CERT_POR_VENCER'), 'hace 3 dias'), $s11Vencido);
+$s11Desconocida = express_problemas_tenant($s11Fila(['edicion' => '']), null, $s11Hoy);
+wa_chk("EDICION_DESCONOCIDA nombra el valor ('') y dice que la API la trata como completa", str_contains($s11Detalle($s11Desconocida, 'EDICION_DESCONOCIDA'), "''") && str_contains($s11Detalle($s11Desconocida, 'EDICION_DESCONOCIDA'), 'completa'), $s11Desconocida);
+
+// --- es pura: no imprime ni escribe en el log (ni con una edicion desconocida: el aviso del log lo da quien arma el informe) y da lo mismo cada vez ---
+ob_start();
+[$s11Dos, $s11Error, $s11Log] = wa_con_log(static fn (): array => [
+    express_problemas_tenant($s11Fila(['edicion' => 'zz-pura']), null, $s11Hoy), express_problemas_tenant($s11Todo, [$s11Rango('E31', null)], $s11Hoy),
+]);
+$s11Salida = (string) ob_get_clean();
+wa_chk('express_problemas_tenant es pura: no imprime, no escribe en el log (ni con una edicion desconocida) y da lo mismo cada vez',
+    $s11Error === null && $s11Salida === '' && $s11Log === '' && ($s11Dos[1] ?? null) === $s11Problemas
+    && array_column($s11Dos[0] ?? [], 'codigo') === ['EDICION_DESCONOCIDA'], [$s11Error?->getMessage(), $s11Salida, $s11Log]);
+$s11Fuente = str_replace("\r\n", "\n", (string) file_get_contents($s11Herramienta));
+$s11Cuerpo = preg_match('/\nfunction express_problemas_tenant\(.*?\n\}\n/s', $s11Fuente, $s11M) === 1 ? $s11M[0] : '';
+wa_chk('express_problemas_tenant se declara una sola vez con la firma del contrato, y su cuerpo no toca una base, un archivo, el log ni la salida',
+    substr_count($s11Fuente, 'function express_problemas_tenant(') === 1 && $s11Cuerpo !== ''
+    && $s8Firma('express_problemas_tenant') === 'express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): array'
+    && preg_match('/\b(error_log|echo|print|printf|fwrite|file_get_contents|file_put_contents|normalizarEdicion|prepare|execute|query|PDO)\b/', $s8SinTextos("<?php\n" . $s11Cuerpo)) !== 1,
+    $s11Cuerpo === '' ? 'no se encontro la funcion' : $s8Firma('express_problemas_tenant'));
+// La muestra de arriba tiene dientes: la misma busqueda sobre un cuerpo que si imprime y escribe en el log lo encuentra (sin la etiqueta <?php el escaneo no veria codigo).
+$s11Sucio = "<?php\nfunction x() { echo 1; error_log('x'); \$p->prepare('x'); }";
+wa_chk('la busqueda de efectos de arriba tiene dientes: encuentra echo, error_log y prepare en un cuerpo que los usa',
+    preg_match_all('/\b(error_log|echo|print|printf|fwrite|file_get_contents|file_put_contents|normalizarEdicion|prepare|execute|query|PDO)\b/', $s8SinTextos($s11Sucio), $s11Halladas) === 3, $s11Halladas[0] ?? []);
+
+// --- la consulta 4 de tools/verificar_migraciones_master.sql: comentada, con su encabezado y la consulta del contrato ----------------------------
+$s11Sql = $s1Leer('tools/verificar_migraciones_master.sql');
+$s11LineasSql = explode("\n", $s11Sql);
+$s11Inicio = null;
+foreach ($s11LineasSql as $s11I => $s11L) {
+    if (str_contains($s11L, 'Consulta 4')) {
+        $s11Inicio = $s11I;
+        break;
+    }
+}
+$s11Bloque = $s11Inicio === null ? [] : array_slice($s11LineasSql, $s11Inicio);
+$s11Cierre = null;   // la ultima linea de guiones del bloque: cierra el encabezado, y lo que sigue es la consulta
+foreach ($s11Bloque as $s11I => $s11L) {
+    if (preg_match('/^-- -{20,}$/', rtrim($s11L)) === 1) {
+        $s11Cierre = $s11I;
+    }
+}
+$s11Encabezado = $s11Cierre === null ? '' : implode("\n", array_slice($s11Bloque, 0, $s11Cierre));
+$s11Consulta = $s11Cierre === null ? '' : trim((string) preg_replace('/\s+/', ' ', implode("\n", array_map(
+    static fn (string $l): string => (string) preg_replace('/^-- ?/', '', $l),
+    array_filter(array_slice($s11Bloque, $s11Cierre + 1), static fn (string $l): bool => trim($l) !== '')
+))));
+wa_chk("el verificador de la master trae una Consulta 4 con la condicion WHERE edicion <> 'completa'", $s11Inicio !== null && str_contains($s11Sql, "WHERE edicion <> 'completa'"), $s11Inicio);
+wa_chk('la Consulta 4 va escrita como la 2: un encabezado de guiones que dice que se corra SOLO cuando la fila 014 dice APLICADA, y despues la consulta, toda comentada',
+    $s11Encabezado !== '' && str_contains($s11Encabezado, 'SOLO') && str_contains($s11Encabezado, '014') && str_contains($s11Encabezado, 'APLICADA')
+    && array_filter($s11Bloque, static fn (string $l): bool => trim($l) !== '' && !str_starts_with(ltrim($l), '--')) === [], array_values(array_filter($s11Bloque, static fn (string $l): bool => trim($l) !== '' && !str_starts_with(ltrim($l), '--'))));
+wa_chk('la consulta de la Consulta 4 es la del contrato, sin cambiar una coma',
+    $s11Consulta === "SELECT id, nombre, rnc, edicion, tipos_ecf_habilitados, modulos_habilitados, pos_enabled, cert_vence, (tipos_ecf_habilitados IS NULL OR TRIM(tipos_ecf_habilitados) = '') AS tipos_vacios FROM tenants WHERE edicion <> 'completa' ORDER BY id;",
+    $s11Consulta);
+// Ni una linea con codigo del archivo (sin las lineas "--" ni lo que va entre comillas) nombra una columna de la 014: una corrida en una master sin ellas no da error,
+// y la fila 014 de arriba las nombra solo como texto (information_schema). Son tambien las lineas que lee tools/check_tenant_schema_orden.php.
+$s11Codigo = (string) preg_replace("/'(?:[^']|'')*'/", "''", (string) preg_replace('/^\s*--.*$/m', '', $s11Sql));
+wa_chk('el codigo del verificador (sin comentarios ni textos) no nombra edicion, modulos_habilitados, tipos_ecf_habilitados ni cert_vence: corre igual en una master sin la 014',
+    $s11Sql !== '' && preg_match('/\b(edicion|modulos_habilitados|tipos_ecf_habilitados|cert_vence)\b/i', $s11Codigo) !== 1, $s11Codigo);
+wa_chk('la fila 014 y la fila 012 del verificador siguen como estaban (no se tocaron)',
+    preg_match("/SELECT '014', '014_tenants_edicion\\.sql',\\s*'columnas tenants\\.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',\\s*"
+        . "\\(SELECT COUNT\\(\\*\\) FROM information_schema\\.COLUMNS\\s+WHERE TABLE_SCHEMA = DATABASE\\(\\) AND TABLE_NAME = 'tenants'\\s+"
+        . "AND COLUMN_NAME IN \\('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'\\)\\) = 4/", $s11Sql) === 1
+    && preg_match("/SELECT '012', '012_pos\\.sql',/", $s11Sql) === 1);
+wa_chk('la Consulta 3 sigue siendo la ultima consulta que se ejecuta (la que lee verificar_migraciones_tenant.sql): despues de ella solo hay comentarios',
+    preg_match('/\nSELECT id, nombre, rnc, tipo, db_name FROM tenants ORDER BY id;\n(?:\s*(?:--[^\n]*)?\n)*\z/', $s11Sql . "\n") === 1);
+
+// --- la herramienta: lo que no se mueve y lo que tiene que estar (la fuente), el php limpio y el hijo aislado --------------------------------------------
+wa_chk('verificar_express.php: empieza en <?php sin BOM, carga MasterDatabase.php y la biblioteca con require_once, y nunca lee $_GET, $_POST, $_REQUEST ni $_COOKIE',
+    str_starts_with($s11Fuente, '<?php') && preg_match_all("~require_once __DIR__ \\. '/(\\.\\./src/MasterDatabase|express_edicion_lib)\\.php';~", $s11Fuente) === 2
+    && !preg_match('/\$_(GET|POST|REQUEST|COOKIE)\b/', $s11Fuente), $s11Fuente === '' ? 'sin fuente' : null);
+$s11PosGuarda = strpos($s11Fuente, "realpath((string) (\$_SERVER['SCRIPT_FILENAME'] ?? '')) === __FILE__");
+$s11PosCli = strpos($s11Fuente, "PHP_SAPI !== 'cli'");
+$s11PosMain = strpos($s11Fuente, 'exit(express_verificar_main())');
+wa_chk('verificar_express.php: el programa principal corre solo si es este archivo el que se ejecuta, y un navegador recibe un 403 en lugar de la lista de empresas (el directorio tools del hosting se puede abrir)',
+    $s11PosGuarda !== false && $s11PosCli !== false && $s11PosMain !== false && $s11PosGuarda < $s11PosCli && $s11PosCli < $s11PosMain
+    && substr_count($s11Fuente, 'exit(express_verificar_main())') === 1 && str_contains($s11Fuente, 'http_response_code(403)'), [$s11PosGuarda, $s11PosCli, $s11PosMain]);
+$s11Literales = [];
+foreach (token_get_all($s11Fuente) as $s11T) {
+    if (is_array($s11T) && in_array($s11T[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE], true)) {
+        $s11Literales[] = trim($s11T[1], "'\" \n\t\r");
+    }
+}
+$s11DeSql = array_values(array_filter($s11Literales, static fn (string $l): bool => preg_match('/^(SELECT|INSERT|UPDATE|DELETE|REPLACE|ALTER|DROP|CREATE|TRUNCATE|GRANT|REVOKE|RENAME|CALL|SET|LOCK|UNLOCK|START|BEGIN|COMMIT|ROLLBACK|SHOW|DESCRIBE|EXPLAIN|USE)\b/i', $l) === 1));
+$s11Escribe = [];
+foreach (token_get_all($s11Fuente) as $s11I => $s11T) {
+    if (is_array($s11T) && $s11T[0] === T_STRING && in_array(strtolower($s11T[1]), ['exec', 'begintransaction', 'commit', 'rollback'], true)) {
+        $s11Escribe[] = $s11T[1] . ' (linea ' . $s11T[2] . ')';
+    }
+}
+wa_chk('verificar_express.php es de solo lectura: toda sentencia SQL que trae es un SELECT, y no llama exec, beginTransaction, commit ni rollBack',
+    $s11DeSql !== [] && array_filter($s11DeSql, static fn (string $l): bool => preg_match('/^SELECT\b/i', $l) !== 1) === [] && $s11Escribe === [], [$s11DeSql, $s11Escribe]);
+$s11Vuelca = [];
+foreach (token_get_all($s11Fuente) as $s11T) {
+    if (is_array($s11T) && $s11T[0] === T_STRING && in_array(strtolower($s11T[1]), ['print_r', 'var_dump', 'var_export', 'debug_zval_dump', 'phpinfo', 'getenv', 'putenv'], true)) {
+        $s11Vuelca[] = $s11T[1] . ' (linea ' . $s11T[2] . ')';
+    }
+}
+wa_chk('verificar_express.php no vuelca variables ni toca el entorno (ni print_r, var_dump, var_export, phpinfo, getenv ni putenv)', $s11Vuelca === [], $s11Vuelca);
+
+// Un php limpio: incluirla no imprime, no abre ninguna conexion y no corre el programa principal (el hijo llega a imprimir su JSON).
+$s11Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_ver_');
+file_put_contents($s11Hijo, <<<'PHP'
+<?php
+// Hijo de la seccion 11: incluye la herramienta en un php limpio, dentro de un buffer, y cuenta lo que dejo.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ob_start();
+require $argv[1];
+$salida = (string) ob_get_clean();
+$instancia = static fn (string $clase): bool => class_exists($clase, false) && (new ReflectionProperty($clase, 'instance'))->getValue() !== null;
+echo json_encode([
+    'salida' => $salida,
+    'database' => $instancia('Database'),
+    'master' => $instancia('MasterDatabase'),
+    'credenciales' => class_exists('Database', false) && Database::hasCredentials(),
+    'funciones' => array_values(array_filter(get_defined_functions()['user'], static fn (string $f): bool => str_starts_with($f, 'express_verificar') || $f === 'express_problemas_tenant')),
+]);
+PHP);
+$s11R = wa_correr([PHP_BINARY, $s11Hijo, $s11Herramienta]);
+@unlink($s11Hijo);
+$s11J = json_decode(trim($s11R['salida']), true);
+wa_chk('incluir la herramienta en un php limpio no imprime nada, no abre conexion (Database y MasterDatabase sin instancia, Database sin credenciales) y declara express_problemas_tenant, express_verificar y express_verificar_main',
+    is_array($s11J) && $s11J['salida'] === '' && $s11J['database'] === false && $s11J['master'] === false && $s11J['credenciales'] === false
+    && array_diff(['express_problemas_tenant', 'express_verificar', 'express_verificar_main'], $s11J['funciones']) === [], $s11R);
+// Corrida directamente, en el hijo aislado (la master apunta a un puerto de loopback sin nadie): no lleva opciones, intenta abrir la master y, al no poder, dice [FALLO] con la
+// linea de express_describir_fallo (la misma politica de tenant_edicion.php) y sale con 1, sin usuario, servidor ni clave y sin avisos de PHP.
+$s11R = express_hijo_aislado(['-d', 'display_errors=1', '-d', 'error_reporting=-1', 'tools/verificar_express.php']);
+wa_chk('verificar_express.php corrida directamente con la master inalcanzable: sale con 1 con UNA linea [FALLO] RuntimeException (MasterDatabase.php:N) que dice que no pudo conectar, sin usuario, servidor ni clave, sin la linea que MasterDatabase manda al log y sin avisos de PHP',
+    $s11R['codigo'] === 1 && preg_match('/^\[FALLO\] RuntimeException \(MasterDatabase\.php:\d+\): No se pudo conectar a la base de datos maestra\.\r?$/m', $s11R['salida']) === 1
+    && substr_count($s11R['salida'], '[FALLO]') === 1 && !preg_match('/127\.0\.0\.1|aislado_usuario|aislado_clave|MasterDB|Stack trace|Warning|Notice|Deprecated|Fatal/', $s11R['salida']), $s11R);
+
+// --- express_verificar: el informe, contra un master de mentira (el PDO de guion de la seccion 9: solo prepare y execute) ---------------------------------
+$s11Maestro = static function (array $filas, ?array $columnas = null): ExpPdoGuion {
+    $columnas ??= array_merge(['id', 'nombre', 'rnc', 'tipo', 'ambiente', 'pos_enabled', 'cert_path'], EXPRESS_COLUMNAS_VERIFICADAS);
+    $master = new ExpPdoGuion('master', new ExpGuionLog());
+    $master->respuesta = static function (string $sql) use ($filas, $columnas): array {
+        if (str_contains($sql, 'information_schema.COLUMNS')) {
+            return array_map(static fn (string $c): array => ['COLUMN_NAME' => $c], $columnas);
+        }
+        if (str_contains($sql, 'FROM tenants')) {
+            return $filas;
+        }
+        throw new LogicException('consulta inesperada al master de mentira de la seccion 11: ' . $sql);
+    };
+    return $master;
+};
+$s11Lee = static fn (ExpPdoGuion $master): array => array_values(array_map(
+    static fn (array $evento): string => $evento[2],
+    array_filter($master->log->eventos, static fn (array $evento): bool => $evento[1] === 'execute')
+));
+wa_chk('express_verificar(PDO $master, int $hoy): array es la firma del informe', $s8Firma('express_verificar') === 'express_verificar(PDO $master, int $hoy): array', $s8Firma('express_verificar'));
+
+$s11A = $s11Fila(['id' => 7, 'nombre' => 'POS Prueba A', 'tipos_ecf_habilitados' => null, 'pos_enabled' => 1, 'cert_path' => null]);
+$s11Raro = $s11Fila(['id' => 8, 'nombre' => 'Raro', 'edicion' => 'zz-verificador']);
+$s11Limpia = $s11Fila(['id' => 9, 'nombre' => 'Limpia']);
+$s11M = $s11Maestro([$s11A, $s11Raro, $s11Limpia]);
+[$s11Informe, $s11Error, $s11Log] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+$s11Lineas = is_array($s11Informe) ? $s11Informe['lineas'] : [];
+wa_chk('el informe lista una linea por problema, "tenant #<id> (<nombre>): <CODIGO> <detalle>", en orden de empresa y de codigo, y sale con 1; la empresa limpia no sale',
+    $s11Error === null && ($s11Informe['codigo'] ?? null) === 1 && count($s11Lineas) === 4
+    && str_starts_with($s11Lineas[0] ?? '', 'tenant #7 (POS Prueba A): TIPOS_VACIOS ') && str_starts_with($s11Lineas[1] ?? '', 'tenant #7 (POS Prueba A): POS_ACTIVO ')
+    && str_starts_with($s11Lineas[2] ?? '', 'tenant #7 (POS Prueba A): SIN_CERTIFICADO ') && str_starts_with($s11Lineas[3] ?? '', 'tenant #8 (Raro): EDICION_DESCONOCIDA ')
+    && !str_contains(implode("\n", $s11Lineas), 'tenant #9'), [$s11Error?->getMessage(), $s11Informe]);
+wa_chk('el informe escribe en el log UNA linea por cada valor de edicion desconocido (la politica de normalizarEdicion: se trata como completa y se avisa), con el valor',
+    substr_count($s11Log, 'zz-verificador') === 1 && substr_count($s11Log, "\n") === 1 && str_contains($s11Log, 'se trata como completa'), $s11Log);
+wa_chk("el informe lee las empresas con una sola consulta, un SELECT con WHERE edicion <> 'completa' y ORDER BY id, y no escribe nada (ni una sentencia que no sea SELECT)",
+    count(array_filter($s11Lee($s11M), static fn (string $sql): bool => str_contains($sql, 'FROM tenants'))) === 1
+    && count(array_filter($s11Lee($s11M), static fn (string $sql): bool => str_contains($sql, "FROM tenants WHERE edicion <> 'completa' ORDER BY id"))) === 1
+    && $s11M->escritas === [] && !$s11M->enTransaccion, $s11Lee($s11M));
+foreach (['una empresa Express limpia' => [$s11Limpia], 'ninguna empresa que no sea completa' => []] as $s11Desc => $s11Filas) {
+    $s11M = $s11Maestro($s11Filas);
+    [$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+    wa_chk("express_verificar con {$s11Desc}: imprime Sin problemas. y sale con 0", $s11Error === null && $s11Informe === ['codigo' => 0, 'lineas' => ['Sin problemas.']], [$s11Error?->getMessage(), $s11Informe]);
+}
+$s11M = $s11Maestro([$s11A], ['id', 'nombre', 'edicion', 'tipos_ecf_habilitados']);
+[$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+wa_chk('sin dos de las columnas de la 014 (modulos_habilitados y cert_vence) sale con 2, nombra db/master_migrations/014_tenants_edicion.sql y las columnas que faltan, y ni siquiera lee tenants',
+    $s11Error === null && ($s11Informe['codigo'] ?? null) === 2 && count($s11Informe['lineas'] ?? []) === 1
+    && str_contains($s11Informe['lineas'][0] ?? '', 'db/master_migrations/014_tenants_edicion.sql') && str_contains($s11Informe['lineas'][0] ?? '', 'Faltan en tenants: modulos_habilitados, cert_vence.')
+    && count(array_filter($s11Lee($s11M), static fn (string $sql): bool => str_contains($sql, 'FROM tenants'))) === 0, [$s11Error?->getMessage(), $s11Informe]);
+$s11M = $s11Maestro([$s11Fila(['id' => 5, 'nombre' => "Mala\n\x1b[31mPe\xc3\xb1a " . str_repeat('x', 200), 'tipos_ecf_habilitados' => null])]);
+[$s11Informe] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+wa_chk('el nombre de la empresa sale en una sola linea, en ASCII imprimible y acotado (sin saltos de linea, escapes ni acentos de bytes sueltos): viene de una base y se escribio a mano',
+    count($s11Informe['lineas'] ?? []) === 1 && preg_match('/^tenant #5 \([\x20-\x7E]{1,60}\): TIPOS_VACIOS [\x20-\x7E]+$/D', $s11Informe['lineas'][0] ?? '') === 1, $s11Informe);
+// Solo una empresa Express, de tipo app y en ecf abre su propia base para leer los rangos: una de integracion, una de edicion desconocida o una en testecf no.
+foreach ([
+    'una de integracion (aunque diga express)' => $s11Fila(['id' => 21, 'tipo' => 'integracion', 'ambiente' => 'ecf', 'tipos_ecf_habilitados' => null]),
+    'una de edicion desconocida' => $s11Fila(['id' => 22, 'edicion' => 'zz-verificador', 'ambiente' => 'ecf']),
+    'una en testecf' => $s11Fila(['id' => 23, 'ambiente' => 'testecf', 'tipos_ecf_habilitados' => null]),
+] as $s11Desc => $s11Row) {
+    $s11M = $s11Maestro([$s11Row]);
+    [$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+    wa_chk("express_verificar no abre la base de {$s11Desc}: da su informe sin intentar conectar", $s11Error === null && ($s11Informe['codigo'] ?? null) === 1 && count($s11Informe['lineas'] ?? []) >= 1,
+        [$s11Error === null ? null : get_class($s11Error) . ': ' . $s11Error->getMessage(), $s11Informe]);
+}
+// La que si la abre: una Express de tipo app en ecf intenta conectar con express_conectar_tenant. Esta fila no trae db_host, db_name ni db_user: el intento se ve en la excepcion.
+$s11M = $s11Maestro([$s11Fila(['id' => 24, 'ambiente' => 'ecf'])]);
+[, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+wa_chk('una empresa Express de tipo app en ecf SI abre su base (express_conectar_tenant): sin db_host, db_name y db_user en la fila lanza InvalidArgumentException, que el programa principal imprime como [FALLO]',
+    $s11Error instanceof InvalidArgumentException && str_contains($s11Error->getMessage(), '#24'), $s11Error === null ? null : get_class($s11Error) . ': ' . $s11Error->getMessage());
+$s11Hallado = $s8Ocho3($s8SinTextos($s11Fuente));
+wa_chk('PHP 8.3 (produccion y CI): verificar_express.php no usa funciones ni sintaxis de PHP 8.4 o 8.5', $s11Hallado === [], $s11Hallado);
+$s11Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s11Herramienta]);
+wa_chk('php -l de verificar_express.php: sin errores de sintaxis ni deprecaciones', $s11Lint['codigo'] === 0 && str_starts_with(trim($s11Lint['salida']), 'No syntax errors detected')
+    && !str_contains($s11Lint['salida'], 'Deprecated'), $s11Lint);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
