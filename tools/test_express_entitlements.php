@@ -125,11 +125,28 @@ echo "\n== 2) config/editions.php y TenantEntitlements (nucleo) ==\n";
 
 // Incluir la clase y leer la config no debe imprimir nada (ni un BOM ni un salto despues de la etiqueta de cierre de
 // PHP): la clase se carga en medio de una peticion que contesta JSON.
+$s2Antes = get_included_files();
 ob_start();
 require_once __DIR__ . '/../src/TenantEntitlements.php';
 $s2Config = TenantEntitlements::config();
 $s2Salida = (string) ob_get_clean();
 wa_chk('incluir la clase y cargar config/editions.php no imprime nada', $s2Salida === '', $s2Salida);
+// La clase incluye src/TenantResolver.php y este, src/MasterDatabase.php y src/Database.php (codigo que este plan no
+// toca). El "no imprime nada" de arriba solo habla de ellos si entraron dentro de esa captura, es decir, si ninguna
+// seccion anterior los habia cargado. Y "no abre conexion" se mide aqui: los dos son singletons perezosos (la conexion
+// nace en getInstance(), no al incluir el archivo), asi que tras incluir ninguno tiene instancia y Database no tiene
+// credenciales.
+$s2Nuevos = array_map('basename', array_values(array_diff(get_included_files(), $s2Antes)));
+wa_chk('la captura cubre la cadena de includes: TenantEntitlements, TenantResolver, MasterDatabase y Database entraron dentro de ella',
+    array_diff(['TenantEntitlements.php', 'TenantResolver.php', 'MasterDatabase.php', 'Database.php'], $s2Nuevos) === [], $s2Nuevos);
+$s2Instancia = static fn (string $clase): mixed => (new ReflectionProperty($clase, 'instance'))->getValue();
+$s2Conexion = [
+    'Database tiene instancia' => $s2Instancia('Database') !== null,
+    'MasterDatabase tiene instancia' => $s2Instancia('MasterDatabase') !== null,
+    'Database tiene credenciales' => Database::hasCredentials(),
+];
+wa_chk('incluir la clase no abre conexion: Database y MasterDatabase sin instancia, Database sin credenciales',
+    !in_array(true, $s2Conexion, true), $s2Conexion);
 
 $s2Preset = ['facturacion', 'clientes', 'productos', 'usuarios', 'configuracion'];
 wa_chk('config(): preset, tipos de venta, permisos, rol Facturador y plazos como en el contrato',
@@ -163,6 +180,21 @@ wa_chk('csv: trim, vacios fuera, sin repetidos, orden de aparicion',
 foreach (['express', ' Express ', 'EXPRESS'] as $s2V) {
     wa_chk("esRestringido('{$s2V}')", TenantEntitlements::esRestringido($s2Fila(['edicion' => $s2V])) === true);
 }
+// wa_con_log (tools/write_ahead_test_lib.php) no es de este plan y todas las pruebas de log de abajo lo desarman como
+// [resultado, excepcion o null, texto del log]: se fija esa forma aqui, para que un cambio del ayudante falle con su nombre.
+$s2SinFallo = wa_con_log(static function (): int {
+    error_log('marca-wa-con-log');
+    return 7;
+});
+$s2ConFallo = wa_con_log(static function (): void {
+    throw new RuntimeException('marca-excepcion');
+});
+wa_chk('wa_con_log devuelve [resultado, excepcion o null, texto del log]: sin fallo, [7, null, la linea]; si lanza, [null, la excepcion, vacio]',
+    count($s2SinFallo) === 3 && $s2SinFallo[0] === 7 && $s2SinFallo[1] === null
+    && substr_count((string) $s2SinFallo[2], 'marca-wa-con-log') === 1 && substr_count((string) $s2SinFallo[2], "\n") === 1
+    && count($s2ConFallo) === 3 && $s2ConFallo[0] === null && $s2ConFallo[1] instanceof RuntimeException
+    && $s2ConFallo[1]->getMessage() === 'marca-excepcion' && $s2ConFallo[2] === '',
+    [$s2SinFallo, $s2ConFallo]);
 // 'completa', en cualquier forma, es un valor conocido: no escribe nada en el log.
 [, , $s2Log] = wa_con_log(function () use ($s2Fila) {
     foreach (['completa', 'Completa', ' completa '] as $s2V) {
