@@ -2373,38 +2373,80 @@ wa_chk('las firmas son las del contrato que consumen tenant_edicion.php y create
     ], array_map($s8Firma, $s8Contrato));
 
 $s8Fuente = (string) file_get_contents($s8Lib);
-$s8Tokens = token_get_all($s8Fuente);
 $s8Imprime = [];
-$s8Codigo = '';
-foreach ($s8Tokens as $s8T) {
-    if (!is_array($s8T)) {
-        $s8Codigo .= $s8T;
-        continue;
-    }
-    if (!in_array($s8T[0], [T_COMMENT, T_DOC_COMMENT], true)) {
-        $s8Codigo .= $s8T[1];
-    }
-    if (in_array($s8T[0], [T_ECHO, T_PRINT, T_EXIT, T_INLINE_HTML, T_OPEN_TAG_WITH_ECHO], true)
-        || ($s8T[0] === T_STRING && in_array(strtolower($s8T[1]), ['printf', 'vprintf', 'print_r', 'var_dump', 'var_export', 'error_log', 'fwrite', 'fputs', 'file_put_contents', 'header'], true))) {
+foreach (token_get_all($s8Fuente) as $s8T) {
+    if (is_array($s8T) && (in_array($s8T[0], [T_ECHO, T_PRINT, T_EXIT, T_INLINE_HTML, T_OPEN_TAG_WITH_ECHO], true)
+        || ($s8T[0] === T_STRING && in_array(strtolower($s8T[1]), ['printf', 'vprintf', 'print_r', 'var_dump', 'var_export', 'error_log', 'fwrite', 'fputs', 'file_put_contents', 'header'], true)))) {
         $s8Imprime[] = token_name($s8T[0]) . ' ' . trim($s8T[1]) . ' (linea ' . $s8T[2] . ')';
     }
 }
 wa_chk('la fuente de la biblioteca no imprime ni escribe en ninguna parte (ni echo, ni exit, ni HTML suelto, ni error_log) y empieza en <?php sin BOM',
     $s8Imprime === [] && str_starts_with($s8Fuente, '<?php'), $s8Imprime);
-$s8Ocho4 = [];
-foreach (['/\b(array_find|array_find_key|array_any|array_all|mb_trim|mb_ltrim|mb_rtrim)\s*\(/i' => 'funcion nueva de PHP 8.4',
-          '/\bnew\s+[\w\\\\]+\s*\([^()]*\)\s*->/' => 'new X()->m() sin parentesis',
-          '/\b(public|protected|private)\(set\)/' => 'visibilidad asimetrica',
-          '/\{\s*(get|set)\s*(=>|\{|\()/' => 'ganchos de propiedad'] as $s8Patron => $s8Que) {
-    if (preg_match($s8Patron, $s8Codigo) === 1) {
-        $s8Ocho4[] = $s8Que;
+
+// --- PHP 8.3: produccion y CI corren 8.3 y esta maquina 8.5, asi que un nombre o una sintaxis mas nueva pasaria aqui sin que nadie lo note ----------------
+// No hay un php 8.3 en esta maquina: la guarda es estatica (el CI de 8.3 corre php -l sobre tools/ en cada push; la suite pura entra al CI en la tarea 13). Se lee el
+// codigo de cada archivo sin comentarios ni textos (un nombre dentro de una cadena, como los de esta tabla, no cuenta) y se buscan las funciones y la sintaxis que
+// llegaron con PHP 8.4 y 8.5. La tabla se prueba a si misma con una muestra que las trae todas y otra que las nombra solo en comentarios y cadenas.
+/** El codigo de un archivo PHP sin comentarios ni textos (cadenas y heredocs): lo que queda es lo que PHP ejecuta. */
+$s8SinTextos = static function (string $fuente): string {
+    $codigo = '';
+    foreach (token_get_all($fuente) as $s8T) {
+        $codigo .= !is_array($s8T) ? $s8T : (in_array($s8T[0], [T_COMMENT, T_DOC_COMMENT], true) ? ' '
+            : (in_array($s8T[0], [T_CONSTANT_ENCAPSED_STRING, T_ENCAPSED_AND_WHITESPACE, T_INLINE_HTML], true) ? "''" : $s8T[1]));
     }
+    return $codigo;
+};
+$s8Patrones83 = [
+    '/\b(array_find|array_find_key|array_any|array_all|mb_trim|mb_ltrim|mb_rtrim|mb_ucfirst|mb_lcfirst|bcceil|bcfloor|bcround|bcdivmod|fpow|grapheme_str_split|request_parse_body|http_get_last_response_headers|http_clear_last_response_headers)\s*\(/i' => 'funcion nueva de PHP 8.4',
+    '/\b(array_first|array_last|get_error_handler|get_exception_handler)\s*\(/i' => 'funcion nueva de PHP 8.5',
+    '/\bPDO::connect\s*\(|\bPdo\\\\[A-Z]\w*/' => 'PDO::connect o una subclase Pdo (PHP 8.4)',
+    '/\bnew\s+[\w\\\\]+\s*\([^()]*\)\s*->/' => 'new X()->m() sin parentesis (PHP 8.4)',
+    '/\b(public|protected|private)\(set\)/' => 'visibilidad asimetrica (PHP 8.4)',
+    '/\{\s*(get|set)\s*(=>|\{|\()/' => 'ganchos de propiedad (PHP 8.4)',
+    '/#\[\s*\\\\?(NoDiscard|Deprecated)\b/' => 'atributo NoDiscard o Deprecated (PHP 8.4 y 8.5)',
+    '/\|>/' => 'operador pipe (PHP 8.5)',
+    '/\(\s*void\s*\)/i' => 'cast (void) (PHP 8.5)',
+];
+/** Que de PHP 8.4 y 8.5 usa un codigo (ya sin comentarios ni textos): las descripciones de la tabla que encuentra. */
+$s8Ocho3 = static function (string $codigo) use ($s8Patrones83): array {
+    return array_values(array_filter($s8Patrones83, static fn (string $que, string $patron): bool => preg_match($patron, $codigo) === 1, ARRAY_FILTER_USE_BOTH));
+};
+$s8Muestra = <<<'PHP'
+<?php
+$a = array_find($x, fn ($v) => $v) ?? mb_trim($y);
+$b = array_first($x) . array_last($x);
+$c = PDO::connect('mysql:') ?? Pdo\Mysql::class;
+$d = new Foo()->bar();
+class K { public private(set) int $z = 1; public string $w { get => 'x'; } }
+#[\NoDiscard]
+function f() { return $x |> trim(...); }
+$e = (void) g();
+PHP;
+$s8Inocente = <<<'PHP'
+<?php
+// array_find( array_first( PDO::connect( new Foo()->bar() |> (void) private(set) #[\NoDiscard]
+/* mb_trim( get_error_handler( */
+$a = 'array_find( array_last( PDO::connect( |> (void)';
+$b = "mb_trim( new Foo()->bar()";
+$c = str_contains($a, 'x') ? array_map('trim', [$b]) : [];
+PHP;
+wa_chk('la guarda de PHP 8.3 tiene dientes: encuentra cada construccion de PHP 8.4 y 8.5 de una muestra que las trae todas, y nada en una que las nombra solo en comentarios y cadenas',
+    $s8Ocho3($s8SinTextos($s8Muestra)) === array_values($s8Patrones83) && $s8Ocho3($s8SinTextos($s8Inocente)) === [], [$s8Ocho3($s8SinTextos($s8Muestra)), $s8Ocho3($s8SinTextos($s8Inocente))]);
+$s8Escaneados = ['la biblioteca' => $s8Lib, 'esta suite' => __FILE__, 'la suite scratch' => __DIR__ . '/test_express_scratch.php'];
+foreach ($s8Escaneados as $s8Quien => $s8Archivo) {
+    $s8Hallado = $s8Ocho3($s8SinTextos((string) file_get_contents($s8Archivo)));
+    wa_chk("PHP 8.3 (produccion y CI): {$s8Quien} no usa funciones ni sintaxis de PHP 8.4 o 8.5 (array_find y compania, new X()->m(), visibilidad asimetrica, ganchos, atributos, |>, (void), PDO::connect)",
+        $s8Hallado === [], $s8Hallado);
 }
-wa_chk('la fuente usa solo sintaxis y funciones de PHP 8.3 (produccion y CI): nada de array_find, array_any, mb_trim, new X()->m(), visibilidad asimetrica ni ganchos', $s8Ocho4 === [], $s8Ocho4);
-// php -l con deprecaciones al maximo: un parametro con null implicito (Tipo $x = null) avisa "Deprecated" desde PHP 8.4.
+// php -l con deprecaciones al maximo: un parametro con null implicito (Tipo $x = null) avisa "Deprecated" desde PHP 8.4. Tambien las dos suites: el CI las revisa con php 8.3.
 $s8Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s8Lib]);
 wa_chk('php -l de la biblioteca: sin errores de sintaxis ni deprecaciones', $s8Lint['codigo'] === 0 && str_starts_with(trim($s8Lint['salida']), 'No syntax errors detected')
     && !str_contains($s8Lint['salida'], 'Deprecated'), $s8Lint);
+foreach (['esta suite' => __FILE__, 'la suite scratch' => __DIR__ . '/test_express_scratch.php'] as $s8Quien => $s8Archivo) {
+    $s8Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s8Archivo]);
+    wa_chk("php -l de {$s8Quien}: sin errores de sintaxis ni deprecaciones", $s8Lint['codigo'] === 0 && str_starts_with(trim($s8Lint['salida']), 'No syntax errors detected')
+        && !str_contains($s8Lint['salida'], 'Deprecated'), $s8Lint);
+}
 
 // --- express_ruta_absoluta: la ruta del certificado se resuelve como CertResolver::toAbsolute (que es privada) ------------------------
 $s8Resuelve = new ReflectionMethod('CertResolver', 'toAbsolute');
@@ -2443,6 +2485,16 @@ foreach (is_array($s8Obtenido) ? $s8Obtenido : [] as $s8Desc => $s8R) {
 wa_chk('express_leer_certificado no lanza, no imprime y no escribe en el log con ninguna de esas filas (ni el warning de un archivo que no existe)',
     $s8Error === null && is_array($s8Obtenido) && count($s8Obtenido) === 10 && $s8Salida === '' && $s8Log === '', [$s8Error?->getMessage(), $s8Salida, $s8Log]);
 
+// --- el limite del vencimiento: la emision (ECFEmissionService::exigirCertificadoVigente) vence un certificado solo con notAfter < time() -----------------------
+// express_leer_certificado sigue esa regla: a la marca exacta del notAfter todavia vale y un segundo despues no (eso se prueba con un certificado real y $ahora en la
+// suite scratch, que ademas compara las dos lecturas). Aqui se lee la comparacion de la emision, porque su hora es time() y no se puede fijar: si alguien la cambia
+// (<=, o un margen), esta prueba obliga a revisar con ella el preflight y TenantEntitlements::certificadoReal del plan 03.
+$s8Emision = (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php');
+$s8Metodo = preg_match('/function exigirCertificadoVigente\b.*?\r?\n    \}\r?\n/s', $s8Emision, $s8M) === 1 ? $s8M[0] : '';
+wa_chk('la emision vence un certificado solo con notAfter < time() (a la hora exacta del notAfter todavia vale), que es el limite de express_leer_certificado: si esa comparacion cambia hay que revisar las dos lecturas',
+    $s8Metodo !== '' && preg_match('/is_int\(\$hasta\)\s*&&\s*\$hasta\s*<\s*time\(\)/', $s8Metodo) === 1 && preg_match('/\$hasta\s*<=|time\(\)\s*[-+]/', $s8Metodo) === 0,
+    $s8Metodo === '' ? 'no se encontro exigirCertificadoVigente en ECFEmissionService' : trim(substr($s8Metodo, 0, 200)));
+
 // --- express_conectar_tenant: lo que se niega antes de abrir nada (la conexion real se prueba en la suite scratch) -----------------
 foreach ([
     "tipo 'integracion' (no tiene base propia)" => ['id' => 5, 'tipo' => 'integracion', 'db_host' => 'host-marca', 'db_name' => 'base_marca', 'db_user' => 'usuario_marca', 'db_pass_encrypted' => 'MARCA-clave-de-la-base'],
@@ -2465,6 +2517,10 @@ foreach ([
 // deja en blanco. Los permisos del Facturador se escriben a mano: la tabla no se deriva de la config que se prueba.
 $s8Hoy = '2026-10-29';
 $s8Rol = ['facturas', 'clients', 'products', 'unidades'];
+// La lista de arriba es una copia a mano a proposito (la tabla no se deriva de la config que prueba), asi que aqui se ata a la config real: mismo contenido y
+// mismo orden (el plan inserta un permiso por token, en el orden de config()['rol_user']). Si la config cambia, falla esta prueba y no una docena de abajo.
+wa_chk('el rol Facturador escrito a mano en esta seccion es exactamente config()[rol_user], en el mismo orden (de ahi salen la base de la evaluacion y el plan escrito a mano)',
+    $s8Rol === TenantEntitlements::config()['rol_user'], TenantEntitlements::config()['rol_user']);
 $s8Vence = strtotime('2027-03-15 12:00:00');
 $s8Base = [
     'tenant' => [
@@ -2716,6 +2772,66 @@ wa_chk('express_plan: tipos_ecf_habilitados y modulos_habilitados salen del pedi
     && $s8Param($s8PlanDe(['pedido.modulos' => []]), 2, ':m') === null, [$s8Modulos2[2]['params'] ?? null]);
 wa_chk('express_plan: un token repetido en el pedido se escribe una sola vez y se respeta el orden en que se pidio (45,31,45 queda 45,31)',
     $s8Param($s8PlanDe(['pedido.tipos' => ['45', '31', '45']]), 2, ':t') === '45,31');
+// --- cert_vence: la fecha que escribe el plan es la que lee estadoCertificado (el dia del notAfter, en la zona horaria por defecto de PHP) --------------------
+// La columna es DATE (migracion master 014, solo informativa). El lector (TenantEntitlements::estadoCertificado, el bloque certificado de GET /api/emisor) la toma como
+// "el dia del notAfter en la zona por defecto de PHP" y cuenta los dias contra date('Y-m-d') de esa misma zona; el plan escribe date('Y-m-d', notAfter) en esa zona.
+// Se prueba en zonas lejos de UTC y con un notAfter cuyo dia local NO es el de UTC (un gmdate, o una zona fija, lo delataria): lo que escribe el plan, leido a la hora
+// del notAfter, da 0 dias (el dia del vencimiento todavia vale, como en la emision), 10 dias diez dias antes y vencido un dia despues. La zona de la suite se restaura.
+$s8Zona0 = date_default_timezone_get();
+$s8Ciclo = [];
+$s8Contrastes = 0;
+try {
+    foreach (['UTC', 'America/Chicago', 'America/Santo_Domingo', 'Pacific/Honolulu', 'Pacific/Kiritimati'] as $s8Zona) {
+        date_default_timezone_set($s8Zona);
+        foreach (['23:30:00', '00:30:00'] as $s8Hora) {
+            $s8Fin = new DateTimeImmutable("2027-03-15 {$s8Hora}", new DateTimeZone($s8Zona));
+            $s8V = $s8Param($s8PlanDe(['cert' => ['ok' => true, 'codigo' => null, 'vence' => $s8Fin->getTimestamp()]]), 2, ':v');
+            $s8Lee = static fn (DateTimeImmutable $hoy): array => TenantEntitlements::estadoCertificado(
+                ['cert_path' => 'certificado_dgii/131000001/cert.p12', 'cert_vence' => $s8V],
+                $hoy->getTimestamp()
+            );
+            $s8Contrastes += (gmdate('Y-m-d', $s8Fin->getTimestamp()) !== '2027-03-15') ? 1 : 0;   // en cuantas la fecha de UTC y la local difieren
+            foreach ([
+                'a la hora del notAfter' => [$s8Lee($s8Fin), ['estado' => 'por_vencer', 'vence' => '2027-03-15', 'dias' => 0]],
+                'diez dias antes' => [$s8Lee($s8Fin->modify('-10 days')), ['estado' => 'por_vencer', 'vence' => '2027-03-15', 'dias' => 10]],
+                'un dia despues' => [$s8Lee($s8Fin->modify('+1 day')), ['estado' => 'vencido', 'vence' => '2027-03-15', 'dias' => -1]],
+            ] as $s8Cuando => [$s8Leido, $s8Debe]) {
+                if ($s8V !== '2027-03-15' || $s8Leido !== $s8Debe) {
+                    $s8Ciclo[] = "{$s8Zona} {$s8Hora}, {$s8Cuando}: " . json_encode([$s8V, $s8Leido]);
+                }
+            }
+        }
+    }
+} finally {
+    date_default_timezone_set($s8Zona0);
+}
+wa_chk('cert_vence: el dia que escribe el plan (el del notAfter en la zona de PHP) es el que lee estadoCertificado en cinco zonas, con un notAfter a las 23:30 y a las 00:30 locales: 0 dias a la hora del notAfter, 10 diez dias antes y vencido un dia despues',
+    $s8Ciclo === [] && date_default_timezone_get() === $s8Zona0, $s8Ciclo);
+wa_chk('cert_vence: la prueba de las zonas tiene dientes (en cuatro de las diez horas elegidas el dia de UTC no es el local) y el plan escribe una fecha DATE (Y-m-d) o NULL, nunca una hora',
+    $s8Contrastes >= 4 && preg_match('/^\d{4}-\d{2}-\d{2}$/D', (string) $s8Param($s8Plan, 2, ':v')) === 1
+    && $s8Param($s8PlanDe(['cert' => ['ok' => true, 'codigo' => null, 'vence' => null]]), 2, ':v') === null, $s8Contrastes);
+
+// --- la baja de clientes de prueba no puede chocar con una llave foranea: ninguna tabla de la base de la empresa apunta a clients --------------------------------
+// Se lee del esquema y de las migraciones de tenant (db/tenant_schema.sql y db/migrations/*.sql), con las dos formas de escribir una FK: directa y armada con CONCAT dentro
+// de un PREPARE (REFERENCES `', @db, '`.tabla). La suite scratch lo comprueba ademas en information_schema de la base de A y corre las sentencias del plan contra ella.
+$s8ApuntaAClients = static function (string $sql): bool {
+    $sql = (string) preg_replace(['~/\*.*?\*/~s', '~^\s*--.*$~m'], ' ', $sql);   // sin comentarios
+    $sql = (string) preg_replace('~[`\'",]|@db\b~', ' ', $sql);   // sin comillas, comas ni @db: REFERENCES `', @db, '`.clients (id) queda como REFERENCES   .clients (id)
+    return preg_match('~\bREFERENCES[\s.]*clients\b~i', $sql) === 1;
+};
+wa_chk('el detector de llaves foraneas hacia clients ve la forma directa, la que lleva comillas y la armada con CONCAT, y no se confunde con otras tablas, con comentarios ni con client_id sin FK',
+    $s8ApuntaAClients('FOREIGN KEY (client_id) REFERENCES clients (id)')
+    && $s8ApuntaAClients('FOREIGN KEY (`client_id`) REFERENCES `clients` (`id`) ON DELETE SET NULL')
+    && $s8ApuntaAClients("'FOREIGN KEY (client_id) ', 'REFERENCES `', @db, '`.clients (id) ON DELETE SET NULL'")
+    && !$s8ApuntaAClients('FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE SET NULL')
+    && !$s8ApuntaAClients("-- REFERENCES clients (id)\nFOREIGN KEY (a) REFERENCES conduces (id)")
+    && !$s8ApuntaAClients('/* REFERENCES clients */ FOREIGN KEY (a) REFERENCES cotizaciones (id)')
+    && !$s8ApuntaAClients("client_id INT(11) NULL COMMENT 'el cliente se puede borrar y client_name guarda su nombre'"));
+$s8SqlTenant = array_merge([__DIR__ . '/../db/tenant_schema.sql'], glob(__DIR__ . '/../db/migrations/*.sql') ?: []);
+$s8ConFk = array_values(array_map('basename', array_filter($s8SqlTenant, static fn (string $f): bool => $s8ApuntaAClients((string) file_get_contents($f)))));
+wa_chk('ninguna tabla de la base de la empresa (esquema y migraciones de tenant) declara una llave foranea hacia clients: el DELETE de clientes de prueba del plan no puede chocar con una (cotizaciones, conduces y facturas guardan client_id sin FK)',
+    count($s8SqlTenant) > 20 && $s8ConFk === [], $s8ConFk);
+
 $s8Rechazo = $s8Con(['m036' => false]);
 wa_chk('express_plan: es [] cuando la evaluacion trae algun rechazo, aunque lo demas se pueda corregir',
     express_plan($s8Rechazo, express_preflight_evaluar($s8Rechazo)) === [] && express_plan($s8Base, ['items' => [], 'nuevo' => true, 'rechazos' => ['tipos'], 'acciones' => []]) === []);

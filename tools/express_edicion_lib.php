@@ -19,7 +19,8 @@
  *     de la DGII usados en ellas) nunca bloquea una conversion (diseno 7, decision D4); testecf tampoco.
  *   - El certificado se lee como lo hara la emision: del cert_path de la empresa, sin respaldo con el certificado global del .env.
  *     El plan 03 agrega TenantEntitlements::certificadoReal con el mismo resultado y una prueba de paridad con express_leer_certificado:
- *     ninguna de las dos llama a la otra, asi que si algun dia se separan, lo dice esa prueba.
+ *     ninguna de las dos llama a la otra, asi que si algun dia se separan, lo dice esa prueba. Mientras llega, el limite del vencimiento es el
+ *     de la emision que ya existe (ECFEmissionService::exigirCertificadoVigente) y las suites lo comparan: ver express_leer_certificado.
  */
 
 require_once __DIR__ . '/../src/TenantEntitlements.php';   // trae TenantResolver (decrypt) y config/editions.php; no imprime ni conecta
@@ -86,8 +87,13 @@ function express_ruta_absoluta(string $ruta): string
 
 /**
  * ¿Tiene la empresa un certificado propio que la emision pueda usar? cert_path no vacio (absoluto o relativo a la raiz del proyecto), un
- * archivo legible, cert_pass_encrypted no vacio que se descifra, un .p12 que openssl_pkcs12_read abre con esa clave y un notAfter posterior a
- * $ahora (marca de tiempo; por omision, la hora actual). Sin respaldo con el certificado del .env, no imprime nada y no lanza.
+ * archivo legible, cert_pass_encrypted no vacio que se descifra, un .p12 que openssl_pkcs12_read abre con esa clave y un notAfter que no sea
+ * anterior a $ahora (marca de tiempo; por omision, la hora actual). Sin respaldo con el certificado del .env, no imprime nada y no lanza.
+ *
+ * El limite es el de la emision: ECFEmissionService::exigirCertificadoVigente vence un certificado solo con notAfter < time(), asi que el
+ * certificado vale hasta su notAfter inclusive (RFC 5280: la vigencia va de notBefore a notAfter, ambos incluidos) y vence un segundo despues.
+ * Es tambien lo que el plan 03 pide de TenantEntitlements::certificadoReal (validTo_time_t < time() es CERT_VENCIDO). La suite pura lee esa
+ * comparacion de la emision y la scratch compara las dos lecturas con certificados reales: si una de las dos se mueve, esas pruebas lo dicen.
  *
  * @return array{ok:bool,codigo:?string,vence:?int} codigo es null si ok; 'CERT_FALTA' si no hay certificado que abrir (ruta vacia, archivo
  *         que no esta o no se lee, clave que falta o no descifra o que no abre el .p12; vence null) y 'CERT_VENCIDO' si abre pero ya vencio
@@ -132,7 +138,7 @@ function express_leer_certificado(array $tenant, ?int $ahora = null): array
     if (!is_int($vence)) {
         return $falta;
     }
-    return $vence > $ahora
+    return $vence >= $ahora   // vence < ahora es lo que la emision llama vencido (exigirCertificadoVigente): a la marca exacta del notAfter todavia vale
         ? ['ok' => true, 'codigo' => null, 'vence' => $vence]
         : ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $vence];
 }
@@ -185,7 +191,8 @@ function express_preflight_rol_user(PDO $master, int $tenantId): ?array
  *   cert: express_leer_certificado de la fila; emisor: la fila 1 de emisor_config (NULL como ''), o null si no hay; almacen: existe
  *   "Almacén Principal"; rangos_ecf: los rangos de ncf_sequences con ambiente ecf; ecf_facturas: cuantas facturas tienen ambiente_dgii ecf;
  *   clientes_prueba: los ids de los clientes de la DGII (RNC 131880681 y 533445861) y CUANTOS de ellos tienen una factura ecf (refs_ecf) o una
- *   de cualquier ambiente (refs_total); rol_user: express_preflight_rol_user; hoy: la fecha de hoy, Y-m-d, en la zona de PHP.
+ *   de cualquier ambiente (refs_total); rol_user: express_preflight_rol_user; hoy: la fecha de hoy, Y-m-d, en la zona de PHP (el dispensador de
+ *   ncfModel compara el vencimiento de un rango con CURDATE() de MySQL: en el hosting las dos zonas son la misma, America/Chicago).
  */
 function express_preflight_hechos(PDO $master, ?PDO $tenantDb, array $tenant, array $pedido): array
 {
@@ -280,8 +287,17 @@ function express_preflight_nombrar(array $tokens): string
 
 /**
  * ¿Hay en $rangos (las filas ecf de los hechos) un rango autorizado que sirva para emitir $tipo ('E31')? Con numero_hasta (uno sin limite
- * no es un rango autorizado), con capacidad (current_value menor que numero_hasta) y sin vencer (fecha_vencimiento vacia o no anterior a
- * $hoy): lo mismo que dispensa y cubre ncfModel::rangoCubre.
+ * no es un rango autorizado), con capacidad (current_value menor que numero_hasta) y sin vencer (fecha_vencimiento vacia o no anterior a $hoy).
+ *
+ * Contra el modelo (ncfModel), medido en la suite scratch con filas reales:
+ *   - dispenseNextECF elige de donde sacar el numero con el mismo filtro de capacidad y vigencia (numero_hasta NULL o current_value < numero_hasta,
+ *     y fecha_vencimiento NULL o >= CURDATE()). Este predicado pone UNA condicion mas: numero_hasta no nulo, porque el dispensador usa un rango sin
+ *     limite pero la DGII no lo autorizo. Sin rangos sin limite de por medio, los dos dicen siempre lo mismo.
+ *   - rangoCubre comparte la regla de vigencia (un rango que vence hoy vale) pero NO es este predicado: pregunta por un numero concreto
+ *     (numero_desde <= valor <= numero_hasta), no mira current_value (da por cubierto el ultimo numero de un rango agotado) y da por cubierto un
+ *     rango sin limite.
+ * El dia: $hoy lo pone quien llama (los hechos traen el de PHP); el modelo compara con CURDATE() de MySQL. En el hosting las dos zonas son la misma
+ * (America/Chicago, medido en el spike S2).
  */
 function express_preflight_rango_vigente(array $rangos, string $tipo, string $hoy): bool
 {
@@ -501,6 +517,15 @@ function express_preflight_evaluar(array $hechos): array
  * integracion en blanco) y el reseteo del rol user a los permisos del Facturador (config()['rol_user']; siempre, aunque el rol ya los tenga:
  * es idempotente y lo deja como dice la config de hoy).
  *
+ * cert_vence (:v) es una columna DATE (migracion master 014, solo informativa): se escribe date('Y-m-d', notAfter) en la zona horaria por defecto
+ * de PHP, que es como la lee TenantEntitlements::estadoCertificado (el bloque certificado de GET /api/emisor), que cuenta los dias contra
+ * date('Y-m-d') de esa misma zona. NULL si no se sabe el notAfter. Una fecha vieja no bloquea nada: la emision abre el certificado de verdad.
+ *
+ * La baja de clientes de prueba no puede chocar con una llave foranea: ninguna tabla de la base de la empresa apunta a clients (cotizaciones,
+ * conduces y facturas guardan client_id sin FK, y borrar un cliente desde la app tampoco mira esas tablas). Solo se protegen los que usa una
+ * factura, que es el dato fiscal; una cotizacion o un conduce que cite a un cliente de prueba conserva su client_name y queda con un client_id
+ * que ya no existe, igual que al borrar ese cliente desde la app. La suite scratch corre estas dos sentencias contra el esquema real.
+ *
  * @return list<array{donde:string,que:string,sql:string,params:array<string,mixed>}>
  */
 function express_plan(array $hechos, array $evaluacion): array
@@ -539,7 +564,7 @@ function express_plan(array $hechos, array $evaluacion): array
         'params' => [
             ':t' => $tipos,
             ':m' => $modulos === [] ? null : implode(',', $modulos),
-            ':v' => is_int($vence) ? date('Y-m-d', $vence) : null,
+            ':v' => is_int($vence) ? date('Y-m-d', $vence) : null,   // DATE: el dia del notAfter en la zona de PHP, como lo lee estadoCertificado
             ':id' => $tenantId,
         ],
     ];

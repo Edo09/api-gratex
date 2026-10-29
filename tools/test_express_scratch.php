@@ -18,9 +18,12 @@
  *      del certificado ni ninguna clave cert_), lo toma de la fila viva en cada peticion y, aun vencido, no bloquea nada; la
  *      B, completa, no lo recibe.
  *   4) la biblioteca de preflight (tools/express_edicion_lib.php) sobre la empresa A: express_conectar_tenant abre su base,
- *      express_leer_certificado abre el .p12 desechable (bueno, con otra clave, sin archivo, sin clave y vencido), express_preflight_hechos
- *      lee los hechos de A y cada uno coincide con una lectura independiente de la base, y D4: lo que certificacion dejo en certecf (una
- *      factura, un contador) no cambia ningun hecho de ecf ni suma ningun rechazo.
+ *      express_leer_certificado abre el .p12 desechable (bueno, con otra clave, sin archivo, sin clave y vencido) y vence igual que la
+ *      emision (ECFEmissionService::exigirCertificadoVigente), express_preflight_hechos lee los hechos de A y cada uno coincide con una
+ *      lectura independiente de la base, el predicado de rangos coincide con ncfModel (dispenseNextECF y rangoCubre) sobre filas reales,
+ *      las sentencias del plan que borran en la base de la empresa corren contra su esquema real (sin llaves foraneas hacia clients, en
+ *      una transaccion que se deshace), y D4: lo que certificacion dejo en certecf (una factura, un contador) no cambia ningun hecho de
+ *      ecf ni suma ningun rechazo.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -733,8 +736,11 @@ wa_chk('express_leer_certificado: con cert_pass_encrypted vacio (o NULL) da CERT
     express_leer_certificado($s4FilaCert(['cert_pass_encrypted' => ''])) === $s4Falta && express_leer_certificado($s4FilaCert(['cert_pass_encrypted' => null])) === $s4Falta);
 wa_chk('express_leer_certificado: el mismo certificado bueno con $ahora diez dias despues da CERT_VENCIDO, con ok false y su notAfter en vence',
     express_leer_certificado($s4FilaCert(), time() + 10 * 86400) === ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $s4Bien['vence']]);
-wa_chk('express_leer_certificado: en la marca exacta del notAfter ya esta vencido y un segundo antes todavia vale ($ahora, el limite incluido en el vencimiento)',
-    express_leer_certificado($s4FilaCert(), $s4Bien['vence'])['codigo'] === 'CERT_VENCIDO' && express_leer_certificado($s4FilaCert(), $s4Bien['vence'] - 1)['ok'] === true);
+// El limite sigue a la emision: ECFEmissionService::exigirCertificadoVigente vence un certificado solo con notAfter < time(), asi que a la marca exacta del
+// notAfter todavia vale (RFC 5280: la vigencia va de notBefore a notAfter, ambos incluidos) y un segundo despues ya no.
+wa_chk('express_leer_certificado: el certificado vale hasta su notAfter inclusive (a esa marca exacta y un segundo antes, ok) y un segundo despues es CERT_VENCIDO con su notAfter en vence',
+    express_leer_certificado($s4FilaCert(), $s4Bien['vence'])['ok'] === true && express_leer_certificado($s4FilaCert(), $s4Bien['vence'] - 1)['ok'] === true
+    && express_leer_certificado($s4FilaCert(), $s4Bien['vence'] + 1) === ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $s4Bien['vence']]);
 // Sin cert_path la empresa no firma con el certificado global del .env: la biblioteca tampoco lo cuenta (CertResolver si caeria en el).
 $s4EnvAntes = getenv('DGII_ECF_CERT_PATH');
 putenv('DGII_ECF_CERT_PATH=' . $s4Cert['path']);
@@ -744,6 +750,62 @@ try {
     putenv($s4EnvAntes === false ? 'DGII_ECF_CERT_PATH' : 'DGII_ECF_CERT_PATH=' . $s4EnvAntes);
 }
 wa_chk('express_leer_certificado: con cert_path vacio da CERT_FALTA aunque DGII_ECF_CERT_PATH apunte a un certificado bueno (no hay respaldo con el del .env)', $s4SinFallback === $s4Falta, $s4SinFallback);
+
+// --- el mismo juicio que la emision: ECFEmissionService::exigirCertificadoVigente (privada) y express_leer_certificado vencen el mismo certificado ---
+// El preflight y la emision no pueden diferir en lo que las dos juzgan. La emision solo juzga el vencimiento (un .p12 que no abre no lo juzga: lo dice el
+// firmador) y no recibe la hora (usa time()), asi que se comparan el certificado bueno y el vencido. El limite exacto (notAfter == ahora) no se puede
+// forzar con la hora de la emision: lo fija la prueba de arriba con $ahora y la suite pura, que lee la comparacion de la emision. PHP no firma con dias
+// negativos (openssl_csr_sign pide de 0 a 24855): un certificado de 0 dias vence en el segundo en que se crea, y se espera a que ese segundo pase.
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php';
+$s4Emision = new ReflectionMethod('ECFEmissionService', 'exigirCertificadoVigente');
+/** Lo que la emision dice de un .p12: 'vigente' si no lanza, o la clase de lo que lanza (EcfUsuarioException cuando esta vencido). */
+$s4EmisionDice = static function (array $p12) use ($s4Emision): string {
+    try {
+        $s4Emision->invoke(null, (string) file_get_contents($p12['path']), $p12['password']);
+        return 'vigente';
+    } catch (Throwable $e) {
+        return get_class($e);
+    }
+};
+/** Un .p12 desechable de $dias dias (0 a 24855) en el temp del sistema, con clave al azar que no se imprime; se borra al terminar el proceso. */
+$s4P12Dias = static function (int $dias): array {
+    $cfg = ['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA, 'digest_alg' => 'sha256'];
+    $cnf = getenv('OPENSSL_CONF') ?: '';
+    $cnfPhp = dirname(PHP_BINARY) . DIRECTORY_SEPARATOR . 'extras' . DIRECTORY_SEPARATOR . 'ssl' . DIRECTORY_SEPARATOR . 'openssl.cnf';
+    if ($cnf === '' && is_file($cnfPhp)) {
+        $cnf = $cnfPhp;
+    }
+    if ($cnf !== '') {
+        $cfg['config'] = $cnf;
+    }
+    $clave = bin2hex(random_bytes(12));
+    $llave = openssl_pkey_new($cfg);
+    $csr = $llave ? openssl_csr_new(['commonName' => 'EXPRESS PRUEBA VENCIDO', 'organizationName' => 'EXPRESS PRUEBA', 'countryName' => 'DO'], $llave, $cfg) : false;
+    $x509 = ($csr && $llave) ? openssl_csr_sign($csr, null, $llave, $dias, $cfg) : false;
+    $p12 = '';
+    if (!$x509 || !openssl_pkcs12_export($x509, $p12, $llave, $clave)) {
+        echo "[FALLO] no se pudo crear el certificado de prueba de {$dias} dias\n";
+        exit(1);
+    }
+    $ruta = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'express_cert_' . $dias . 'd_' . getmypid() . '.p12';
+    file_put_contents($ruta, $p12);
+    register_shutdown_function(static function () use ($ruta): void {
+        @unlink($ruta);
+    });
+    return ['path' => $ruta, 'password' => $clave];
+};
+$s4Corto = $s4P12Dias(0);
+$s4FilaCorto = $s4FilaCert(['cert_path' => $s4Corto['path'], 'cert_pass_encrypted' => TenantResolver::encrypt($s4Corto['password'])]);
+$s4NotAfterCorto = express_leer_certificado($s4FilaCorto, 0)['vence'];   // con $ahora en 0 todo certificado que abre vale: devuelve su notAfter
+for ($s4I = 0; $s4I < 30 && is_int($s4NotAfterCorto) && time() <= $s4NotAfterCorto; $s4I++) {
+    usleep(100000);   // a lo mas un segundo: el notAfter es el segundo en que se creo
+}
+$s4Vencido = express_leer_certificado($s4FilaCorto);
+wa_chk('express_leer_certificado y la emision vencen el mismo certificado: uno de 0 dias, pasado su segundo, es CERT_VENCIDO con su notAfter en vence y exigirCertificadoVigente lanza EcfUsuarioException',
+    is_int($s4NotAfterCorto) && $s4Vencido === ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $s4NotAfterCorto] && $s4EmisionDice($s4Corto) === 'EcfUsuarioException',
+    [$s4Vencido, $s4EmisionDice($s4Corto)]);
+wa_chk('express_leer_certificado y la emision dan por bueno el mismo certificado (el de wa_cert_prueba): ok, y exigirCertificadoVigente no lanza',
+    $s4Bien['ok'] === true && $s4EmisionDice($s4Cert) === 'vigente', [$s4Bien, $s4EmisionDice($s4Cert)]);
 
 // --- express_preflight_hechos sobre A: cada hecho se compara con una lectura independiente de la base --------------------------------
 $s4Pedido = ['edicion' => 'express', 'tipos' => ['45'], 'modulos' => null];
@@ -810,6 +872,156 @@ wa_chk('evaluar(hechos de A): tenant, columnas, tipos, modulos, clientes_modulo 
 wa_chk('evaluar(hechos de A): A tiene el POS prendido (pos_enabled 1), el hash de integracion y un rol user que no es el del Facturador: pos y inventario siguen a "nueva", integracion y roles se corrigen, y A es testecf (rangos no se evalua)',
     $s4Ev['items']['pos']['estado'] === ($s4Ev['nuevo'] ? 'corregir' : 'rechazar') && $s4Ev['items']['integracion']['estado'] === 'corregir'
     && $s4Ev['items']['roles']['estado'] === 'corregir' && $s4Ev['items']['rangos']['estado'] === 'ok', array_map(static fn (array $i): string => $i['estado'], $s4Ev['items']));
+
+// --- rangos: el predicado de la biblioteca contra el dispensador real (ncfModel), sobre filas reales ----------------------------------------
+// express_preflight_rango_vigente dice si hay un rango acotado, con capacidad y sin vencer. Se compara con ncfModel de verdad: dispenseNextECF (de donde saca el
+// numero el dispensador: capacidad y vigencia) y rangoCubre (si un numero cae en un rango registrado y vigente; no mira current_value y cuenta un rango sin limite).
+// Las filas van a un ambiente descartable de la base de A (ncf_sequences es unica por tipo, ambiente y numero_desde) y se borran al terminar. "Hoy" lo pone la
+// prueba con el CURDATE() de MySQL, el reloj con el que comparan los dos metodos del modelo: asi la prueba no depende de la zona horaria de este php.
+require_once __DIR__ . '/../src/Models/ncfModel.php';
+$s4Amb = 'wa_eg_t8';
+$s4HoyDb = (string) $s4Uno('SELECT CURDATE()');
+$s4Dia = static fn (string $mod): string => (new DateTimeImmutable($s4HoyDb))->modify($mod)->format('Y-m-d');
+[$s4Ayer, $s4Manana] = [$s4Dia('-1 day'), $s4Dia('+1 day')];
+// Cada caso: [descripcion, filas (desde, hasta, current_value, vence, tipo opcional), numero que pregunta rangoCubre, esperado: [biblioteca, dispenseNextECF da numero, rangoCubre]].
+$s4Casos = [
+    ['un rango 1-100 con 40 usados que vence manana', [[1, 100, 40, $s4Manana]], 41, [true, true, true]],
+    ['el mismo que vence hoy (el dia del vencimiento todavia vale)', [[1, 100, 40, $s4HoyDb]], 41, [true, true, true]],
+    ['el mismo sin fecha de vencimiento', [[1, 100, 40, null]], 41, [true, true, true]],
+    ['el mismo vencido ayer', [[1, 100, 40, $s4Ayer]], 41, [false, false, false]],
+    ['agotado (100 de 100): sin capacidad, pero rangoCubre aun da por cubierto su ultimo numero', [[1, 100, 100, $s4Manana]], 100, [false, false, true]],
+    ['un numero fuera del rango (150): rangoCubre no lo cubre, pero el rango sigue teniendo capacidad', [[1, 100, 40, $s4Manana]], 150, [true, true, false]],
+    ['dos rangos, el primero agotado y el segundo con capacidad', [[1, 10, 10, $s4Manana], [11, 20, 10, $s4Manana]], 11, [true, true, true]],
+    ['dos rangos, el primero con capacidad pero vencido y el segundo agotado', [[1, 10, 5, $s4Ayer], [11, 20, 20, $s4Manana]], 7, [false, false, false]],
+    ['sin filas', [], 5, [false, false, false]],
+    ['solo filas de otro tipo (E32)', [[1, 100, 40, $s4Manana, 'E32']], 41, [false, false, false]],
+    ['solo un rango sin limite: no es un rango autorizado para la biblioteca, el dispensador si lo usa y rangoCubre lo cubre', [[1, null, 0, null]], 5, [false, true, true]],
+    ['un rango sin limite tras uno acotado agotado: igual', [[1, 10, 10, $s4Manana], [11, null, 10, null]], 15, [false, true, true]],
+    ['un rango acotado con capacidad junto a uno sin limite: los tres lo dan por bueno', [[1, 10, 3, $s4Manana], [11, null, 10, null]], 4, [true, true, true]],
+];
+wa_chk('precondicion: este proceso aun no tiene credenciales de Database (la prueba de rangos las pone y las quita)', !Database::hasCredentials());
+if (!Database::hasCredentials()) {
+    $s4Inserta = $s4Pdo->prepare(
+        'INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, fecha_vencimiento, description, ambiente)
+         VALUES (:t, :t2, :c, :d, :h, :v, :descr, :a)'
+    );
+    $s4Resultados = [];
+    try {
+        $s4Cred = $ctx['cred'];
+        Database::setCredentials(['host' => $s4Cred['host'], 'port' => $s4Cred['port'], 'name' => $ctx['dbA'], 'user' => $s4Cred['user'], 'pass' => $s4Cred['pass']]);
+        $s4Ncf = new ncfModel();   // el modelo real, sobre la base de A
+        foreach ($s4Casos as [$s4Desc, $s4Filas, $s4Numero, $s4Esperado]) {
+            $s4Pdo->prepare('DELETE FROM ncf_sequences WHERE ambiente = :a')->execute([':a' => $s4Amb]);
+            foreach ($s4Filas as $s4F) {
+                $s4Tipo = $s4F[4] ?? 'E31';
+                $s4Inserta->execute([':t' => $s4Tipo, ':t2' => $s4Tipo, ':c' => $s4F[2], ':d' => $s4F[0], ':h' => $s4F[1], ':v' => $s4F[3], ':descr' => 'Express T8', ':a' => $s4Amb]);
+            }
+            // Las filas como las pasa el recolector a la evaluacion (lectura independiente de la base, con las mismas conversiones).
+            $s4Leidas = array_map(static fn (array $r): array => [
+                'type' => (string) $r['type'], 'numero_hasta' => $s4EnteroONull($r['numero_hasta']), 'current_value' => (int) $r['current_value'],
+                'fecha_vencimiento' => $r['fecha_vencimiento'] === null ? null : (string) $r['fecha_vencimiento'],
+            ], $s4Pdo->query("SELECT type, numero_hasta, current_value, fecha_vencimiento FROM ncf_sequences WHERE ambiente = '{$s4Amb}' ORDER BY type, numero_desde")->fetchAll());
+            $s4Biblioteca = express_preflight_rango_vigente($s4Leidas, 'E31', $s4HoyDb);
+            $s4Cubre = $s4Ncf->rangoCubre('E31', $s4Amb, $s4Numero);   // no escribe
+            $s4Dispensa = $s4Ncf->dispenseNextECF('E31', $s4Amb) !== null;   // escribe (suma uno al rango que elige): va al final
+            $s4Resultados[$s4Desc] = [$s4Biblioteca, $s4Dispensa, $s4Cubre];
+            wa_chk("rangos, {$s4Desc} -> biblioteca " . json_encode($s4Esperado[0]) . ', dispenseNextECF da numero ' . json_encode($s4Esperado[1]) . ', rangoCubre(' . $s4Numero . ') ' . json_encode($s4Esperado[2]),
+                $s4Resultados[$s4Desc] === $s4Esperado, $s4Resultados[$s4Desc]);
+        }
+    } finally {
+        $s4Pdo->prepare('DELETE FROM ncf_sequences WHERE ambiente = :a')->execute([':a' => $s4Amb]);
+        Database::clearCredentials();
+    }
+    // La biblioteca decide como el dispensador en todo lo que es un rango acotado; solo se aparta en los rangos sin limite (que el dispensador usa y la DGII no autorizo).
+    $s4Aparta = [];
+    foreach ($s4Casos as [$s4Desc, $s4Filas]) {
+        $s4SinRangoSinLimite = array_filter($s4Filas, static fn (array $f): bool => $f[1] === null) === [];
+        if ($s4SinRangoSinLimite && $s4Resultados[$s4Desc][0] !== $s4Resultados[$s4Desc][1]) {
+            $s4Aparta[] = $s4Desc;
+        }
+    }
+    wa_chk('rangos: sin rangos sin limite de por medio, la biblioteca y dispenseNextECF dicen lo mismo en todos los casos (capacidad y vigencia)', count($s4Resultados) === count($s4Casos) && $s4Aparta === [], $s4Aparta);
+    wa_chk('rangos: al terminar no queda ninguna fila del ambiente descartable en A y la prueba quito las credenciales de Database',
+        (int) $s4Uno('SELECT COUNT(*) FROM ncf_sequences WHERE ambiente = :a', [':a' => $s4Amb]) === 0 && !Database::hasCredentials());
+}
+
+// --- express_plan: la baja de clientes de prueba contra el esquema real de A (sin llaves foraneas hacia clients), en una transaccion que se deshace ----
+// Ninguna tabla declara una llave foranea hacia clients (cotizaciones, conduces y facturas guardan client_id sin FK: borrar un cliente desde la app tampoco
+// mira esas tablas), asi que el DELETE del plan no puede chocar con una. Aqui se corre el SQL exacto del plan, con sus parametros, y se ve que borra y que no.
+$s4Fk = $s4Pdo->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'clients'")->fetchAll();
+$s4ConClientId = array_column($s4Pdo->query("SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'client_id' ORDER BY TABLE_NAME")->fetchAll(), 'TABLE_NAME');
+wa_chk('esquema real de A: ninguna llave foranea apunta a clients, y client_id solo esta en cotizaciones, conduces, facturas y el respaldo de la migracion 035 (una tabla nueva con client_id obliga a revisar el DELETE del plan)',
+    $s4Fk === [] && array_diff($s4ConClientId, ['clients_credito_respaldo_035', 'conduces', 'cotizaciones', 'facturas']) === [], [$s4Fk, $s4ConClientId]);
+$s4Motores = (int) $s4Uno("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND ENGINE = 'InnoDB'
+                           AND TABLE_NAME IN ('clients', 'facturas', 'cotizaciones', 'conduces', 'ncf_sequences')");
+wa_chk('precondicion: clients, facturas, cotizaciones, conduces y ncf_sequences son InnoDB en A (la prueba corre en una transaccion que se deshace)', $s4Motores === 5, $s4Motores);
+$s4MarcaFk = 'ZZ-EXPRESS-FK';
+if ($s4Motores === 5) {
+    $s4ErrorFk = null;
+    $s4Pdo->beginTransaction();
+    try {
+        $s4NuevoCliente = static function (string $rnc, string $nombre) use ($s4Pdo): int {
+            $s4Pdo->prepare(
+                "INSERT INTO clients (email, client_name, company_name, rnc, razon_social, direccion, phone_number)
+                 VALUES ('fk-prueba@example.com', :n1, :n2, :r, :n3, 'Direccion de prueba', '')"
+            )->execute([':n1' => $nombre, ':n2' => $nombre, ':n3' => $nombre, ':r' => $rnc]);
+            return (int) $s4Pdo->lastInsertId();
+        };
+        $s4Libre = $s4NuevoCliente('131880681', "{$s4MarcaFk} sin documentos");
+        $s4ConDocs = $s4NuevoCliente('131880681', "{$s4MarcaFk} con cotizacion y conduce");
+        $s4EnCertecf = $s4NuevoCliente('533445861', "{$s4MarcaFk} con factura certecf");
+        $s4Pdo->prepare('INSERT INTO cotizaciones (code, client_id, client_name, total) VALUES (:c, :id, :n, 0)')
+            ->execute([':c' => $s4MarcaFk, ':id' => $s4ConDocs, ':n' => "{$s4MarcaFk} con cotizacion y conduce"]);
+        $s4NumeroConduce = 1 + (int) $s4Uno('SELECT COALESCE(MAX(numero), 0) FROM conduces');   // numero es UNIQUE: el siguiente libre
+        $s4Pdo->prepare('INSERT INTO conduces (numero, code, date, client_id, client_name) VALUES (:num, :c, NOW(), :id, :n)')
+            ->execute([':num' => $s4NumeroConduce, ':c' => $s4MarcaFk, ':id' => $s4ConDocs, ':n' => "{$s4MarcaFk} con cotizacion y conduce"]);
+        $s4Pdo->prepare(
+            "INSERT INTO facturas (no_factura, client_id, client_name, tipo_ecf, e_ncf, ambiente_dgii, estado_dgii)
+             VALUES (:m, :c, :n, '31', 'E319999999998', 'certecf', 'ACEPTADO')"
+        )->execute([':m' => $s4MarcaFk, ':c' => $s4EnCertecf, ':n' => "{$s4MarcaFk} con factura certecf"]);
+        $s4Pdo->exec("INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, description, ambiente)
+                      VALUES ('E99', 'E99', 0, 1, NULL, 'Express FK prueba', 'ecf')");
+        $s4FilasCert = static fn (): int => (int) $s4Uno("SELECT COUNT(*) FROM ncf_sequences WHERE ambiente IN ('certecf', 'testecf')");
+        $s4CertAntes = $s4FilasCert();
+
+        // El plan de una empresa nueva (la evaluacion armada a mano: lo que se prueba es el SQL de los pasos de la base de la empresa).
+        $s4PasosFk = array_values(array_filter(
+            express_plan($s4Hechos, ['items' => [], 'nuevo' => true, 'rechazos' => [], 'acciones' => []]),
+            static fn (array $p): bool => $p['donde'] === 'tenant'
+        ));
+        wa_chk('precondicion: el plan de una empresa nueva trae dos pasos en la base de la empresa (los rangos ecf sin limite y los clientes de prueba sin facturas)',
+            count($s4PasosFk) === 2 && str_contains($s4PasosFk[0]['sql'], 'ncf_sequences') && str_contains($s4PasosFk[1]['sql'], 'clients'), array_column($s4PasosFk, 'sql'));
+        try {
+            foreach ($s4PasosFk as $s4Paso) {
+                $s4Pdo->prepare($s4Paso['sql'])->execute($s4Paso['params']);
+            }
+        } catch (Throwable $s4ErrorFk) {
+        }
+        $s4Esta = static fn (int $id): bool => (int) $s4Uno('SELECT COUNT(*) FROM clients WHERE id = :id', [':id' => $id]) === 1;
+        wa_chk('los dos DELETE del plan corren sin error contra el esquema real de A, con una cotizacion y un conduce que apuntan a un cliente de prueba (no hay llave foranea que lo impida)',
+            $s4ErrorFk === null, $s4ErrorFk === null ? null : wa_describir_excepcion($s4ErrorFk));
+        wa_chk('el DELETE de clientes borra los de prueba que ninguna factura usa (aunque una cotizacion y un conduce los citen) y deja el que usa una factura certecf',
+            !$s4Esta($s4Libre) && !$s4Esta($s4ConDocs) && $s4Esta($s4EnCertecf), [$s4Esta($s4Libre), $s4Esta($s4ConDocs), $s4Esta($s4EnCertecf)]);
+        wa_chk('no se pierde ningun documento: la factura sigue apuntando a su cliente y la cotizacion y el conduce siguen ahi con su client_name, ahora con un client_id que ya no existe (como al borrar un cliente desde la app)',
+            (int) $s4Uno('SELECT client_id FROM facturas WHERE no_factura = :m', [':m' => $s4MarcaFk]) === $s4EnCertecf
+            && (string) $s4Uno('SELECT client_name FROM cotizaciones WHERE code = :m', [':m' => $s4MarcaFk]) === "{$s4MarcaFk} con cotizacion y conduce"
+            && (string) $s4Uno('SELECT client_name FROM conduces WHERE code = :m', [':m' => $s4MarcaFk]) === "{$s4MarcaFk} con cotizacion y conduce"
+            && (int) $s4Uno('SELECT client_id FROM cotizaciones WHERE code = :m', [':m' => $s4MarcaFk]) === $s4ConDocs);
+        wa_chk("el DELETE de rangos borra el rango ecf sin limite (el E99 de la prueba) y no toca ni una fila de certecf ni de testecf",
+            (int) $s4Uno("SELECT COUNT(*) FROM ncf_sequences WHERE ambiente = 'ecf' AND type = 'E99'") === 0 && $s4FilasCert() === $s4CertAntes, [$s4CertAntes, $s4FilasCert()]);
+    } finally {
+        if ($s4Pdo->inTransaction()) {
+            $s4Pdo->rollBack();
+        }
+    }
+    wa_chk('la transaccion se deshizo: no queda ninguno de los clientes, documentos ni rangos de la prueba',
+        !$s4Pdo->inTransaction()
+        && (int) $s4Uno('SELECT COUNT(*) FROM clients WHERE client_name LIKE :m', [':m' => "{$s4MarcaFk}%"]) === 0
+        && (int) $s4Uno('SELECT COUNT(*) FROM cotizaciones WHERE code = :m', [':m' => $s4MarcaFk]) === 0
+        && (int) $s4Uno('SELECT COUNT(*) FROM conduces WHERE code = :m', [':m' => $s4MarcaFk]) === 0
+        && (int) $s4Uno('SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s4MarcaFk]) === 0
+        && (int) $s4Uno("SELECT COUNT(*) FROM ncf_sequences WHERE type = 'E99'") === 0);
+}
 
 // --- D4: lo que certificacion dejo en certecf nunca bloquea la conversion (solo se leen filas ecf) -----------------------------------
 // Una factura certecf que usa un cliente de prueba de la DGII y un rango certecf con current_value 9: ecf_facturas no cambia, los rangos ecf
