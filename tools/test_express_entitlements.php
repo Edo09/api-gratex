@@ -1330,6 +1330,196 @@ wa_chk('cargarEntitlements con la clase rota: false las dos veces, la clase sigu
     && substr_count((string) $s4Dejo[3], "\n") === 1 && str_contains((string) $s4Dejo[3], 'TenantEntitlements'), $s4R);
 
 // ---------------------------------------------------------------------------
+// 5) PermissionGate::enforcing (forzado para Express) y PosAuth::exigirPosActivo
+// ---------------------------------------------------------------------------
+echo "\n== 5) enforcing() forzado para Express y POS_INACTIVO ==\n";
+
+require_once __DIR__ . '/../src/PermissionGate.php';
+require_once __DIR__ . '/../src/Pos/PosAuth.php';
+
+/** Una fila de master.tenants de una empresa Express con POS; $o pisa los campos que cada caso cambia. */
+$s5Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'pos_enabled' => 1,
+];
+$s5SinEdicion = $s5Fila();
+unset($s5SinEdicion['edicion']);
+$s5SinTipo = $s5Fila();
+unset($s5SinTipo['tipo']);
+$s5Resuelta = static function (?array $tenant): void {
+    (new ReflectionProperty(TenantResolver::class, 'current'))->setValue(null, $tenant);
+};
+/** PERMISSIONS_ENFORCE: null lo quita del entorno y de $_ENV (el gate lee los dos). */
+$s5Flag = static function (?string $valor): void {
+    putenv($valor === null ? 'PERMISSIONS_ENFORCE' : 'PERMISSIONS_ENFORCE=' . $valor);
+    unset($_ENV['PERMISSIONS_ENFORCE']);
+};
+/** enforcing() es privado: se llama por reflexion, con $tenant como la empresa resuelta. */
+$s5Enforcing = static function (?array $tenant) use ($s5Resuelta): bool {
+    $s5Resuelta($tenant);
+    return (new ReflectionMethod(PermissionGate::class, 'enforcing'))->invoke(null);
+};
+
+// --- enforcing(): con PERMISSIONS_ENFORCE sin definir (modo sombra), solo una empresa Express se aplica ----------------------
+$s5EnvAntes = [getenv('PERMISSIONS_ENFORCE'), array_key_exists('PERMISSIONS_ENFORCE', $_ENV), $_ENV['PERMISSIONS_ENFORCE'] ?? null];
+try {
+    $s5Flag(null);
+    $s5Casos = [   // descripcion => [empresa resuelta, esperado]
+        "edicion 'express'" => [$s5Fila(), true],
+        "edicion 'Express'" => [$s5Fila(['edicion' => 'Express']), true],
+        "edicion ' EXPRESS ' (las mayusculas y los espacios no la cambian)" => [$s5Fila(['edicion' => ' EXPRESS ']), true],
+        'una fila express sin la clave tipo (cuenta como app)' => [$s5SinTipo, true],
+        "edicion 'completa'" => [$s5Fila(['edicion' => 'completa']), false],
+        "edicion ' completa '" => [$s5Fila(['edicion' => ' completa ']), false],
+        "edicion '' (el vacio se trata como completa)" => [$s5Fila(['edicion' => '']), false],
+        "edicion 'basico' (desconocida: completa)" => [$s5Fila(['edicion' => 'basico']), false],
+        "tipo 'integracion' con edicion 'express'" => [$s5Fila(['tipo' => 'integracion']), false],
+        'edicion NULL' => [$s5Fila(['edicion' => null]), false],
+        'una fila sin la clave edicion (master sin migrar)' => [$s5SinEdicion, false],
+        'ninguna empresa resuelta' => [null, false],
+    ];
+    ob_start();
+    [$s5Obtenido, $s5Error, $s5Log] = wa_con_log(static fn (): array => array_map(
+        static fn (array $caso): bool => $s5Enforcing($caso[0]),
+        $s5Casos
+    ));
+    $s5Salida = (string) ob_get_clean();
+    foreach ($s5Casos as $s5Desc => [, $s5Esperado]) {
+        wa_chk("enforcing() sin PERMISSIONS_ENFORCE, {$s5Desc}: " . ($s5Esperado ? 'true (forzado)' : 'false (modo sombra)'),
+            ($s5Obtenido[$s5Desc] ?? null) === $s5Esperado, [$s5Obtenido[$s5Desc] ?? null, $s5Error?->getMessage()]);
+    }
+    wa_chk('enforcing() no imprime ni escribe en el log con ninguna de esas filas (la clase ya cargada, nada que avisar)',
+        $s5Salida === '' && $s5Log === '', [$s5Salida, $s5Log]);
+
+    // El interruptor global sigue valiendo como siempre, y apagado de forma explicita no desarma a una empresa Express.
+    foreach ([
+        ['true', 'una empresa completa', $s5Fila(['edicion' => 'completa']), true],
+        ['true', 'ninguna empresa', null, true],
+        ['true', 'una empresa Express', $s5Fila(), true],
+        ['false', 'una empresa completa', $s5Fila(['edicion' => 'completa']), false],
+        ['false', 'una empresa Express (se aplica con el interruptor apagado)', $s5Fila(), true],
+    ] as [$s5Valor, $s5Desc, $s5Tenant, $s5Esperado]) {
+        $s5Flag($s5Valor);
+        wa_chk("enforcing() con PERMISSIONS_ENFORCE={$s5Valor}, {$s5Desc}: " . ($s5Esperado ? 'true' : 'false'),
+            $s5Enforcing($s5Tenant) === $s5Esperado);
+    }
+    $s5Flag(null);
+    $_ENV['PERMISSIONS_ENFORCE'] = 'true';   // el gate tambien lee $_ENV cuando el entorno del proceso no trae la variable
+    wa_chk('enforcing() con PERMISSIONS_ENFORCE=true solo en $_ENV, empresa completa: true',
+        $s5Enforcing($s5Fila(['edicion' => 'completa'])) === true);
+} finally {
+    putenv($s5EnvAntes[0] === false ? 'PERMISSIONS_ENFORCE' : 'PERMISSIONS_ENFORCE=' . $s5EnvAntes[0]);
+    unset($_ENV['PERMISSIONS_ENFORCE']);
+    if ($s5EnvAntes[1]) {
+        $_ENV['PERMISSIONS_ENFORCE'] = $s5EnvAntes[2];
+    }
+    $s5Resuelta(null);   // no dejar una empresa resuelta
+}
+
+// --- PosAuth::exigirPosActivo: una empresa Express no tiene POS, ni con pos_enabled en 1 ---------------------------------------
+/** Lo que lanzo exigirPosActivo ([codigo, http, mensaje]) o null si volvio sin lanzar. */
+$s5Pos = static function (?array $tenant): ?array {
+    try {
+        PosAuth::exigirPosActivo($tenant);
+        return null;
+    } catch (PosError $e) {
+        return [$e->codigo(), $e->http(), $e->getMessage()];
+    }
+};
+$s5Inactivo = ['POS_INACTIVO', 403, 'El POS no está activo para esta empresa.'];
+foreach ([
+    "edicion 'express', tipo app, pos_enabled 1" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => 'express'], $s5Inactivo],
+    "edicion ' EXPRESS ' (las mayusculas y los espacios no la cambian)" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => ' EXPRESS '], $s5Inactivo],
+    "edicion 'completa', pos_enabled 1" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => 'completa'], null],
+    "edicion ' completa ', pos_enabled 1" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => ' completa '], null],
+    "edicion '' (el vacio se trata como completa), pos_enabled 1" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => ''], null],
+    "edicion 'basico' (desconocida: completa), pos_enabled 1" => [['tipo' => 'app', 'pos_enabled' => 1, 'edicion' => 'basico'], null],
+    'una fila sin la clave edicion (master sin migrar), pos_enabled 1' => [['tipo' => 'app', 'pos_enabled' => 1], null],
+    "edicion 'completa', pos_enabled 0 (la regla de siempre)" => [['tipo' => 'app', 'pos_enabled' => 0, 'edicion' => 'completa'], $s5Inactivo],
+    "tipo 'integracion', pos_enabled 1 (la regla de siempre)" => [['tipo' => 'integracion', 'pos_enabled' => 1, 'edicion' => 'completa'], $s5Inactivo],
+    'ninguna empresa (la regla de siempre)' => [null, $s5Inactivo],
+] as $s5Desc => [$s5Empresa, $s5Esperado]) {
+    $s5Lanzo = $s5Pos($s5Empresa);
+    wa_chk("exigirPosActivo, {$s5Desc}: " . ($s5Esperado === null ? 'vuelve sin lanzar' : 'PosError POS_INACTIVO, 403 y el texto de siempre'),
+        $s5Lanzo === $s5Esperado, $s5Lanzo);
+}
+
+// --- lo que test_integracion_alcance.php pinea en PermissionGate.php sigue en pie: de enforcing() solo cambia el cuerpo ------
+$s5Fuente = (string) file_get_contents(__DIR__ . '/../src/PermissionGate.php');
+wa_chk('PermissionGate.php: deny() sigue con el parametro bool $siempre = false, una sola vez',
+    substr_count($s5Fuente, 'bool $siempre = false') === 1);
+wa_chk('PermissionGate.php: deny() sigue respetando $siempre antes del modo sombra (if (!$siempre && !self::enforcing())), una sola vez',
+    substr_count($s5Fuente, 'if (!$siempre && !self::enforcing())') === 1);
+wa_chk("PermissionGate.php: la rama 'principal no-usuario en ruta de app' sigue llamando deny(..., true), una sola vez",
+    substr_count($s5Fuente, 'principal no-usuario en ruta de app') === 1
+    && preg_match("/principal no-usuario en ruta de app', 403,\s*'[^']*', true\)/", $s5Fuente) === 1);
+
+// --- enforcing() y la clase: solo carga detras de la prueba en linea, y sin ella una empresa Express se niega -----------------
+// En un proceso nuevo, porque el de la suite ya tiene la clase cargada (seccion 2). Las copias del arbol con la clase ausente,
+// rota o sin declarar son la de la seccion 4 ($s4Copia): una empresa Express sin su clase no se puede decidir y no pasa, y
+// jamas es un 500 (el Router se traga lo que lance el gate y el controller seguiria sin que nadie lo detuviera).
+$s5Raiz = dirname(__DIR__);
+$s5Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_gate_');
+$s5HijoLog = (string) tempnam(sys_get_temp_dir(), 'ent_gatelog_');
+file_put_contents($s5Hijo, <<<'PHP'
+<?php
+// argv[1] = raiz del arbol, argv[2] = archivo de error_log, argv[3] = la empresa resuelta (JSON en base64).
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ini_set('error_log', $argv[2]);
+putenv('PERMISSIONS_ENFORCE');
+unset($_ENV['PERMISSIONS_ENFORCE']);
+require $argv[1] . '/src/PermissionGate.php';
+(new ReflectionProperty('TenantResolver', 'current'))->setValue(null, json_decode((string) base64_decode($argv[3]), true));
+$metodo = new ReflectionMethod('PermissionGate', 'enforcing');
+// deny() la llama dos veces por cada 403 (la bitacora y la decision): aqui tambien dos.
+echo json_encode([$metodo->invoke(null), $metodo->invoke(null), class_exists('TenantEntitlements', false), (string) file_get_contents($argv[2])]);
+PHP);
+/** enforcing() dos veces en un proceso nuevo sobre el arbol $raiz: [decision, decision, clase_cargada, log] o ['hijo_sin_json' => lo que imprimio]. */
+$s5EnHijo = static function (string $raiz, ?array $empresa) use ($s5Hijo, $s5HijoLog): array {
+    file_put_contents($s5HijoLog, '');
+    $r = wa_correr([PHP_BINARY, $s5Hijo, $raiz, $s5HijoLog, base64_encode((string) json_encode($empresa))]);
+    $dejo = json_decode(trim($r['salida']), true);
+    return is_array($dejo) ? $dejo : ['hijo_sin_json' => $r];
+};
+$s5R = $s5EnHijo($s5Raiz, $s5Fila());
+wa_chk('enforcing() en un proceso nuevo, empresa Express: true las dos veces, la clase se carga (detras de la prueba en linea) y sin log',
+    $s5R === [true, true, true, ''], $s5R);
+foreach ([
+    "edicion 'completa'" => $s5Fila(['edicion' => 'completa']),
+    "edicion '' (el vacio se trata como completa)" => $s5Fila(['edicion' => '']),
+    "tipo 'integracion' con edicion 'express'" => $s5Fila(['tipo' => 'integracion']),
+    'ninguna empresa resuelta' => null,
+] as $s5Desc => $s5Empresa) {
+    $s5R = $s5EnHijo($s5Raiz, $s5Empresa);
+    wa_chk("enforcing() en un proceso nuevo, {$s5Desc}: false, TenantEntitlements no se carga jamas y sin log",
+        $s5R === [false, false, false, ''], $s5R);
+}
+$s5ClaseEnCopia = $s4Copia . '/src/TenantEntitlements.php';
+wa_chk('la copia del arbol de la seccion 4 sigue ahi, con el gate y la clase (de ahi salen la clase ausente, rota y sin declarar)',
+    is_file($s4Copia . '/src/PermissionGate.php') && is_file($s5ClaseEnCopia), $s4Copia);
+foreach ([
+    'ausente' => null,
+    'rota (error de sintaxis)' => "<?php\nesto no es php {{{\n",
+    'sin la clase (el archivo carga pero no la declara)' => "<?php\n// archivo vacio\n",
+] as $s5Modo => $s5Contenido) {
+    if ($s5Contenido === null) {
+        @unlink($s5ClaseEnCopia);
+    } else {
+        file_put_contents($s5ClaseEnCopia, $s5Contenido);
+    }
+    $s5R = $s5EnHijo($s4Copia, $s5Fila());
+    wa_chk("clase {$s5Modo}, empresa Express: enforcing() es true las dos veces (sin la clase no se puede decidir y no pasa), la clase no carga y el intento deja UNA linea de log que la nombra",
+        array_slice($s5R, 0, 3) === [true, true, false] && substr_count((string) ($s5R[3] ?? ''), "\n") === 1
+        && str_contains((string) ($s5R[3] ?? ''), 'TenantEntitlements'), $s5R);
+    $s5R = $s5EnHijo($s4Copia, $s5Fila(['edicion' => 'completa']));
+    wa_chk("clase {$s5Modo}, empresa completa: enforcing() es false, la clase no se pide jamas y no hay log",
+        $s5R === [false, false, false, ''], $s5R);
+}
+@unlink($s5Hijo);
+@unlink($s5HijoLog);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

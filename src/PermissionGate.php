@@ -168,10 +168,23 @@ class PermissionGate
 
     private static function enforcing(): bool
     {
-        return filter_var(
+        if (filter_var(
             getenv('PERMISSIONS_ENFORCE') ?: ($_ENV['PERMISSIONS_ENFORCE'] ?? false),
             FILTER_VALIDATE_BOOLEAN
-        );
+        )) {
+            return true;
+        }
+        // Edicion Express (plan 02): el RBAC de una empresa Express se aplica SIEMPRE, con el interruptor global apagado
+        // tambien, para que su Facturador (rol user) no llegue a /api/users ni a POST /api/ncf/rangos mientras la sombra
+        // sigue encendida para las demas. La prueba va en linea y es falsa para una empresa completa, una de integracion o
+        // ninguna: para ellas esto sigue como siempre y TenantEntitlements no se carga.
+        // Sin la clase (cargarEntitlements() false) no se puede decidir y una empresa Express no pasa: true.
+        $tenant = TenantResolver::current();
+        if (($tenant['tipo'] ?? 'app') === 'app'
+            && strtolower(trim((string) ($tenant['edicion'] ?? ''))) === 'express') {
+            return !TenantResolver::cargarEntitlements() || TenantEntitlements::restringido();
+        }
+        return false;
     }
 
     /**
