@@ -1170,6 +1170,8 @@ $s5Auditoria = static function () use ($s5Master, $s5IdA): array {
     $st->execute([':t' => $s5IdA]);
     return $st->fetchAll();
 };
+/** La fila 1 de emisor_config de la base de A: rnc, razon_social, direccion y telefono (lo que lee el item emisor del preflight); [] si no hay fila. */
+$s5EmisorCfg = static fn (): array => $s5Pdo->query('SELECT rnc, razon_social, direccion, telefono FROM emisor_config WHERE id = 1')->fetch() ?: [];
 
 // Lo que nunca debe salir en lo que imprime la herramienta: las credenciales de las bases, los secretos derivados, el certificado y su clave, la
 // credencial de integracion de A. Se llena mas abajo con lo de A; cada corrida de la herramienta guarda su salida para revisarla al final.
@@ -1241,12 +1243,18 @@ wa_chk('precondicion: la definicion de facturas.idempotency_key se pudo leer tal
     $s5Def0 === null || ($s5Def0['columna'] !== null && $s5Def0['previa'] !== null), $s5Def0);
 
 // Lo que esta seccion toca fuera de lo que restaura express_scratch_preparar(): inventario_estricto de A, las filas de prueba de la base de A
-// (facturas, clientes, rangos) y la columna de arriba. Todo vuelve a su sitio en el finally.
+// (facturas, clientes, rangos), la columna de arriba y el RNC de la fila 1 de emisor_config de A. Todo vuelve a su sitio en el finally. El emisor
+// lo repone tambien la siembra de express_scratch_preparar() (pos_scratch_preparar llama a wa_sembrar), pero esta seccion no depende de ella: lo
+// restaura el finally y la prueba del final lo mide antes de que esa siembra corra.
 $s5Inventario0 = (int) $s5Uno($s5Master, 'SELECT inventario_estricto FROM tenants WHERE id = :id', [':id' => $s5IdA]);
 $s5Marca = 'ZZ-EXPRESS-T9';
 $s5Fila0 = $s5Fila($s5IdA);
 $s5FilaB0 = $s5Fila($s5IdB);
 $s5RolB0 = $s5Rol($s5IdB);
+$s5EmisorCfg0 = $s5EmisorCfg();   // como lo dejo la siembra al arrancar la suite: abajo se le pone el RNC de la empresa y el finally se lo quita
+wa_chk('precondicion: la fila 1 de emisor_config de A existe y su RNC todavia no es el de la empresa (la seccion se lo pone: asi restaurarlo se nota)',
+    $s5EmisorCfg0 !== [] && $s5EmisorCfg0['rnc'] !== (string) $s5Fila0['rnc'],
+    ['hay_fila' => $s5EmisorCfg0 !== [], 'rnc_ya_es_el_de_la_empresa' => ($s5EmisorCfg0['rnc'] ?? null) === (string) $s5Fila0['rnc']]);
 $s5Hash0 = (string) $s5Fila0['api_secret_hash'];
 $s5Prohibidos['el hash de la credencial de integracion'] = $s5Hash0;
 $s5Prohibidos['la api key de A'] = (string) $s5Fila0['api_key'];
@@ -1268,6 +1276,7 @@ $s5Credencial = static function () use ($s5ApiKey, $s5ApiSecret): bool {
     }
 };
 $s5Final = null;
+$s5EmisorCfgRestaurado = [];   // la fila de emisor_config tal como la deja la restauracion del finally (se lee ahi, antes de la siembra de express_scratch_preparar())
 
 try {
     // --- A queda lista para convertir: nueva, con certificado, con emisor completo y con algo que corregir en cada item que corrige ------------------
@@ -1522,8 +1531,9 @@ try {
     }
     $s5Final = ['b' => $s5Difieren($s5FilaB0, $s5Fila($s5IdB)), 'rol_b' => $s5Rol($s5IdB) === $s5RolB0];
 } finally {
-    // Todo vuelve a su sitio: la columna como se encontro, las filas de prueba de la base de A, la auditoria de A en la master, A y B como completas y
-    // con su credencial, POS y roles (express_scratch_preparar() llama a pos_scratch_preparar()), inventario_estricto de A y lo que dejo puesto el resolvedor.
+    // Todo vuelve a su sitio: la columna como se encontro, las filas de prueba de la base de A, la fila 1 de emisor_config de A, la auditoria de A en la
+    // master, A y B como completas y con su credencial, POS y roles (express_scratch_preparar() llama a pos_scratch_preparar()), inventario_estricto de A
+    // y lo que dejo puesto el resolvedor.
     $s5Restaurar($s5Def0);
     $s5Pdo->prepare('DELETE FROM facturas WHERE no_factura = :m')->execute([':m' => $s5Marca]);
     if (is_array($s5Rango)) {
@@ -1531,6 +1541,11 @@ try {
     }
     $s5Pdo->prepare('DELETE FROM clients WHERE client_name LIKE :m')->execute([':m' => "{$s5Marca}%"]);
     $s5Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf' AND type = 'E99'");
+    if ($s5EmisorCfg0 !== []) {   // el RNC de la empresa que la seccion le puso a emisor_config (y los otros tres datos que lee el preflight): como estaban
+        $s5Pdo->prepare('UPDATE emisor_config SET rnc = :r, razon_social = :rs, direccion = :d, telefono = :t WHERE id = 1')
+            ->execute([':r' => $s5EmisorCfg0['rnc'], ':rs' => $s5EmisorCfg0['razon_social'], ':d' => $s5EmisorCfg0['direccion'], ':t' => $s5EmisorCfg0['telefono']]);
+    }
+    $s5EmisorCfgRestaurado = $s5EmisorCfg();   // se lee ANTES de que express_scratch_preparar() reponga la siembra (wa_sembrar): la prueba del final mide esta restauracion y no esa
     $s5Master->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s5IdA]);
     express_scratch_preparar();
     $s5Master->prepare('UPDATE tenants SET inventario_estricto = :v WHERE id = :id')->execute([':v' => $s5Inventario0, ':id' => $s5IdA]);
@@ -1551,13 +1566,16 @@ foreach ($s5Salidas as $s5I => $s5Salida) {
 wa_chk('ninguna de las corridas de tenant_edicion.php imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base',
     count($s5Salidas) >= 15 && $s5Fugas === [], $s5Fugas);
 $s5Limpia = $s5Fila($s5IdA);
-wa_chk('al terminar A vuelve a ser completa, sin certificado ni listas, con el POS prendido, su inventario, su hash de integracion de siempre y los permisos del rol user de antes; sin auditoria de edicion; y la columna idempotency_key como se encontro',
+$s5EmisorCfgFinal = $s5EmisorCfg();
+wa_chk('al terminar A vuelve a ser completa, sin certificado ni listas, con el POS prendido, su inventario, su hash de integracion de siempre y los permisos del rol user de antes; sin auditoria de edicion; la columna idempotency_key como se encontro; y la fila 1 de su emisor_config (rnc, razon social, direccion y telefono) como estaba, justo despues de la restauracion del finally y al final',
     $s5Limpia['edicion'] === 'completa' && $s5Limpia['tipos_ecf_habilitados'] === null && $s5Limpia['modulos_habilitados'] === null && $s5Limpia['cert_vence'] === null
     && $s5Limpia['cert_path'] === null && $s5Limpia['cert_pass_encrypted'] === null && (int) $s5Limpia['pos_enabled'] === 1 && (int) $s5Limpia['inventario_estricto'] === $s5Inventario0
     && $s5Limpia['api_secret_hash'] === $s5Hash0 && $s5Rol($s5IdA) === $s5Rol0 && $s5Auditoria() === [] && $s5Definicion() === $s5Def0
     && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s5Marca]) === 0
-    && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM clients WHERE client_name LIKE :m', [':m' => "{$s5Marca}%"]) === 0,
-    array_intersect_key($s5Limpia, array_flip(['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'])) + ['columna' => $s5Definicion() === $s5Def0]);
+    && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM clients WHERE client_name LIKE :m', [':m' => "{$s5Marca}%"]) === 0
+    && $s5EmisorCfg0 !== [] && $s5EmisorCfgRestaurado === $s5EmisorCfg0 && $s5EmisorCfgFinal === $s5EmisorCfg0,
+    array_intersect_key($s5Limpia, array_flip(['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'])) + ['columna' => $s5Definicion() === $s5Def0]
+    + ['emisor_cfg_columnas_distintas' => ['tras_restaurar' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgRestaurado), 'al_final' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgFinal)]]);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
