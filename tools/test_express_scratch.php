@@ -14,6 +14,9 @@
  *      migraciones la ve, y express_scratch_preparar() deja las dos empresas de prueba como completas.
  *   2) user.entitlements en POST /api/auth/login y GET /api/auth/me, por HTTP: la empresa A Express recibe el bloque
  *      y los permisos cruzados con su edicion (administrador y Facturador); la B, completa, el user de siempre.
+ *   3) el bloque certificado de GET /api/emisor, por HTTP: la empresa A Express lo recibe (por vencer a 45 dias, sin la ruta
+ *      del certificado ni ninguna clave cert_), lo toma de la fila viva en cada peticion y, aun vencido, no bloquea nada; la
+ *      B, completa, no lo recibe.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -551,6 +554,105 @@ wa_chk('express_usar_master: MasterDatabase lee la master scratch (la empresa A,
     $s2Maestro->getConnection()->query('SELECT DATABASE()')->fetchColumn() === $ctx['master']
     && is_array($s2FilaA) && $s2FilaA['edicion'] === 'express' && (int) $s2FilaA['id'] === $s2IdA
     && TenantResolver::decrypt((string) $s2FilaA['db_pass_encrypted']) === $ctx['cred']['pass'], is_array($s2FilaA) ? $s2FilaA['edicion'] : $s2FilaA);
+
+// ---------------------------------------------------------------------------
+// 3) El bloque certificado de GET /api/emisor
+// ---------------------------------------------------------------------------
+echo "\n== 3) El bloque certificado de GET /api/emisor ==\n";
+$s3Pdo = $ctx['pdo'];
+$s3IdA = (int) $ctx['tenantA'];
+$s3IdB = (int) $ctx['tenantB'];
+// El .p12 desechable de este proceso (en el temp del sistema; la API de la suite ya lo trae en su entorno): es lo que va en cert_path.
+$s3Ruta = wa_cert_prueba()['path'];
+/** Edicion, certificado y fecha de una empresa de prueba tal como estan en su fila, cada valor en texto o NULL. */
+$s3Fila = static function (int $id) use ($s3Pdo): array {
+    $st = $s3Pdo->prepare('SELECT edicion, cert_path, cert_vence FROM tenants WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return array_map(static fn ($valor): ?string => $valor === null ? null : (string) $valor, (array) $st->fetch());
+};
+/** Deja el certificado de las dos empresas de prueba como se pide (la ruta y la fecha, o NULL): el resto de la fila queda como esta. */
+$s3Poner = static function (?string $ruta, ?string $vence) use ($s3Pdo, $s3IdA, $s3IdB): void {
+    $s3Pdo->prepare('UPDATE tenants SET cert_path = :p, cert_vence = :c WHERE id IN (:a, :b)')
+        ->execute([':p' => $ruta, ':c' => $vence, ':a' => $s3IdA, ':b' => $s3IdB]);
+};
+
+// A es la empresa Express y B, la de control, sigue completa; las dos con certificado y a 45 dias de vencer. El dia se calcula en la
+// zona por defecto de este proceso, la misma que usa la API de la suite (un php -S con el mismo php.ini, sin zona propia).
+$s3Vence = date('Y-m-d', strtotime('+45 days'));
+express_edicion($ctx, 'A', 'express', '45', null, $s3Vence);
+express_edicion($ctx, 'B', null, null, null, $s3Vence);
+$s3Poner($s3Ruta, $s3Vence);
+wa_chk('precondicion: A es Express y B completa, las dos con cert_path (el .p12 desechable) y cert_vence a 45 dias',
+    $s3Fila($s3IdA) === ['edicion' => 'express', 'cert_path' => $s3Ruta, 'cert_vence' => $s3Vence]
+    && $s3Fila($s3IdB) === ['edicion' => 'completa', 'cert_path' => $s3Ruta, 'cert_vence' => $s3Vence], [$s3Fila($s3IdA), $s3Fila($s3IdB)]);
+$s3Api = express_api('express_api', 8294);
+$s3TokenA = express_login($s3Api, 'admin_pos_a')['token'];
+/** GET /api/emisor con la sesion de $token. */
+$s3Pedir = static fn (string $token): array => wa_http('GET', $s3Api . '/api/emisor', null, express_h($token));
+
+// La empresa Express recibe el bloque, a 45 dias de vencer.
+$s3A = $s3Pedir($s3TokenA);
+$s3DataA = $s3A['json']['data'] ?? null;
+wa_chk('GET /api/emisor (A, Express, a 45 dias): 200 y data.certificado es por_vencer, con la fecha de la fila y 45 dias',
+    $s3A['status'] === 200 && ($s3A['json']['status'] ?? null) === true
+    && ($s3DataA['certificado'] ?? null) === ['estado' => 'por_vencer', 'vence' => $s3Vence, 'dias' => 45], [$s3A['status'], $s3A['body']]);
+wa_chk('GET /api/emisor (A, Express): certificado va al final, despues de fuente, y trae exactamente estado, vence y dias',
+    is_array($s3DataA) && array_slice(array_keys($s3DataA), -2) === ['fuente', 'certificado']
+    && is_array($s3DataA['certificado'] ?? null) && array_keys($s3DataA['certificado']) === ['estado', 'vence', 'dias'], is_array($s3DataA) ? array_keys($s3DataA) : $s3DataA);
+// Ni la ruta del certificado (escrita como la escribe json_encode, con o sin barras escapadas, ni su nombre de archivo) ni una clave cert_*.
+$s3Prohibido = array_values(array_unique([
+    $s3Ruta,
+    trim((string) json_encode($s3Ruta), '"'),
+    trim((string) json_encode($s3Ruta, JSON_UNESCAPED_SLASHES), '"'),
+    basename($s3Ruta),
+    'cert_',
+]));
+$s3Filtrado = array_values(array_filter($s3Prohibido, static fn (string $texto): bool => str_contains($s3A['body'], $texto)));
+wa_chk('GET /api/emisor (A, Express): el texto de la respuesta no contiene la ruta del certificado (ni escapada ni su nombre de archivo) ni "cert_"',
+    $s3A['status'] === 200 && $s3Filtrado === [], $s3Filtrado);
+
+// La empresa completa no recibe nada nuevo, aunque su fila traiga la ruta y la fecha: B, y A misma cuando se la deja completa (la
+// respuesta es entonces la de Express menos el bloque, dato por dato).
+$s3B = $s3Pedir(express_login($s3Api, 'admin_pos_b')['token']);
+$s3DataB = $s3B['json']['data'] ?? null;
+wa_chk('GET /api/emisor (B, completa, con cert_path y cert_vence en su fila): 200 y data sin la clave certificado',
+    $s3B['status'] === 200 && is_array($s3DataB) && ($s3DataB['fuente'] ?? null) === 'emisor_config' && !array_key_exists('certificado', $s3DataB),
+    [$s3B['status'], $s3B['body']]);
+express_edicion($ctx, 'A', null, null, null, $s3Vence);
+$s3AComoCompleta = $s3Pedir($s3TokenA);
+$s3SinBloque = is_array($s3DataA) ? array_diff_key($s3DataA, ['certificado' => true]) : null;
+wa_chk('GET /api/emisor (A dejada completa, con el mismo certificado en su fila): data sin certificado y igual, dato por dato, a la de Express sin ese bloque',
+    $s3AComoCompleta['status'] === 200 && $s3SinBloque !== null && ($s3AComoCompleta['json']['data'] ?? null) === $s3SinBloque,
+    [$s3AComoCompleta['status'], $s3AComoCompleta['body']]);
+express_edicion($ctx, 'A', 'express', '45', null, $s3Vence);   // de vuelta a Express para lo que sigue
+
+// RF4: el bloque sale de la fila viva. Renovar el certificado (cert_vence nuevo en la fila) se ve en la peticion siguiente, y una fecha
+// que quedo vieja informa pero no bloquea nada: la respuesta sigue siendo 200 con los datos del emisor de siempre.
+$s3Renovado = date('Y-m-d', strtotime('+100 days'));
+$s3Poner($s3Ruta, $s3Renovado);
+$s3R = $s3Pedir($s3TokenA);
+wa_chk('cert_vence cambia en la fila entre dos peticiones: la segunda ya lo refleja (vigente, la fecha nueva y 100 dias)',
+    $s3R['status'] === 200 && ($s3R['json']['data']['certificado'] ?? null) === ['estado' => 'vigente', 'vence' => $s3Renovado, 'dias' => 100],
+    [$s3R['status'], $s3R['body']]);
+$s3Viejo = date('Y-m-d', strtotime('-3 days'));
+$s3Poner($s3Ruta, $s3Viejo);
+$s3R = $s3Pedir($s3TokenA);
+wa_chk('una fecha ya vencida no bloquea nada: 200, certificado vencido a -3 dias y el resto de los datos del emisor intacto',
+    $s3R['status'] === 200 && ($s3R['json']['data']['certificado'] ?? null) === ['estado' => 'vencido', 'vence' => $s3Viejo, 'dias' => -3]
+    && is_array($s3R['json']['data'] ?? null) && $s3SinBloque !== null && array_diff_key($s3R['json']['data'], ['certificado' => true]) === $s3SinBloque,
+    [$s3R['status'], $s3R['body']]);
+// Los dos estados sin nada que contar: con ruta y sin fecha, y sin ruta (aunque la fila traiga fecha).
+$s3Poner($s3Ruta, null);
+$s3R = $s3Pedir($s3TokenA);
+wa_chk('cert_vence NULL en la fila (con cert_path): certificado sin_dato, con vence y dias en null',
+    $s3R['status'] === 200 && ($s3R['json']['data']['certificado'] ?? null) === ['estado' => 'sin_dato', 'vence' => null, 'dias' => null],
+    [$s3R['status'], $s3R['body']]);
+$s3Poner(null, $s3Vence);
+$s3R = $s3Pedir($s3TokenA);
+wa_chk('sin cert_path en la fila (con cert_vence): certificado no_configurado, con vence y dias en null',
+    $s3R['status'] === 200 && ($s3R['json']['data']['certificado'] ?? null) === ['estado' => 'no_configurado', 'vence' => null, 'dias' => null],
+    [$s3R['status'], $s3R['body']]);
+$s3Poner(null, null);   // la ruta de prueba no pasa a las secciones que siguen
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

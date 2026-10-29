@@ -7,17 +7,18 @@ require_once(__DIR__ . '/TenantResolver.php');
  * master.tenants.edicion (migracion 014) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
  * resuelve, para una empresa Express, lo que su fila le da: los modulos (el preset de config/editions.php angostado por
  * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen, el bloque que se le
- * entrega al cliente al iniciar sesion, que rutas de la API puede llamar (la guarda de rutas) y cuando vence por
- * inactividad el token de su sesion (tokenCaducado).
+ * entrega al cliente al iniciar sesion, que rutas de la API puede llamar (la guarda de rutas), cuando vence por
+ * inactividad el token de su sesion (tokenCaducado) y el estado de su certificado, que Configuracion le muestra
+ * (estadoCertificado).
  *
  * Reglas del archivo:
  *   - Todo es estatico y no hay namespace. Incluirlo no imprime nada: se carga en medio de una peticion que contesta
  *     JSON.
  *   - Las peticiones solo la cargan despues de una prueba en linea que ya probo la empresa Express: para una empresa
  *     completa, una de integracion o ninguna, esta clase no se incluye jamas.
- *   - Las funciones de modulos, tipos, permisos y bloque son funciones PURAS de la fila: no preguntan la edicion (eso lo
- *     hace quien las llama, con esRestringido) y un $tenant null significa la empresa resuelta
- *     (TenantResolver::current()).
+ *   - Las funciones de modulos, tipos, permisos, bloque y estado del certificado son funciones PURAS de la fila: no
+ *     preguntan la edicion (eso lo hace quien las llama, con esRestringido) y un $tenant null significa la empresa
+ *     resuelta (TenantResolver::current()).
  *   - evaluarRuta tambien es pura (no imprime, no abre conexion y no corta), pero si pregunta la edicion: una empresa
  *     que no es Express pasa tal cual. Las que contestan y cortan la peticion con exit son guardaRuta y responderError.
  *   - Un token mal escrito en las listas de la fila angosta y nunca ensancha: lo que no se reconoce no suma nada.
@@ -428,6 +429,76 @@ final class TenantEntitlements
         }
         $marca = strtotime($fecha);
         return $marca === false ? null : $marca;
+    }
+
+    /**
+     * El estado del certificado de la empresa: el bloque certificado de GET /api/emisor. Sale solo de la fila (cert_path y
+     * cert_vence): no abre el archivo, no descifra la clave y jamas devuelve la ruta ni la clave. Es PURA y no pregunta la
+     * edicion (eso lo hace quien la llama): un $tenant null es la empresa resuelta.
+     *
+     * Es informativo y no bloquea nada, ni con una fecha vieja: la fila se lee en cada peticion y de una a otra no se guarda
+     * nada, asi que el aviso sigue a cert_vence en cuanto esta se refresca. Tampoco sirve para decidir si una empresa puede
+     * emitir: la fecha de la fila puede haber quedado vieja.
+     *
+     * estado:
+     *   no_configurado  cert_path vacio (NULL, '' o solo espacios), haya o no fecha; vence y dias salen null.
+     *   sin_dato        hay cert_path pero cert_vence esta vacia o no es una fecha del calendario (la fecha cero de MySQL
+     *                   incluida): no hay desde donde contar; vence y dias salen null.
+     *   vencido         dias < 0.
+     *   por_vencer      dias <= CERT_POR_VENCER_DIAS de config(); el dia del vencimiento cuenta (0 dias) y aun vale.
+     *   vigente         el resto.
+     * CERT_CRITICO_DIAS (el tono del aviso) es cosa del cliente: el servidor no lo usa.
+     *
+     * El calendario: cert_vence se guarda como la fecha del notAfter del .p12 en la zona horaria por defecto de PHP, asi que
+     * "hoy" es date('Y-m-d', $hoy) en esa misma zona, y dias es la diferencia entre las medianoches UTC de las dos fechas
+     * partida en 86400 (un entero exacto: UTC no cambia de hora). Nunca gmdate($hoy), que entre las 20:00 y las 24:00 de un
+     * reloj UTC-4 daria el dia siguiente, ni la resta de marcas locales, que con un cambio de hora en medio mide un dia de
+     * mas o de menos.
+     *
+     * @param ?array $tenant fila de master.tenants; null = la empresa resuelta en esta peticion (TenantResolver::current())
+     * @param ?int   $hoy    marca de tiempo unix de "ahora"; null = time()
+     * @return array{estado:string,vence:?string,dias:?int} siempre esas tres claves y en ese orden
+     */
+    public static function estadoCertificado(?array $tenant = null, ?int $hoy = null): array
+    {
+        $tenant ??= TenantResolver::current();
+        if (trim((string) ($tenant['cert_path'] ?? '')) === '') {
+            return self::resultadoCertificado('no_configurado', null, null);
+        }
+        $vence = self::fechaDeCertificado($tenant['cert_vence'] ?? null);
+        if ($vence === null) {
+            return self::resultadoCertificado('sin_dato', null, null);
+        }
+        $dias = intdiv(self::medianocheUtc($vence) - self::medianocheUtc(date('Y-m-d', $hoy ?? time())), 86400);
+        $estado = match (true) {
+            $dias < 0 => 'vencido',
+            $dias <= (int) self::config()['CERT_POR_VENCER_DIAS'] => 'por_vencer',
+            default => 'vigente',
+        };
+        return self::resultadoCertificado($estado, $vence, $dias);
+    }
+
+    /** cert_vence como 'YYYY-MM-DD'; null si esta vacia o no es una fecha del calendario (la fecha cero de MySQL y un 30 de febrero incluidos). */
+    private static function fechaDeCertificado(mixed $valor): ?string
+    {
+        $fecha = is_string($valor) ? trim($valor) : '';
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})$/D', $fecha, $partes) !== 1) {
+            return null;
+        }
+        return checkdate((int) $partes[2], (int) $partes[3], (int) $partes[1]) ? $fecha : null;
+    }
+
+    /** Medianoche UTC de una fecha 'YYYY-MM-DD' valida: la resta de dos de ellas es un multiplo exacto de 86400. */
+    private static function medianocheUtc(string $fecha): int
+    {
+        [$anio, $mes, $dia] = array_map('intval', explode('-', $fecha));
+        return (int) gmmktime(0, 0, 0, $mes, $dia, $anio);
+    }
+
+    /** El resultado de estadoCertificado: siempre las mismas tres claves y en el mismo orden. */
+    private static function resultadoCertificado(string $estado, ?string $vence, ?int $dias): array
+    {
+        return ['estado' => $estado, 'vence' => $vence, 'dias' => $dias];
     }
 
     /** El resultado de evaluarRuta: siempre las mismas cuatro claves y en el mismo orden. */

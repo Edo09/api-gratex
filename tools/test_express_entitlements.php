@@ -1956,6 +1956,169 @@ foreach ([
 @unlink($s6HijoLog);
 
 // ---------------------------------------------------------------------------
+// 7) estadoCertificado: el bloque certificado de GET /api/emisor (de cert_path y cert_vence, sin abrir nada)
+// ---------------------------------------------------------------------------
+echo "\n== 7) estadoCertificado ==\n";
+
+/** Una fila de master.tenants de una empresa Express con certificado; $o pisa los campos que cada caso cambia. */
+$s7Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf', 'edicion' => 'express',
+    'cert_path' => 'certificado_dgii/131000001/MARCA-ruta-del-p12.p12', 'cert_pass_encrypted' => 'MARCA-clave-cifrada',
+    'cert_vence' => '2026-12-27',
+];
+$s7Claves = ['estado', 'vence', 'dias'];
+$s7Hoy = strtotime('2026-10-27 12:00:00');   // en la zona por defecto de este proceso: date('Y-m-d') de esta marca es 2026-10-27 en ella
+
+// --- la tabla del contrato: la ventana de aviso (60 dias, el limite entra), el dia del vencimiento y el dia despues ---------------
+foreach ([
+    ['2026-12-27', 'vigente', 61],      // 61 dias: aun fuera de la ventana de aviso
+    ['2026-12-26', 'por_vencer', 60],   // 60 dias: el limite ya entra
+    ['2026-10-28', 'por_vencer', 1],
+    ['2026-10-27', 'por_vencer', 0],    // vence hoy: todavia no esta vencido
+    ['2026-10-26', 'vencido', -1],      // vencio ayer
+    ['2026-01-01', 'vencido', -299],
+    ['2028-02-29', 'vigente', 490],     // un 29 de febrero valido, pasando por el cambio de ano
+] as [$s7Vence, $s7Estado, $s7Dias]) {
+    $s7Obtenido = TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => $s7Vence]), $s7Hoy);
+    wa_chk("estadoCertificado: cert_vence {$s7Vence} con hoy 2026-10-27 es {$s7Estado}, {$s7Dias} dias",
+        $s7Obtenido === ['estado' => $s7Estado, 'vence' => $s7Vence, 'dias' => $s7Dias], $s7Obtenido);
+}
+
+// --- sin certificado y sin fecha: no hay de donde contar, y la ruta vacia gana aunque haya fecha -------------------------------
+$s7SinCertificado = ['estado' => 'no_configurado', 'vence' => null, 'dias' => null];
+foreach ([
+    "cert_path ''" => ['cert_path' => ''],
+    'cert_path NULL' => ['cert_path' => null],
+    'cert_path de solo espacios' => ['cert_path' => "  \t "],
+] as $s7Desc => $s7Cambio) {
+    $s7R = TenantEntitlements::estadoCertificado($s7Fila($s7Cambio), $s7Hoy);
+    wa_chk("estadoCertificado: {$s7Desc} es no_configurado con vence y dias en null, aunque cert_vence traiga una fecha",
+        $s7R === $s7SinCertificado, $s7R);
+}
+$s7SinColumnas = ['tipo' => 'app', 'edicion' => 'express'];   // un master sin migrar: ni cert_path ni cert_vence
+wa_chk('estadoCertificado: una fila sin las columnas cert_path y cert_vence (master sin migrar) es no_configurado',
+    TenantEntitlements::estadoCertificado($s7SinColumnas, $s7Hoy) === $s7SinCertificado);
+$s7SinFecha = ['estado' => 'sin_dato', 'vence' => null, 'dias' => null];
+foreach ([
+    'cert_vence NULL' => null, "cert_vence ''" => '', 'la fecha cero de MySQL' => '0000-00-00', 'texto que no es fecha' => 'basura',
+    'un 30 de febrero' => '2026-02-30', 'un 29 de febrero que no existe' => '2027-02-29', 'un mes 13' => '2026-13-01',
+    'una fecha con hora' => '2026-12-27 00:00:00',
+] as $s7Desc => $s7Valor) {
+    $s7R = TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => $s7Valor]), $s7Hoy);
+    wa_chk("estadoCertificado: con cert_path y {$s7Desc} es sin_dato, con vence y dias en null", $s7R === $s7SinFecha, $s7R);
+}
+wa_chk('estadoCertificado: con cert_path y sin la clave cert_vence en la fila es sin_dato',
+    TenantEntitlements::estadoCertificado($s7SinColumnas + ['cert_path' => 'certificado_dgii/x.p12'], $s7Hoy) === $s7SinFecha);
+
+// --- la forma: siempre las mismas tres claves y nunca la ruta ni la clave --------------------------------------------------------
+foreach ([
+    'vigente' => $s7Fila(), 'por_vencer' => $s7Fila(['cert_vence' => '2026-11-01']), 'vencido' => $s7Fila(['cert_vence' => '2026-10-01']),
+    'no_configurado' => $s7Fila(['cert_path' => '']), 'sin_dato' => $s7Fila(['cert_vence' => null]),
+] as $s7Esperado => $s7Empresa) {
+    $s7R = TenantEntitlements::estadoCertificado($s7Empresa, $s7Hoy);
+    wa_chk("estadoCertificado ({$s7Esperado}): sale con exactamente las claves estado, vence y dias, en ese orden",
+        ($s7R['estado'] ?? null) === $s7Esperado && array_keys($s7R) === $s7Claves, $s7R);
+}
+$s7Json = (string) json_encode(TenantEntitlements::estadoCertificado($s7Fila(), $s7Hoy));
+$s7Filtradas = array_values(array_filter(
+    ['cert_path', 'cert_pass', 'MARCA-ruta-del-p12', 'MARCA-clave-cifrada', 'certificado_dgii', '.p12'],
+    static fn (string $marca): bool => str_contains($s7Json, $marca)
+));
+wa_chk('estadoCertificado: el JSON no lleva el valor de cert_path ni el de cert_pass_encrypted (ni sus nombres)',
+    $s7Json === '{"estado":"vigente","vence":"2026-12-27","dias":61}' && $s7Filtradas === [], [$s7Json, $s7Filtradas]);
+// Pura de la fila: no abre el archivo ni descifra la clave (esta no se puede descifrar aqui) y no pregunta la edicion: ni una completa
+// ni un valor desconocido cambian la respuesta, y no se escribe nada en el log (normalizarEdicion avisa de lo desconocido).
+[$s7Resultado, $s7Error, $s7Log] = wa_con_log(static fn (): array => [
+    TenantEntitlements::estadoCertificado($s7Fila(), $s7Hoy),
+    TenantEntitlements::estadoCertificado($s7Fila(['edicion' => 'completa']), $s7Hoy),
+    TenantEntitlements::estadoCertificado($s7Fila(['edicion' => 'valor-s7-desconocido']), $s7Hoy),
+]);
+wa_chk('estadoCertificado: no lanza con un archivo que no existe y una clave que no se descifra, y da lo mismo para una fila completa o de edicion desconocida, sin escribir al log',
+    $s7Error === null && is_array($s7Resultado) && $s7Resultado[1] === $s7Resultado[0] && $s7Resultado[2] === $s7Resultado[0]
+    && $s7Resultado[0] === ['estado' => 'vigente', 'vence' => '2026-12-27', 'dias' => 61] && $s7Log === '', [$s7Error?->getMessage(), $s7Resultado, $s7Log]);
+
+// --- la ventana de aviso sale de la config -----------------------------------------------------------------------------------------
+// Con otro valor en la config (no el 60 de hoy) el limite se mueve: asi se ve que estadoCertificado la lee y no la repite.
+$s7Config = TenantEntitlements::config();
+$s7Cache = new ReflectionProperty('TenantEntitlements', 'config');
+$s7Cache->setValue(null, ['CERT_POR_VENCER_DIAS' => 10] + $s7Config);
+try {
+    $s7PorConfig = [
+        TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => '2026-11-06']), $s7Hoy),   // a 10 dias
+        TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => '2026-11-07']), $s7Hoy),   // a 11 dias
+    ];
+} finally {
+    $s7Cache->setValue(null, $s7Config);
+}
+wa_chk('estadoCertificado: la ventana de aviso sale de config()[CERT_POR_VENCER_DIAS] (con 10: a 10 dias por_vencer, a 11 vigente) y la config queda como estaba',
+    $s7PorConfig === [
+        ['estado' => 'por_vencer', 'vence' => '2026-11-06', 'dias' => 10],
+        ['estado' => 'vigente', 'vence' => '2026-11-07', 'dias' => 11],
+    ] && TenantEntitlements::config() === $s7Config, $s7PorConfig);
+
+// --- null = lo de siempre: la empresa resuelta y el reloj -------------------------------------------------------------------------
+$s7Resuelta = static function (?array $tenant): void {
+    (new ReflectionProperty(TenantResolver::class, 'current'))->setValue(null, $tenant);
+};
+try {
+    $s7Resuelta($s7Fila(['cert_vence' => '2026-12-26']));
+    $s7ConEmpresa = TenantEntitlements::estadoCertificado(null, $s7Hoy);
+    $s7Explicita = TenantEntitlements::estadoCertificado($s7Fila(['cert_path' => '']), $s7Hoy);
+    $s7Resuelta(null);
+    $s7SinEmpresa = TenantEntitlements::estadoCertificado(null, $s7Hoy);
+} finally {
+    $s7Resuelta(null);   // no dejar una empresa resuelta a las secciones que siguen
+}
+wa_chk('estadoCertificado: sin fila lee la empresa resuelta (por_vencer, 60 dias), una fila explicita gana sobre ella y sin ninguna empresa es no_configurado',
+    $s7ConEmpresa === ['estado' => 'por_vencer', 'vence' => '2026-12-26', 'dias' => 60] && $s7Explicita === $s7SinCertificado && $s7SinEmpresa === $s7SinCertificado,
+    [$s7ConEmpresa, $s7Explicita, $s7SinEmpresa]);
+// Sin $hoy cuenta desde el reloj: fechas lejos del dia de hoy, para que la medianoche no mueva el resultado.
+$s7Lejos = TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => date('Y-m-d', strtotime('+400 days'))]));
+$s7Pasado = TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => date('Y-m-d', strtotime('-5 days'))]));
+wa_chk('estadoCertificado: sin $hoy usa la hora actual (dentro de 400 dias es vigente; hace 5 dias, vencido)',
+    $s7Lejos['estado'] === 'vigente' && $s7Lejos['dias'] >= 399 && $s7Lejos['dias'] <= 401
+    && $s7Pasado['estado'] === 'vencido' && $s7Pasado['dias'] >= -6 && $s7Pasado['dias'] <= -4, [$s7Lejos, $s7Pasado]);
+
+// --- el calendario: el dia es el del reloj en la zona de PHP, no el de UTC, y un cambio de hora no mueve un dia ---------------------
+// cert_vence se guarda como la fecha del notAfter del .p12 en la zona por defecto de PHP: "hoy" sale de date('Y-m-d', $hoy) en ella.
+// Con gmdate($hoy), a las 23:30 de un reloj UTC-4 (Santo Domingo) saldria el dia siguiente, y a las 00:30 de uno UTC+13 (Auckland
+// en octubre) el anterior: por eso cada zona se prueba a las dos horas. La zona vuelve a la de antes al terminar.
+$s7Zona = date_default_timezone_get();
+try {
+    foreach (['UTC', 'America/Santo_Domingo', 'Pacific/Auckland'] as $s7Tz) {
+        date_default_timezone_set($s7Tz);
+        foreach (['23:30:00', '00:30:00'] as $s7Hora) {
+            $s7Marca = strtotime("2026-10-27 {$s7Hora}");   // la hora de pared de esta zona, que es la que fijo la linea de arriba
+            $s7Obtenido = [
+                TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => '2026-12-26']), $s7Marca),
+                TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => '2026-10-27']), $s7Marca),
+            ];
+            wa_chk("estadoCertificado: con la zona {$s7Tz} y hoy 2026-10-27 {$s7Hora}, el 2026-12-26 sigue siendo por_vencer, 60 y el 2026-10-27, 0",
+                $s7Obtenido === [
+                    ['estado' => 'por_vencer', 'vence' => '2026-12-26', 'dias' => 60],
+                    ['estado' => 'por_vencer', 'vence' => '2026-10-27', 'dias' => 0],
+                ], $s7Obtenido);
+        }
+    }
+    // America/Chicago es la zona de produccion y cambia de hora el 2026-03-08 y el 2026-11-01: restar medianoches locales daria un
+    // dia de menos o de mas segun el sentido. Entre las dos fechas de cada caso cae uno de los cambios.
+    date_default_timezone_set('America/Chicago');
+    foreach ([
+        ['2026-03-01 12:00:00', '2026-03-15', 14],   // cambio de primavera (se pierde una hora) en medio
+        ['2026-03-15 12:00:00', '2026-03-01', -14],
+        ['2026-10-25 12:00:00', '2026-11-08', 14],   // cambio de otono (se gana una hora) en medio
+        ['2026-11-08 12:00:00', '2026-10-25', -14],
+    ] as [$s7Ahora, $s7Vence, $s7Dias]) {
+        $s7Obtenido = TenantEntitlements::estadoCertificado($s7Fila(['cert_vence' => $s7Vence]), strtotime($s7Ahora));
+        wa_chk("estadoCertificado: America/Chicago, de {$s7Ahora} al {$s7Vence} (con un cambio de hora en medio) son {$s7Dias} dias",
+            ($s7Obtenido['dias'] ?? null) === $s7Dias && ($s7Obtenido['estado'] ?? null) === ($s7Dias < 0 ? 'vencido' : 'por_vencer'), $s7Obtenido);
+    }
+} finally {
+    date_default_timezone_set($s7Zona);
+}
+wa_chk('la zona horaria de este proceso quedo como estaba', date_default_timezone_get() === $s7Zona, [date_default_timezone_get(), $s7Zona]);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
