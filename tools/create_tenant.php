@@ -42,13 +42,36 @@
  *   php tools/create_tenant.php --tipo=app `
  *     --nombre="Cliente B SRL" --rnc=132222222 `
  *     --db-name=tenant_clienteB --db-user=clienteB_user --db-pass=secreto `
- *     --razon-social="CLIENTE B SRL" --direccion="Av. X #1" `
+ *     --razon-social="CLIENTE B SRL" --direccion="Av. X #1" [--telefono=809-555-1234] `
  *     [--admin-email=admin@b.com --admin-pass=clave1234 --admin-name="Admin B" --admin-username=admin_b] `
- *     [--cert-path=... --cert-pass=...] [--ambiente=certecf] [--db-host=localhost] [--skip-create-db]
+ *     [--cert-path=... --cert-pass=...] [--ambiente=certecf] [--db-host=localhost] [--skip-create-db] `
+ *     [--edicion=express --tipos-ecf=45[,31,32,33]]
  *
  * App sin --cert-path (el .p12 llega despues): el alta deja tenants.cert_path apuntando a
  * <CERT_DIR>/<rnc>/cert.p12 SIN archivo, para que no firme con el cert global del .env
  * (el de Gratex). El .p12 se carga luego con tools/set_tenant_cert.php.
+ *
+ * --telefono (solo app): el telefono del emisor (emisor_config.telefono), con el formato 999-999-9999.
+ * Sin el flag queda como lo deja el esquema (vacio).
+ *
+ * Fiscalpoint Express (--edicion=express --tipos-ecf=..., solo CLI y solo tipo app: el envoltorio web
+ * no las acepta). El alta nace completa, como siempre, y al final, ya con sus roles y su usuario admin,
+ * se convierte con el mismo preflight de tools/tenant_edicion.php (tools/express_edicion_lib.php).
+ * --tipos-ecf son los tipos de venta que la empresa emite (31, 32, 45 y, opcional, el 33; el 34 se
+ * deriva solo) y se escriben exactos: un tipo mal escrito se rechaza. --edicion=completa es lo mismo
+ * que no poner la bandera. Piden la migracion master 014 (db/master_migrations/014_tenants_edicion.sql):
+ * sin ella la herramienta falla ANTES de crear nada.
+ *   - Una sola orden termina bien con un --cert-path y un --cert-pass validos y sin vencer,
+ *     --direccion, --telefono y --ambiente=testecf. En ecf una empresa nueva todavia no tiene los
+ *     rangos autorizados por la DGII, asi que ahi son dos pasos: crearla y despues
+ *       php tools/tenant_edicion.php --tenant=ID --edicion=express --tipos=45 [--apply]
+ *   - La conversion deja en blanco la credencial de integracion: el resumen no imprime API KEY ni
+ *     API SECRET.
+ *   - Si el preflight rechaza algo no cambia nada: la empresa queda creada como completa, el resumen
+ *     sale como siempre y la herramienta termina con 3.
+ *
+ * Salida: 0 hecho, 1 error de uso o de ejecucion, 3 la empresa quedo creada pero el preflight de
+ * Express la rechazo.
  *
  * MySQL admin (privilegio CREATE DATABASE, solo tipo app): ADMIN_DB_USER/PASS del
  * .env, o si faltan MASTER_DB_USER/PASS. En hosting compartido usar --skip-create-db.
@@ -86,16 +109,78 @@ if ($isCli) {
         'cert-path::', 'cert-pass::',
         'webhook-url::', 'webhook-secret::',
         'admin-email::', 'admin-pass::', 'admin-name::', 'admin-username::',
+        'edicion::', 'tipos-ecf::', 'telefono::',
         'skip-create-db',
     ]);
 } else {
     $opts = $_REQUEST; // GET o POST (usa POST para cert-pass y no exponerlo en logs)
     unset($opts['token']); // no es parametro de tenant
+    // Fiscalpoint Express y --telefono son solo de linea de comandos (el envoltorio web no se extiende):
+    // un ?edicion=express en la URL no se acepta.
+    unset($opts['edicion'], $opts['tipos-ecf'], $opts['telefono']);
 }
 
 $tipo = strtolower((string) ($opts['tipo'] ?? 'app'));
 if (!in_array($tipo, ['app', 'integracion'], true)) {
     fail("--tipo invalido: '{$tipo}'. Use 'app' o 'integracion'.");
+}
+
+// Fiscalpoint Express y telefono (solo CLI, solo tipo app): --edicion, --tipos-ecf y --telefono. Se juzgan aqui,
+// antes de los argumentos requeridos, del certificado y de abrir ninguna conexion: un error de uso no puede dejar
+// una base creada ni un tenant a medias. getopt ignora lo que no conoce, asi que cada bandera se juzga por lo que
+// de verdad llego (una repetida llega como arreglo y una sin valor, como false).
+$expressPedido = false; // --edicion=express: al terminar el alta, el tenant se convierte a Express (antes del resumen)
+$tiposEcf = [];         // los tipos de venta de --tipos-ecf (solo con --edicion=express)
+$telefono = null;       // --telefono, ya validado: se escribe en emisor_config.telefono
+if (isset($opts['edicion']) || isset($opts['tipos-ecf']) || isset($opts['telefono'])) {
+    // Los tipos permitidos, las columnas de la migracion 014 y como nombrar lo que el operador tecleo salen de la
+    // biblioteca del preflight. Se carga solo cuando llega una de estas banderas: el alta de siempre y la web no
+    // cargan nada nuevo.
+    require_once __DIR__ . '/express_edicion_lib.php';
+    foreach (['edicion', 'tipos-ecf', 'telefono'] as $opcion) {
+        if (!isset($opts[$opcion])) {
+            continue;
+        }
+        if (is_array($opts[$opcion])) {
+            fail("--{$opcion} esta repetido: se da una sola vez.");
+        }
+        if ($tipo !== 'app') {
+            fail("--{$opcion} es solo para tenants tipo app (este es tipo '{$tipo}').");
+        }
+    }
+    if (isset($opts['edicion'])) {
+        $edicionArg = (string) $opts['edicion'];
+        if (!in_array($edicionArg, ['express', 'completa'], true)) {
+            fail('--edicion invalida: ' . express_preflight_nombrar([$edicionArg])
+                . '. Use express (Fiscalpoint Express) o completa (el alta de siempre), en minusculas.');
+        }
+        $expressPedido = $edicionArg === 'express';
+    }
+    if ($expressPedido) {
+        if (!isset($opts['tipos-ecf'])) {
+            fail('--edicion=express requiere --tipos-ecf=45[,31,32,33]: los tipos de venta que la empresa emite.');
+        }
+        $tiposEcf = TenantEntitlements::csv((string) $opts['tipos-ecf']);
+        if ($tiposEcf === []) {
+            fail('--tipos-ecf no trae ningun tipo (por ejemplo --tipos-ecf=45 o --tipos-ecf=45,31).');
+        }
+        $tiposPermitidos = express_preflight_tipos_permitidos();
+        $tiposFuera = array_values(array_diff($tiposEcf, $tiposPermitidos));
+        if ($tiposFuera !== []) {
+            fail('--tipos-ecf trae tipos que Express no vende: ' . express_preflight_nombrar($tiposFuera)
+                . '. Se piden solo ' . implode(', ', $tiposPermitidos)
+                . ' (el 34, la nota de credito, se deriva solo; el 33 es opcional).');
+        }
+    } elseif (isset($opts['tipos-ecf'])) {
+        fail('--tipos-ecf requiere --edicion=express: sin la edicion Express los tipos de venta no se usan.');
+    }
+    if (isset($opts['telefono'])) {
+        $telefono = (string) $opts['telefono'];
+        if (preg_match('/^\d{3}-\d{3}-\d{4}$/D', $telefono) !== 1) {
+            fail('--telefono invalido: ' . express_preflight_nombrar([$telefono])
+                . '. El formato es 809-555-1234 (tres digitos, guion, tres digitos, guion y cuatro digitos).');
+        }
+    }
 }
 
 // Sandbox (solo integracion): firma con un cert descartable, asi que no pide .p12.
@@ -231,6 +316,20 @@ if (!$tieneColumnaGrupo && ($grupoId !== null || $grupoSelf)) {
         . PHP_EOL . '   La columna tenants.grupo_id todavia no existe en esta base. Aplicala y reintenta.');
 }
 
+// --edicion=express: al terminar el alta, la conversion escribe las cuatro columnas de la migracion master 014.
+// Sin ellas se rechaza aqui, ANTES de crear la base y el tenant (despues quedaria un tenant a medias). Solo se
+// consulta cuando se pidio Express: el alta de siempre no hace ninguna consulta mas.
+if ($expressPedido) {
+    $faltan014 = array_values(array_diff(
+        EXPRESS_COLUMNAS_VERIFICADAS,
+        array_column($masterPdo->query('SHOW COLUMNS FROM tenants')->fetchAll(PDO::FETCH_ASSOC), 'Field')
+    ));
+    if ($faltan014 !== []) {
+        fail('--edicion=express requiere la migracion master 014 (db/master_migrations/014_tenants_edicion.sql).'
+            . PHP_EOL . '   Faltan en tenants: ' . implode(', ', $faltan014) . '. Aplicala en la master y reintenta.');
+    }
+}
+
 // Grupo: la cabeza debe existir, estar activa y ser del MISMO tipo (una
 // credencial de integracion no puede cubrir un tenant app, y viceversa).
 if ($grupoId !== null) {
@@ -321,6 +420,11 @@ if ($tipo === 'app') {
           WHERE id = 1'
     );
     $stmt->execute([':rnc' => $rnc, ':rs' => $razonSocial, ':nc' => $nombre, ':dir' => $direccion]);
+    if ($telefono !== null) {
+        // El esquema deja el telefono vacio y el preflight de Express lo pide. Va en un UPDATE aparte para que el
+        // de arriba, y toda alta sin la bandera, no cambien.
+        $tenantPdo->prepare('UPDATE emisor_config SET telefono = :tel WHERE id = 1')->execute([':tel' => $telefono]);
+    }
 
     // Cliente de prueba para certificacion: lo inserta la migracion 004 (RNC 131880681).
     // Su id (autoincrement, varia por tenant) se usa como client_id en el wizard (Fase 2/4).
@@ -527,6 +631,31 @@ if (!$isCli && isset($_FILES['logo']) && is_array($_FILES['logo'])
 }
 
 // =============================================================================
+// Fiscalpoint Express (--edicion=express): la conversion va DESPUES de crear el tenant
+// =============================================================================
+// El INSERT de arriba no cambia: el tenant nace completa y solo la conversion lo pasa a Express, asi una fila
+// Express nunca existe antes de pasar su preflight. Va aqui porque el preflight lee los roles y la base de la
+// empresa, que a esta altura ya existen. Es el mismo preflight de tools/tenant_edicion.php y aplica (el ultimo
+// argumento es true). Si rechaza algo no cambia nada: el tenant queda completa, con su API KEY y su API SECRET
+// vigentes, el resumen sale como siempre y la herramienta termina con 3. Si la conversion falla por otra causa
+// (la master, la base de la empresa) el resumen tambien sale: es el unico lugar donde estan el id del tenant y el
+// API SECRET, que se imprime una sola vez.
+$expressConvertido = false;
+$codigoSalida = 0;
+if ($expressPedido) {
+    echo "-> Convirtiendo el tenant a Express (preflight) ...\n";
+    try {
+        $conversion = express_convertir($master, $tenantId, ['edicion' => 'express', 'tipos' => $tiposEcf, 'modulos' => null], true);
+        echo implode("\n", $conversion['lineas']), "\n";
+        $expressConvertido = $conversion['ok'] === true && $conversion['aplicado'] === true;
+        $codigoSalida = $expressConvertido ? 0 : 3;
+    } catch (Throwable $e) {
+        echo '[FALLO] ' . describirFalloExpress($e) . "\n";
+        $codigoSalida = 1;
+    }
+}
+
+// =============================================================================
 // Listo
 // =============================================================================
 echo "\n== Tenant creado OK ==\n";
@@ -542,14 +671,21 @@ if ($tipo === 'app') {
 if ($grupoId !== null) {
     echo "  grupo_id   : {$grupoId}" . ($grupoSelf ? ' (cabeza del grupo)' : '') . "\n";
 }
-echo "  API KEY    : {$apiKey}\n";
-echo "  API SECRET : {$apiSecret}\n";
+if ($expressConvertido) {
+    // La conversion dejo api_secret_hash en blanco: el par que se imprimiria no sirve.
+    echo "  >> Credenciales de integración desactivadas: es un tenant Express.\n";
+} else {
+    echo "  API KEY    : {$apiKey}\n";
+    echo "  API SECRET : {$apiSecret}\n";
+}
 if ($webhookUrl !== null && $webhookUrl !== '') {
     echo "  WEBHOOK URL    : {$webhookUrl}\n";
     echo "  WEBHOOK SECRET : {$webhookSecret}\n";
     echo "  >> El cliente verifica el header X-Gratex-Signature: sha256=HMAC(body, WEBHOOK SECRET).\n";
 }
-if ($grupoId !== null && !$grupoSelf) {
+if ($expressConvertido) {
+    // Sin credencial de integracion: no hay par que entregar ni que desactivar (ya se dijo arriba).
+} elseif ($grupoId !== null && !$grupoSelf) {
     // Hermana: el cliente ya tiene la credencial del grupo. Este par abre TODO
     // el grupo (switchToSibling), asi que entregarlo solo duplica la exposicion.
     echo "  >> NO entregar esta API KEY + API SECRET al cliente. El cliente usa la credencial\n";
@@ -586,7 +722,18 @@ if ($tipo === 'integracion' && $ambiente === 'ecf') {
     echo "!! NO corra el set de pruebas DGII (Fase 2/3/4) para el: saldrian facturas fiscales reales.\n";
     echo "!! Si todavia tiene que certificar: UPDATE tenants SET ambiente = 'certecf' WHERE id = {$tenantId};\n";
 }
-exit(0);
+if ($expressPedido && !$expressConvertido) {
+    // El alta SI quedo: el resumen de arriba es el de una empresa completa.
+    $tiposCsv = implode(',', $tiposEcf);
+    if ($codigoSalida === 3) {
+        echo "\nEl tenant #{$tenantId} quedó creado como completa. Corrige lo anterior y corre tools/tenant_edicion.php --tenant={$tenantId} --edicion=express --tipos={$tiposCsv} --apply\n";
+    } else {
+        echo "\nEl tenant #{$tenantId} quedo creado, pero la conversion a Express fallo con un error inesperado (ver arriba):\n"
+            . "puede estar como completa o como express (si quedo como express, la credencial de integracion de arriba ya no sirve).\n"
+            . "Mira como quedo con tools/tenant_edicion.php --tenant={$tenantId} --edicion=express --tipos={$tiposCsv} (sin --apply es un ensayo).\n";
+    }
+}
+exit($codigoSalida);
 
 // =============================================================================
 // Helpers
@@ -710,6 +857,25 @@ function saveTenantLogo(int $tenantId, array $file): array
     }
     $rel = 'logos/' . $tenantId . '.' . $ext;
     return ['path' => $rel, 'msg' => "logo guardado en {$rel}"];
+}
+
+/**
+ * Un fallo inesperado de la conversion a Express como una sola linea que se puede imprimir: la clase y
+ * archivo:linea y, de una PDOException, el SQLSTATE y el codigo del driver (su mensaje trae el usuario y el
+ * servidor); de las excepciones de la propia biblioteca y de los errores del motor, su mensaje (no lleva
+ * secretos). De cualquier otra, solo la clase. Es lo mismo que hace tools/tenant_edicion.php.
+ */
+function describirFalloExpress(Throwable $e): string
+{
+    $texto = get_class($e) . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+    if ($e instanceof PDOException) {
+        $info = (array) $e->errorInfo;
+        return $texto . ($info !== [] ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?') : ' codigo ' . $e->getCode());
+    }
+    if ($e instanceof InvalidArgumentException || $e instanceof RuntimeException || $e instanceof LogicException || $e instanceof Error) {
+        return $texto . ': ' . trim((string) preg_replace('/\s+/', ' ', $e->getMessage()));
+    }
+    return $texto;
 }
 
 function fail(string $msg): void

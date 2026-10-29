@@ -3767,6 +3767,182 @@ wa_chk('php -l de la biblioteca despues de la tarea 9: sin errores de sintaxis n
     && !str_contains($s9Lint['salida'], 'Deprecated'), $s9Lint);
 
 // ---------------------------------------------------------------------------
+// 10) tools/create_tenant.php: --edicion, --tipos-ecf y --telefono
+// ---------------------------------------------------------------------------
+echo "\n== 10) create_tenant.php: --edicion, --tipos-ecf y --telefono ==\n";
+$s10Herramienta = __DIR__ . '/create_tenant.php';
+// El arbol de Windows trae esta herramienta con CRLF (autocrlf): las busquedas de texto van sobre la fuente con \n.
+$s10Fuente = str_replace("\r\n", "\n", (string) file_get_contents($s10Herramienta));
+
+/**
+ * create_tenant.php en un hijo aislado (ver express_hijo_aislado): la master (por el entorno) y la base de la empresa (--db-host y --db-port) apuntan a un puerto de
+ * loopback sin nadie. Los dos -d van antes del script: con el php.ini de produccion (display_errors apagado) un aviso de PHP no saldria en la salida, y las pruebas
+ * de "sin avisos" no verian nada.
+ */
+$s10Hijo = static fn (array $args): array => express_hijo_aislado(array_merge(
+    ['-d', 'display_errors=1', '-d', 'error_reporting=-1', 'tools/create_tenant.php', '--db-host=127.0.0.1', '--db-port=1'],
+    $args
+));
+/** Un alta tipo app con todos sus argumentos requeridos: sin banderas de Express llega a abrir la master, que en el hijo aislado no contesta. */
+$s10App = ['--tipo=app', '--nombre=X', '--rnc=131000001', '--db-name=a', '--db-user=b', '--db-pass=c'];
+$s10Diagnostico = '/Fatal error|Warning|Notice|Deprecated|Stack trace|Uncaught/i';
+
+// --- lo que se rechaza: sale con 1 antes de abrir ninguna conexion (ni siquiera imprime el titulo del alta) ---------------------------------
+foreach ([
+    '--edicion=express sin --tipos-ecf' => [array_merge($s10App, ['--edicion=express']), ['--tipos-ecf'], []],
+    '--edicion=express con --tipos-ecf= (valor vacio: segun la version de PHP, getopt lo descarta o lo entrega vacio; de las dos formas se pide --tipos-ecf)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=']), ['--tipos-ecf'], []],
+    '--edicion=express con --tipos-ecf sin valor (llega como false)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf']), ['--tipos-ecf', 'ningun tipo'], []],
+    '--edicion=express con --tipos-ecf de solo comas' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=,']), ['--tipos-ecf', 'ningun tipo'], []],
+    '--tipos-ecf=44 (un tipo que Express no vende)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=44']), ["'44'", '31, 32, 45, 33'], []],
+    '--tipos-ecf=e45 (un tipo mal escrito: RF2)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=e45']), ["'e45'", '31, 32, 45, 33'], []],
+    '--tipos-ecf=34 (la nota de credito se deriva sola, no se pide)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=34']), ["'34'", '31, 32, 45, 33'], []],
+    '--tipos-ecf=45,44 (uno bueno y uno malo: se rechaza todo, no se angosta en silencio)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=45,44']), ["'44'", '31, 32, 45, 33'], []],
+    '--edicion=basica' => [array_merge($s10App, ['--edicion=basica']), ["'basica'", 'express', 'completa'], []],
+    '--edicion=Express (se escribe exacta, en minusculas, como en tenant_edicion.php)' => [array_merge($s10App, ['--edicion=Express', '--tipos-ecf=45']), ["'Express'", 'minusculas'], []],
+    '--edicion sin valor' => [array_merge($s10App, ['--edicion']), ['--edicion', 'express', 'completa'], []],
+    '--tipos-ecf=45 sin --edicion' => [array_merge($s10App, ['--tipos-ecf=45']), ['requiere --edicion=express'], []],
+    '--tipos-ecf=45 con --edicion=completa' => [array_merge($s10App, ['--edicion=completa', '--tipos-ecf=45']), ['requiere --edicion=express'], []],
+    '--telefono=8095551234 (sin guiones)' => [array_merge($s10App, ['--telefono=8095551234']), ['809-555-1234', "'8095551234'"], []],
+    '--telefono=809-555-12345 (un digito de mas)' => [array_merge($s10App, ['--telefono=809-555-12345']), ['809-555-1234'], []],
+    '--telefono=809-555-123 (un digito de menos)' => [array_merge($s10App, ['--telefono=809-555-123']), ['809-555-1234'], []],
+    '--telefono=abc-def-ghij (letras)' => [array_merge($s10App, ['--telefono=abc-def-ghij']), ['809-555-1234'], []],
+    '--telefono=809-555-1234 con un salto de linea al final' => [array_merge($s10App, ["--telefono=809-555-1234\n"]), ['809-555-1234'], []],
+    '--telefono sin valor' => [array_merge($s10App, ['--telefono']), ['809-555-1234'], []],
+    '--edicion dos veces' => [array_merge($s10App, ['--edicion=express', '--edicion=express', '--tipos-ecf=45']), ['--edicion', 'repetido'], []],
+    '--tipos-ecf dos veces (se da una sola lista, separada por comas)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=45', '--tipos-ecf=31']), ['--tipos-ecf', 'repetido'], []],
+    '--telefono dos veces' => [array_merge($s10App, ['--telefono=809-555-1234', '--telefono=809-555-1235']), ['--telefono', 'repetido'], []],
+    'tipo integracion con --edicion=express (sandbox, que no pide certificado)' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--edicion=express'], ['solo para tenants tipo app'], []],
+    'tipo integracion con --tipos-ecf' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--tipos-ecf=45'], ['solo para tenants tipo app'], []],
+    'tipo integracion con --telefono' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--telefono=809-555-1234'], ['solo para tenants tipo app'], []],
+    'las banderas se juzgan antes que los argumentos requeridos (un app sin --db-name, --db-user ni --db-pass)' => [['--tipo=app', '--nombre=X', '--rnc=131000001', '--edicion=express'], ['--tipos-ecf'], ['Faltan argumentos requeridos']],
+    'las banderas se juzgan antes que el certificado (una integracion sin --cert-pass)' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--edicion=express'], ['solo para tenants tipo app'], ['Faltan argumentos requeridos']],
+] as $s10Desc => [$s10Args, $s10Agujas, $s10Prohibidas]) {
+    $s10R = $s10Hijo($s10Args);
+    wa_chk("create_tenant.php {$s10Desc}: sale con 1, dice " . implode(' y ', $s10Agujas) . ', no llega al titulo del alta y no deja avisos de PHP',
+        $s10R['codigo'] === 1
+        && array_filter($s10Agujas, static fn (string $aguja): bool => !str_contains($s10R['salida'], $aguja)) === []
+        && array_filter($s10Prohibidas, static fn (string $aguja): bool => str_contains($s10R['salida'], $aguja)) === []
+        && !str_contains($s10R['salida'], '== Onboarding tenant') && preg_match($s10Diagnostico, $s10R['salida']) !== 1, $s10R);
+}
+
+// --- lo que se acepta pasa la validacion y el hijo llega al titulo del alta y a abrir la master (que no contesta): ninguna bandera valida se rechaza ---
+foreach ([
+    'sin ninguna bandera de Express (el alta de siempre)' => [],
+    '--edicion=express --tipos-ecf=45' => ['--edicion=express', '--tipos-ecf=45'],
+    'los tipos escritos a mano con espacios y coma al final, el 33 y el telefono' => ['--edicion=express', '--tipos-ecf= 45, 31 ,33,', '--telefono=809-555-1234'],
+    '--edicion=completa (lo mismo que no ponerla)' => ['--edicion=completa'],
+    '--telefono sin Express' => ['--telefono=809-555-1234'],
+] as $s10Desc => $s10Args) {
+    $s10R = $s10Hijo(array_merge($s10App, $s10Args));
+    wa_chk("create_tenant.php {$s10Desc}: pasa la validacion de las banderas, imprime el titulo del alta y llega a abrir la master (que en el hijo aislado no contesta), sin ningun ERROR de uso ni avisos de PHP",
+        str_contains($s10R['salida'], '== Onboarding tenant (app): X (RNC 131000001) ==') && str_contains($s10R['salida'], 'base de datos maestra')
+        && !str_contains($s10R['salida'], 'ERROR: ') && preg_match('/Warning|Notice|Deprecated/i', $s10R['salida']) !== 1, $s10R);
+}
+
+// --- la fuente: lo que no se mueve y lo que tiene que estar ------------------------------------------------------------------------------
+// El INSERT del tenant es el de master, letra por letra: el alta nace completa y la conversion es una llamada aparte (una fila Express nunca existe
+// antes de pasar su preflight; contratos 4: create_tenant.php ya no inserta las columnas de la 014).
+$s10Insert = <<<'SQL'
+'INSERT INTO tenants
+        (nombre, rnc, api_key, api_secret_hash, tipo, ' . $colGrupo . 'db_host, db_port, db_name, db_user,
+         db_pass_encrypted, cert_path, cert_pass_encrypted, webhook_url, webhook_secret_encrypted,
+         ambiente, activo)
+     VALUES
+        (:nombre, :rnc, :api_key, :api_secret_hash, :tipo, ' . $valGrupo . ':db_host, :db_port, :db_name, :db_user,
+         :db_pass_enc, :cert_path, :cert_pass_enc, :webhook_url, :webhook_sec_enc,
+         :ambiente, 1)'
+SQL;
+wa_chk('create_tenant.php: el INSERT INTO tenants es el de master letra por letra, y es el unico (sin columnas de la 014: la conversion es una llamada aparte)',
+    substr_count($s10Fuente, $s10Insert) === 1 && substr_count($s10Fuente, 'INSERT INTO tenants') === 1);
+// El UPDATE de emisor_config de siempre no cambia: el telefono va en un segundo UPDATE y solo si se dio --telefono.
+$s10UpdateEmisor = <<<'SQL'
+'UPDATE emisor_config
+            SET rnc = :rnc, razon_social = :rs, nombre_comercial = :nc, direccion = :dir
+          WHERE id = 1'
+SQL;
+wa_chk('create_tenant.php: el UPDATE emisor_config de siempre (rnc, razon social, nombre comercial y direccion) no cambia',
+    substr_count($s10Fuente, $s10UpdateEmisor) === 1);
+preg_match("/getopt\\(\\s*'',\\s*\\[(.*?)\\]\\s*\\);/s", $s10Fuente, $s10Lista);
+$s10Opciones = $s10Lista[1] ?? '';
+wa_chk("create_tenant.php: la lista de getopt trae 'edicion::', 'tipos-ecf::' y 'telefono::' y sigue trayendo las de siempre",
+    array_filter(["'edicion::'", "'tipos-ecf::'", "'telefono::'", "'tipo::'", "'nombre:'", "'rnc:'", "'direccion::'", "'skip-create-db'"],
+        static fn (string $opcion): bool => !str_contains($s10Opciones, $opcion)) === [], $s10Opciones);
+wa_chk('create_tenant.php: el telefono se escribe con un segundo UPDATE emisor_config SET telefono = :tel WHERE id = 1, solo si se dio --telefono, despues del UPDATE de siempre',
+    substr_count($s10Fuente, 'UPDATE emisor_config SET telefono = :tel') === 1
+    && preg_match('/if \(\$telefono !== null\) \{[^}]*UPDATE emisor_config SET telefono = :tel WHERE id = 1/', $s10Fuente) === 1
+    && strpos($s10Fuente, 'UPDATE emisor_config SET telefono = :tel') > strpos($s10Fuente, $s10UpdateEmisor));
+// La rama web (anexo 9.4: el envoltorio web no se extiende): se corre el bloque tal como esta escrito, con un $_REQUEST de mentira que trae las tres banderas.
+$s10Rama = preg_match('/\n\} else \{\n(    \$opts = \$_REQUEST;.*?\n)\}\n/s', $s10Fuente, $s10M) === 1 ? $s10M[1] : '';
+$s10Prueba = (string) tempnam(sys_get_temp_dir(), 'ent_web_');
+file_put_contents($s10Prueba, "<?php\n\$_REQUEST = json_decode((string) base64_decode(\$argv[1]), true);\n" . $s10Rama . "echo json_encode(\$opts);\n");
+$s10R = wa_correr([PHP_BINARY, $s10Prueba, base64_encode((string) json_encode([
+    'token' => 't', 'tipo' => 'app', 'nombre' => 'X', 'edicion' => 'express', 'tipos-ecf' => '45', 'telefono' => '809-555-1234',
+]))]);
+@unlink($s10Prueba);
+wa_chk('create_tenant.php: la rama web ($opts = $_REQUEST) le quita a $opts el token y las tres banderas (edicion, tipos-ecf y telefono) y deja lo demas: el navegador nunca las acepta',
+    $s10Rama !== '' && json_decode(trim($s10R['salida']), true) === ['tipo' => 'app', 'nombre' => 'X'], [$s10Rama, $s10R]);
+// La conversion: una sola llamada, despues de crear los roles y el usuario admin y antes del resumen, con apply en true.
+$s10PosLlamada = strpos($s10Fuente, 'express_convertir(');
+$s10PosResumen = strpos($s10Fuente, '== Tenant creado OK ==');
+$s10PosRoles = strpos($s10Fuente, 'INSERT INTO roles');
+$s10PosAdmin = strpos($s10Fuente, 'INSERT INTO users');
+wa_chk('create_tenant.php: express_convertir( aparece una vez, despues de sembrar los roles y de crear el usuario admin y antes del echo "== Tenant creado OK ==", y aplica (apply true)',
+    substr_count($s10Fuente, 'express_convertir(') === 1 && !in_array(false, [$s10PosLlamada, $s10PosResumen, $s10PosRoles, $s10PosAdmin], true)
+    && $s10PosRoles < $s10PosLlamada && $s10PosAdmin < $s10PosLlamada && $s10PosLlamada < $s10PosResumen
+    && preg_match('/express_convertir\(\$master, \$tenantId, \[[^\]]*\], true\)/', $s10Fuente) === 1, [$s10PosRoles, $s10PosAdmin, $s10PosLlamada, $s10PosResumen]);
+// Lo que ningun hijo aislado alcanza a correr (sin una master real no se llega a la conversion): el codigo de salida y cuando se imprime la credencial.
+wa_chk('create_tenant.php: un rechazo del preflight deja el codigo de salida en 3, un fallo inesperado en 1, y la herramienta termina con ese codigo (ya no con exit(0))',
+    preg_match('/\$codigoSalida = \$expressConvertido \? 0 : 3;/', $s10Fuente) === 1
+    && preg_match('/catch \(Throwable \$e\) \{[^}]*\$codigoSalida = 1;/', $s10Fuente) === 1
+    && preg_match('/\nexit\(\$codigoSalida\);\n/', $s10Fuente) === 1 && !str_contains($s10Fuente, 'exit(0)'));
+wa_chk('create_tenant.php: API KEY y API SECRET se imprimen una sola vez y solo cuando el tenant NO quedo convertido (el else de if ($expressConvertido)), y de un tenant convertido tampoco se imprime la guia de entregarlos',
+    substr_count($s10Fuente, '  API KEY    : {$apiKey}') === 1 && substr_count($s10Fuente, '  API SECRET : {$apiSecret}') === 1
+    && preg_match('/if \(\$expressConvertido\) \{[^}]*Credenciales de integración desactivadas[^}]*\} else \{\s*echo "  API KEY    : \{\$apiKey\}\\\\n";\s*echo "  API SECRET : \{\$apiSecret\}\\\\n";\s*\}/', $s10Fuente) === 1
+    && preg_match('/if \(\$expressConvertido\) \{\s*\/\/[^\n]*\n\} elseif \(\$grupoId !== null && !\$grupoSelf\) \{/', $s10Fuente) === 1);
+wa_chk('create_tenant.php: las dos lineas del resumen de Express son las de la tarea, letra por letra (credenciales desactivadas, y el tenant que quedo como completa con el comando para terminar)',
+    str_contains($s10Fuente, '>> Credenciales de integración desactivadas: es un tenant Express.')
+    && preg_match('/quedó creado como completa\. Corrige lo anterior y corre tools\/tenant_edicion\.php --tenant=[^\n]*? --edicion=express --tipos=[^\n]*? --apply/', $s10Fuente) === 1
+    // ... con el id y los tipos que se pidieron (no un "..."), y es lo que se imprime con la salida 3 (el rechazo), no con la de un fallo inesperado.
+    && str_contains($s10Fuente, '--tenant={$tenantId} --edicion=express --tipos={$tiposCsv} --apply') && str_contains($s10Fuente, '$tiposCsv = implode(\',\', $tiposEcf);')
+    && preg_match('/if \(\$codigoSalida === 3\) \{\s*echo "\\\\nEl tenant #\{\$tenantId\} quedó creado como completa\. /', $s10Fuente) === 1);
+wa_chk('create_tenant.php: el informe del preflight (las lineas [OK  ], [CORR] y [RECH] y su RECHAZADO o APLICADO) se imprime antes del resumen, tanto si convierte como si rechaza',
+    str_contains($s10Fuente, "echo implode(\"\\n\", \$conversion['lineas']), \"\\n\";") && substr_count($s10Fuente, "\$conversion['lineas']") === 1
+    && (int) strpos($s10Fuente, "\$conversion['lineas']") < (int) strpos($s10Fuente, '== Tenant creado OK =='));
+// describirFalloExpress es el unico lugar donde un fallo inesperado de la conversion llega a la pantalla: se corre su codigo, tal como esta escrito, en un hijo.
+// El mensaje de una PDOException trae el usuario y el servidor, y no puede salir; el de las excepciones de la propia biblioteca si.
+$s10Funcion = preg_match('/\nfunction describirFalloExpress\(Throwable \$e\): string\n\{.*?\n\}\n/s', $s10Fuente, $s10M) === 1 ? $s10M[0] : '';
+$s10Prueba = (string) tempnam(sys_get_temp_dir(), 'ent_desc_');
+file_put_contents($s10Prueba, "<?php\n" . $s10Funcion . <<<'PHP'
+$e1 = new PDOException("SQLSTATE[HY000] [1045] Access denied for user 'usuario_secreto'@'servidor_secreto'");
+$e1->errorInfo = ['HY000', 1045, "Access denied for user 'usuario_secreto'@'servidor_secreto'"];
+$e2 = new PDOException('sin errorInfo, con el usuario_secreto en el mensaje', 77);
+$e3 = new RuntimeException("No se pudo conectar\n   a la   base");
+$e4 = new JsonException('texto de una clase que no se imprime');
+$e5 = new TypeError('Argument #1 must be of type X');
+echo json_encode(array_map('describirFalloExpress', [$e1, $e2, $e3, $e4, $e5]));
+PHP);
+$s10R = wa_correr([PHP_BINARY, $s10Prueba]);
+@unlink($s10Prueba);
+$s10Lineas = (array) json_decode(trim($s10R['salida']), true);
+wa_chk('create_tenant.php: describirFalloExpress da la clase y archivo:linea; de una PDOException solo el SQLSTATE y el errno (o el codigo), nunca su mensaje; de una excepcion de la biblioteca o un Error su mensaje en una linea; de cualquier otra solo la clase',
+    $s10Funcion !== '' && count($s10Lineas) === 5
+    && preg_match('/^PDOException \([^)]+:\d+\) SQLSTATE HY000 errno 1045$/', (string) ($s10Lineas[0] ?? '')) === 1
+    && preg_match('/^PDOException \([^)]+:\d+\) codigo 77$/', (string) ($s10Lineas[1] ?? '')) === 1
+    && preg_match('/^RuntimeException \([^)]+:\d+\): No se pudo conectar a la base$/', (string) ($s10Lineas[2] ?? '')) === 1
+    && preg_match('/^JsonException \([^)]+:\d+\)$/', (string) ($s10Lineas[3] ?? '')) === 1
+    && preg_match('/^TypeError \([^)]+:\d+\): Argument #1 must be of type X$/', (string) ($s10Lineas[4] ?? '')) === 1
+    && !str_contains((string) $s10R['salida'], 'secreto'), [$s10Funcion !== '', $s10R]);
+wa_chk('create_tenant.php: la cabecera de uso documenta las tres banderas nuevas (--edicion=express, --tipos-ecf y --telefono=809-555-1234)',
+    preg_match('/\A<\?php\s*\/\*\*.*?\*\//s', $s10Fuente, $s10Cabecera) === 1
+    && array_filter(['--edicion=express', '--tipos-ecf', '--telefono=809-555-1234'], static fn (string $bandera): bool => !str_contains($s10Cabecera[0], $bandera)) === [],
+    $s10Cabecera[0] ?? null);
+$s10Hallado = $s8Ocho3($s8SinTextos($s10Fuente));
+wa_chk('PHP 8.3 (produccion y CI): create_tenant.php no usa funciones ni sintaxis de PHP 8.4 o 8.5', $s10Hallado === [], $s10Hallado);
+$s10Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s10Herramienta]);
+wa_chk('php -l de create_tenant.php: sin errores de sintaxis ni deprecaciones', $s10Lint['codigo'] === 0 && str_starts_with(trim($s10Lint['salida']), 'No syntax errors detected')
+    && !str_contains($s10Lint['salida'], 'Deprecated'), $s10Lint);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

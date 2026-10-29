@@ -31,6 +31,10 @@
  *      credencial de integracion de A funciona antes y no despues (y de nuevo tras revertir), --refrescar-cert deja a cert_vence en la fecha
  *      del certificado y GET /api/emisor la informa, revertir deja a A en completa con su hash de integracion y su token ya no recibe
  *      entitlements, y express_aplicar hace rollback de verdad (InnoDB) cuando falla un paso de la master.
+ *   5b) tools/create_tenant.php --edicion=express --tipos-ecf=45 sobre la master scratch, en un hijo (express_cli): sin una columna de la 014
+ *      (edicion, y por separado cert_vence) sale con 1 antes de crear nada y nombra db/master_migrations/014_tenants_edicion.sql y la columna
+ *      que falta; con las cuatro puestas la misma orden ya no dice nada de la 014. La base de la empresa de la prueba no existe, asi que ni una
+ *      corrida sin la comprobacion puede dejar una empresa.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -1576,6 +1580,105 @@ wa_chk('al terminar A vuelve a ser completa, sin certificado ni listas, con el P
     && $s5EmisorCfg0 !== [] && $s5EmisorCfgRestaurado === $s5EmisorCfg0 && $s5EmisorCfgFinal === $s5EmisorCfg0,
     array_intersect_key($s5Limpia, array_flip(['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'])) + ['columna' => $s5Definicion() === $s5Def0]
     + ['emisor_cfg_columnas_distintas' => ['tras_restaurar' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgRestaurado), 'al_final' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgFinal)]]);
+
+// ---------------------------------------------------------------------------
+// 5b) tools/create_tenant.php --edicion=express sin las columnas de la migracion master 014: se detiene antes de crear nada
+// ---------------------------------------------------------------------------
+echo "\n== 5b) create_tenant.php --edicion=express sin la migracion master 014 ==\n";
+$s5bMaster = $ctx['pdo'];
+$s5bCred = $ctx['cred'];
+$s5bSecretos = pos_scratch_secretos($s5bCred['pass']);
+$s5bColumnas = ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'];
+$s5bRnc = '131000009';
+express_usar_master($ctx);   // la master de prueba y su clave maestra, por el entorno, para el hijo de express_cli
+
+// Lo que nunca debe salir en lo que imprime la herramienta, y con lo que se enmascara lo que una prueba muestre al fallar. Una traza de excepcion de PHP corta cada
+// argumento a 15 caracteres ('usuario_largo_de...'): ese principio de un valor largo tambien cuenta como fuga, y tambien se enmascara.
+$s5bProhibidos = [
+    'la clave de la base' => $s5bCred['pass'], 'el usuario de la base' => $s5bCred['user'], 'el servidor' => $s5bCred['host'],
+    'la clave maestra' => $s5bSecretos['clave_maestra'], 'el pepper' => $s5bSecretos['pepper'], 'la clave de los usuarios' => $s5bSecretos['clave_usuarios'],
+];
+foreach ($s5bProhibidos as $s5bQue => $s5bValor) {
+    if (strlen((string) $s5bValor) > 15) {
+        $s5bProhibidos["{$s5bQue}, cortada a 15 caracteres como la muestra una traza"] = substr((string) $s5bValor, 0, 15);
+    }
+}
+/** Lo que se muestra de una corrida cuando una prueba falla: el codigo y la salida enmascarada y acotada. */
+$s5bVer = static fn (array $r): array => ['codigo' => $r['codigo'], 'salida' => pos_scratch_enmascarar(substr($r['salida'], 0, 1800), array_values($s5bProhibidos))];
+/** ¿Tiene tenants esa columna ahora? (siempre un nombre de la lista de arriba). */
+$s5bTiene = static fn (string $columna): bool => (int) $s5bMaster->query(
+    "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME = '{$columna}'"
+)->fetchColumn() === 1;
+/** Cuantas empresas hay con el RNC de la prueba: ninguna, pase lo que pase (la base de la empresa de la prueba no existe). */
+$s5bConRnc = static function () use ($s5bMaster, $s5bRnc): int {
+    $st = $s5bMaster->prepare('SELECT COUNT(*) FROM tenants WHERE rnc = :r');
+    $st->execute([':r' => $s5bRnc]);
+    return (int) $st->fetchColumn();
+};
+/** Repone lo que se quito: la 014 es idempotente y solo agrega las columnas que faltan (en su sitio y con su definicion). */
+$s5bRestaurar = static function () use ($s5bMaster): void {
+    correrSql($s5bMaster, (string) file_get_contents(EXPRESS_MIGRACION_014));
+};
+// El alta de la tarea con una base de empresa que no existe (y --skip-create-db): ni siquiera una corrida que no hiciera la comprobacion podria dejar una
+// empresa, se detendria al abrir esa base. --db-host=127.0.0.1 --db-port=1 (un puerto de loopback sin nadie) le quita ademas a esa corrida la posibilidad
+// de intentar entrar a un MySQL local con las credenciales de la master de prueba.
+$s5bArgs = ['tools/create_tenant.php', '--tipo=app', '--nombre=X', "--rnc={$s5bRnc}", '--db-name=zz_no_existe_scratch', '--db-user=u', '--db-pass=p',
+    '--skip-create-db', '--db-host=127.0.0.1', '--db-port=1', '--edicion=express', '--tipos-ecf=45'];
+$s5bSalidas = [];
+
+try {
+    wa_exigir_marca($s5bMaster);   // solo la master scratch
+    $s5bRestaurar();               // las cuatro columnas puestas, como las deja express_scratch_preparar()
+    wa_chk('precondicion: tenants tiene las cuatro columnas de la 014 y no hay ninguna empresa con el RNC de la prueba',
+        array_filter($s5bColumnas, static fn (string $columna): bool => !$s5bTiene($columna)) === [] && $s5bConRnc() === 0, $s5bConRnc());
+
+    // edicion es la de la tarea; cert_vence, la ultima de la 014, es un estado a medias (una migracion que quedo a la mitad): la comprobacion mira las cuatro.
+    foreach (['edicion', 'cert_vence'] as $s5bFalta) {
+        $s5bMaster->exec("ALTER TABLE tenants DROP COLUMN {$s5bFalta}");
+        $r = express_cli($s5bArgs);
+        $s5bSalidas[] = $r['salida'];
+        wa_chk("(sin tenants.{$s5bFalta}) --edicion=express --tipos-ecf=45 sale con 1, nombra db/master_migrations/014_tenants_edicion.sql y la columna que falta ({$s5bFalta}), no crea ninguna empresa y no deja avisos de PHP",
+            !$s5bTiene($s5bFalta) && $r['codigo'] === 1 && str_contains($r['salida'], 'db/master_migrations/014_tenants_edicion.sql')
+            && str_contains($r['salida'], "Faltan en tenants: {$s5bFalta}.") && $s5bConRnc() === 0 && !str_contains($r['salida'], 'Tenant creado OK')
+            && preg_match('/Fatal error|Stack trace|Warning|Notice|Deprecated/', $r['salida']) !== 1, $s5bVer($r));
+        $s5bRestaurar();
+    }
+
+    // El control: con las cuatro columnas la misma orden ya no dice nada de la 014 (la comprobacion no se dispara de mas). Se le agrega un --grupo que no
+    // existe para que termine limpio, con un mensaje, justo despues de esa comprobacion y sin tocar la base de la empresa.
+    $r = express_cli(array_merge($s5bArgs, ['--grupo=2147483647']));
+    $s5bSalidas[] = $r['salida'];
+    wa_chk('(control) con las cuatro columnas de la 014 la misma orden ya no menciona la migracion: pasa esa comprobacion y se detiene en el grupo que no existe (sale con 1), sin crear ninguna empresa',
+        $r['codigo'] === 1 && !str_contains($r['salida'], '014_tenants_edicion.sql') && str_contains($r['salida'], 'no existe un tenant activo con ese id') && $s5bConRnc() === 0, $s5bVer($r));
+} finally {
+    $s5bRestaurar();   // las cuatro columnas, pase lo que pase (express_scratch_preparar() la repone tambien al terminar el proceso)
+}
+$s5bDefiniciones = [];
+foreach ($s5bMaster->query(
+    "SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('" . implode("','", $s5bColumnas) . "')"
+)->fetchAll() as $s5bF) {
+    $s5bDefiniciones[$s5bF['COLUMN_NAME']] = [$s5bF['COLUMN_TYPE'], $s5bF['IS_NULLABLE'], $s5bF['COLUMN_DEFAULT']];
+}
+ksort($s5bDefiniciones);
+$s5bEstado = $s5bMaster->query('SELECT id, edicion FROM tenants WHERE id IN (' . (int) $ctx['tenantA'] . ', ' . (int) $ctx['tenantB'] . ') ORDER BY id')->fetchAll();
+wa_chk('al terminar tenants tiene otra vez las cuatro columnas de la 014 con su definicion (edicion ENUM NOT NULL DEFAULT completa, cert_vence DATE NULL), A y B siguen completas y no hay ninguna empresa con el RNC de la prueba',
+    $s5bDefiniciones === [
+        'cert_vence' => ['date', 'YES', null],
+        'edicion' => ["enum('completa','express')", 'NO', 'completa'],
+        'modulos_habilitados' => ['text', 'YES', null],
+        'tipos_ecf_habilitados' => ['varchar(64)', 'YES', null],
+    ] && count($s5bEstado) === 2 && array_unique(array_column($s5bEstado, 'edicion')) === ['completa'] && $s5bConRnc() === 0, [$s5bDefiniciones, $s5bEstado]);
+$s5bFugas = [];
+foreach ($s5bSalidas as $s5bI => $s5bSalida) {
+    foreach ($s5bProhibidos as $s5bQue => $s5bValor) {
+        if ($s5bValor !== '' && str_contains($s5bSalida, $s5bValor)) {
+            $s5bFugas[] = "corrida {$s5bI}: {$s5bQue}";
+        }
+    }
+}
+wa_chk('ninguna de las corridas de create_tenant.php imprimio una credencial (la clave ni el usuario de la base, el servidor ni los secretos derivados)',
+    count($s5bSalidas) === 3 && $s5bFugas === [], $s5bFugas);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
