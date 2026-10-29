@@ -330,6 +330,533 @@ try {
 }
 
 // ---------------------------------------------------------------------------
+// 3) evaluarRuta, guardaRuta y responderError (lista de rutas, por defecto denegado)
+// ---------------------------------------------------------------------------
+echo "\n== 3) evaluarRuta, guardaRuta y responderError ==\n";
+
+/** Una fila de master.tenants de una empresa Express; $o pisa los campos que cada caso cambia. */
+$s3Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null,
+];
+$s3Preset = TenantEntitlements::config()['modulos'];
+/** evaluarRuta de una peticion escrita 'METODO uri' (por defecto, el administrador de la empresa Express base). */
+$s3Ruta = static function (string $peticion, ?string $rol = 'admin', ?array $tenant = null) use ($s3Fila): array {
+    [$metodo, $uri] = explode(' ', $peticion, 2);
+    return TenantEntitlements::evaluarRuta($metodo, $uri, $rol, $tenant ?? $s3Fila());
+};
+
+$s3Permitidas = [   // -> 200
+    'GET /api/facturas', 'GET /api/facturas?lean=1&archivadas=0&estado=accion&client_id=5', 'GET /api/facturas/stats?stats=light',
+    'GET /api/facturas/avisos', 'GET /api/facturas/modificables?e_ncf=E450000000001', 'GET /api/facturas/12/pdf?format=datos&formato=pos',
+    'GET /api/facturas/12/xml', 'GET /api/facturas/12/estado', 'POST /api/facturas', 'POST /api/facturas/12/reenviar',
+    'GET /api/clients?orden=uso', 'POST /api/clients', 'PUT /api/clients', 'GET /api/clients/7', 'GET /api/clients?query=Constr...',
+    'GET /api/products?activo=1&facturable=1', 'POST /api/products', 'PUT /api/products/3',
+    'GET /api/rnc/consulta?rnc=131000001', 'GET /api/unidades-medida', 'GET /api/emisor', 'GET /api/ncf/rangos', 'POST /api/ncf/rangos',
+    'GET /api/users', 'POST /api/users', 'PUT /api/users/5', 'DELETE /api/users/5',
+    'GET /api/auth/me', 'POST /api/auth/signout', 'GET //api/facturas',
+];
+$s3Denegadas = [   // -> 403 EDICION_NO_INCLUYE
+    'GET /api/gastos', 'GET /api/inventario/movimientos', 'GET /api/facturacion-electronica/estado', 'GET /api/cotizaciones', 'GET /api/conduces',
+    'GET /api/pos-admin/cajas', 'GET /api/pos/estado', 'GET /api/reportes/607', 'GET /api/roles', 'PUT /api/ncf', 'GET /api/ncf/sequence',
+    'GET /api/ecf', 'GET /api/audit-logs', 'GET /api/branding', 'GET /api/categories', 'GET /api/integracion/ecf',
+    'POST /api/auth/pos-handoff', 'POST /api/auth/pos-handoff/canje', 'POST /api/auth/login',
+    'POST /api/facturas/preview', 'PUT /api/facturas', 'DELETE /api/facturas', 'DELETE /api/clients',
+    'GET /api/products/imagen', 'POST /api/products/imagen', 'GET /api/facturas/12/pdf/extra', 'GET /api/facturas/stats/x',
+    'GET /api/facturas/12/estado%0A', 'GET /api/facturas/', 'GET /api/auth/me/', 'GET /api/FACTURAS', 'GET /api/facturas/x/api/gastos',
+    'GET //api/gastos', 'HEAD /api/facturas', 'GET /api/facturas/12/reenviar',
+];
+$s3Invalidas = [   // -> 400 SOLICITUD_INVALIDA
+    'GET /api/facturas/../gastos', 'GET /api/facturas/%2e%2e/gastos', 'GET /api/facturas/%2E%2e/gastos', 'GET /api/facturas/.%2e/gastos',
+    'GET /api/facturas?x=/api/ncf/sequence', 'GET /api/clients?query=/api/gastos',
+];
+foreach ($s3Permitidas as $s3P) {
+    $s3R = $s3Ruta($s3P);
+    wa_chk("permite {$s3P}", $s3R['permitido'] === true && $s3R['http'] === 200 && $s3R['codigo'] === null, $s3R);
+}
+foreach ($s3Denegadas as $s3P) {
+    $s3R = $s3Ruta($s3P);
+    wa_chk("niega con 403 EDICION_NO_INCLUYE {$s3P}",
+        $s3R['permitido'] === false && $s3R['http'] === 403 && $s3R['codigo'] === 'EDICION_NO_INCLUYE', $s3R);
+}
+foreach ($s3Invalidas as $s3P) {
+    $s3R = $s3Ruta($s3P);
+    wa_chk("rechaza con 400 SOLICITUD_INVALIDA {$s3P}",
+        $s3R['permitido'] === false && $s3R['http'] === 400 && $s3R['codigo'] === 'SOLICITUD_INVALIDA', $s3R);
+}
+
+// Mas alla de las tres listas del plan. Casi-coincidencias que tienen que seguir negadas (cada path es exacto: ni un id que
+// no es numero, ni una barra de mas, ni otro metodo) y la ruta sacada como la saca el Router (src/Router.php): despues del
+// PRIMER '/api/', sin las barras iniciales del resto, y desde el principio del path cuando no hay '/api/'.
+$s3Cercanas = [   // -> 403 EDICION_NO_INCLUYE
+    'GET /api/facturas/12', 'GET /api/facturas/preview', 'GET /api/facturas/12/pdf/', 'GET /api/facturas/12/PDF', 'POST /api/facturas/12',
+    'POST /api/facturas/12/reenviar/x', 'GET /api/facturas//stats',
+    'GET /api/clients/abc', 'GET /api/clients/-1', 'GET /api/clients/7.5', 'GET /api/clients/7/x', 'POST /api/clients/7/x',
+    'GET /api/products/3/imagen', 'PUT /api/products/abc',
+    'GET /api/rnc', 'GET /api/rnc/consulta/x', 'POST /api/rnc/consulta', 'GET /api/unidades-medida/1', 'GET /api/emisor/x', 'PUT /api/emisor',
+    'GET /api/auth/signout', 'POST /api/auth/me', 'POST /api/auth/signout/x',
+    'PUT /api/ncf/rangos', 'DELETE /api/ncf/rangos', 'GET /api/ncf/rangos/1',
+    'GET /api/users/abc', 'GET /api/users/5/x', 'PATCH /api/users/5',
+    'GET /api/gastos/x/api/facturas', 'GET /api//gastos', 'GET /gratex/api/gastos', 'GET /gastos',
+];
+$s3DelRouter = [   // -> 200: el Router los manda a la ruta permitida
+    'GET /api//facturas', 'GET /gratex/api/facturas', 'GET /facturas',
+];
+foreach ($s3Cercanas as $s3P) {
+    $s3R = $s3Ruta($s3P);
+    wa_chk("niega con 403 EDICION_NO_INCLUYE (casi coincide) {$s3P}",
+        $s3R['permitido'] === false && $s3R['http'] === 403 && $s3R['codigo'] === 'EDICION_NO_INCLUYE', $s3R);
+}
+foreach ($s3DelRouter as $s3P) {
+    $s3R = $s3Ruta($s3P);
+    wa_chk("permite {$s3P} (el Router lo manda a la ruta permitida)",
+        $s3R['permitido'] === true && $s3R['http'] === 200 && $s3R['codigo'] === null, $s3R);
+}
+$s3Todas = array_merge($s3Permitidas, $s3Denegadas, $s3Invalidas, $s3Cercanas, $s3DelRouter);
+
+// evaluarRuta es pura: recorrer todas las listas con una empresa Express no imprime nada ni escribe en el log.
+ob_start();
+[, $s3Error, $s3Log] = wa_con_log(function () use ($s3Todas, $s3Ruta): void {
+    foreach ($s3Todas as $s3P) {
+        $s3Ruta($s3P);
+    }
+});
+$s3Salida = (string) ob_get_clean();
+wa_chk('evaluarRuta es pura: recorrer todas las listas con una empresa Express no imprime nada ni escribe en el log',
+    $s3Error === null && $s3Salida === '' && $s3Log === '', [$s3Error?->getMessage(), $s3Salida, $s3Log]);
+
+// --- el veredicto: su forma, el modulo, el metodo en minusculas, la URI que parse_url no puede leer ----------------------
+$s3R = $s3Ruta('GET /api/facturas');
+wa_chk('evaluarRuta devuelve exactamente permitido, http, codigo y modulo, en ese orden',
+    array_keys($s3R) === ['permitido', 'http', 'codigo', 'modulo'], $s3R);
+$s3Modulos = [];
+foreach ([
+    // [peticion, rol, cambios de la fila, modulo esperado]
+    ['GET /api/facturas', 'admin', [], 'facturacion'],
+    ['GET /api/unidades-medida', 'admin', [], 'facturacion'],                      // dos modulos: el primero
+    ['GET /api/auth/me', 'admin', [], null],                                       // la fila no pide modulo
+    ['GET /api/gastos', 'admin', [], null],                                        // ninguna fila coincide
+    ['GET /api/users', 'admin', [], 'usuarios'],
+    ['POST /api/ncf/rangos', 'user', [], 'configuracion'],                         // negada por el rol
+    ['GET /api/clients', 'admin', ['modulos_habilitados' => 'usuarios'], 'clientes'], // negada por el modulo
+] as [$s3P, $s3Rol, $s3Cambios, $s3Esperado]) {
+    $s3Obtenido = $s3Ruta($s3P, $s3Rol, $s3Fila($s3Cambios))['modulo'];
+    if ($s3Obtenido !== $s3Esperado) {
+        $s3Modulos[$s3P] = $s3Obtenido;
+    }
+}
+wa_chk("evaluarRuta: 'modulo' es el primer modulo de la fila que coincide, o null", $s3Modulos === [], $s3Modulos);
+$s3R = TenantEntitlements::evaluarRuta('get', '/api/facturas', 'admin', $s3Fila());
+wa_chk('el metodo se compara en mayusculas: get lleva a la fila de GET', $s3R['permitido'] === true && $s3R['http'] === 200, $s3R);
+$s3R = $s3Ruta('GET http:///x');
+wa_chk('una URI que parse_url no puede leer es 400 SOLICITUD_INVALIDA',
+    $s3R['permitido'] === false && $s3R['http'] === 400 && $s3R['codigo'] === 'SOLICITUD_INVALIDA', $s3R);
+
+// --- null = la empresa resuelta (TenantResolver::current()) ------------------------------------------------------------
+$s3Resuelta = static function (?array $tenant): void {
+    (new ReflectionProperty(TenantResolver::class, 'current'))->setValue(null, $tenant);
+};
+$s3Resuelta(null);
+$s3SinEmpresa = TenantEntitlements::evaluarRuta('GET', '/api/gastos', 'admin');
+$s3Resuelta($s3Fila());
+try {
+    $s3ConEmpresa = [
+        TenantEntitlements::evaluarRuta('GET', '/api/gastos', 'admin'),
+        TenantEntitlements::evaluarRuta('GET', '/api/facturas', 'admin'),
+    ];
+} finally {
+    $s3Resuelta(null);   // no dejar una empresa resuelta a las secciones que siguen
+}
+wa_chk('sin empresa resuelta, evaluarRuta deja pasar (200); con una Express resuelta aplica su lista',
+    $s3SinEmpresa['permitido'] === true && $s3SinEmpresa['http'] === 200
+    && $s3ConEmpresa[0]['http'] === 403 && $s3ConEmpresa[0]['codigo'] === 'EDICION_NO_INCLUYE' && $s3ConEmpresa[1]['permitido'] === true,
+    [$s3SinEmpresa, $s3ConEmpresa]);
+
+// --- modulos habilitados: el modulo lo da la empresa, no el rol (tambien niega a un administrador con '*') ---------------
+$s3Angosto = $s3Fila(['modulos_habilitados' => 'facturacion,configuracion']);
+$s3Fallan = array_values(array_filter(
+    ['GET /api/clients', 'POST /api/clients', 'GET /api/products', 'GET /api/rnc/consulta', 'GET /api/users'],
+    static fn (string $p): bool => ($s3R = $s3Ruta($p, 'admin', $s3Angosto))['http'] !== 403 || $s3R['codigo'] !== 'EDICION_NO_INCLUYE'
+));
+wa_chk('modulos_habilitados facturacion,configuracion: clients, products, rnc y users dan 403 EDICION_NO_INCLUYE aun para un administrador',
+    $s3Fallan === [], $s3Fallan);
+$s3Fallan = array_values(array_filter(
+    ['GET /api/facturas', 'GET /api/emisor', 'GET /api/ncf/rangos', 'GET /api/unidades-medida', 'GET /api/auth/me'],
+    static fn (string $p): bool => ($s3R = $s3Ruta($p, 'admin', $s3Angosto))['permitido'] !== true || $s3R['http'] !== 200
+));
+wa_chk('modulos_habilitados facturacion,configuracion: facturas, emisor, ncf/rangos, unidades-medida y auth/me siguen en 200',
+    $s3Fallan === [], $s3Fallan);
+$s3R = $s3Ruta('GET /api/ncf/rangos', 'admin', $s3Fila(['modulos_habilitados' => 'facturacion']));
+wa_chk('modulos_habilitados facturacion: GET /api/ncf/rangos da 403 EDICION_NO_INCLUYE',
+    $s3R['http'] === 403 && $s3R['codigo'] === 'EDICION_NO_INCLUYE', $s3R);
+
+// --- RF1: el Facturador en una ruta de administrador: 403 sin codigo (nunca EDICION_NO_INCLUYE) --------------------------
+$s3Admin = ['POST /api/ncf/rangos', 'GET /api/users', 'PUT /api/users/5'];
+$s3Fallan = array_values(array_filter(
+    $s3Admin,
+    static fn (string $p): bool => ($s3R = $s3Ruta($p, 'user'))['permitido'] !== false || $s3R['http'] !== 403 || $s3R['codigo'] !== null
+));
+wa_chk('RF1: el rol user en POST /api/ncf/rangos, GET /api/users y PUT /api/users/5 recibe 403 con codigo null', $s3Fallan === [], $s3Fallan);
+$s3Fallan = array_values(array_filter(
+    $s3Admin,
+    static fn (string $p): bool => ($s3R = $s3Ruta($p, null))['permitido'] !== false || $s3R['http'] !== 403 || $s3R['codigo'] !== null
+));
+wa_chk('RF1: sin rol (null) en esas tres rutas recibe 403 con codigo null', $s3Fallan === [], $s3Fallan);
+$s3Fallan = [];
+foreach (['ADMIN', ' admin '] as $s3Rol) {
+    foreach ($s3Admin as $s3P) {
+        $s3R = $s3Ruta($s3P, $s3Rol);
+        if ($s3R['permitido'] !== true || $s3R['http'] !== 200) {
+            $s3Fallan["{$s3Rol} {$s3P}"] = $s3R;
+        }
+    }
+}
+wa_chk("RF1: el nombre del rol admin se compara sin mayusculas ni espacios ('ADMIN', ' admin ' pasan con 200)", $s3Fallan === [], $s3Fallan);
+
+// --- fila por fila, con la tabla del plan escrita a mano (no se deriva de la config que se prueba) -------------------------
+// Para cada peticion: los modulos que la dejan pasar (null = la sesion, sin modulo) y si es de administrador.
+$s3Tabla = [
+    'GET /api/facturas' => [['facturacion'], false], 'POST /api/facturas' => [['facturacion'], false],
+    'GET /api/facturas/12/estado' => [['facturacion'], false], 'POST /api/facturas/12/reenviar' => [['facturacion'], false],
+    'GET /api/clients' => [['clientes'], false], 'POST /api/clients' => [['clientes'], false], 'PUT /api/clients/7' => [['clientes'], false],
+    'GET /api/products' => [['productos'], false], 'POST /api/products' => [['productos'], false], 'PUT /api/products/3' => [['productos'], false],
+    'GET /api/rnc/consulta' => [['clientes'], false],
+    'GET /api/unidades-medida' => [['facturacion', 'productos'], false],
+    'GET /api/emisor' => [['facturacion', 'configuracion'], false],
+    'GET /api/ncf/rangos' => [['configuracion'], false], 'POST /api/ncf/rangos' => [['configuracion'], true],
+    'GET /api/users' => [['usuarios'], true], 'POST /api/users' => [['usuarios'], true],
+    'PUT /api/users/5' => [['usuarios'], true], 'DELETE /api/users/5' => [['usuarios'], true],
+    'GET /api/auth/me' => [null, false], 'POST /api/auth/signout' => [null, false],
+];
+$s3Desacuerdos = [];
+foreach ($s3Tabla as $s3P => [$s3Quienes]) {
+    foreach ([...$s3Preset, 'ninguno'] as $s3M) {
+        // Un solo modulo habilitado; 'ninguno' es un valor que no esta en el preset (modulosEfectivos queda vacio).
+        $s3R = $s3Ruta($s3P, 'admin', $s3Fila(['modulos_habilitados' => $s3M === 'ninguno' ? 'foo' : $s3M]));
+        $s3Debe = $s3Quienes === null || in_array($s3M, $s3Quienes, true);
+        if ($s3R['permitido'] !== $s3Debe) {
+            $s3Desacuerdos[] = "{$s3P} con solo {$s3M}: " . ($s3R['permitido'] ? 'pasa' : 'se niega');
+        }
+    }
+}
+wa_chk('cada fila con un solo modulo habilitado pasa exactamente con los modulos de la tabla del plan (sin ninguno, solo la sesion)',
+    $s3Desacuerdos === [], $s3Desacuerdos);
+$s3Desacuerdos = [];
+foreach ($s3Tabla as $s3P => [, $s3EsAdmin]) {
+    $s3R = $s3Ruta($s3P, 'user');
+    if ($s3R['permitido'] === $s3EsAdmin || ($s3EsAdmin && $s3R['codigo'] !== null)) {
+        $s3Desacuerdos[] = "{$s3P}: " . json_encode($s3R);
+    }
+}
+wa_chk('el rol user pasa en toda fila que no es de administrador (tabla del plan) y recibe 403 sin codigo en las demas',
+    $s3Desacuerdos === [], $s3Desacuerdos);
+// El modulo se mira antes que el rol: en una ruta de administrador de un modulo que la empresa no tiene, el Facturador
+// recibe la negativa de la edicion (la ruta no existe para esa empresa), no la del rol.
+$s3R = $s3Ruta('GET /api/users', 'user', $s3Fila(['modulos_habilitados' => 'facturacion']));
+wa_chk('el modulo se mira antes que el rol: un Facturador en GET /api/users de una empresa sin el modulo usuarios recibe EDICION_NO_INCLUYE',
+    $s3R['permitido'] === false && $s3R['http'] === 403 && $s3R['codigo'] === 'EDICION_NO_INCLUYE', $s3R);
+
+// --- la lista contra los permisos (anexo IP2): lo que el Facturador abre por la lista, el RBAC se lo tiene que dar --------
+// El gate resuelve el modulo de cada ruta con config/permissions.php. Toda fila que no es de administrador tiene que
+// caer en un permiso que el rol user de Express (config 'rol_user') tiene; si no, el Facturador entraria por la lista y
+// el RBAC lo echaria con 403. 'public' y 'authenticated' no piden modulo. La unica excepcion conocida: el Facturador
+// preset no tiene 'ncf', asi que con enforcing() forzado recibe el 403 de RF1 en GET /api/ncf/rangos. Plan 05 o el dueno
+// decide si el Facturador necesita esa lectura (entonces rol_user gana 'ncf') o si la fila pasa a ser de administrador;
+// en cualquiera de los dos casos hay que sacarla de esta lista, y esta prueba falla hasta que se haga.
+require_once __DIR__ . '/../src/PermissionGate.php';
+$s3Rutas = TenantEntitlements::config()['rutas'];
+$s3Permisos = (static fn (): array => require __DIR__ . '/../config/permissions.php')();
+$s3Resolver = new ReflectionMethod('PermissionGate', 'resolveRequirement');
+$s3Conocidas = ['GET ncf/rangos'];
+$s3Inconsistentes = [];
+foreach ($s3Rutas as $s3F) {
+    // '#^rangos$#D' -> 'rangos': el identificador de la fila en la lista de excepciones es "METODO ruta/path".
+    $s3Literal = (string) preg_replace('/^#\^(.*)\$#D$/', '$1', $s3F['path']);
+    $s3Id = $s3F['method'] . ' ' . $s3F['route'] . ($s3Literal !== '' ? '/' . $s3Literal : '');
+    $s3Requerido = $s3Resolver->invoke(null, $s3Permisos['routes'], $s3F['route'], $s3F['method'], '');
+    if ($s3Requerido === null) {
+        $s3Inconsistentes[] = "{$s3Id} (la ruta no esta en config/permissions.php)";
+    } elseif (!in_array($s3Requerido, ['public', 'authenticated'], true) && !$s3F['admin']
+        && !PermissionGate::permMatches(TenantEntitlements::config()['rol_user'], $s3Requerido)) {
+        $s3Inconsistentes[] = $s3Id;
+    }
+}
+wa_chk('lista contra permisos: toda fila que no es de administrador cae en un permiso de rol_user, salvo la excepcion conocida GET ncf/rangos (y esa sigue siendo una)',
+    $s3Rutas !== [] && $s3Inconsistentes === $s3Conocidas, $s3Inconsistentes);
+
+// --- una empresa que no es Express pasa tal cual: la lista no la toca ------------------------------------------------------
+foreach ([
+    "edicion 'completa'" => ['edicion' => 'completa'],
+    "edicion 'Completa'" => ['edicion' => 'Completa'],
+    "edicion ' completa '" => ['edicion' => ' completa '],
+    "edicion ''" => ['edicion' => ''],
+    "edicion 'basico'" => ['edicion' => 'basico'],
+    "tipo 'integracion' con edicion 'express'" => ['tipo' => 'integracion'],
+] as $s3Desc => $s3Cambios) {
+    // Dentro de wa_con_log: las lineas de log de los valores de edicion desconocidos no deben llegar a stderr.
+    [$s3Fallan, $s3Error] = wa_con_log(function () use ($s3Todas, $s3Ruta, $s3Fila, $s3Cambios): array {
+        return array_values(array_filter(
+            $s3Todas,
+            static fn (string $p): bool => ($s3R = $s3Ruta($p, 'admin', $s3Fila($s3Cambios)))['permitido'] !== true || $s3R['http'] !== 200
+        ));
+    });
+    wa_chk("{$s3Desc}: cada URI de las listas (permitidas, negadas, invalidas, casi-coincidencias y del Router) pasa con 200",
+        $s3Error === null && $s3Fallan === [], $s3Error?->getMessage() ?? $s3Fallan);
+}
+
+// --- la lista misma: forma y consistencia ---------------------------------------------------------------------------------
+$s3Claves = ['admin', 'method', 'modulos', 'path', 'route'];
+$s3MalFormadas = [];
+$s3MalAncladas = [];
+$s3ModuloAjeno = [];
+$s3Vistas = [];
+$s3Repetidas = [];
+foreach ($s3Rutas as $s3I => $s3F) {
+    $s3Llaves = array_keys($s3F);
+    sort($s3Llaves);
+    if ($s3Llaves !== $s3Claves || !is_string($s3F['route']) || $s3F['route'] === '' || !is_string($s3F['path'])
+        || !in_array($s3F['method'], ['GET', 'POST', 'PUT', 'DELETE'], true) || !is_array($s3F['modulos']) || !is_bool($s3F['admin'])) {
+        $s3MalFormadas[] = $s3I;
+        continue;
+    }
+    // Compila (preg_match devuelve false si no) y esta anclada al principio y al final: '$' solo cuenta con la D, o '\z'.
+    if (@preg_match($s3F['path'], '') === false || !str_starts_with($s3F['path'], '#^')
+        || !(str_ends_with($s3F['path'], '$#D') || str_ends_with($s3F['path'], '\z#'))) {
+        $s3MalAncladas[] = $s3F['route'] . ' ' . $s3F['method'] . ' ' . $s3F['path'];
+    }
+    if (array_diff($s3F['modulos'], $s3Preset) !== []) {
+        $s3ModuloAjeno[] = $s3F['route'] . ' ' . $s3F['method'];
+    }
+    $s3Llave = $s3F['route'] . ' ' . $s3F['method'] . ' ' . $s3F['path'];
+    if (isset($s3Vistas[$s3Llave])) {
+        $s3Repetidas[] = $s3Llave;
+    }
+    $s3Vistas[$s3Llave] = true;
+}
+wa_chk('rutas: hay filas y cada una trae las cinco claves (route, method, path, modulos, admin) con su tipo',
+    $s3Rutas !== [] && $s3MalFormadas === [], $s3MalFormadas);
+wa_chk('rutas: cada path compila, empieza con #^ y termina en $#D o \z# (nada de $ sin D)', $s3Rutas !== [] && $s3MalAncladas === [], $s3MalAncladas);
+wa_chk('rutas: ninguna fila repite (route, method, path)', $s3Repetidas === [], $s3Repetidas);
+wa_chk('rutas: los modulos de cada fila existen en el preset de config(); un typo ahi negaria la ruta a todos', $s3ModuloAjeno === [], $s3ModuloAjeno);
+
+// --- procesos hijos: responderError y guardaRuta terminan la peticion con exit, asi que no se pueden probar aqui ------------
+$s3Clase = dirname(__DIR__) . '/src/TenantEntitlements.php';
+$s3Temporales = [];
+register_shutdown_function(static function () use (&$s3Temporales): void {
+    foreach ($s3Temporales as $s3Archivo) {
+        @unlink($s3Archivo);
+    }
+});
+/** Archivo temporal con $contenido; se borra al terminar el proceso, aunque la suite caiga a medias. */
+$s3Temp = static function (string $prefijo, string $contenido = '') use (&$s3Temporales): string {
+    $archivo = (string) tempnam(sys_get_temp_dir(), $prefijo);
+    $s3Temporales[] = $archivo;
+    file_put_contents($archivo, $contenido);
+    return $archivo;
+};
+
+// responderError: argv[1] = archivo donde deja el codigo HTTP que quedo puesto, argv[2] = codigo ('-' es vacio),
+// argv[3] = 'mal-utf8' para que $extra lleve un byte que no es UTF-8.
+$s3HijoResponder = $s3Temp('ent_resp_', str_replace('__CLASE__', var_export($s3Clase, true), <<<'PHP'
+<?php
+error_reporting(E_ALL);
+require_once __CLASE__;
+$lado = $argv[1];
+register_shutdown_function(static function () use ($lado): void {
+    file_put_contents($lado, (string) http_response_code());
+});
+TenantEntitlements::responderError(403, $argv[2] === '-' ? '' : $argv[2], 'm', $argv[3] === 'mal-utf8' ? ['x' => "a\xFFb"] : ['x' => 1]);
+echo 'NO';
+PHP));
+/** @return array{salida:string, http:string} lo que imprimio responderError y el codigo HTTP que dejo puesto */
+$s3Responder = static function (string $codigo, string $extra = 'normal') use ($s3Temp, $s3HijoResponder): array {
+    $lado = $s3Temp('ent_lado_');
+    $r = wa_correr([PHP_BINARY, $s3HijoResponder, $lado, $codigo === '' ? '-' : $codigo, $extra]);
+    return ['salida' => $r['salida'], 'http' => (string) file_get_contents($lado)];
+};
+$s3G = $s3Responder('EDICION_NO_INCLUYE');
+wa_chk('responderError: pone el codigo HTTP, imprime {status, error, codigo, ...extra} y corta (nunca llega al echo siguiente)',
+    $s3G === ['salida' => '{"status":false,"error":"m","codigo":"EDICION_NO_INCLUYE","x":1}', 'http' => '403'], $s3G);
+$s3G = $s3Responder('');
+wa_chk("responderError: con codigo '' no imprime la clave codigo",
+    $s3G === ['salida' => '{"status":false,"error":"m","x":1}', 'http' => '403'], $s3G);
+$s3G = $s3Responder('EDICION_NO_INCLUYE', 'mal-utf8');
+wa_chk('responderError: un byte que no es UTF-8 en $extra se sustituye y el cuerpo sale (nunca vacio)',
+    $s3G === ['salida' => json_encode(['status' => false, 'error' => 'm', 'codigo' => 'EDICION_NO_INCLUYE', 'x' => "a\xEF\xBF\xBDb"]), 'http' => '403'], $s3G);
+
+// guardaRuta: argv[1] = escenario en base64 (JSON: tenant, llamadas [{metodo, uri, rol, tenant?}], config?),
+// argv[2] = archivo de error_log, argv[3] = archivo donde deja {http, pasos, log, auditoria} al salir.
+// La bitacora va encendida, pero escribe en una conexion de mentira que anota los parametros de cada INSERT: ninguna de
+// estas pruebas toca una base de datos (la instancia de Database se fija antes de que nada la pida).
+$s3HijoGuarda = $s3Temp('ent_guarda_', str_replace('__CLASE__', var_export($s3Clase, true), <<<'PHP'
+<?php
+error_reporting(E_ALL);
+putenv('AUDIT_LOG_ENABLED=true');
+putenv('MULTI_TENANT_ENABLED=false');
+$escenario = json_decode((string) base64_decode($argv[1]), true);
+[$logArchivo, $ladoArchivo] = [$argv[2], $argv[3]];
+ini_set('error_log', $logArchivo);
+require_once __CLASE__;
+$auditoria = [];
+final class FalsaSentencia
+{
+    public function execute(array $params): bool
+    {
+        $GLOBALS['auditoria'][] = $params;
+        return true;
+    }
+}
+final class FalsaConexion
+{
+    public function prepare(string $sql): FalsaSentencia
+    {
+        return new FalsaSentencia();
+    }
+}
+$bd = (new ReflectionClass('Database'))->newInstanceWithoutConstructor();
+(new ReflectionProperty('Database', 'conexion'))->setValue($bd, new FalsaConexion());
+(new ReflectionProperty('Database', 'instance'))->setValue(null, $bd);
+$actual = new ReflectionProperty('TenantResolver', 'current');
+$actual->setValue(null, $escenario['tenant']);
+if (isset($escenario['config'])) {
+    (new ReflectionProperty('TenantEntitlements', 'config'))->setValue(null, $escenario['config']);
+}
+$pasos = 0;
+register_shutdown_function(static function () use (&$pasos, $logArchivo, $ladoArchivo): void {
+    file_put_contents($ladoArchivo, json_encode([
+        'http' => http_response_code(),
+        'pasos' => $pasos,
+        'log' => (string) @file_get_contents($logArchivo),
+        'auditoria' => $GLOBALS['auditoria'],
+    ]));
+});
+foreach ($escenario['llamadas'] as $llamada) {
+    if (array_key_exists('tenant', $llamada)) {
+        $actual->setValue(null, $llamada['tenant']);
+    }
+    $_SERVER['REQUEST_METHOD'] = $llamada['metodo'];
+    $_SERVER['REQUEST_URI'] = $llamada['uri'];
+    TenantEntitlements::guardaRuta($llamada['rol']);
+    $pasos++;
+}
+PHP));
+/**
+ * Corre las llamadas de $llamadas contra guardaRuta, una tras otra, en un proceso hijo con $tenant como empresa resuelta.
+ * Devuelve lo que el hijo imprimio, el codigo HTTP que dejo puesto (false si nadie lo puso), cuantas llamadas volvieron
+ * sin cortar, lo que se escribio al log y los parametros de cada fila de auditoria que se intento insertar.
+ *
+ * @return array{salida:string, http:int|false|null, pasos:int, log:string, auditoria:list<array<string,mixed>>}
+ */
+$s3Guarda = static function (array $tenant, array $llamadas, ?array $config = null) use ($s3Temp, $s3HijoGuarda): array {
+    $log = $s3Temp('ent_log_');
+    $lado = $s3Temp('ent_lado_');
+    $escenario = ['tenant' => $tenant, 'llamadas' => $llamadas] + ($config !== null ? ['config' => $config] : []);
+    $r = wa_correr([PHP_BINARY, $s3HijoGuarda, base64_encode((string) json_encode($escenario)), $log, $lado]);
+    $dejo = json_decode((string) file_get_contents($lado), true);
+    return [
+        'salida' => $r['salida'],
+        'http' => is_array($dejo) ? $dejo['http'] : null,
+        'pasos' => is_array($dejo) ? (int) $dejo['pasos'] : -1,
+        'log' => is_array($dejo) ? (string) $dejo['log'] : '',
+        'auditoria' => is_array($dejo) ? $dejo['auditoria'] : [],
+    ];
+};
+/**
+ * Lo esencial de las filas de auditoria de un hijo: cuantas, y de la primera el modulo, la accion, el exito, el motivo
+ * (error_message), el metodo y el endpoint que la bitacora tomo de la peticion, y el detalle (new_values) decodificado.
+ */
+$s3Auditado = static function (array $guarda): array {
+    $fila = $guarda['auditoria'][0] ?? [];
+    return [
+        count($guarda['auditoria']), $fila[':module'] ?? null, $fila[':action'] ?? null, $fila[':success'] ?? null,
+        $fila[':error_message'] ?? null, $fila[':http_method'] ?? null, $fila[':endpoint'] ?? null,
+        json_decode((string) ($fila[':new_values'] ?? ''), true),
+    ];
+};
+/** Una llamada del escenario: metodo, uri y rol; $tenant (opcional) cambia la empresa resuelta antes de llamar. */
+$s3Llamada = static fn (string $metodo, string $uri, ?string $rol, ?array $tenant = null): array
+    => ['metodo' => $metodo, 'uri' => $uri, 'rol' => $rol] + ($tenant !== null ? ['tenant' => $tenant] : []);
+/** El cuerpo JSON de una negativa del guarda, decodificado. */
+$s3Cuerpo = static fn (array $guarda): mixed => json_decode($guarda['salida'], true);
+
+$s3G = $s3Guarda($s3Fila(), [$s3Llamada('GET', '/api/facturas?lean=1', 'admin')]);
+wa_chk('guardaRuta: una ruta de la lista vuelve sin imprimir nada, sin tocar el codigo HTTP, sin escribir al log y sin auditar',
+    $s3G === ['salida' => '', 'http' => false, 'pasos' => 1, 'log' => '', 'auditoria' => []], $s3G);
+$s3G = $s3Guarda($s3Fila(), [$s3Llamada('GET', '/api/gastos', 'admin')]);
+wa_chk('guardaRuta: una ruta fuera de la lista contesta 403 con el codigo y el texto de EDICION_NO_INCLUYE y no vuelve',
+    $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+    && $s3G['http'] === 403 && $s3G['pasos'] === 0 && $s3G['log'] === '', $s3G);
+wa_chk('guardaRuta: esa negativa deja UNA fila de auditoria (modulo edicion, ACCESS_DENIED, sin exito) con el motivo y el detalle',
+    $s3Auditado($s3G) === [1, 'edicion', 'ACCESS_DENIED', 0, 'ruta fuera de la edicion', 'GET', '/api/gastos',
+        ['metodo' => 'GET', 'http' => 403, 'codigo' => 'EDICION_NO_INCLUYE', 'modulo' => null]], $s3Auditado($s3G));
+wa_chk('el texto de EDICION_NO_INCLUYE no termina en punto (un solo texto: la constante de la clase)',
+    TenantEntitlements::MSG_EDICION !== '' && !str_ends_with(TenantEntitlements::MSG_EDICION, '.'), TenantEntitlements::MSG_EDICION);
+wa_chk('los textos de la solicitud invalida y de la ruta de administrador son los del contrato (este ultimo, el mismo del gate de permisos)',
+    TenantEntitlements::MSG_SOLICITUD === 'La solicitud no es válida.'
+    && TenantEntitlements::MSG_SOLO_ADMIN === 'No tienes permiso para hacer esto. Pídeselo a un administrador.',
+    [TenantEntitlements::MSG_SOLICITUD, TenantEntitlements::MSG_SOLO_ADMIN]);
+$s3G = $s3Guarda($s3Fila(['modulos_habilitados' => 'usuarios']), [$s3Llamada('GET', '/api/clients?query=x', 'admin')]);
+wa_chk('guardaRuta: un modulo que la empresa no tiene contesta la misma negativa EDICION_NO_INCLUYE, y la auditoria dice cual',
+    $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+    && $s3G['http'] === 403 && $s3G['pasos'] === 0
+    && $s3Auditado($s3G) === [1, 'edicion', 'ACCESS_DENIED', 0, 'modulo no habilitado', 'GET', '/api/clients',
+        ['metodo' => 'GET', 'http' => 403, 'codigo' => 'EDICION_NO_INCLUYE', 'modulo' => 'clientes']], [$s3G, $s3Auditado($s3G)]);
+$s3G = $s3Guarda($s3Fila(), [$s3Llamada('POST', '/api/ncf/rangos', 'user')]);
+wa_chk('guardaRuta: una fila de administrador con un rol que no lo es contesta 403 con el texto de administrador y SIN la clave codigo',
+    $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN]
+    && $s3G['http'] === 403 && $s3G['pasos'] === 0
+    && $s3Auditado($s3G) === [1, 'edicion', 'ACCESS_DENIED', 0, 'ruta de administrador', 'POST', '/api/ncf/rangos',
+        ['metodo' => 'POST', 'http' => 403, 'codigo' => null, 'modulo' => 'configuracion']], [$s3G, $s3Auditado($s3G)]);
+$s3G = $s3Guarda($s3Fila(), [$s3Llamada('GET', '/api/facturas?x=/api/ncf/sequence', 'admin')]);
+wa_chk('guardaRuta: una solicitud invalida contesta 400 con SOLICITUD_INVALIDA y el texto de solicitud, y tambien se audita',
+    $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLICITUD, 'codigo' => 'SOLICITUD_INVALIDA']
+    && $s3G['http'] === 400 && $s3G['pasos'] === 0
+    && $s3Auditado($s3G) === [1, 'edicion', 'ACCESS_DENIED', 0, 'solicitud no valida', 'GET', '/api/facturas',
+        ['metodo' => 'GET', 'http' => 400, 'codigo' => 'SOLICITUD_INVALIDA', 'modulo' => null]], [$s3G, $s3Auditado($s3G)]);
+// Un fallo al evaluar (aqui, una fila de la lista con un path que no es texto: TypeError) es una negativa, nunca un 500.
+$s3Config = ['modulos' => $s3Preset, 'rutas' => [['route' => 'facturas', 'method' => 'GET', 'path' => [], 'modulos' => [], 'admin' => false]]];
+$s3G = $s3Guarda($s3Fila(), [$s3Llamada('GET', '/api/facturas', 'admin')], $s3Config);
+wa_chk('guardaRuta: si evaluarRuta lanza algo, niega con 403 EDICION_NO_INCLUYE (nunca un 500), deja UNA linea en el log y lo audita',
+    $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+    && $s3G['http'] === 403 && $s3G['pasos'] === 0
+    && substr_count($s3G['log'], "\n") === 1 && str_contains($s3G['log'], 'guardaRuta')
+    && $s3Auditado($s3G) === [1, 'edicion', 'ACCESS_DENIED', 0, 'fallo al evaluar la ruta', 'GET', '/api/facturas',
+        ['metodo' => 'GET', 'http' => 403, 'codigo' => 'EDICION_NO_INCLUYE', 'modulo' => null]], [$s3G, $s3Auditado($s3G)]);
+$s3G = $s3Guarda($s3Fila(['edicion' => 'completa']), [$s3Llamada('GET', '/api/gastos', 'user')]);
+wa_chk('guardaRuta: una empresa completa pasa en cualquier ruta (identidad), sin auditar',
+    $s3G === ['salida' => '', 'http' => false, 'pasos' => 1, 'log' => '', 'auditoria' => []], $s3G);
+
+// Memoria por peticion (RF5): la decision de permitir se recuerda por metodo, URI, empresa y rol. La misma llamada repetida
+// sale por la memoria aunque la fila de la empresa ya no la dejaria pasar (la peticion siguiente lee la fila nueva en un
+// proceso nuevo); cualquier dato distinto se evalua de nuevo, y solo se recuerda lo permitido.
+$s3SoloUsuarios = $s3Fila(['modulos_habilitados' => 'usuarios']);
+$s3G = $s3Guarda($s3Fila(), [
+    $s3Llamada('GET', '/api/facturas', 'admin'),
+    $s3Llamada('GET', '/api/facturas', 'admin', $s3SoloUsuarios),   // misma peticion, fila angostada: sale por la memoria
+    $s3Llamada('GET', '/api/clients', 'admin'),                     // otra URI, ya sin clientes: se evalua y se niega
+]);
+wa_chk('guardaRuta: la misma peticion repetida sale por la memoria aunque la fila se angoste; otra URI se evalua de nuevo',
+    $s3G['pasos'] === 2 && $s3G['http'] === 403 && ($s3Cuerpo($s3G)['codigo'] ?? null) === 'EDICION_NO_INCLUYE', $s3G);
+$s3G = $s3Guarda($s3Fila(), [
+    $s3Llamada('POST', '/api/ncf/rangos', 'admin'),
+    $s3Llamada('POST', '/api/ncf/rangos', 'user'),                  // mismo metodo, URI y empresa; otro rol
+]);
+wa_chk('guardaRuta: el rol es parte de la clave de la memoria (lo que paso el administrador no pasa al Facturador)',
+    $s3G['pasos'] === 1 && $s3G['http'] === 403 && $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN], $s3G);
+$s3G = $s3Guarda($s3Fila(), [
+    $s3Llamada('GET', '/api/facturas', 'admin'),
+    $s3Llamada('GET', '/api/facturas', 'admin', $s3Fila(['id' => 13, 'modulos_habilitados' => 'usuarios'])),   // misma peticion y rol; otra empresa
+]);
+wa_chk('guardaRuta: la empresa es parte de la clave de la memoria (lo que paso una empresa no pasa a otra)',
+    $s3G['pasos'] === 1 && $s3G['http'] === 403 && ($s3Cuerpo($s3G)['codigo'] ?? null) === 'EDICION_NO_INCLUYE', $s3G);
+$s3G = $s3Guarda($s3Fila(), [
+    $s3Llamada('GET', '/api/ncf/rangos', 'user'),
+    $s3Llamada('POST', '/api/ncf/rangos', 'user'),                  // misma URI, empresa y rol; otro metodo
+]);
+wa_chk('guardaRuta: el metodo es parte de la clave de la memoria (el GET permitido no permite el POST)',
+    $s3G['pasos'] === 1 && $s3G['http'] === 403 && $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN], $s3G);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

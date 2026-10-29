@@ -39,9 +39,54 @@ return [
         'configuracion' => 'ncf',
     ],
 
-    // Lista de rutas de la API que una empresa Express puede llamar: lo que no aparezca se deniega. Todavia vacia; la
-    // llena la evaluacion de rutas de TenantEntitlements.
-    'rutas' => [],
+    // Lista de rutas de la API que una empresa Express puede llamar: lo que no aparezca aqui se deniega (por defecto,
+    // denegado: una ruta nueva de la API no llega a Express hasta que alguien la agregue a esta lista). Una fila por
+    // ruta y metodo; decide la primera que coincide con los tres primeros campos:
+    //   route    primer segmento de la URL despues de /api/ ('facturas'), exacto y con sus mayusculas, como lo lee el Router.
+    //   method   GET, POST, PUT o DELETE, en mayusculas.
+    //   path     expresion regular (delimitador #) sobre el resto de la URL, sin la ruta ni la consulta: '' para
+    //            /api/facturas y '12/pdf' para /api/facturas/12/pdf. Siempre anclada con ^...$#D: la D evita que $
+    //            acepte un salto de linea al final.
+    //   modulos  al menos uno tiene que estar entre los modulos efectivos de la empresa; vacio = siempre (la sesion).
+    //   admin    true: ademas el rol del usuario tiene que llamarse 'admin' (otro rol recibe 403 sin codigo).
+    // El modulo lo da la empresa, no el rol: un administrador con '*' tampoco pasa por una fila cuyo modulo la empresa no
+    // tiene. El login y el canje del POS son publicos (la sesion no se valida para ellos) y por eso no estan aqui.
+    // La evaluacion de una URL contra esta lista es TenantEntitlements::evaluarRuta.
+    'rutas' => [
+        // Sesion: quien soy y cerrar sesion. Sin modulo: toda empresa Express las necesita.
+        ['route' => 'auth', 'method' => 'GET',  'path' => '#^me$#D',      'modulos' => [], 'admin' => false],
+        ['route' => 'auth', 'method' => 'POST', 'path' => '#^signout$#D', 'modulos' => [], 'admin' => false],
+
+        // Facturas: listado, estadisticas, avisos, las que se pueden modificar, y pdf, xml y estado de una; emitir y
+        // reenviar. Sin preview, sin PUT ni DELETE.
+        ['route' => 'facturas', 'method' => 'GET',  'path' => '#^(|stats|avisos|modificables|\d+/(pdf|xml|estado))$#D', 'modulos' => ['facturacion'], 'admin' => false],
+        ['route' => 'facturas', 'method' => 'POST', 'path' => '#^(|\d+/reenviar)$#D', 'modulos' => ['facturacion'], 'admin' => false],
+
+        // Clientes y productos: leer, crear y editar (la raiz o un id). Sin DELETE y, en productos, sin 'imagen'.
+        ['route' => 'clients', 'method' => 'GET',  'path' => '#^(|\d+)$#D', 'modulos' => ['clientes'], 'admin' => false],
+        ['route' => 'clients', 'method' => 'POST', 'path' => '#^(|\d+)$#D', 'modulos' => ['clientes'], 'admin' => false],
+        ['route' => 'clients', 'method' => 'PUT',  'path' => '#^(|\d+)$#D', 'modulos' => ['clientes'], 'admin' => false],
+        ['route' => 'products', 'method' => 'GET',  'path' => '#^(|\d+)$#D', 'modulos' => ['productos'], 'admin' => false],
+        ['route' => 'products', 'method' => 'POST', 'path' => '#^(|\d+)$#D', 'modulos' => ['productos'], 'admin' => false],
+        ['route' => 'products', 'method' => 'PUT',  'path' => '#^(|\d+)$#D', 'modulos' => ['productos'], 'admin' => false],
+
+        // Catalogos de solo lectura que leen las pantallas de facturar, clientes y productos.
+        ['route' => 'rnc',             'method' => 'GET', 'path' => '#^consulta$#D', 'modulos' => ['clientes'], 'admin' => false],
+        ['route' => 'unidades-medida', 'method' => 'GET', 'path' => '#^$#D', 'modulos' => ['facturacion', 'productos'], 'admin' => false],
+
+        // Datos del emisor (solo lectura; trae el bloque informativo del certificado).
+        ['route' => 'emisor', 'method' => 'GET', 'path' => '#^$#D', 'modulos' => ['facturacion', 'configuracion'], 'admin' => false],
+
+        // Numeracion: solo los rangos (no la secuencia heredada de PUT /api/ncf). Registrar un rango es del administrador.
+        ['route' => 'ncf', 'method' => 'GET',  'path' => '#^rangos$#D', 'modulos' => ['configuracion'], 'admin' => false],
+        ['route' => 'ncf', 'method' => 'POST', 'path' => '#^rangos$#D', 'modulos' => ['configuracion'], 'admin' => true],
+
+        // Usuarios de la empresa: todo es del administrador.
+        ['route' => 'users', 'method' => 'GET',    'path' => '#^(|\d+)$#D', 'modulos' => ['usuarios'], 'admin' => true],
+        ['route' => 'users', 'method' => 'POST',   'path' => '#^(|\d+)$#D', 'modulos' => ['usuarios'], 'admin' => true],
+        ['route' => 'users', 'method' => 'PUT',    'path' => '#^(|\d+)$#D', 'modulos' => ['usuarios'], 'admin' => true],
+        ['route' => 'users', 'method' => 'DELETE', 'path' => '#^(|\d+)$#D', 'modulos' => ['usuarios'], 'admin' => true],
+    ],
 
     // Permisos del rol de sistema 'user' (el Facturador) en una empresa Express: vender, ver y crear clientes y
     // productos y leer los catalogos compartidos. Nunca 'users' ni 'ncf': los usuarios y la numeracion son de

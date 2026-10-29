@@ -6,8 +6,8 @@ require_once(__DIR__ . '/TenantResolver.php');
  *
  * master.tenants.edicion (migracion 014) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
  * resuelve, para una empresa Express, lo que su fila le da: los modulos (el preset de config/editions.php angostado por
- * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen y el bloque que se le
- * entrega al cliente al iniciar sesion.
+ * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen, el bloque que se le
+ * entrega al cliente al iniciar sesion y que rutas de la API puede llamar (la guarda de rutas).
  *
  * Reglas del archivo:
  *   - Todo es estatico y no hay namespace. Incluirlo no imprime nada: se carga en medio de una peticion que contesta
@@ -17,10 +17,33 @@ require_once(__DIR__ . '/TenantResolver.php');
  *   - Las funciones de modulos, tipos, permisos y bloque son funciones PURAS de la fila: no preguntan la edicion (eso lo
  *     hace quien las llama, con esRestringido) y un $tenant null significa la empresa resuelta
  *     (TenantResolver::current()).
+ *   - evaluarRuta tambien es pura (no imprime, no abre conexion y no corta), pero si pregunta la edicion: una empresa
+ *     que no es Express pasa tal cual. Las que contestan y cortan la peticion con exit son guardaRuta y responderError.
  *   - Un token mal escrito en las listas de la fila angosta y nunca ensancha: lo que no se reconoce no suma nada.
  */
 final class TenantEntitlements
 {
+    /** Codigo de la negativa por una ruta o un modulo que la edicion no incluye. El cliente se guia por el codigo, nunca por el texto. */
+    public const CODIGO_EDICION_NO_INCLUYE = 'EDICION_NO_INCLUYE';
+
+    /** Codigo de la solicitud rechazada por su forma: un segmento '..' en la ruta o '/api/' dentro de la consulta. */
+    public const CODIGO_SOLICITUD_INVALIDA = 'SOLICITUD_INVALIDA';
+
+    /**
+     * Texto de EDICION_NO_INCLUYE, sin punto final. Es la unica copia en la API (todo lo que conteste esa negativa lo lee
+     * de aqui) y tiene que ser igual, byte a byte, a MSG_EDICION del mock del front (express/dev/mock-api.mjs).
+     */
+    public const MSG_EDICION = 'Tu plan Express no incluye esta función';
+
+    /** Texto de SOLICITUD_INVALIDA. */
+    public const MSG_SOLICITUD = 'La solicitud no es válida.';
+
+    /**
+     * Texto de una fila de administrador cuando el rol no lo es: 403 sin codigo, porque no es un asunto de la edicion.
+     * Es el mismo texto que da PermissionGate a un rol sin el modulo, asi el Facturador lee lo mismo en los dos modos.
+     */
+    public const MSG_SOLO_ADMIN = 'No tienes permiso para hacer esto. Pídeselo a un administrador.';
+
     /** Tipo que se deriva de cualquier tipo de venta: la nota de credito, con la que se anula una factura. */
     private const TIPO_ANULACION = '34';
 
@@ -41,6 +64,14 @@ final class TenantEntitlements
      * @var array<string,true>
      */
     private static array $edicionesAvisadas = [];
+
+    /**
+     * Peticiones que guardaRuta ya dejo pasar en este proceso, por clave (metodo, URI, id de la empresa, rol). Solo lo
+     * permitido: una negativa termina la peticion y no hay nada que recordar.
+     *
+     * @var array<string,true>
+     */
+    private static array $rutasPermitidas = [];
 
     /** config/editions.php: se lee con require una sola vez por proceso. */
     public static function config(): array
@@ -200,6 +231,167 @@ final class TenantEntitlements
             'tipos_ecf' => self::tiposEfectivos($tenant),
             'capacidades' => self::config()['CAPACIDADES'],
         ];
+    }
+
+    /**
+     * Evalua una peticion (metodo, URI y rol) contra la lista de rutas de config 'rutas' para una empresa Express. Es PURA:
+     * no imprime, no abre conexion y no corta la peticion (eso lo hace guardaRuta). Lo unico que puede escribir en el log
+     * es la linea, una por valor y por proceso, de una edicion desconocida (normalizarEdicion).
+     *
+     * Una empresa que no es Express (completa, de integracion o ninguna) pasa tal cual: 200. Para una Express:
+     *   1. La URI se parte con parse_url. Una que no se puede leer, un segmento '..' en la ruta (o su forma con %2e) o un
+     *      '/api/' dentro de la consulta son 400 SOLICITUD_INVALIDA: los controllers leen la URI a pedazos. Una consulta
+     *      con '..' pasa (se puede buscar "Constr...").
+     *   2. La ruta y el resto se sacan igual que el Router: despues del PRIMER '/api/', la ruta es el primer segmento,
+     *      exacto y con sus mayusculas, y el resto son los demas. "//api/gastos" es la ruta 'gastos', como para el Router.
+     *      Una ruta que termina en '/' se deniega: el Router contesta la documentacion para ella.
+     *   3. Decide la primera fila de 'rutas' con esa ruta, ese metodo (en mayusculas) y un path que coincide con el resto.
+     *      Sin fila: 403 EDICION_NO_INCLUYE. Con fila, al menos uno de sus modulos tiene que estar entre los efectivos de
+     *      la empresa (tambien para un administrador con '*'), si no: 403 EDICION_NO_INCLUYE. Y en una fila de
+     *      administrador el rol tiene que llamarse admin, sin mayusculas ni espacios (la base busca el rol sin
+     *      distinguirlas), si no: 403 con codigo null.
+     *
+     * @param ?string $rol    nombre del rol del usuario, o null si no hay
+     * @param ?array  $tenant fila de la empresa; null = la resuelta en esta peticion (TenantResolver::current())
+     * @return array{permitido:bool,http:int,codigo:?string,modulo:?string} 'modulo' es el primero de la fila que coincidio
+     */
+    public static function evaluarRuta(string $metodo, string $uri, ?string $rol, ?array $tenant = null): array
+    {
+        $tenant ??= TenantResolver::current();
+        if (!self::esRestringido($tenant)) {
+            return self::veredicto(true, 200, null, null);
+        }
+
+        $partes = parse_url($uri);
+        if ($partes === false) {
+            return self::veredicto(false, 400, self::CODIGO_SOLICITUD_INVALIDA, null);
+        }
+        $path = (string) ($partes['path'] ?? '');
+        $consulta = (string) ($partes['query'] ?? '');
+        foreach (explode('/', $path) as $segmento) {
+            // '..' y sus formas con %2e (%2e%2e, .%2e, %2E.), con o sin mayusculas.
+            if (preg_match('/^(%2e|\.){2}$/i', $segmento) === 1) {
+                return self::veredicto(false, 400, self::CODIGO_SOLICITUD_INVALIDA, null);
+            }
+        }
+        if (str_contains($consulta, '/api/')) {
+            return self::veredicto(false, 400, self::CODIGO_SOLICITUD_INVALIDA, null);
+        }
+
+        if (str_ends_with($path, '/')) {
+            return self::veredicto(false, 403, self::CODIGO_EDICION_NO_INCLUYE, null);
+        }
+        // La misma derivacion del Router (src/Router.php): ruta cruda y con mayusculas, desde el primer '/api/'.
+        $apiPos = strpos($path, '/api/');
+        $resto = $apiPos !== false ? substr($path, $apiPos + 5) : ltrim($path, '/');
+        $segmentos = explode('/', ltrim($resto, '/'));
+        $ruta = $segmentos[0];
+        $subruta = implode('/', array_slice($segmentos, 1));
+        $metodo = strtoupper($metodo);
+
+        foreach (self::config()['rutas'] as $fila) {
+            if ($fila['route'] !== $ruta || $fila['method'] !== $metodo || preg_match($fila['path'], $subruta) !== 1) {
+                continue;
+            }
+            $modulo = $fila['modulos'][0] ?? null;
+            if ($fila['modulos'] !== [] && array_intersect($fila['modulos'], self::modulosEfectivos($tenant)) === []) {
+                return self::veredicto(false, 403, self::CODIGO_EDICION_NO_INCLUYE, $modulo);
+            }
+            if ($fila['admin'] && strtolower(trim((string) $rol)) !== 'admin') {
+                return self::veredicto(false, 403, null, $modulo);
+            }
+            return self::veredicto(true, 200, null, $modulo);
+        }
+        return self::veredicto(false, 403, self::CODIGO_EDICION_NO_INCLUYE, null);
+    }
+
+    /**
+     * La guarda de rutas de la peticion en curso: la deja pasar (metodo y URI de $_SERVER, la empresa resuelta y el rol que
+     * se le da) o contesta la negativa y corta con exit. Esta pensada para la rama de sesion de
+     * AuthMiddleware::validateRequest y solo para una empresa Express. Esa funcion corre mas de una vez por peticion, asi
+     * que lo permitido se recuerda por metodo, URI, id de la empresa y rol y la segunda vez sale sin volver a mirar. Solo
+     * se recuerda lo permitido, y nada pasa de una peticion a otra: la fila de la empresa se vuelve a leer en cada una,
+     * asi un cambio de edicion rige desde la siguiente.
+     *
+     * Falla cerrado: si evaluarRuta lanza lo que sea, es una negativa (403 EDICION_NO_INCLUYE), nunca un 500. Toda
+     * negativa deja una fila de auditoria (modulo 'edicion'), y un fallo de la bitacora no la estorba.
+     */
+    public static function guardaRuta(?string $rol): void
+    {
+        $metodo = (string) ($_SERVER['REQUEST_METHOD'] ?? '');
+        $uri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+        $tenant = TenantResolver::current();
+        $clave = serialize([$metodo, $uri, $tenant['id'] ?? null, $rol]);
+        if (isset(self::$rutasPermitidas[$clave])) {
+            return;
+        }
+
+        $motivo = null;
+        try {
+            $veredicto = self::evaluarRuta($metodo, $uri, $rol, $tenant);
+        } catch (Throwable $e) {
+            error_log('[TenantEntitlements] guardaRuta: fallo al evaluar la ruta, se niega: ' . $e->getMessage());
+            $veredicto = self::veredicto(false, 403, self::CODIGO_EDICION_NO_INCLUYE, null);
+            $motivo = 'fallo al evaluar la ruta';
+        }
+        if ($veredicto['permitido']) {
+            self::$rutasPermitidas[$clave] = true;
+            return;
+        }
+
+        $codigo = $veredicto['codigo'];
+        $motivo ??= match (true) {
+            $codigo === self::CODIGO_SOLICITUD_INVALIDA => 'solicitud no valida',
+            $codigo === null => 'ruta de administrador',
+            $veredicto['modulo'] !== null => 'modulo no habilitado',
+            default => 'ruta fuera de la edicion',
+        };
+        try {
+            require_once __DIR__ . '/Middleware/AuditMiddleware.php';
+            AuditMiddleware::logAccessDenied(
+                'edicion',
+                $motivo,
+                ['metodo' => $metodo, 'http' => $veredicto['http'], 'codigo' => $codigo, 'modulo' => $veredicto['modulo']],
+                "Acceso denegado por la edicion Express: {$motivo}."
+            );
+        } catch (Throwable $e) {
+            error_log('[TenantEntitlements] guardaRuta: no se pudo auditar la negativa: ' . $e->getMessage());
+        }
+
+        self::responderError(
+            $veredicto['http'],
+            (string) $codigo,
+            match ($codigo) {
+                self::CODIGO_SOLICITUD_INVALIDA => self::MSG_SOLICITUD,
+                null => self::MSG_SOLO_ADMIN,
+                default => self::MSG_EDICION,
+            }
+        );
+    }
+
+    /**
+     * Contesta una negativa y corta la peticion: pone el codigo HTTP e imprime {status:false, error, codigo, ...extra}.
+     * Un $codigo vacio omite la clave codigo (la negativa por rol de administrador no la lleva). Las claves de $extra no
+     * pisan status, error ni codigo. Nunca vuelve.
+     *
+     * @param array<string,mixed> $extra claves adicionales del cuerpo
+     */
+    public static function responderError(int $http, string $codigo, string $mensaje, array $extra = []): never
+    {
+        $cuerpo = ['status' => false, 'error' => $mensaje];
+        if ($codigo !== '') {
+            $cuerpo['codigo'] = $codigo;
+        }
+        http_response_code($http);
+        // Con bytes que no son UTF-8 en $extra, un cuerpo vacio rompe el JSON del cliente: se sustituyen y se sigue.
+        echo json_encode($cuerpo + $extra, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+        exit;
+    }
+
+    /** El resultado de evaluarRuta: siempre las mismas cuatro claves y en el mismo orden. */
+    private static function veredicto(bool $permitido, int $http, ?string $codigo, ?string $modulo): array
+    {
+        return ['permitido' => $permitido, 'http' => $http, 'codigo' => $codigo, 'modulo' => $modulo];
     }
 
     /**
