@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gratex — Certificado de un tenant</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --err:#ef4444; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:system-ui,Segoe UI,Roboto,sans-serif; background:var(--bg);
+         color:var(--txt); display:flex; justify-content:center; padding:24px; }
+  .wrap { width:100%; max-width:640px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  p.sub { color:var(--mut); margin:0 0 20px; font-size:14px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px;
+          padding:20px; margin-bottom:16px; }
+  label { display:block; font-size:13px; color:var(--mut); margin:12px 0 4px; }
+  input { width:100%; padding:10px 12px; background:#0b1220; color:var(--txt);
+          border:1px solid var(--line); border-radius:8px; font-size:14px; }
+  input:focus { outline:none; border-color:var(--accent); }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  .chk { display:flex; align-items:center; gap:8px; margin-top:14px; }
+  .chk input { width:auto; }
+  .chk label { margin:0; color:var(--txt); font-size:14px; }
+  button { width:100%; margin-top:20px; padding:12px; background:var(--accent); color:#06283d;
+           border:none; border-radius:8px; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:not-allowed; }
+  h2 { font-size:14px; margin:18px 0 0; color:var(--accent); border-top:1px solid var(--line); padding-top:14px; }
+  .hint { font-size:12px; color:var(--mut); margin-top:4px; }
+  pre { background:#0b1220; border:1px solid var(--line); border-radius:8px; padding:14px;
+        white-space:pre-wrap; word-break:break-word; font-size:13px; max-height:420px; overflow:auto; }
+  .result.ok { border-color:var(--ok); }
+  .result.err { border-color:var(--err); }
+  .hidden { display:none; }
+  .req::after { content:" *"; color:var(--err); }
+  a { color:var(--accent); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Certificado de un tenant</h1>
+  <p class="sub">Carga el .p12 de un tenant que ya existe, o reserva su ruta mientras el certificado llega. No cambia el ambiente.</p>
+
+  <form id="f" class="card">
+    <label class="req">Token de onboarding</label>
+    <input type="password" name="token" required autocomplete="off">
+    <div class="hint">El valor de ONBOARD_TOKEN del .env (el mismo de onboard.html).</div>
+
+    <h2>Tenant</h2>
+    <div class="row">
+      <div><label>tenant_id</label><input name="id" inputmode="numeric" placeholder="ej. 6"></div>
+      <div><label>RNC</label><input name="rnc" inputmode="numeric"></div>
+    </div>
+    <div class="hint">Con uno basta; el tenant_id sale en el resumen del alta. Si pones los dos tienen que ser del mismo tenant.</div>
+
+    <h2>Qué hacer</h2>
+    <div class="chk">
+      <input type="radio" name="modo" id="modoCargar" value="cargar" checked>
+      <label for="modoCargar">Cargar el certificado (o reemplazar el que tiene)</label>
+    </div>
+    <div class="chk">
+      <input type="radio" name="modo" id="modoReservar" value="reservar">
+      <label for="modoReservar">Reservar la ruta, sin certificado todavía</label>
+    </div>
+
+    <section id="secCargar">
+      <label>Archivo .p12</label>
+      <input type="file" name="cert" id="cert" accept=".p12,.pfx">
+      <label class="req">Clave del certificado</label>
+      <input type="password" name="cert-pass" id="certPass" autocomplete="off">
+      <div class="hint">
+        El .p12 se abre aquí con la clave. Si viene con cifrado legacy (RC2-40, lo normal en los de la CA), se
+        re-cifra en este navegador a AES-256 con la <b>misma clave</b> antes de subirlo: el servidor no puede
+        leer el legacy. La llave y el certificado no cambian. Si no eliges archivo, se usa el que ya esté en la
+        carpeta de certificados del servidor (<code>&lt;CERT_DIR&gt;/&lt;rnc&gt;/cert.p12</code>, subido por el File Manager).
+      </div>
+    </section>
+
+    <section id="secReservar" class="hidden">
+      <div class="hint" style="margin-top:12px">
+        Deja la ruta del certificado puesta <b>sin archivo</b>: hasta que se cargue el .p12, emitir un e-CF
+        falla en vez de firmar con el certificado global del .env (el de Gratex). Los tenants app nuevos sin
+        .p12 ya quedan así desde el alta; esto es para los que se crearon antes. <b>No lo uses</b> en un
+        tenant que firma a propósito con el certificado del .env (Gratex, o una empresa DEMO).
+      </div>
+    </section>
+
+    <div class="chk">
+      <input type="checkbox" id="dry" value="1">
+      <label for="dry">Solo validar: no escribe nada</label>
+    </div>
+
+    <button type="submit" id="btn">Cargar certificado</button>
+  </form>
+
+  <div id="resultCard" class="card hidden">
+    <h2 style="border:none;padding:0;margin:0 0 10px">Resultado</h2>
+    <pre id="out" class="result"></pre>
+    <div class="hint">Siguiente: <a href="diagnostico_dgii.html">probar la firma contra la DGII</a> (no emite ni gasta e-NCF).
+      Borra <code>set_tenant_cert.php</code> y esta página del servidor cuando termines.</div>
+  </div>
+</div>
+
+<!-- node-forge: abre los .p12 legacy (RC2-40/3DES) que el PHP del server (OpenSSL 3 sin provider legacy) no lee.
+     SRI fijado: la pagina maneja la llave privada y su clave, asi que un forge.min.js
+     alterado en el CDN no se ejecuta (el navegador lo bloquea y el submit pregunta antes
+     de subir sin revisar). Al cambiar de version, recalcular:
+       openssl dgst -sha384 -binary forge.min.js | openssl base64 -A -->
+<script src="https://cdn.jsdelivr.net/npm/node-forge@1.3.1/dist/forge.min.js"
+        integrity="sha384-xE6n3RBMZWgwAhyzoIMfY7HN3oDBa/+HBwFFNyxsdY8kseup7C4Blx1yDzprEESV"
+        crossorigin="anonymous"></script>
+<script>
+const f = document.getElementById('f');
+const btn = document.getElementById('btn');
+const dry = document.getElementById('dry');
+const certInput = document.getElementById('cert');
+const certPass = document.getElementById('certPass');
+const secCargar = document.getElementById('secCargar');
+const secReservar = document.getElementById('secReservar');
+const resultCard = document.getElementById('resultCard');
+const out = document.getElementById('out');
+
+const modo = () => f.elements.modo.value;
+
+function etiqueta() {
+  if (dry.checked) return 'Validar sin escribir';
+  return modo() === 'reservar' ? 'Reservar ruta' : 'Cargar certificado';
+}
+
+function toggle() {
+  const reservar = modo() === 'reservar';
+  secCargar.classList.toggle('hidden', reservar);
+  secReservar.classList.toggle('hidden', !reservar);
+  btn.textContent = etiqueta();
+}
+f.querySelectorAll('input[name="modo"]').forEach(r => r.addEventListener('change', toggle));
+dry.addEventListener('change', toggle);
+toggle();
+
+// ---------------------------------------------------------------- certificado
+// Misma revision/conversion que onboard.html (si se cambia una, cambiar la otra).
+// Algoritmos PBE de PKCS#12 (1.2.840.113549.1.12.1.x) y PBES1 (1.2.840.113549.1.5.x)
+// que OpenSSL 3 solo lee con el provider legacy: RC4, RC2 y DES simple. 3DES y
+// PBES2/AES los lee sin el. El server no tiene el legacy activo, y con estos la
+// emision falla con "Unable to read certificate ... error:0308010C ... unsupported".
+const PBE_LEGACY = {
+  '1.2.840.113549.1.12.1.1': 'RC4-128', '1.2.840.113549.1.12.1.2': 'RC4-40',
+  '1.2.840.113549.1.12.1.5': 'RC2-128', '1.2.840.113549.1.12.1.6': 'RC2-40',
+  '1.2.840.113549.1.5.1': 'MD2-DES', '1.2.840.113549.1.5.3': 'MD5-DES',
+  '1.2.840.113549.1.5.4': 'MD2-RC2', '1.2.840.113549.1.5.6': 'MD5-RC2',
+  '1.2.840.113549.1.5.10': 'SHA1-DES', '1.2.840.113549.1.5.11': 'SHA1-RC2',
+};
+
+// Los AlgorithmIdentifier del AuthenticatedSafe van en claro dentro del DER (solo el
+// contenido esta cifrado), asi que basta buscar el OID codificado en los bytes.
+function algoritmosLegacy(der) {
+  return Object.entries(PBE_LEGACY)
+    .filter(([oid]) => {
+      const v = forge.asn1.oidToDer(oid).getBytes();
+      return der.includes('\x06' + String.fromCharCode(v.length) + v);
+    })
+    .map(([, nombre]) => nombre);
+}
+
+const bagsDe = (p12, tipo) => p12.getBags({ bagType: tipo })[tipo] || [];
+const mismaLlave = (pub, key) => !!(pub && pub.n && key && key.n && pub.n.equals(key.n) && pub.e.equals(key.e));
+
+/**
+ * Abre el .p12 con la clave (asi una clave mal escrita se ve aqui, no al emitir) y,
+ * si viene con cifrado legacy, lo re-cifra a AES-256 con la MISMA clave: no hay que
+ * tocar la clave guardada, y la firma que ve la DGII es identica. Es lo mismo que
+ * hace convertir_cert.ps1 con openssl.
+ * Devuelve {file, nota}; lanza Error con el mensaje para el usuario si no sirve.
+ */
+async function prepararCert(file, pass) {
+  const der = forge.util.binary.raw.encode(new Uint8Array(await file.arrayBuffer()));
+  const legacy = algoritmosLegacy(der);
+  const usarScript = 'Conviértelo con convertir_cert.ps1 (misma clave) y súbelo de nuevo.';
+
+  let p12;
+  try {
+    p12 = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(der), false, pass);
+  } catch (e) {
+    if (/MAC could not be verified|wrong password|Invalid password/i.test(e.message)) {
+      throw new Error('La clave no abre este .p12: revise la clave del certificado.');
+    }
+    if (legacy.length) {
+      throw new Error(`El .p12 viene con cifrado legacy (${legacy.join(', ')}) y no se pudo abrir aquí `
+        + `(${e.message}). ${usarScript}`);
+    }
+    // Moderno pero raro para forge: el server lo puede leer igual; set_tenant_cert.php lo valida y aborta si no.
+    return { file, nota: `Certificado: no se pudo revisar el .p12 en el navegador (${e.message}); se subió tal cual.` };
+  }
+
+  const llaves = [...bagsDe(p12, forge.pki.oids.pkcs8ShroudedKeyBag), ...bagsDe(p12, forge.pki.oids.keyBag)];
+  const certs = bagsDe(p12, forge.pki.oids.certBag);
+  if (!llaves.length) {
+    throw new Error('El .p12 no trae la llave privada (solo el certificado): pida al cliente el archivo completo.');
+  }
+  if (!legacy.length) {
+    return { file, nota: '' }; // el server lo lee tal cual: se sube sin tocar
+  }
+
+  // forge solo re-codifica llaves y certificados RSA (los de la CA dominicana lo son).
+  if (llaves.length !== 1 || !llaves[0].key || certs.some(b => !b.cert)) {
+    throw new Error(`El .p12 viene con cifrado legacy (${legacy.join(', ')}) pero no se puede convertir aquí `
+      + `(${llaves.length} llave(s), o una llave/certificado que no es RSA). ${usarScript}`);
+  }
+  const key = llaves[0].key;
+  const cadena = certs.map(b => b.cert);
+  const hoja = cadena.find(c => mismaLlave(c.publicKey, key));
+  if (!hoja) {
+    throw new Error('Ningún certificado del .p12 corresponde a su llave privada: pida al cliente el archivo correcto.');
+  }
+
+  // Hoja primero: generateLocalKeyId une la llave con el PRIMER certificado, que es
+  // como openssl_pkcs12_read sabe cual de la cadena es el del emisor.
+  const nuevoAsn1 = forge.pkcs12.toPkcs12Asn1(key, [hoja, ...cadena.filter(c => c !== hoja)], pass,
+    { algorithm: 'aes256', generateLocalKeyId: true });
+  const nuevoDer = forge.asn1.toDer(nuevoAsn1).getBytes();
+
+  // Ida y vuelta: el .p12 nuevo abre con la misma clave, trae la misma llave y ya no es legacy.
+  const check = forge.pkcs12.pkcs12FromAsn1(forge.asn1.fromDer(nuevoDer), false, pass);
+  const checkLlave = (bagsDe(check, forge.pki.oids.pkcs8ShroudedKeyBag)[0] || {}).key;
+  if (!mismaLlave(checkLlave, key) || algoritmosLegacy(nuevoDer).length) {
+    throw new Error(`La conversión del .p12 no se pudo verificar. ${usarScript}`);
+  }
+
+  let cn = (hoja.subject.getField('CN') || {}).value || 'sin CN';
+  try { cn = forge.util.decodeUtf8(cn); } catch (e) { /* forge lo dejo en bytes: se muestra tal cual */ }
+  const nombre = file.name.replace(/\.(p12|pfx)$/i, '') + '_moderno.p12';
+  return {
+    file: new File([forge.util.binary.raw.decode(nuevoDer)], nombre, { type: 'application/x-pkcs12' }),
+    nota: `Certificado: el .p12 venía con cifrado legacy (${legacy.join(', ')}), que el servidor no puede leer.\n`
+      + `Se re-cifró en este navegador a AES-256 con la misma clave; la llave y el certificado no cambian\n`
+      + `(${cn}, vence ${hoja.validity.notAfter.toISOString().slice(0, 10)}).`,
+  };
+}
+
+// ---------------------------------------------------------------- envio
+function mostrar(texto, ok) {
+  out.textContent = texto;
+  out.classList.remove('ok', 'err');
+  out.classList.add(ok ? 'ok' : 'err');
+  resultCard.classList.remove('hidden');
+}
+
+f.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const reservar = modo() === 'reservar';
+  const id = f.elements.id.value.trim();
+  const rnc = f.elements.rnc.value.trim();
+  const clave = certPass.value;
+  btn.disabled = true; btn.textContent = 'Trabajando...';
+  resultCard.classList.add('hidden');
+
+  const terminar = () => { btn.disabled = false; btn.textContent = etiqueta(); };
+  const fallo = (msg) => { mostrar(msg, false); terminar(); };
+
+  if (!id && !rnc) return fallo('Falta el tenant_id o el RNC del tenant.');
+  if (!reservar && !clave) return fallo('Falta la clave del certificado.');
+
+  // El .p12 se revisa (y si es legacy, se convierte) ANTES de enviar nada: un
+  // certificado que el server no puede leer deja un tenant que no emite.
+  let cert = certInput.files && certInput.files.length ? certInput.files[0] : null;
+  let certNota = '';
+  if (!reservar && cert) {
+    if (typeof forge === 'undefined') {
+      const seguir = confirm('No cargó el revisor de certificados (sin internet o CDN bloqueado).\n\n'
+        + '¿Subir el .p12 sin revisar? Si viene con cifrado legacy, el servidor lo va a rechazar.');
+      if (!seguir) return fallo('No se envió nada: recargue la página para reintentar la revisión del .p12.');
+      certNota = 'Certificado: subido SIN revisar (no cargó node-forge).';
+    } else {
+      try {
+        ({ file: cert, nota: certNota } = await prepararCert(cert, clave));
+      } catch (err) {
+        return fallo('No se envió nada.\n\n' + err.message);
+      }
+    }
+  }
+
+  // Solo los campos con valor: el backend distingue "no vino" de "vino vacio".
+  const fd = new FormData();
+  fd.append('token', f.elements.token.value);
+  if (id) fd.append('id', id);
+  if (rnc) fd.append('rnc', rnc);
+  if (reservar) {
+    fd.append('reservar', '1');
+  } else {
+    fd.append('cert-pass', clave);
+    if (cert) fd.append('cert', cert, cert.name);
+  }
+  if (dry.checked) fd.append('dry-run', '1');
+
+  try {
+    const res = await fetch('set_tenant_cert.php', { method: 'POST', body: fd });
+    const text = await res.text();
+    mostrar((certNota ? certNota + '\n\n' : '') + text, res.ok);
+    // Tras una carga real, la clave y el archivo no se quedan en el formulario.
+    if (res.ok && !dry.checked && !reservar) { certInput.value = ''; certPass.value = ''; }
+  } catch (err) {
+    mostrar('Error de red: ' + err.message, false);
+  } finally {
+    terminar();
+  }
+});
+</script>
+</body>
+</html>

@@ -161,7 +161,10 @@ Request
   **`tenants.ambiente`** > **`DGII_ECF_ENVIRONMENT` global**. Cada tenant certifica en `certecf`
   y se promueve a `ecf` por su cuenta, en el mismo server.
 - **`CertResolver`** — cert `.p12` del tenant (`tenants.cert_path`/`cert_pass_encrypted`) o
-  fallback al cert global del `.env`. Cableado en emisión, ACECF y firma de acuses.
+  fallback al cert global del `.env` (cuando `cert_path` está vacío; el alta de un app sin
+  `.p12` reserva la ruta para no caer ahí, ver
+  [alta-tenant-runbook.md](integrations/alta-tenant-runbook.md#alta-sin-certificado-el-p12-llega-después)).
+  Cableado en emisión, ACECF y firma de acuses.
 
 ### Cifrado de credenciales (AES-256-GCM)
 `db_pass`/`cert_pass`/`webhook_secret` se guardan cifrados (`iv(12)‖tag(16)‖ciphertext`) con
