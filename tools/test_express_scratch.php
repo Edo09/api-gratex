@@ -32,9 +32,10 @@
  *
  * Las APIs que levanta express_api() (php -S, un puerto cada una; este plan usa del 8291 al 8294) corren con
  * PERMISSIONS_ENFORCE=false (modo sombra) o, con --enforce, en true: lo que prueba la suite tiene que valer en
- * los dos modos. Un php -S que quedo de una corrida interrumpida (Ctrl+C en Windows puede saltarse el cierre) en
- * el modo contrario, o de otro arbol, hace que wa_servidor pare con "[FALLO] el puerto ... ya lo usa otro
- * proceso": detenlo y vuelve a correr.
+ * los dos modos, y con la zona horaria por defecto de este proceso (la del php.ini o la de un -d date.timezone= al
+ * correr la suite: el hijo no hereda ese -d, asi que express_api() se la pasa). Un php -S que quedo de una corrida
+ * interrumpida (Ctrl+C en Windows puede saltarse el cierre) en el modo contrario, de otro arbol o de otra zona, hace que
+ * wa_servidor pare con "[FALLO] el puerto ... ya lo usa otro proceso": detenlo y vuelve a correr.
  *
  * Uso:
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_express_scratch.php [--enforce]
@@ -159,13 +160,20 @@ function express_edicion(array $ctx, string $tenant, ?string $edicion, ?string $
  * en un puerto de loopback sin nadie (EXPRESS_DGII_SIN_SERVICIO). $raiz es el arbol del API; '' es el de esta rama. Se niega
  * (salida 1) si el arbol trae un .env: lo cargaria el servidor y una peticion sin empresa podria caer en la base que diga.
  *
- * El nombre con el que se registra el servidor lleva el modo y el arbol ("{$nombre}_enf|som_<hash de la raiz>"): un php -S que
- * quedo de otra corrida en ese puerto, del otro modo o de otro arbol, no se reutiliza con la configuracion equivocada;
- * wa_servidor se detiene con "[FALLO] el puerto ... ya lo usa otro proceso". La salida del servidor queda en el temp del
+ * La zona horaria por defecto del servidor es la de ESTE proceso, fijada con -d date.timezone=: el hijo no hereda un -d de quien corre la
+ * suite (solo el php.ini), y una prueba que cuenta dias contra el reloj de la API (cert_vence y "hoy", en la zona de PHP) tiene que
+ * contar el mismo "hoy" que ella sin suponerlo. La zona se toma una sola vez por proceso, en la primera llamada: todos los servidores
+ * de la corrida comparten la misma aunque una seccion cambie la zona de la suite despues.
+ *
+ * El nombre con el que se registra el servidor lleva el modo, el arbol y la zona ("{$nombre}_enf|som_<hash de la raiz y la zona>"): un
+ * php -S que quedo de otra corrida en ese puerto, del otro modo, de otro arbol o de otra zona, no se reutiliza con la configuracion
+ * equivocada; wa_servidor se detiene con "[FALLO] el puerto ... ya lo usa otro proceso". La salida del servidor queda en el temp del
  * sistema (wa_<nombre>_<puerto>.log).
  */
 function express_api(string $nombre, int $puerto, string $raiz = ''): string
 {
+    static $zona = null;
+    $zona ??= date_default_timezone_get();
     $arbol = $raiz !== '' ? $raiz : dirname(__DIR__);
     if (is_file($arbol . '/.env')) {
         echo "[FALLO] el arbol del API a probar tiene un .env: el servidor lo cargaria y una peticion sin empresa podria caer en la base de ese archivo\n";
@@ -178,8 +186,8 @@ function express_api(string $nombre, int $puerto, string $raiz = ''): string
         pos_scratch_env_api($cred, $master, pos_scratch_secretos($cred['pass']), EXPRESS_DGII_SIN_SERVICIO, wa_cert_prueba(), $enforce),
         pos_scratch_env_base_por_defecto($cred, $master)
     );
-    $servidor = $nombre . '_' . ($enforce ? 'enf' : 'som') . '_' . substr(md5($arbol), 0, 6);
-    return wa_servidor($servidor, 'index.php', $puerto, $env, $raiz);
+    $servidor = $nombre . '_' . ($enforce ? 'enf' : 'som') . '_' . substr(md5($arbol . '|' . $zona), 0, 6);
+    return wa_servidor($servidor, 'index.php', $puerto, $env, $raiz, ['-d', 'date.timezone=' . $zona]);
 }
 
 /**
@@ -577,7 +585,8 @@ $s3Poner = static function (?string $ruta, ?string $vence) use ($s3Pdo, $s3IdA, 
 };
 
 // A es la empresa Express y B, la de control, sigue completa; las dos con certificado y a 45 dias de vencer. El dia se calcula en la
-// zona por defecto de este proceso, la misma que usa la API de la suite (un php -S con el mismo php.ini, sin zona propia).
+// zona por defecto de este proceso, y la API de la suite corre en esa misma zona porque express_api() se la fija con -d date.timezone=
+// (no se supone: un -d date.timezone= al correr la suite no llega al hijo por si solo, y el dia del servidor saldria uno de mas o de menos).
 $s3Vence = date('Y-m-d', strtotime('+45 days'));
 express_edicion($ctx, 'A', 'express', '45', null, $s3Vence);
 express_edicion($ctx, 'B', null, null, null, $s3Vence);
