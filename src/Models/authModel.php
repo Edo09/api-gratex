@@ -2,6 +2,7 @@
 require_once(__DIR__ . '/../Utils/TokenGenerator.php');
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../MasterDatabase.php');
+require_once(__DIR__ . '/../TenantResolver.php');
 
 class authModel
 {
@@ -212,14 +213,19 @@ class authModel
 
         // Prepare user data response (without password). Incluye los modulos
         // a los que el rol da acceso, para que el front muestre/oculte paginas.
+        // La empresa se lee una vez del master (sin master, en un solo tenant, no hay fila): solo si es Express
+        // (master.tenants.edicion) sus permisos salen cruzados con los modulos de su edicion y el user trae
+        // entitlements. Para toda otra empresa el user sale exactamente como siempre.
+        $fila = $this->filaTenant($user['tenant_id'] ?? null);
         $user_data = [
             'id' => (int)$user['id'],
             'email' => $user['email'],
             'username' => $user['username'],
             'name' => $user['name'] . ' ' . $user['last_name'],
             'role' => $user['role'],
-            'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role']),
+            'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role'], $fila),
         ];
+        $user_data = $this->conEntitlements($user_data, $fila);
 
         // Tercer elemento: empresa del usuario, solo para la bitacora.
         return ['success', ['token' => $token, 'user' => $user_data],
@@ -227,19 +233,80 @@ class authModel
     }
 
     /**
-     * Modulos (permisos) a los que da acceso un rol. Vacio si no resuelve.
+     * Modulos (permisos) a los que da acceso un rol. Vacio si no resuelve. Con la fila de una empresa Express, los del rol
+     * cruzados con los modulos que su edicion incluye (TenantEntitlements::permisosEfectivos); con cualquier otra fila, o
+     * sin ella, los del rol tal cual. Si la clase de la edicion no carga, tambien tal cual: ver conEntitlements.
+     *
+     * @param ?array $fila fila de master.tenants de la empresa del usuario (filaTenant), o null
      */
-    private function permissionsForUser($tenant_id, $role): array
+    private function permissionsForUser($tenant_id, $role, ?array $fila = null): array
     {
         require_once __DIR__ . '/RoleModel.php';
-        return (new RoleModel())->getPermissionsForRole(
+        $permisos = (new RoleModel())->getPermissionsForRole(
             $tenant_id !== null ? (int) $tenant_id : null,
             (string) $role
         );
+        if (self::esFilaExpress($fila) && TenantResolver::cargarEntitlements()) {
+            return TenantEntitlements::permisosEfectivos($permisos, $fila);
+        }
+        return $permisos;
     }
 
     /**
-     * Perfil del usuario actual + sus modulos (para GET /api/auth/me).
+     * Agrega el bloque entitlements al user del login y de /me, despues de permissions (que ya es su ultima clave), solo si
+     * $fila es la de una empresa Express; con cualquier otra devuelve $user_data tal cual, sin la clave (ni como null). El
+     * bloque sale de TenantEntitlements::bloque, que lo arma campo por campo: la fila de tenants lleva certificado y claves y
+     * jamas se serializa.
+     *
+     * Si la clase de la edicion no carga (TenantResolver::cargarEntitlements() es false y deja su propia linea en el log), la
+     * respuesta sale normal SIN el bloque y con los permisos crudos del rol: el cliente falla cerrado ante la falta del bloque
+     * y la guarda de AuthMiddleware contesta 403 a toda peticion posterior de esa empresa.
+     *
+     * @param ?array $fila fila de master.tenants de la empresa del usuario (filaTenant), o null
+     */
+    private function conEntitlements(array $user_data, ?array $fila): array
+    {
+        if (self::esFilaExpress($fila) && TenantResolver::cargarEntitlements()) {
+            $user_data['entitlements'] = TenantEntitlements::bloque($fila);
+        }
+        return $user_data;
+    }
+
+    /**
+     * La fila de master.tenants de la empresa de un usuario (getTenantById), o null: la unica lectura que el login suma. De ella
+     * sale el bloque user.entitlements de una empresa Express. Sin master (un solo tenant) o sin tenant_id no hay nada que
+     * leer, y una empresa inexistente o inactiva tampoco da fila. Cualquier fallo (master a medias, tabla ausente) se traga:
+     * la respuesta queda como estaba, sin el bloque y con los permisos del rol, y deja UNA linea en el log.
+     */
+    private function filaTenant($tenantId): ?array
+    {
+        if (!self::multiTenant() || $tenantId === null) {
+            return null;
+        }
+        try {
+            return MasterDatabase::getInstance()->getTenantById((int) $tenantId);
+        } catch (Throwable $e) {
+            error_log('[authModel] filaTenant: no se pudo leer la empresa ' . (int) $tenantId . ' (' . get_class($e) . ': '
+                . $e->getMessage() . '); la respuesta sale sin el bloque de la edicion');
+            return null;
+        }
+    }
+
+    /**
+     * La prueba de Express, en linea y sin cargar la clase de la edicion: false para una fila completa, de integracion o sin la
+     * columna edicion (master sin migrar), y para ninguna fila. Es la de TenantEntitlements::esRestringido (que ademas avisa
+     * una edicion desconocida: de eso se ocupa AuthMiddleware en la peticion siguiente), pero preguntarsela a esa clase la
+     * cargaria para todas las empresas.
+     */
+    private static function esFilaExpress(?array $fila): bool
+    {
+        return ($fila['tipo'] ?? 'app') === 'app'
+            && strtolower(trim((string) ($fila['edicion'] ?? ''))) === 'express';
+    }
+
+    /**
+     * Perfil del usuario actual + sus modulos (para GET /api/auth/me). Lo mismo que el user del login, bloque entitlements
+     * incluido cuando la empresa es Express.
      * @return array|null
      */
     public function getUserProfile($user_id)
@@ -252,14 +319,21 @@ class authModel
             if (!$u) {
                 return null;
             }
-            return [
+            // La empresa del usuario: si es la que la peticion ya resolvio (validateRequest acaba de leerla), esa fila, y /me no
+            // suma una consulta al master; si no, una lectura (filaTenant).
+            $tenantId = $u['tenant_id'] ?? null;
+            $actual = TenantResolver::current();
+            $fila = ($actual !== null && $tenantId !== null && (int) ($actual['id'] ?? 0) === (int) $tenantId)
+                ? $actual
+                : $this->filaTenant($tenantId);
+            return $this->conEntitlements([
                 'id' => (int) $u['id'],
                 'email' => $u['email'],
                 'username' => $u['username'],
                 'name' => trim(($u['name'] ?? '') . ' ' . ($u['last_name'] ?? '')),
                 'role' => $u['role'],
-                'permissions' => $this->permissionsForUser($u['tenant_id'] ?? null, $u['role']),
-            ];
+                'permissions' => $this->permissionsForUser($tenantId, $u['role'], $fila),
+            ], $fila);
         } catch (PDOException $e) {
             return null;
         }

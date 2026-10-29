@@ -1520,6 +1520,371 @@ foreach ([
 @unlink($s5HijoLog);
 
 // ---------------------------------------------------------------------------
+// 6) user.entitlements en el login y en /me (authModel: conEntitlements, filaTenant, permissionsForUser)
+// ---------------------------------------------------------------------------
+echo "\n== 6) user.entitlements en el login y en /me ==\n";
+
+/**
+ * PDO de mentira para MasterDatabase (su propiedad conexion esta tipada PDO: no vale cualquier objeto). No llama al constructor
+ * del padre, asi que no abre nada. Con $respuesta en null, prepare() lanza una PDOException (la base no responde); con una
+ * funcion, cada consulta que llega a execute() se anota en $consultas y $respuesta(sql, parametros) devuelve sus filas (o lanza).
+ */
+final class ExpPdoMaster extends PDO
+{
+    /** @var list<array{sql:string,params:array<string,mixed>}> */
+    public array $consultas = [];
+    public ?Closure $respuesta = null;
+
+    public function __construct()
+    {
+    }
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        if ($this->respuesta === null) {
+            throw new PDOException('prepare de mentira: la base no responde');
+        }
+        // Un PDOStatement no se construye a mano: se crea sin constructor y se le dice de que conexion viene.
+        $sentencia = (new ReflectionClass(ExpSentenciaMaster::class))->newInstanceWithoutConstructor();
+        $sentencia->origen = $this;
+        $sentencia->sql = $query;
+        return $sentencia;
+    }
+}
+
+/** La sentencia de ExpPdoMaster: execute() anota la consulta y pide sus filas; fetch() y fetchAll() las entregan. */
+final class ExpSentenciaMaster extends PDOStatement
+{
+    public ExpPdoMaster $origen;
+    public string $sql = '';
+    /** @var list<array<string,mixed>> */
+    private array $filas = [];
+
+    public function execute(?array $params = null): bool
+    {
+        $this->origen->consultas[] = ['sql' => $this->sql, 'params' => $params ?? []];
+        $this->filas = ($this->origen->respuesta)($this->sql, $params ?? []);
+        return true;
+    }
+
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        return $this->filas[0] ?? false;
+    }
+
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        return $this->filas;
+    }
+}
+
+$s6Raiz = dirname(__DIR__);
+/** Una fila de master.tenants de una empresa Express, con las columnas que jamas deben llegar al cliente; $o pisa los campos que cada caso cambia. */
+$s6Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'pos_enabled' => 0,
+    'api_key' => 'api-key-secreta', 'api_secret_hash' => 'hash-secreto', 'db_pass_encrypted' => 'clave-db-secreta',
+    'cert_path' => 'certificado_dgii/x/cert.p12', 'cert_pass_encrypted' => 'clave-cert-secreta', 'cert_vence' => '2027-01-31',
+];
+/** El user del login antes de la edicion: lo que emitirSesion arma para un administrador (permissions '*'). */
+$s6Usuario = ['id' => 7, 'email' => 'ana@example.com', 'username' => 'ana', 'name' => 'Ana Perez', 'role' => 'admin', 'permissions' => ['*']];
+/** El mismo user como JSON, escrito a mano: la forma que una empresa completa recibe hoy y que no puede cambiar. */
+$s6UsuarioJson = '{"id":7,"email":"ana@example.com","username":"ana","name":"Ana Perez","role":"admin","permissions":["*"]}';
+/** Los permisos de un administrador Express: el '*' cruzado con los modulos del preset, en el orden de sus tokens. */
+$s6PermisosAdminExpress = ['facturas', 'clients', 'products', 'users', 'ncf', 'unidades'];
+/** Llama a un metodo privado de authModel por reflexion. */
+$s6Llamar = static fn (authModel $modelo, string $metodo, array $args): mixed => (new ReflectionMethod('authModel', $metodo))->invoke($modelo, ...$args);
+
+// --- conEntitlements: el bloque solo para una fila Express, y despues de permissions ---------------------------------------
+// authModel sin constructor y con una conexion de mentira: $s4Modelo y ExpConexionFalsa son de la seccion 4, que ya los armo.
+// La primera llamada va sin envolver en wa_con_log a proposito: si el metodo no existe, la ReflectionException corta la suite (exit 255).
+$s6Modelo = $s4Modelo(new ExpConexionFalsa(false));
+$s6Express = $s6Fila();
+$s6R = $s6Llamar($s6Modelo, 'conEntitlements', [$s6Usuario, $s6Express]);
+wa_chk('conEntitlements: una fila express agrega entitlements DESPUES de permissions (el orden de las claves del user es el del contrato)',
+    json_encode(array_keys($s6R)) === '["id","email","username","name","role","permissions","entitlements"]', array_keys($s6R));
+wa_chk('conEntitlements: el bloque es el de TenantEntitlements::bloque(fila) y lo demas del user queda como estaba',
+    array_slice($s6R, 0, 6, true) === $s6Usuario && $s6R['entitlements'] === TenantEntitlements::bloque($s6Express), $s6R);
+$s6Json = (string) json_encode($s6R);
+$s6Fugas = array_values(array_filter(
+    ['api-key-secreta', 'hash-secreto', 'clave-db-secreta', 'certificado_dgii', 'clave-cert-secreta', 'cert_vence', '2027-01-31'],
+    static fn (string $secreto): bool => str_contains($s6Json, $secreto)
+));
+wa_chk('conEntitlements: solo sale la lista blanca del bloque (cinco claves, y tenant con id, nombre, rnc y ambiente): ningun dato de la fila se filtra',
+    array_keys($s6R['entitlements']) === ['edicion', 'tenant', 'modulos', 'tipos_ecf', 'capacidades']
+    && array_keys($s6R['entitlements']['tenant']) === ['id', 'nombre', 'rnc', 'ambiente'] && $s6Fugas === [], [$s6Fugas, array_keys($s6R['entitlements'])]);
+
+$s6SinEdicion = $s6Fila();
+unset($s6SinEdicion['edicion']);
+$s6SinTipo = $s6Fila();
+unset($s6SinTipo['tipo']);
+$s6Casos = [   // descripcion => [fila, ¿lleva el bloque?]
+    "edicion 'express'" => [$s6Fila(), true],
+    "edicion 'Express'" => [$s6Fila(['edicion' => 'Express']), true],
+    "edicion ' EXPRESS ' (las mayusculas y los espacios no la cambian)" => [$s6Fila(['edicion' => ' EXPRESS ']), true],
+    'una fila express sin la clave tipo (cuenta como app)' => [$s6SinTipo, true],
+    "edicion 'completa'" => [$s6Fila(['edicion' => 'completa']), false],
+    "edicion ' completa '" => [$s6Fila(['edicion' => ' completa ']), false],
+    "edicion '' (el vacio se trata como completa)" => [$s6Fila(['edicion' => '']), false],
+    "edicion 'basico' (desconocida: completa)" => [$s6Fila(['edicion' => 'basico']), false],
+    "tipo 'integracion' con edicion 'express'" => [$s6Fila(['tipo' => 'integracion']), false],
+    'edicion NULL' => [$s6Fila(['edicion' => null]), false],
+    'una fila sin la clave edicion (master sin migrar)' => [$s6SinEdicion, false],
+    'ninguna fila (null)' => [null, false],
+];
+ob_start();
+[$s6Obtenido, $s6Error, $s6Log] = wa_con_log(static fn (): array => array_map(
+    static fn (array $caso): array => $s6Llamar($s6Modelo, 'conEntitlements', [$s6Usuario, $caso[0]]),
+    $s6Casos
+));
+$s6Salida = (string) ob_get_clean();
+foreach ($s6Casos as $s6Desc => [, $s6Lleva]) {
+    $s6R = $s6Obtenido[$s6Desc] ?? null;
+    wa_chk("conEntitlements, {$s6Desc}: " . ($s6Lleva ? 'agrega el bloque' : 'devuelve el user igual, sin la clave entitlements (ni como null)'),
+        $s6Lleva
+            ? is_array($s6R) && is_array($s6R['entitlements'] ?? null)
+            : $s6R === $s6Usuario && !array_key_exists('entitlements', (array) $s6R),
+        [$s6R, $s6Error?->getMessage()]);
+}
+wa_chk('conEntitlements no imprime ni escribe en el log con ninguna de esas filas (una edicion desconocida la avisa AuthMiddleware, no el login)',
+    $s6Salida === '' && $s6Log === '', [$s6Salida, $s6Log]);
+
+// --- filaTenant, y el login y /me enteros contra un master de mentira ------------------------------------------------------
+// Todo lo que cambia estado del proceso (la instancia de MasterDatabase, la empresa resuelta, el modo multi-tenant) se repone en el finally.
+$s6Instancia = new ReflectionProperty('MasterDatabase', 'instance');
+$s6InstanciaAntes = $s6Instancia->getValue();
+$s6Actual = new ReflectionProperty('TenantResolver', 'current');
+$s6MtAntes = getenv('MULTI_TENANT_ENABLED');
+/** Un MasterDatabase sin constructor, con $pdo de conexion, como la instancia que devuelve getInstance(). */
+$s6PonerMaestro = static function (ExpPdoMaster $pdo) use ($s6Instancia): void {
+    $maestro = (new ReflectionClass('MasterDatabase'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('MasterDatabase', 'conexion'))->setValue($maestro, $pdo);
+    $s6Instancia->setValue(null, $maestro);
+};
+/**
+ * Un master de mentira que contesta la fila de cada empresa ($tenants: id => fila) y los permisos de cada rol ($permisos: rol =>
+ * lista); con $tenantsCae, leer tenants lanza una PDOException. Cualquier otra consulta hace fallar la prueba (LogicException).
+ */
+$s6NuevoMaestro = static function (array $tenants, array $permisos = ['admin' => ['*']], bool $tenantsCae = false) use ($s6PonerMaestro): ExpPdoMaster {
+    $pdo = new ExpPdoMaster();
+    $pdo->respuesta = static function (string $sql, array $params) use ($tenants, $permisos, $tenantsCae): array {
+        if (str_contains($sql, 'FROM tenants')) {
+            if ($tenantsCae) {
+                throw new PDOException('la lectura de tenants fallo (prueba)');
+            }
+            $id = (int) ($params[':id'] ?? 0);
+            return isset($tenants[$id]) ? [$tenants[$id]] : [];
+        }
+        if (str_contains($sql, 'role_permissions')) {
+            return array_map(static fn (string $p): array => ['permission' => $p], $permisos[(string) ($params[':name'] ?? '')] ?? []);
+        }
+        throw new LogicException('consulta inesperada al master de mentira: ' . $sql);
+    };
+    $s6PonerMaestro($pdo);
+    return $pdo;
+};
+/** Los parametros de cada lectura a tenants que llego al master de mentira. */
+$s6Lecturas = static fn (ExpPdoMaster $pdo): array => array_values(array_map(
+    static fn (array $consulta): array => $consulta['params'],
+    array_filter($pdo->consultas, static fn (array $consulta): bool => str_contains($consulta['sql'], 'FROM tenants'))
+));
+$s6Clave = 'clave-de-prueba';
+$s6Hash = password_hash($s6Clave, PASSWORD_BCRYPT, ['cost' => 4]);
+/** La fila de users (modo multi-tenant) que leen loginUser y getUserProfile; $o pisa campos. */
+$s6FilaUsuario = static fn (array $o = []): array => $o + [
+    'id' => '7', 'tenant_id' => '12', 'email' => 'ana@example.com', 'username' => 'ana', 'name' => 'Ana', 'last_name' => 'Perez',
+    'password' => $s6Hash, 'role' => 'admin',
+];
+/** loginUser de la usuaria 'ana' (con $usuario pisando su fila) contra un master que tiene $tenants y $permisos: lo que devolvio, lo que lanzo, el log y las lecturas a tenants. */
+$s6Login = static function (array $tenants, array $permisos = ['admin' => ['*']], bool $tenantsCae = false, array $usuario = [])
+    use ($s6NuevoMaestro, $s6Lecturas, $s4Modelo, $s6FilaUsuario, $s6Clave): array {
+    $pdo = $s6NuevoMaestro($tenants, $permisos, $tenantsCae);
+    [$r, $e, $log] = wa_con_log(static fn (): array => $s4Modelo(new ExpConexionFalsa($s6FilaUsuario($usuario)))->loginUser('ana', $s6Clave));
+    return ['r' => $r, 'e' => $e, 'log' => $log, 'lecturas' => $s6Lecturas($pdo)];
+};
+/** getUserProfile de la usuaria 7 con $actual como empresa resuelta de la peticion y $tenants en el master: igual que $s6Login. */
+$s6Perfil = static function (?array $actual, array $tenants, array $permisos = ['admin' => ['*']], array $usuario = [])
+    use ($s6NuevoMaestro, $s6Lecturas, $s4Modelo, $s6FilaUsuario, $s6Actual): array {
+    $pdo = $s6NuevoMaestro($tenants, $permisos);
+    $s6Actual->setValue(null, $actual);
+    [$r, $e, $log] = wa_con_log(static fn (): mixed => $s4Modelo(new ExpConexionFalsa($s6FilaUsuario($usuario)))->getUserProfile(7));
+    return ['r' => $r, 'e' => $e, 'log' => $log, 'lecturas' => $s6Lecturas($pdo)];
+};
+try {
+    putenv('MULTI_TENANT_ENABLED=true');
+
+    // filaTenant: con el master caido devuelve null y no lanza.
+    $s6Caido = new ExpPdoMaster();   // sin respuesta: prepare() lanza una PDOException
+    $s6PonerMaestro($s6Caido);
+    [$s6R, $s6E, $s6Log] = wa_con_log(static fn (): mixed => $s6Llamar($s6Modelo, 'filaTenant', ['12']));
+    wa_chk('filaTenant con el master caido (la conexion lanza al preparar): devuelve null y no lanza',
+        $s6R === null && $s6E === null, [$s6R, $s6E === null ? null : get_class($s6E) . ': ' . $s6E->getMessage()]);
+    wa_chk('...y deja UNA linea de log que nombra filaTenant (un login sin el bloque no pasa en silencio)',
+        substr_count($s6Log, "\n") === 1 && str_contains($s6Log, 'filaTenant'), $s6Log);
+
+    // filaTenant: una lectura con el id como entero; null si no hay tenant o no hay master.
+    $s6Pdo = $s6NuevoMaestro([12 => $s6Fila()]);
+    [$s6R, $s6E, $s6Log] = wa_con_log(static fn (): mixed => $s6Llamar($s6Modelo, 'filaTenant', ['12']));
+    wa_chk('filaTenant (multi-tenant): UNA lectura a tenants con el id como entero (getTenantById) y devuelve la fila de la empresa, sin log',
+        $s6E === null && $s6R === $s6Fila() && $s6Lecturas($s6Pdo) === [[':id' => 12]] && count($s6Pdo->consultas) === 1 && $s6Log === '',
+        [$s6R, $s6Pdo->consultas]);
+    $s6Pdo = $s6NuevoMaestro([]);
+    [$s6R, $s6E] = wa_con_log(static fn (): mixed => $s6Llamar($s6Modelo, 'filaTenant', [12]));
+    wa_chk('filaTenant de una empresa inexistente o inactiva: null, una lectura y nada mas (el login sigue como siempre)',
+        $s6E === null && $s6R === null && $s6Lecturas($s6Pdo) === [[':id' => 12]], [$s6R, $s6Pdo->consultas]);
+    $s6Pdo = $s6NuevoMaestro([12 => $s6Fila()]);
+    [$s6R, $s6E] = wa_con_log(static fn (): mixed => $s6Llamar($s6Modelo, 'filaTenant', [null]));
+    wa_chk('filaTenant sin tenant_id (null): null y ninguna lectura', $s6E === null && $s6R === null && $s6Pdo->consultas === [], [$s6R, $s6Pdo->consultas]);
+    putenv('MULTI_TENANT_ENABLED=false');
+    [$s6R, $s6E] = wa_con_log(static fn (): mixed => $s6Llamar($s6Modelo, 'filaTenant', ['12']));
+    wa_chk('filaTenant en modo de un solo tenant: null y ninguna lectura (no hay master al que preguntar)',
+        $s6E === null && $s6R === null && $s6Pdo->consultas === [], [$s6R, $s6Pdo->consultas]);
+    putenv('MULTI_TENANT_ENABLED=true');
+
+    // loginUser entero: el user, el bloque, los permisos y las lecturas.
+    $s6L = $s6Login([12 => $s6Fila()]);
+    $s6U = $s6L['r'][1]['user'] ?? [];
+    wa_chk('loginUser (Express): success con un token y un user con id, email, username, name, role, permissions y entitlements, en ese orden',
+        $s6L['e'] === null && ($s6L['r'][0] ?? null) === 'success' && is_string($s6L['r'][1]['token'] ?? null) && $s6L['r'][1]['token'] !== ''
+        && json_encode(array_keys($s6U)) === '["id","email","username","name","role","permissions","entitlements"]',
+        [$s6L['e']?->getMessage(), array_keys($s6U)]);
+    wa_chk('loginUser (Express): permissions es el "*" del administrador cruzado con los modulos de la edicion, y entitlements el bloque de su fila',
+        ($s6U['permissions'] ?? null) === $s6PermisosAdminExpress && ($s6U['entitlements'] ?? null) === TenantEntitlements::bloque($s6Fila()), $s6U);
+    wa_chk('loginUser (Express): UNA sola lectura a tenants (con el tenant_id del usuario) y el tercer elemento, el de la bitacora, sigue siendo la empresa',
+        $s6L['lecturas'] === [[':id' => 12]] && ($s6L['r'][2] ?? null) === ['tenant_id' => 12] && $s6L['log'] === '', [$s6L['lecturas'], $s6L['r'][2] ?? null, $s6L['log']]);
+    $s6L = $s6Login([12 => $s6Fila()], ['user' => ['gastos', 'ncf', 'facturas', 'clients', 'reportes']], false, ['role' => 'user']);
+    wa_chk('loginUser (Express, rol user): permissions son los del rol cruzados con los modulos de la edicion, en el orden de los tokens y no en el del rol, sin lo que la edicion no incluye',
+        ($s6L['r'][1]['user']['permissions'] ?? null) === ['facturas', 'clients', 'ncf'], $s6L['r'][1]['user'] ?? null);
+    $s6L = $s6Login([12 => $s6Fila(['edicion' => 'completa'])]);
+    wa_chk('loginUser (completa): el user es EXACTAMENTE el de siempre (mismas claves, mismo orden, permissions crudas) y tambien lee la empresa una vez',
+        $s6L['e'] === null && json_encode($s6L['r'][1]['user'] ?? null) === $s6UsuarioJson && $s6L['lecturas'] === [[':id' => 12]],
+        [$s6L['r'][1]['user'] ?? null, $s6L['lecturas']]);
+    $s6L = $s6Login([12 => $s6Fila()], ['admin' => ['*']], true);
+    wa_chk('loginUser: si la lectura de la empresa falla, el login sigue (success y token) como si fuera completa: sin el bloque y con los permisos del rol tal cual',
+        $s6L['e'] === null && ($s6L['r'][0] ?? null) === 'success' && ($s6L['r'][1]['token'] ?? '') !== ''
+        && json_encode($s6L['r'][1]['user'] ?? null) === $s6UsuarioJson, [$s6L['e']?->getMessage(), $s6L['r'][1]['user'] ?? null]);
+    wa_chk('...hizo UN intento de lectura y dejo UNA linea de log que nombra filaTenant',
+        count($s6L['lecturas']) === 1 && substr_count($s6L['log'], "\n") === 1 && str_contains($s6L['log'], 'filaTenant'), [$s6L['lecturas'], $s6L['log']]);
+
+    // getUserProfile (/me): la empresa que ya resolvio la peticion se reutiliza si es la del usuario; si no, una lectura.
+    $s6P = $s6Perfil($s6Fila(['tipos_ecf_habilitados' => '31']), [12 => $s6Fila()]);
+    wa_chk('getUserProfile con TenantResolver::current() de la empresa del usuario: arma el bloque con ESA fila (tipos 31, no los 45 del master) y NO lee tenants',
+        ($s6P['r']['entitlements']['tipos_ecf'] ?? null) === ['31', '34'] && $s6P['lecturas'] === [] && $s6P['e'] === null,
+        [$s6P['r']['entitlements'] ?? null, $s6P['lecturas']]);
+    wa_chk('getUserProfile (Express): las claves son las del login (id, email, username, name, role, permissions y entitlements) y permissions va cruzada con la edicion',
+        json_encode(array_keys($s6P['r'] ?? [])) === '["id","email","username","name","role","permissions","entitlements"]'
+        && ($s6P['r']['permissions'] ?? null) === $s6PermisosAdminExpress, $s6P['r']);
+    $s6P = $s6Perfil(null, [12 => $s6Fila()]);
+    wa_chk('getUserProfile sin empresa resuelta (current() null): UNA lectura a tenants y el bloque sale de la fila del master (tipos 45)',
+        ($s6P['r']['entitlements']['tipos_ecf'] ?? null) === ['45', '34'] && $s6P['lecturas'] === [[':id' => 12]], [$s6P['r']['entitlements'] ?? null, $s6P['lecturas']]);
+    $s6P = $s6Perfil($s6Fila(['id' => 99, 'tipos_ecf_habilitados' => '31']), [12 => $s6Fila(['edicion' => 'completa'])]);
+    wa_chk('getUserProfile con current() de OTRA empresa (id 99, Express): no se usa su fila; se lee la del usuario (completa) y el perfil sale sin el bloque',
+        !array_key_exists('entitlements', (array) $s6P['r']) && $s6P['lecturas'] === [[':id' => 12]] && json_encode($s6P['r']) === $s6UsuarioJson,
+        [$s6P['r'], $s6P['lecturas']]);
+    $s6P = $s6Perfil($s6Fila(['edicion' => 'completa']), []);
+    wa_chk('getUserProfile (completa, current() de su empresa): el perfil es EXACTAMENTE el de siempre y no lee tenants',
+        json_encode($s6P['r']) === $s6UsuarioJson && $s6P['lecturas'] === [] && $s6P['log'] === '', [$s6P['r'], $s6P['lecturas'], $s6P['log']]);
+} finally {
+    $s6Instancia->setValue(null, $s6InstanciaAntes);
+    $s6Actual->setValue(null, null);
+    putenv($s6MtAntes === false ? 'MULTI_TENANT_ENABLED' : 'MULTI_TENANT_ENABLED=' . $s6MtAntes);
+}
+
+// --- la clase de la edicion: una empresa que no es Express no la carga jamas, y sin ella una Express recibe el login sin el bloque ---
+// En un proceso nuevo por caso (la clase ya esta cargada en este), sin multi-tenant: RoleModel lee de Database, que aqui es una
+// conexion de mentira con los permisos '*' de un administrador. Las copias del arbol con la clase ausente, rota o sin declarar
+// son la de la seccion 4 ($s4Copia).
+$s6Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_sesion_');
+$s6HijoLog = (string) tempnam(sys_get_temp_dir(), 'ent_seslog_');
+file_put_contents($s6Hijo, <<<'PHP'
+<?php
+// argv[1] = raiz del arbol, argv[2] = archivo de error_log, argv[3] = la fila de la empresa (JSON en base64).
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ini_set('error_log', $argv[2]);
+putenv('MULTI_TENANT_ENABLED=false');
+unset($_ENV['MULTI_TENANT_ENABLED']);
+$fila = json_decode((string) base64_decode($argv[3]), true);
+require $argv[1] . '/src/Models/authModel.php';
+final class HijoSentencia
+{
+    public function execute(?array $params = null): bool
+    {
+        return true;
+    }
+
+    public function fetchAll(): array
+    {
+        return [['permission' => '*']];
+    }
+}
+final class HijoConexion
+{
+    public function prepare(string $sql): HijoSentencia
+    {
+        return new HijoSentencia();
+    }
+}
+$bd = (new ReflectionClass('Database'))->newInstanceWithoutConstructor();
+(new ReflectionProperty('Database', 'conexion'))->setValue($bd, new HijoConexion());
+(new ReflectionProperty('Database', 'instance'))->setValue(null, $bd);
+$modelo = (new ReflectionClass('authModel'))->newInstanceWithoutConstructor();
+$usuario = ['id' => 7, 'email' => 'ana@example.com', 'username' => 'ana', 'name' => 'Ana Perez', 'role' => 'admin', 'permissions' => ['*']];
+$permisos = (new ReflectionMethod('authModel', 'permissionsForUser'))->invoke($modelo, 12, 'admin', $fila);
+$conBloque = (new ReflectionMethod('authModel', 'conEntitlements'))->invoke($modelo, $usuario, $fila);
+echo json_encode([$permisos, $conBloque, class_exists('TenantEntitlements', false), (string) file_get_contents($argv[2])]);
+PHP);
+/** permissionsForUser y conEntitlements en un proceso nuevo sobre el arbol $raiz: [permisos, user, clase_cargada, log] o ['hijo_sin_json' => lo que imprimio]. */
+$s6EnHijo = static function (string $raiz, ?array $fila) use ($s6Hijo, $s6HijoLog): array {
+    file_put_contents($s6HijoLog, '');
+    $r = wa_correr([PHP_BINARY, $s6Hijo, $raiz, $s6HijoLog, base64_encode((string) json_encode($fila))]);
+    $dejo = json_decode(trim($r['salida']), true);
+    return is_array($dejo) ? $dejo : ['hijo_sin_json' => $r];
+};
+foreach ([
+    "edicion 'completa'" => $s6Fila(['edicion' => 'completa']),
+    "edicion '' (el vacio se trata como completa)" => $s6Fila(['edicion' => '']),
+    "tipo 'integracion' con edicion 'express'" => $s6Fila(['tipo' => 'integracion']),
+    'ninguna empresa' => null,
+] as $s6Desc => $s6Empresa) {
+    $s6R = $s6EnHijo($s6Raiz, $s6Empresa);
+    wa_chk("empresa que no es Express ({$s6Desc}): permissions y user como siempre, TenantEntitlements no se carga jamas y no hay log",
+        $s6R === [['*'], $s6Usuario, false, ''], $s6R);
+}
+$s6R = $s6EnHijo($s6Raiz, $s6Express);
+$s6Esperado = [
+    $s6PermisosAdminExpress,
+    $s6Usuario + ['entitlements' => json_decode((string) json_encode(TenantEntitlements::bloque($s6Express)), true)],
+    true,
+    '',
+];
+wa_chk('empresa Express con la clase en su sitio: permissions cruzada con la edicion, el user con el bloque, la clase se carga (detras de la prueba en linea) y no hay log',
+    $s6R === $s6Esperado, $s6R);
+$s6ClaseEnCopia = $s4Copia . '/src/TenantEntitlements.php';
+wa_chk('la copia del arbol de la seccion 4 sigue ahi, con authModel y la clase (de ahi salen la clase ausente, rota y sin declarar)',
+    is_file($s4Copia . '/src/Models/authModel.php') && is_file($s6ClaseEnCopia), $s4Copia);
+foreach ([
+    'ausente' => null,
+    'rota (error de sintaxis)' => "<?php\nesto no es php {{{\n",
+    'sin la clase (el archivo carga pero no la declara)' => "<?php\n// archivo vacio\n",
+] as $s6Modo => $s6Contenido) {
+    if ($s6Contenido === null) {
+        @unlink($s6ClaseEnCopia);
+    } else {
+        file_put_contents($s6ClaseEnCopia, $s6Contenido);
+    }
+    $s6R = $s6EnHijo($s4Copia, $s6Express);
+    wa_chk("clase {$s6Modo}, empresa Express: el login contesta SIN el bloque y con los permisos del rol tal cual (ni lanza ni niega), la clase no carga y el intento deja UNA linea de log que la nombra",
+        array_slice($s6R, 0, 3) === [['*'], $s6Usuario, false] && substr_count((string) ($s6R[3] ?? ''), "\n") === 1
+        && str_contains((string) ($s6R[3] ?? ''), 'TenantEntitlements'), $s6R);
+    $s6R = $s6EnHijo($s4Copia, $s6Fila(['edicion' => 'completa']));
+    wa_chk("clase {$s6Modo}, empresa completa: el login sale como siempre, la clase no se pide jamas y no hay log",
+        $s6R === [['*'], $s6Usuario, false, ''], $s6R);
+}
+@unlink($s6Hijo);
+@unlink($s6HijoLog);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

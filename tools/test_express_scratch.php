@@ -12,6 +12,13 @@
  *   1) la migracion master 014 sobre la master scratch: aplica de cero, es idempotente, completa un estado a
  *      medias, su guardia corta antes de tocar nada, el ENUM rechaza una edicion desconocida, el verificador de
  *      migraciones la ve, y express_scratch_preparar() deja las dos empresas de prueba como completas.
+ *   2) user.entitlements en POST /api/auth/login y GET /api/auth/me, por HTTP: la empresa A Express recibe el bloque
+ *      y los permisos cruzados con su edicion (administrador y Facturador); la B, completa, el user de siempre.
+ *
+ * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
+ * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
+ * raiz), express_login, express_h (la cabecera de sesion) y express_usar_master (apunta MasterDatabase y
+ * TenantResolver de ESTE proceso a la master scratch).
  *
  * Nunca produccion: wa_pdo() se niega a usar una base sin la tabla marca zz_write_ahead_scratch y
  * pos_scratch_exigir() una que no se llame wa_scratch o wa_scratch_sin_gate. Las credenciales salen de
@@ -20,16 +27,28 @@
  * La seccion 1 quita y vuelve a crear columnas de tenants en la master scratch (y deja a las dos empresas de
  * prueba como completas al terminar): no corras a la vez otra suite que use esas bases.
  *
+ * Las APIs que levanta express_api() (php -S, un puerto cada una; este plan usa del 8291 al 8294) corren con
+ * PERMISSIONS_ENFORCE=false (modo sombra) o, con --enforce, en true: lo que prueba la suite tiene que valer en
+ * los dos modos. Un php -S que quedo de una corrida interrumpida (Ctrl+C en Windows puede saltarse el cierre) en
+ * el modo contrario, o de otro arbol, hace que wa_servidor pare con "[FALLO] el puerto ... ya lo usa otro
+ * proceso": detenlo y vuelve a correr.
+ *
  * Uso:
- *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_express_scratch.php
+ *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_express_scratch.php [--enforce]
  *   (un -d extension=... solo para lo que tu php.ini no carga; ver write_ahead_test_lib.php)
  * Sale con 1 si algo falla.
  */
 
 require_once __DIR__ . '/pos_scratch_prepare.php';
+// pos_scratch_env_api() y pos_scratch_env_base_por_defecto(): el entorno de la API de las suites del POS. Incluirlo solo
+// define funciones; su programa principal corre unicamente cuando es ese archivo el que se ejecuta.
+require_once __DIR__ . '/test_pos_scratch.php';
 
 /** La migracion master 014, tal como se pega en phpMyAdmin. */
 const EXPRESS_MIGRACION_014 = __DIR__ . '/../db/master_migrations/014_tenants_edicion.sql';
+
+/** Puerto de loopback donde no escucha nadie: las APIs de esta suite no tienen DGII, y lo que intente llamarla falla al instante. */
+const EXPRESS_DGII_SIN_SERVICIO = 'http://127.0.0.1:1';
 
 /**
  * Corre un archivo SQL entero en una sola llamada, como cuando se pega en la pestaña SQL de phpMyAdmin
@@ -108,6 +127,104 @@ function express_scratch_preparar(): array
         });
     }
     return $info + ['pdo' => $pdo];
+}
+
+/**
+ * Deja a la empresa de prueba $tenant ('A' o 'B') con la edicion y las listas dadas: un UPDATE sobre la master scratch. Lo que
+ * se pasa es lo que queda, tal cual: $tipos, $modulos y $certVence en null son NULL en la fila (no "sin tocar"), y $edicion en
+ * null es la edicion por defecto de la columna, 'completa'. No toca nada mas de la fila (ni cert_path, ni cert_pass_encrypted,
+ * ni pos_enabled). Lo que cambia aqui no hay que restaurarlo a mano: express_scratch_preparar() ya dejo registrado el
+ * reinicio de las dos empresas para cuando termine el proceso, y $ctx solo sale de esa funcion.
+ *
+ * @param array $ctx lo que devuelve express_scratch_preparar()
+ */
+function express_edicion(array $ctx, string $tenant, ?string $edicion, ?string $tipos, ?string $modulos, ?string $certVence = null): void
+{
+    $ids = ['A' => (int) ($ctx['tenantA'] ?? 0), 'B' => (int) ($ctx['tenantB'] ?? 0)];
+    if (($ids[$tenant] ?? 0) <= 0) {
+        throw new InvalidArgumentException("las empresas de prueba son 'A' y 'B', no '{$tenant}'");
+    }
+    wa_exigir_marca($ctx['pdo']);
+    $ctx['pdo']->prepare(
+        'UPDATE tenants SET edicion = :e, tipos_ecf_habilitados = :t, modulos_habilitados = :m, cert_vence = :c WHERE id = :id'
+    )->execute([':e' => $edicion ?? 'completa', ':t' => $tipos, ':m' => $modulos, ':c' => $certVence, ':id' => $ids[$tenant]]);
+}
+
+/**
+ * Levanta (o reutiliza) una API multi-tenant sobre las bases scratch y devuelve su URL: el mismo entorno que la API de las suites
+ * del POS (pos_scratch_env_api y pos_scratch_env_base_por_defecto), PERMISSIONS_ENFORCE en true solo con --enforce, y una DGII
+ * en un puerto de loopback sin nadie (EXPRESS_DGII_SIN_SERVICIO). $raiz es el arbol del API; '' es el de esta rama. Se niega
+ * (salida 1) si el arbol trae un .env: lo cargaria el servidor y una peticion sin empresa podria caer en la base que diga.
+ *
+ * El nombre con el que se registra el servidor lleva el modo y el arbol ("{$nombre}_enf|som_<hash de la raiz>"): un php -S que
+ * quedo de otra corrida en ese puerto, del otro modo o de otro arbol, no se reutiliza con la configuracion equivocada;
+ * wa_servidor se detiene con "[FALLO] el puerto ... ya lo usa otro proceso". La salida del servidor queda en el temp del
+ * sistema (wa_<nombre>_<puerto>.log).
+ */
+function express_api(string $nombre, int $puerto, string $raiz = ''): string
+{
+    $arbol = $raiz !== '' ? $raiz : dirname(__DIR__);
+    if (is_file($arbol . '/.env')) {
+        echo "[FALLO] el arbol del API a probar tiene un .env: el servidor lo cargaria y una peticion sin empresa podria caer en la base de ese archivo\n";
+        exit(1);
+    }
+    $cred = wa_credenciales();
+    $master = wa_base_real(POS_SCRATCH_BASE_MASTER);
+    $enforce = wa_arg('enforce') !== null;
+    $env = array_merge(
+        pos_scratch_env_api($cred, $master, pos_scratch_secretos($cred['pass']), EXPRESS_DGII_SIN_SERVICIO, wa_cert_prueba(), $enforce),
+        pos_scratch_env_base_por_defecto($cred, $master)
+    );
+    $servidor = $nombre . '_' . ($enforce ? 'enf' : 'som') . '_' . substr(md5($arbol), 0, 6);
+    return wa_servidor($servidor, 'index.php', $puerto, $env, $raiz);
+}
+
+/**
+ * Inicia sesion como $usuario (uno de los usuarios de prueba: admin_pos_a, user_pos_a, admin_pos_b) en la API $api y devuelve
+ * ['token' => la sesion, 'user' => el user de la respuesta]. Sale con 1, con la linea [FALLO] y lo que contesto la API
+ * (enmascarado), si no hay sesion: una prueba que necesita una sesion no tiene nada que decir sin ella.
+ *
+ * @return array{token:string, user:array}
+ */
+function express_login(string $api, string $usuario): array
+{
+    $cred = wa_credenciales();
+    $secretos = pos_scratch_secretos($cred['pass']);
+    $r = wa_http('POST', $api . '/api/auth/login', ['emailOrUsername' => $usuario, 'password' => $secretos['clave_usuarios']]);
+    $token = (string) ($r['json']['data']['token'] ?? '');
+    if ($token === '') {
+        echo "[FALLO] no se pudo iniciar sesion como {$usuario} en {$api}: HTTP {$r['status']} "
+            . pos_scratch_enmascarar(substr($r['body'], 0, 300), array_merge([$cred['pass'], $cred['user'], $cred['host']], array_values($secretos))) . "\n";
+        exit(1);
+    }
+    return ['token' => $token, 'user' => (array) ($r['json']['data']['user'] ?? [])];
+}
+
+/** La cabecera de una sesion de usuario, lista para wa_http (X-API-KEY, como la mandan las otras suites). @return string[] */
+function express_h(string $token): array
+{
+    return ['X-API-KEY: ' . $token];
+}
+
+/**
+ * Apunta MasterDatabase y TenantResolver de ESTE proceso a la master scratch, como wa_usar_base lo hace con la base de una
+ * empresa: MasterDatabase lee solo $_ENV, asi que llena $_ENV y putenv con MASTER_DB_* y deja la clave maestra de prueba para
+ * que TenantResolver descifre las claves de las bases. Hay que llamarla antes de la primera vez que algo pida
+ * MasterDatabase::getInstance() en este proceso (la instancia se crea una vez y ya no cambia de base).
+ *
+ * @param array $ctx lo que devuelve express_scratch_preparar()
+ */
+function express_usar_master(array $ctx): void
+{
+    $c = $ctx['cred'];
+    foreach ([
+        'MASTER_DB_HOST' => $c['host'], 'MASTER_DB_PORT' => $c['port'], 'MASTER_DB_NAME' => $ctx['master'],
+        'MASTER_DB_USER' => $c['user'], 'MASTER_DB_PASS' => $c['pass'],
+        'MASTER_ENCRYPTION_KEY' => pos_scratch_secretos($c['pass'])['clave_maestra'],
+    ] as $clave => $valor) {
+        $_ENV[$clave] = $valor;
+        putenv("{$clave}={$valor}");
+    }
 }
 
 // Modo hijo: lo lanza la seccion 1 para ver la restauracion de al terminar. Ensucia las dos empresas (columnas
@@ -348,6 +465,92 @@ wa_chk('al terminar un proceso se restaura todo: las dos empresas completas (col
     $s1Hijo['codigo'] === 0 && $s1Hijo['salida'] === ''
     && $s1Despues[$s1Ids[0]] === $s1LimpiaConPos && $s1Despues[$s1Ids[1]] === $s1LimpiaConPos
     && $s1Rol === 'admin' && (int) $s1Permisos->fetchColumn() === count($s1Defaults['user']), [$s1Despues, $s1Rol]);
+
+// ---------------------------------------------------------------------------
+// 2) user.entitlements en el login y en /me
+// ---------------------------------------------------------------------------
+echo "\n== 2) user.entitlements en el login y en /me ==\n";
+$s2Pdo = $ctx['pdo'];
+$s2IdA = (int) $ctx['tenantA'];
+$s2IdB = (int) $ctx['tenantB'];
+/** Las columnas de edicion de una empresa de prueba, cada valor en texto o NULL. */
+$s2Fila = static function (int $id) use ($s2Pdo): array {
+    $st = $s2Pdo->prepare('SELECT edicion, tipos_ecf_habilitados, modulos_habilitados, cert_vence FROM tenants WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return array_map(static fn ($valor): ?string => $valor === null ? null : (string) $valor, (array) $st->fetch());
+};
+
+// A es la empresa Express (solo E45); B, la de control, sigue completa.
+express_edicion($ctx, 'A', 'express', '45', null);
+wa_chk('express_edicion(A, express, 45, null): A queda express con tipos 45 y modulos y cert_vence en NULL, y B sigue completa',
+    $s2Fila($s2IdA) === ['edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'cert_vence' => null]
+    && $s2Fila($s2IdB)['edicion'] === 'completa', [$s2Fila($s2IdA), $s2Fila($s2IdB)]);
+$s2Api = express_api('express_api', 8294);
+
+// Login del administrador de A.
+$s2LoginA = express_login($s2Api, 'admin_pos_a');
+$s2UserA = $s2LoginA['user'];
+$s2Bloque = $s2UserA['entitlements'] ?? null;
+/** El "*" del administrador cruzado con los cinco modulos del preset: un token por modulo (la configuracion es ncf) y el compartido unidades. */
+$s2PermisosAdminA = ['facturas', 'clients', 'products', 'users', 'ncf', 'unidades'];
+wa_chk('login admin_pos_a (A, Express): el user trae entitlements, despues de permissions y como ultima clave',
+    json_encode(array_keys($s2UserA)) === '["id","email","username","name","role","permissions","entitlements"]', array_keys($s2UserA));
+wa_chk('login admin_pos_a: entitlements trae exactamente edicion, tenant, modulos, tipos_ecf y capacidades',
+    is_array($s2Bloque) && array_keys($s2Bloque) === ['edicion', 'tenant', 'modulos', 'tipos_ecf', 'capacidades'], is_array($s2Bloque) ? array_keys($s2Bloque) : $s2Bloque);
+wa_chk('login admin_pos_a: entitlements.tenant trae exactamente id, nombre, rnc y ambiente, los de A',
+    is_array($s2Bloque['tenant'] ?? null) && array_keys($s2Bloque['tenant']) === ['id', 'nombre', 'rnc', 'ambiente']
+    && $s2Bloque['tenant'] === ['id' => $s2IdA, 'nombre' => POS_SCRATCH_TENANTS['A']['nombre'], 'rnc' => POS_SCRATCH_TENANTS['A']['rnc'], 'ambiente' => 'testecf'],
+    $s2Bloque['tenant'] ?? null);
+wa_chk('login admin_pos_a: edicion express, los cinco modulos del preset, tipos_ecf ["45","34"] (la venta y la nota de credito derivada) y las capacidades de hoy',
+    ($s2Bloque['edicion'] ?? null) === 'express'
+    && ($s2Bloque['modulos'] ?? null) === ['facturacion', 'clientes', 'productos', 'usuarios', 'configuracion']
+    && ($s2Bloque['tipos_ecf'] ?? null) === ['45', '34']
+    && ($s2Bloque['capacidades'] ?? null) === ['idempotencia' => false, 'reconciliador' => false, 'certificado' => true], $s2Bloque);
+wa_chk('login admin_pos_a: permissions es el "*" del administrador cruzado con los modulos de la edicion (facturas, clients, products, users, ncf, unidades)',
+    ($s2UserA['permissions'] ?? null) === $s2PermisosAdminA, $s2UserA['permissions'] ?? null);
+
+// GET /api/auth/me del mismo administrador: el mismo bloque y los mismos permisos.
+$s2Me = wa_http('GET', $s2Api . '/api/auth/me', null, express_h($s2LoginA['token']));
+$s2MeUser = $s2Me['json']['data']['user'] ?? null;
+wa_chk('GET /api/auth/me (A, Express): 200 con success y el user con las mismas claves que el login, bloque incluido',
+    $s2Me['status'] === 200 && ($s2Me['json']['success'] ?? null) === true && is_array($s2MeUser)
+    && json_encode(array_keys($s2MeUser)) === '["id","email","username","name","role","permissions","entitlements"]', [$s2Me['status'], $s2Me['body']]);
+wa_chk('GET /api/auth/me (A, Express): entitlements (un bloque de verdad, no null) y permissions son los del login',
+    is_array($s2MeUser) && is_array($s2Bloque) && ($s2MeUser['entitlements'] ?? null) === $s2Bloque
+    && ($s2MeUser['permissions'] ?? null) === $s2PermisosAdminA && $s2PermisosAdminA === ($s2UserA['permissions'] ?? null), $s2MeUser);
+
+// El Facturador (rol user) de A: el bloque es de la empresa, no del rol; los permisos son los de SU rol cruzados con la edicion.
+$s2LoginU = express_login($s2Api, 'user_pos_a');
+$s2Rol = $s2Pdo->prepare("SELECT rp.permission FROM role_permissions rp JOIN roles r ON r.id = rp.role_id WHERE r.tenant_id = :t AND r.name = 'user'");
+$s2Rol->execute([':t' => $s2IdA]);
+$s2PermisosRol = array_column($s2Rol->fetchAll(), 'permission');
+// Lo esperado sale de la tabla de permisos de la base, no de la funcion que se prueba: los tokens de la edicion, en su orden, que el rol tiene.
+$s2EsperadoU = array_values(array_intersect(['facturas', 'clients', 'products', 'users', 'ncf', 'unidades'], $s2PermisosRol));
+wa_chk('precondicion: el rol user de A tiene permisos y no tiene el modulo users (el cruce con la edicion tiene algo que mostrar)',
+    $s2EsperadoU !== [] && !in_array('users', $s2PermisosRol, true) && !in_array('*', $s2PermisosRol, true), $s2PermisosRol);
+wa_chk('login user_pos_a (el Facturador de A): el mismo bloque que el administrador y permissions = los tokens de la edicion que su rol tiene, en el orden de los tokens y sin users',
+    ($s2LoginU['user']['entitlements'] ?? null) === $s2Bloque && ($s2LoginU['user']['permissions'] ?? null) === $s2EsperadoU
+    && !in_array('users', (array) ($s2LoginU['user']['permissions'] ?? []), true), $s2LoginU['user']);
+
+// B (completa): el login y /me de siempre.
+$s2LoginB = express_login($s2Api, 'admin_pos_b');
+$s2MeB = wa_http('GET', $s2Api . '/api/auth/me', null, express_h($s2LoginB['token']));
+$s2MeUserB = $s2MeB['json']['data']['user'] ?? null;
+wa_chk('login admin_pos_b (B, completa): data.user trae exactamente id, email, username, name, role y permissions, sin entitlements, y permissions es el "*" del rol',
+    array_keys($s2LoginB['user']) === ['id', 'email', 'username', 'name', 'role', 'permissions'] && !array_key_exists('entitlements', $s2LoginB['user'])
+    && $s2LoginB['user']['permissions'] === ['*'], $s2LoginB['user']);
+wa_chk('GET /api/auth/me (B, completa): 200 con las mismas seis claves, sin entitlements, y permissions "*"',
+    $s2MeB['status'] === 200 && is_array($s2MeUserB) && array_keys($s2MeUserB) === ['id', 'email', 'username', 'name', 'role', 'permissions']
+    && !array_key_exists('entitlements', $s2MeUserB) && $s2MeUserB['permissions'] === ['*'], [$s2MeB['status'], $s2MeB['body']]);
+
+// express_usar_master: MasterDatabase y TenantResolver de este proceso leen la master scratch.
+express_usar_master($ctx);
+$s2Maestro = MasterDatabase::getInstance();
+$s2FilaA = $s2Maestro->getTenantById($s2IdA);
+wa_chk('express_usar_master: MasterDatabase lee la master scratch (la empresa A, express) y TenantResolver descifra la clave de su base con la clave maestra de prueba',
+    $s2Maestro->getConnection()->query('SELECT DATABASE()')->fetchColumn() === $ctx['master']
+    && is_array($s2FilaA) && $s2FilaA['edicion'] === 'express' && (int) $s2FilaA['id'] === $s2IdA
+    && TenantResolver::decrypt((string) $s2FilaA['db_pass_encrypted']) === $ctx['cred']['pass'], is_array($s2FilaA) ? $s2FilaA['edicion'] : $s2FilaA);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
