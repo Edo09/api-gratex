@@ -14,7 +14,8 @@ El equivalente para tenants app es [alta-tenant-runbook.md](alta-tenant-runbook.
 
 > **Las dos cosas que hay que acordar con el cliente antes de empezar:** desde qué número
 > de e-NCF arranca cada tipo (el runner consume secuencias reales suyas) y quién produce
-> las Representaciones Impresas (Fase 8) — no hay generador para este tipo de tenant.
+> las Representaciones Impresas (Fase 8): el cliente desde su sistema, o nosotros desde
+> el XML con `tools/ri_desde_xml.php`.
 
 ---
 
@@ -25,6 +26,7 @@ El equivalente para tenants app es [alta-tenant-runbook.md](alta-tenant-runbook.
 | RNC del cliente (9-11 dígitos) | `SELECT id, nombre FROM tenants WHERE rnc = '<rnc>';` en el master — vacío (`tenants.rnc` es UNIQUE) |
 | Certificado `.p12` + contraseña | Obligatorio en integración: firma sus e-CF y sus acuses |
 | Rangos e-NCF autorizados por DGII | Por tipo. Anotar el primer número libre de cada uno |
+| Dirección y teléfono reales del emisor | Van en el XML de cada e-CF de la Fase 7 y salen en su Representación Impresa: la DGII rechaza la RI sin ellos ("N/D" no cuenta). Teléfono de 10 dígitos (`809-555-0100`), dirección de hasta 100 caracteres |
 | `ONBOARD_TOKEN` | En el `.env` del server |
 | Carpeta de certificados | `CERT_DIR` del `.env` (default `certificado_dgii`), con escritura para PHP. Está en `.gitignore`: **un deploy nuevo no la trae** |
 | ¿Cliente con varias empresas? | Se agrupan con `--grupo`; requiere la migración master `db/master_migrations/008_add_tenant_grupo.sql` aplicada |
@@ -230,11 +232,14 @@ php tools/send_fase4_simulation.php --api=https://gratex.net/api `
   --api-key=<key> --api-secret=<secret> `
   --encf-start=E31:7,E32:5,E33:1,E34:1,E41:1,E43:1,E44:1,E45:1,E46:1,E47:1 `
   --emisor-rnc=131111111 --emisor-razon-social="CLIENTE A SRL" `
-  --emisor-direccion="Av. Winston Churchill #45" `
+  --emisor-direccion="Av. Winston Churchill #45" --emisor-telefono=809-555-0100 `
   --nota-wait-accepted=240 --nota-poll=15
 ```
 
 `--encf-start` acepta también un número suelto (todos los tipos arrancan ahí).
+`--emisor-direccion` y `--emisor-telefono` son obligatorios y el runner los valida antes de
+emitir: la RI de cada comprobante se imprime desde su XML, y lo que no vaya ahí no se
+puede agregar después sin que la RI deje de coincidir con el e-CF.
 `--nota-wait-accepted` espera a que los E31 estén `ACEPTADO` antes de mandar las notas
 (E33/E34), que los referencian — consulta por `GET /integracion/estado`.
 
@@ -242,14 +247,22 @@ php tools/send_fase4_simulation.php --api=https://gratex.net/api `
 
 ## Fase 8 — Representaciones Impresas
 
-**No hay generador para este tipo de tenant.** La RI de un tenant app sale de
-`GET /facturas/{id}/pdf`, que necesita la factura persistida; un tenant de integración no
-tiene DB. Opciones, en orden de preferencia:
+La RI de un tenant app sale de `GET /facturas/{id}/pdf`, que necesita la factura
+persistida; un tenant de integración no tiene DB. Opciones, en orden de preferencia:
 
 1. El cliente las genera desde su sistema con lo que devuelve la emisión: `codigo_seguridad`,
    `fecha_emision` (fecha de firma) y el QR. Requisitos mínimos de DGII en
    [../api/guia-cliente-integracion.md](../api/guia-cliente-integracion.md) §7.
-2. Se arman a mano para el set de certificación.
+2. Las generamos desde el XML firmado de cada comprobante (los guarda la Fase 7):
+   `php tools/ri_desde_xml.php <E....xml> --ambiente=certecf`. Ver
+   [../modules/representacion-impresa-pos.md](../modules/representacion-impresa-pos.md#reimprimir-desde-el-xml-firmado-cli).
+
+Lo que la DGII ya observó en RI de certificación: E32/E34 sin fecha de vencimiento; código
+de seguridad y fecha de firma debajo del QR; dirección y teléfono del emisor visibles; en
+E33/E34 el NCF modificado al lado del e-NCF. Si la Fase 7 se corrió con la dirección "N/D"
+o sin teléfono, `ri_desde_xml.php --direccion=... --telefono=...` los pone en el impreso,
+pero el XML firmado sigue diciendo otra cosa: lo correcto es repetir la Fase 7 con los datos
+reales.
 
 Planificarlo en la Fase 0, no el día que el portal las pide.
 

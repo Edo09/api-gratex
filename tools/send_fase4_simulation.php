@@ -33,15 +33,18 @@
  * no lo trae, porque en la ruta app lo aportaba client_id.
  *
  * Y como no hay emisor_config que leer, el emisor va en cada payload:
- * --emisor-rnc, --emisor-razon-social y --emisor-direccion son obligatorios
- * (opcionales: --emisor-nombre-comercial, --emisor-municipio,
- * --emisor-provincia, --emisor-telefono, --emisor-correo).
+ * --emisor-rnc, --emisor-razon-social, --emisor-direccion y --emisor-telefono
+ * son obligatorios (opcionales: --emisor-nombre-comercial, --emisor-municipio,
+ * --emisor-provincia, --emisor-correo). Direccion y telefono salen en la RI de
+ * cada comprobante, que se imprime desde su XML: la DGII la rechaza sin ellos
+ * ("N/D" no cuenta). El telefono va con 10 digitos (809-555-0100); con otro
+ * formato el XML no pasa el XSD y la DGII rechaza la corrida entera.
  *
  *   php tools/send_fase4_simulation.php \
  *       --api=https://gratex.net/api \
  *       --api-key=<api_key> --api-secret=<api_secret> \
  *       --emisor-rnc=131111111 --emisor-razon-social="CLIENTE A SRL" \
- *       --emisor-direccion="Av. Winston Churchill #45" \
+ *       --emisor-direccion="Av. Winston Churchill #45" --emisor-telefono=809-555-0100 \
  *       --encf-start=1                        # todos los tipos arrancan en 1
  *       # o por tipo, para retomar una corrida:
  *       --encf-start=E31:7,E32:5,E34:2        # los no listados caen en 1
@@ -183,6 +186,16 @@ function main(array $argv): int
             'telefono' => isset($opts['emisor-telefono']) ? trim((string) $opts['emisor-telefono']) : null,
             'correo' => isset($opts['emisor-correo']) ? trim((string) $opts['emisor-correo']) : null,
         ], fn($v) => $v !== null && $v !== '');
+
+        // La RI de cada comprobante sale de su XML: la DGII la rechaza sin
+        // direccion y telefono del emisor, y un dato fuera del formato del XSD
+        // deja invalidos todos los XML de la corrida (y gasta sus e-NCF).
+        $errores = errorContactoEmisor($emisor);
+        if ($errores !== []) {
+            fwrite(STDERR, "ERROR: datos del emisor:\n   - " . implode("\n   - ", $errores) . "\n");
+            return 2;
+        }
+        $emisor['telefono'] = telefonoDgii($emisor['telefono']);
     }
 
     $countsOverride = [];
@@ -1142,6 +1155,46 @@ function guardarXmlFirmado(?string $dir, string $eNcf, ?string $xml): ?string
         return null;
     }
     return $path;
+}
+
+/** Telefono como lo pide el XSD del e-CF (999-999-9999), o null si no son 10 digitos. */
+function telefonoDgii(string $v): ?string
+{
+    $d = (string) preg_replace('/\D+/', '', $v);
+    if (strlen($d) === 11 && $d[0] === '1') {
+        $d = substr($d, 1);
+    }
+    return strlen($d) === 10 ? substr($d, 0, 3) . '-' . substr($d, 3, 3) . '-' . substr($d, 6) : null;
+}
+
+/**
+ * Contacto del emisor contra el XSD del e-CF y lo que la DGII pide en la RI:
+ * direccion real (no "N/D", max. 100), telefono de 10 digitos, correo con el
+ * patron del XSD (max. 80). Devuelve los errores; vacio = todo bien.
+ *
+ * @return string[]
+ */
+function errorContactoEmisor(array $emisor): array
+{
+    $errores = [];
+    $dir = trim((string) ($emisor['direccion'] ?? ''));
+    if (preg_match('#^(n[\s./]*[da][\s.]*|-+|\.+)?$#i', $dir)) {
+        $errores[] = '--emisor-direccion tiene que ser la direccion real: sale en la RI y "N/D" no cuenta';
+    } elseif (mb_strlen($dir) > 100) {
+        $errores[] = '--emisor-direccion pasa de 100 caracteres (el XSD no la acepta)';
+    }
+    $tel = trim((string) ($emisor['telefono'] ?? ''));
+    if ($tel === '') {
+        $errores[] = '--emisor-telefono es obligatorio: sale en la RI y la DGII la rechaza sin el';
+    } elseif (telefonoDgii($tel) === null) {
+        $errores[] = '--emisor-telefono tiene que tener 10 digitos (809-555-0100)';
+    }
+    $correo = trim((string) ($emisor['correo'] ?? ''));
+    if ($correo !== '' && (strlen($correo) > 80
+        || !preg_match("/^\\w+([-+.']\\w+)*@\\w+([-.]\\w+)*\\.\\w+([-.]\\w+)*$/", $correo))) {
+        $errores[] = '--emisor-correo no tiene un formato que la DGII acepte';
+    }
+    return $errores;
 }
 
 function parseArgs(array $argv): array

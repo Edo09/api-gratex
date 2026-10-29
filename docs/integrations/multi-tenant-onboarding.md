@@ -271,7 +271,7 @@ php tools/send_fase3.php <set.xlsx> --api=https://gratex.net/api `
 php tools/send_fase4_simulation.php --api=https://gratex.net/api `
   --api-key=<key> --api-secret=<secret> --encf-start=1 `
   --emisor-rnc=131111111 --emisor-razon-social="CLIENTE A SRL" `
-  --emisor-direccion="Av. Winston Churchill #45"
+  --emisor-direccion="Av. Winston Churchill #45" --emisor-telefono=809-555-0100
 ```
 
 Diferencias contra una corrida de tipo app:

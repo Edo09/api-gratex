@@ -24,11 +24,11 @@ class FacturaPdfGenerator extends FPDF
     /**
      * Cuadro de totales, tambien fijo en la ultima hoja: cada plantilla pone
      * la fila Total en y=-40 y apila las demas 5 mm hacia arriba (drawTotals).
-     * Empieza en x=157.9 (153.9 en ferreventura): 150 deja margen.
+     * Empieza en x=157.9 (153.9 en ferreventura; 147.9 en clasico, que usa la disposicion de la norma): 145 deja margen.
      */
     private const TOTALES_ANCLA = 40;
     private const TOTALES_FILA = 5;
-    private const TOTALES_X_INICIO = 150;
+    private const TOTALES_X_INICIO = 145;
 
     /**
      * Donde termina el texto de la ultima fila dibujada, por zona: 'izq' son
@@ -37,6 +37,15 @@ class FacturaPdfGenerator extends FPDF
      * @var array{pagina:int,izq:float,der:float}|null
      */
     private $ultimaFila = null;
+
+    /**
+     * Disposicion de la norma (ver FacturaTemplate::usaDisposicionNorma): la
+     * tabla lleva una celda con borde por columna y, si hay, una columna
+     * sombreada (el Valor). Las demas plantillas dibujan las filas sin bordes.
+     */
+    private $tablaConBordes = false;
+    /** @var int|null Indice de la columna sombreada de la tabla con bordes. */
+    private $columnaSombreada = null;
 
     private $factura;
     private $widths;
@@ -224,8 +233,12 @@ class FacturaPdfGenerator extends FPDF
             $texto = rtrim($data[$i]);
             $nbTexto[$i] = $texto === '' ? 0 : $this->NbLines($width, $texto);
         }
-        $h = $this->lineHeight * $nb;
-        $hTexto = $this->lineHeight * max($nbTexto ?: [0]);
+        // Con bordes, el texto queda 1.2 mm dentro de la celda por arriba y por
+        // abajo; el renglon de aire de la descripcion ya no hace falta (ver
+        // generatePdf) y sin el nb == nbTexto.
+        $pad = $this->tablaConBordes ? 1.2 : 0;
+        $h = $this->lineHeight * $nb + 2 * $pad;
+        $hTexto = $this->lineHeight * max($nbTexto ?: [0]) + 2 * $pad;
         // Corta de hoja si el TEXTO no cabe antes del pie de la plantilla.
         $this->CheckPageBreak($hTexto);
         $x0 = $this->GetX();
@@ -241,14 +254,29 @@ class FacturaPdfGenerator extends FPDF
         }
         $izq = $der = $y0;
         $xCol = $x0;
+        if ($this->tablaConBordes) {
+            // Las celdas se dibujan antes que el texto: el relleno es opaco.
+            $this->SetDrawColor(110, 110, 110);
+            $this->SetFillColor(240, 240, 240);
+            $this->SetLineWidth(0.2);
+            $xCelda = $x0;
+            for ($i = 0; $i < count($data); $i++) {
+                $w = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
+                $this->Rect($xCelda, $y0, $w, $h, $i === $this->columnaSombreada ? 'DF' : 'D');
+                $xCelda += $w;
+            }
+            $this->SetDrawColor(0, 0, 0);
+            $this->SetXY($x0, $y0);
+        }
         for ($i = 0; $i < count($data); $i++) {
             $w = (isset($this->widths) && isset($this->widths[$i])) ? $this->widths[$i] : 40;
             $a = isset($this->aligns[$i]) ? $this->aligns[$i] : 'L';
             $x = $this->GetX();
-            $y = $this->GetY();
+            $y = $this->GetY() + $pad;
+            $this->SetXY($x, $y);
             $this->MultiCell($w, $this->lineHeight ?: 4, $data[$i], 0, $a);
-            $this->SetXY($x + $w, $y);
-            $finTexto = $y0 + $this->lineHeight * $nbTexto[$i];
+            $this->SetXY($x + $w, $y - $pad);
+            $finTexto = $y0 + $this->lineHeight * $nbTexto[$i] + 2 * $pad;
             if ($xCol < self::TIMBRE_X_FIN) {
                 $izq = max($izq, $finTexto);
             }
@@ -440,7 +468,8 @@ class FacturaPdfGenerator extends FPDF
         $y = $qrY + $qrSize + 0.5;
         $lineas = [
             ['Código de Seguridad:', $timbre['codigo_seguridad']],
-            ['Fecha de Firma:', $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D'],
+            // El modelo de la DGII la rotula "Fecha Firma".
+            [$this->template()->usaDisposicionNorma() ? 'Fecha Firma:' : 'Fecha de Firma:', $timbre['fecha_firma'] !== '' ? $timbre['fecha_firma'] : 'N/D'],
         ];
         foreach ($lineas as [$etiqueta, $valor]) {
             $etiqueta = $this->convertEncoding($etiqueta);
@@ -476,33 +505,135 @@ class FacturaPdfGenerator extends FPDF
     }
 
     /**
-     * Generate the PDF content
-     * @return string PDF content as string
+     * Regla de color a todo lo ancho entre franjas (modelo de RI de la DGII).
      */
-    public function generatePdf()
+    private function reglaNorma(FacturaTemplate $tpl, float $y): void
     {
-        // Resolver plantilla ANTES de AddPage() (Header/Footer la usan).
-        $tpl = $this->template();
-        $tpl->setDocumento($this->doc());
-        $style = $tpl->style();
-        $layout = $tpl->layout();
-        // Limites del motor: la tabla no empieza dentro del encabezado minimo
-        // ni su texto baja hasta el pie de la plantilla (pie_y); la zona de
-        // totales/QR de la ultima hoja la reserva tablaInvadeCierre().
-        $tableStartY = max(36, min(120, (float) ($layout['table_start_y'] ?? 56)));
-        $docIdY = max(6, min(80, (float) ($layout['doc_id_y'] ?? 10)));
-        $pieY = max(150, min($this->GetPageHeight() - 20, (float) ($layout['pie_y'] ?? 243)));
+        $c = $tpl->coloresNorma()['linea'];
+        $this->SetDrawColor($c[0], $c[1], $c[2]);
+        $this->SetLineWidth(0.5);
+        $this->Line(8, $y, $this->GetPageWidth() - 8, $y);
+        $this->SetLineWidth(0.2);
+        $this->SetDrawColor(0, 0, 0);
+    }
 
-        $this->AliasNbPages();
-        $this->SetMargins(8, 10, 8);
-        // Las filas pasan a la hoja siguiente antes de que su texto llegue al
-        // pie que la plantilla dibuja en cada hoja (ver Row()). Con el corte
-        // por defecto de FPDF (y=259.4) bajaban por debajo del sello, la regla
-        // de moderno o "Recibido por:".
-        $this->SetAutoPageBreak(true, $this->GetPageHeight() - $pieY);
-        $this->AddPage();
+    /** "Etiqueta: valor" pegado al margen derecho, etiqueta en negrita. */
+    private function lineaDerecha(string $etiqueta, string $valor): void
+    {
+        $derecha = $this->GetPageWidth() - $this->rMargin;
+        $etiqueta = $this->convertEncoding($etiqueta) . ' ';
+        $valor = $this->convertEncoding($valor);
+        $this->SetFont($this->fontFamily(), 'B', 9);
+        $we = $this->GetStringWidth($etiqueta);
+        $this->SetFont($this->fontFamily(), '', 9);
+        $wv = $this->GetStringWidth($valor);
+        $this->SetXY($derecha - $we - $wv - 2, $this->GetY());
+        $this->SetFont($this->fontFamily(), 'B', 9);
+        $this->Cell($we, 4, $etiqueta, 0, 0, 'L');
+        $this->SetFont($this->fontFamily(), '', 9);
+        $this->Cell($wv + 2, 4, $valor, 0, 1, 'L');
+    }
 
-        $doc = $this->doc();
+    /**
+     * Encabezado de la hoja carta con la disposicion del modelo de RI de la
+     * DGII. A la izquierda, ya dibujado por la plantilla en Header(): emisor,
+     * RNC, direccion, contacto y Fecha Emision. Aqui, a la derecha: titulo del
+     * comprobante, e-NCF, NCF Modificado (E33/E34) y Fecha Vencimiento; debajo,
+     * entre dos reglas de color, el cliente (Razon Social y RNC). Devuelve la Y
+     * donde arranca la tabla.
+     *
+     * La norma prohibe la etiqueta "Factura No.": va "e-NCF". E32/E34 no llevan
+     * vencimiento (EcfDocumento::fechaVencimiento devuelve '').
+     *
+     * @param float $yIzquierda Donde termino el bloque del emisor.
+     */
+    private function dibujarEncabezadoNorma(FacturaTemplate $tpl, EcfDocumento $doc, float $yIzquierda): float
+    {
+        $color = $tpl->coloresNorma()['titulo'];
+        $x = 108;
+        $ancho = $this->GetPageWidth() - $this->rMargin - $x;
+
+        $this->SetXY($x, 10);
+        $this->SetFont($this->fontFamily(), 'B', 13);
+        $this->SetTextColor($color[0], $color[1], $color[2]);
+        $this->MultiCell($ancho, 5.5, $this->convertEncoding($doc->titulo()), 0, 'R');
+        $this->SetTextColor(0, 0, 0);
+        $this->SetY($this->GetY() + 1);
+
+        if ($this->noElectronica) {
+            // Factura NO electronica: numero interno + NCF tradicional (si lo
+            // hay); sin e-NCF ni vencimiento, que son propios del e-CF.
+            $this->lineaDerecha('Factura No.:', $doc->noFactura());
+            if ($doc->ncfTradicional() !== '') {
+                $this->lineaDerecha('NCF:', $doc->ncfTradicional());
+            }
+        } else {
+            $this->lineaDerecha('e-NCF:', $doc->eNcf());
+            // La DGII rechazo la RI que ponia el comprobante modificado lejos del
+            // e-NCF de la nota: va justo debajo. El Motivo sale en la tabla.
+            $nota = $doc->notaModificacion();
+            if ($nota !== null && $nota['ncf'] !== '') {
+                $this->lineaDerecha('NCF Modificado:', $nota['ncf']
+                    . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : ''));
+            }
+            $vencimiento = $doc->fechaVencimiento();
+            if ($vencimiento !== '') {
+                $this->lineaDerecha('Fecha Vencimiento:', str_replace('/', '-', $vencimiento));
+            }
+        }
+        // Venta a credito: cuando vence el pago, en una linea corta y gris (la
+        // "Fecha Vencimiento" de arriba es la de la secuencia, no la del pago).
+        if ($tpl->mostrarVencimientoPago() && $doc->esCredito()) {
+            $this->SetFont($this->fontFamily(), '', 8);
+            $this->SetTextColor(100, 100, 100);
+            $this->SetX($x);
+            $this->Cell($ancho, 3.8, $this->convertEncoding('Crédito · Pago vence: ' . $doc->fechaLimitePago()), 0, 1, 'R');
+            $this->SetTextColor(0, 0, 0);
+        }
+
+        $y = max($this->GetY(), $yIzquierda) + 1;
+        $this->reglaNorma($tpl, $y);
+
+        // Cliente: E43 (Gastos Menores) no lleva Comprador y E47 usa
+        // "Identificacion Tributaria" (ver EcfDocumento::receptor). Sin RNC
+        // (E32 de consumo sin comprador) no se imprime esa linea.
+        $receptor = $doc->receptor();
+        if ($receptor['mostrar']) {
+            $this->SetXY($this->lMargin, $y + 2);
+            $ancho = $this->GetPageWidth() - $this->lMargin - $this->rMargin;
+            $this->lineaIzquierda('Razón Social Cliente:', $receptor['razon_social'], $ancho);
+            if ($receptor['rnc'] !== '') {
+                $this->lineaIzquierda($receptor['label_id'] . ':', $receptor['rnc'], $ancho);
+            }
+            if ($receptor['contacto'] !== '') {
+                $this->lineaIzquierda('Contacto:', $receptor['contacto'], $ancho);
+            }
+            $y = $this->GetY() + 1;
+            $this->reglaNorma($tpl, $y);
+        }
+        return $y + 3;
+    }
+
+    /** "Etiqueta: valor" en el margen izquierdo, etiqueta en negrita, valor largo con sangria. */
+    private function lineaIzquierda(string $etiqueta, string $valor, float $ancho): void
+    {
+        $etiqueta = $this->convertEncoding($etiqueta) . ' ';
+        $this->SetX($this->lMargin);
+        $this->SetFont($this->fontFamily(), 'B', 10);
+        $we = $this->GetStringWidth($etiqueta);
+        $this->Cell($we, 4.6, $etiqueta, 0, 0, 'L');
+        $this->SetFont($this->fontFamily(), '', 10);
+        $this->MultiCell($ancho - $we, 4.6, $this->convertEncoding($valor), 0, 'L');
+    }
+
+    /**
+     * Encabezado historico de la hoja carta (todas las plantillas salvo las que
+     * piden la disposicion de la norma): titulo, e-NCF, fechas y receptor en la
+     * columna derecha, bajo el emisor que dibuja la plantilla. Deja el cursor
+     * donde arranca la tabla.
+     */
+    private function dibujarIdentificacionClasica(FacturaTemplate $tpl, EcfDocumento $doc, array $style, float $docIdY, float $tableStartY): void
+    {
         $receptor = $doc->receptor();
         $fechaEspanol = $doc->fechaLarga();
 
@@ -535,6 +666,17 @@ class FacturaPdfGenerator extends FPDF
         } else {
             $this->SetX(-73);
             $this->Cell(70, 3.8, 'e-NCF: ' . $doc->eNcf(), 0, 1, 'L');
+            // Notas de Debito (E33) / Credito (E34): el comprobante que modifican
+            // va al lado de su e-NCF. La DGII rechazo la RI que lo ponia aparte,
+            // a la izquierda bajo el emisor. El Motivo sale en la tabla (mas
+            // abajo). Se persisten al emitir la nota (facturaModel::
+            // reservarFacturaECF, migracion 006) o salen del XML firmado.
+            $nota = $doc->notaModificacion();
+            if ($nota !== null && $nota['ncf'] !== '') {
+                $this->SetX(-73);
+                $this->MultiCell(70, 3.8, 'NCF Modificado: ' . $nota['ncf']
+                    . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : ''), 0, 'L');
+            }
             $this->SetX(-73);
             $this->Cell(70, 3.8, $this->convertEncoding('Fecha de Emisión: ' . $fechaEspanol), 0, 1, 'L');
             // E32/E34 no llevan vencimiento: sin linea, ni vacia.
@@ -581,27 +723,48 @@ class FacturaPdfGenerator extends FPDF
 
         $finBloqueDerecho = $this->GetY();
 
-        // Notas de Debito (E33) / Credito (E34): la norma DGII exige mostrar el
-        // NCF Modificado y el Motivo. Se persisten al emitir la nota (ver
-        // facturaModel::reservarFacturaECF y la migracion 006). El NCF Modificado
-        // va aqui en el encabezado; el Motivo se muestra como descripcion de la
-        // linea en la tabla (mas abajo).
-        $nota = $doc->notaModificacion();
-        if ($nota !== null && $nota['ncf'] !== '') {
-            $this->SetXY($this->lMargin, 48);
-            $this->SetFont($this->fontFamily(), 'B', 9);
-            $lineNcf = 'NCF Modificado: ' . $nota['ncf'];
-            if ($nota['fecha'] !== '') {
-                $lineNcf .= '  (' . $nota['fecha'] . ')';
-            }
-            $this->Cell(125, 3.8, $lineNcf, 0, 1, 'L');
-        }
-
         // La tabla arranca debajo de TODO el encabezado: el minimo de la
-        // plantilla, la linea del NCF Modificado (que deja el cursor en y=48) y
-        // el bloque del receptor, que crece con un nombre largo. Solo con el
-        // GetY() de la nota, un receptor de varias lineas quedaba bajo la tabla.
-        $this->SetY(max($this->GetY(), $finBloqueDerecho, $tableStartY));
+        // plantilla y el bloque derecho (e-NCF, NCF Modificado, fechas y
+        // receptor), que crece con un nombre largo.
+        $this->SetY(max($finBloqueDerecho, $tableStartY));
+    }
+    /**
+     * Generate the PDF content
+     * @return string PDF content as string
+     */
+    public function generatePdf()
+    {
+        // Resolver plantilla ANTES de AddPage() (Header/Footer la usan).
+        $tpl = $this->template();
+        $tpl->setDocumento($this->doc());
+        $style = $tpl->style();
+        $layout = $tpl->layout();
+        // Limites del motor: la tabla no empieza dentro del encabezado minimo
+        // ni su texto baja hasta el pie de la plantilla (pie_y); la zona de
+        // totales/QR de la ultima hoja la reserva tablaInvadeCierre().
+        $tableStartY = max(36, min(120, (float) ($layout['table_start_y'] ?? 56)));
+        $docIdY = max(6, min(80, (float) ($layout['doc_id_y'] ?? 10)));
+        $pieY = max(150, min($this->GetPageHeight() - 20, (float) ($layout['pie_y'] ?? 243)));
+
+        $this->AliasNbPages();
+        $this->SetMargins(8, 10, 8);
+        // Las filas pasan a la hoja siguiente antes de que su texto llegue al
+        // pie que la plantilla dibuja en cada hoja (ver Row()). Con el corte
+        // por defecto de FPDF (y=259.4) bajaban por debajo del sello, la regla
+        // de moderno o "Recibido por:".
+        $this->SetAutoPageBreak(true, $this->GetPageHeight() - $pieY);
+        $this->AddPage();
+
+        $doc = $this->doc();
+        // Donde termino el emisor que dibujo la plantilla en Header().
+        $yIzquierda = $this->GetY();
+
+        $norma = $tpl->usaDisposicionNorma();
+        if ($norma) {
+            $this->SetY($this->dibujarEncabezadoNorma($tpl, $doc, $yIzquierda));
+        } else {
+            $this->dibujarIdentificacionClasica($tpl, $doc, $style, $docIdY, $tableStartY);
+        }
 
         // Table header — columnas exactas y en el orden exigido por la norma
         // DGII (anchos y etiquetas los fija el motor; la plantilla solo dibuja):
@@ -615,28 +778,33 @@ class FacturaPdfGenerator extends FPDF
         // unitario puede traer 4 decimales y en Arial 10 "12,345.6789" mide
         // 19.6 mm, que no cabe en los 19 utiles de 21 mm y MultiCell lo partia
         // en dos renglones. Con 25 caben hasta "123,456.7891" (21.6 mm).
+        // El modelo de la DGII rotula la columna "Unidad de Medida" completo (en
+        // dos renglones); las demas plantillas conservan el rotulo corto.
+        $etqUnidad = $norma ? 'Unidad de Medida' : 'Und. Medida';
         if ($this->noElectronica) {
             $columnWidths = [18, 101, 24, 25, 32];
             $columnLabels = [
                 'Cantidad',
                 $this->convertEncoding('Descripción'),
-                'Und. Medida',
+                $etqUnidad,
                 'Precio',
                 'Valor',
             ];
-            $aligns = ['C', 'L', 'C', 'C', 'C'];
+            $aligns = $norma ? ['C', 'L', 'C', 'R', 'R'] : ['C', 'L', 'C', 'C', 'C'];
         } else {
             $columnWidths = [18, 88, 24, 25, 21, 24];
             $columnLabels = [
                 'Cantidad',
                 $this->convertEncoding('Descripción'),
-                'Und. Medida',
+                $etqUnidad,
                 'Precio',
                 'ITBIS',
                 'Valor',
             ];
-            $aligns = ['C', 'L', 'C', 'C', 'C', 'C'];
+            $aligns = $norma ? ['C', 'L', 'C', 'R', 'R', 'R'] : ['C', 'L', 'C', 'C', 'C', 'C'];
         }
+        $this->tablaConBordes = $norma;
+        $this->columnaSombreada = $norma ? count($columnWidths) - 1 : null;
         $tpl->drawItemsTableHeader($this, $columnWidths, $columnLabels);
 
         // Table rows
@@ -655,7 +823,7 @@ class FacturaPdfGenerator extends FPDF
         foreach ($doc->lineas() as $linea) {
             $fila = [
                 $linea['cantidad'],
-                $this->convertEncoding(html_entity_decode($linea['descripcion'])) . "\n ",
+                $this->convertEncoding(html_entity_decode($linea['descripcion'])) . ($norma ? '' : "\n "),
                 $linea['unidad'],
                 $linea['precio_texto'],
             ];
@@ -697,6 +865,10 @@ class FacturaPdfGenerator extends FPDF
         $this->SetMargins(10, 0, 10);
         $tpl->drawTotals($this, $filasTotales);
         $this->SetTextColor(0, 0, 0);
+        if ($norma) {
+            // Regla que cierra la tabla y abre el pie (QR + totales).
+            $this->reglaNorma($tpl, self::QR_Y - 1.5);
+        }
 
         // QR del timbre al final, en la pagina actual (ultima), junto a las firmas.
         $this->addQRTimbre();

@@ -476,7 +476,10 @@ const PASOS = [
         <div><label>RNC emisor</label><input type="text" id="emRnc"></div>
         <div><label>Razón social emisor</label><input type="text" id="emRazon"></div>
       </div>
-      <label>Dirección emisor</label><input type="text" id="emDir" value="N/D">
+      <div class="row">
+        <div><label>Dirección emisor</label><input type="text" id="emDir" maxlength="100" placeholder="Calle, número, sector, ciudad"></div>
+        <div><label>Teléfono emisor (10 dígitos)</label><input type="text" id="emTel" maxlength="20" placeholder="809-555-0100"></div>
+      </div>
       <div class="row">
         <div><label>RNC comprador</label><input type="text" id="emCompRnc" value="131880681"></div>
         <div><label>Razón social comprador</label><input type="text" id="emCompRazon" value="EMPRESA COMPRADORA SRL"></div>
@@ -595,8 +598,14 @@ const PASOS = [
       </div>
       <div class="row">
         <div><label>Razón social emisor</label><input type="text" id="f4razon"></div>
-        <div><label>Dirección emisor</label><input type="text" id="f4dir" value="N/D"></div>
+        <div><label>Dirección emisor</label><input type="text" id="f4dir" maxlength="100" placeholder="Calle, número, sector, ciudad"></div>
       </div>
+      <div class="row">
+        <div><label>Teléfono emisor (10 dígitos)</label><input type="text" id="f4tel" maxlength="20" placeholder="809-555-0100"></div>
+        <div><label>Correo emisor (opcional)</label><input type="text" id="f4correo" maxlength="80"></div>
+      </div>
+      <p class="muted">Dirección y teléfono van en el XML y salen en la <b>Representación Impresa</b>:
+      la DGII la rechaza si no los muestra, y "N/D" no cuenta como dirección.</p>
       <div class="row">
         <div><label>Vencimiento de la secuencia (dd-mm-aaaa)</label>
              <input type="text" id="f4venc" placeholder="31-12-2026"></div>
@@ -708,11 +717,21 @@ function wire(n) {
     $('emRnc').addEventListener('input', pintarEmpresaInfo);
 
     $('btnEmitir').onclick = async (e) => {
+      // Teléfono opcional aquí, pero con el formato del XSD si viene.
+      const errEmisor = errorContactoEmisor($('emDir').value, $('emTel').value, '', false);
+      if (errEmisor) {
+        $('outEmitir').style.display = 'block';
+        $('outEmitir').textContent = errEmisor;
+        return;
+      }
       e.target.disabled = true;
       const payload = {
         tipo_ecf: $('emTipo').value,
         e_ncf: $('emEncf').value.trim(),
-        emisor: { rnc: $('emRnc').value.trim(), razon_social: $('emRazon').value.trim(), direccion: $('emDir').value.trim() },
+        emisor: Object.assign(
+          { rnc: $('emRnc').value.trim(), razon_social: $('emRazon').value.trim(), direccion: $('emDir').value.trim() },
+          $('emTel').value.trim() ? { telefono: telefonoDgii($('emTel').value) } : {}
+        ),
         comprador: { rnc: $('emCompRnc').value.trim(), razon_social: $('emCompRazon').value.trim() },
         items: [{
           numero_linea: 1, indicador_facturacion: 1, indicador_bien_servicio: 2,
@@ -1069,6 +1088,34 @@ function wireXmlIntegros() {
   $('xmlConRnc').onchange = ejemplo;
 }
 
+/** Vacio o un relleno como "N/D": no es un dato del emisor. */
+function esRelleno(v) {
+  return /^(n[\s.\/]*[da][\s.]*|-+|\.+)?$/i.test(String(v || '').trim());
+}
+
+/** Telefono como lo pide el XSD de la DGII (999-999-9999), o null si no son 10 digitos. */
+function telefonoDgii(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.length === 11 && d[0] === '1') d = d.slice(1);
+  return d.length === 10 ? `${d.slice(0, 3)}-${d.slice(3, 6)}-${d.slice(6)}` : null;
+}
+
+/**
+ * Contacto del emisor contra el XSD del e-CF: un dato fuera de formato deja el
+ * XML invalido y la DGII rechaza TODOS los comprobantes de la corrida. Devuelve
+ * el error, o '' si todo esta bien.
+ */
+function errorContactoEmisor(dir, tel, correo, telObligatorio) {
+  dir = String(dir || '').trim(); tel = String(tel || '').trim(); correo = String(correo || '').trim();
+  if (esRelleno(dir)) return 'Pon la dirección real del emisor: sale en la Representación Impresa y la DGII la rechaza sin ella ("N/D" no cuenta).';
+  if (dir.length > 100) return 'La dirección del emisor pasa de 100 caracteres: la DGII no la acepta en el XML.';
+  if (tel === '' && telObligatorio) return 'Pon el teléfono del emisor: sale en la Representación Impresa y la DGII la rechaza sin él.';
+  if (tel !== '' && !telefonoDgii(tel)) return 'El teléfono del emisor tiene que tener 10 dígitos (809-555-0100): con otro formato el XML no es válido.';
+  if (correo !== '' && (correo.length > 80 || !/^\w+([-+.']\w+)*@\w+([-.]\w+)*\.\w+([-.]\w+)*$/.test(correo)))
+    return 'El correo del emisor no tiene un formato que la DGII acepte.';
+  return '';
+}
+
 async function correrFase(btn) {
   const fase = btn.dataset.fase;
   const out = $('outRunner');
@@ -1099,10 +1146,20 @@ async function correrFase(btn) {
     fd.append('nota-wait-accepted', $('f2esperar').checked ? String(espera) : '0');
   }
   if (fase === '4') {
+    // La RI de cada comprobante sale de su XML: sin direccion y telefono reales
+    // la DGII la rechaza, y el XML firmado ya no se puede corregir.
+    const errEmisor = errorContactoEmisor($('f4dir').value, $('f4tel').value, $('f4correo').value, true);
+    if (errEmisor) {
+      out.style.display = 'block';
+      out.textContent = errEmisor;
+      return;
+    }
     fd.append('encf_start', $('f4encf').value.trim());
     fd.append('emisor_rnc', $('f4rnc').value.trim());
     fd.append('emisor_razon_social', $('f4razon').value.trim());
     fd.append('emisor_direccion', $('f4dir').value.trim());
+    fd.append('emisor_telefono', telefonoDgii($('f4tel').value));
+    if ($('f4correo').value.trim()) fd.append('emisor_correo', $('f4correo').value.trim());
     if ($('f4venc').value.trim()) fd.append('fecha_venc_secuencia', $('f4venc').value.trim());
     if ($('f4counts').value.trim()) fd.append('counts', $('f4counts').value.trim());
   }
