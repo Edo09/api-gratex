@@ -119,6 +119,185 @@ wa_chk('schema.md: el snapshot del tenant llega hasta la 035 (001–035 y 012–
     && !str_contains($s1Doc, '001–031') && !str_contains($s1Doc, '012–031'));
 
 // ---------------------------------------------------------------------------
+// 2) config/editions.php y el nucleo de TenantEntitlements
+// ---------------------------------------------------------------------------
+echo "\n== 2) config/editions.php y TenantEntitlements (nucleo) ==\n";
+
+// Incluir la clase y leer la config no debe imprimir nada (ni un BOM ni un salto despues de la etiqueta de cierre de
+// PHP): la clase se carga en medio de una peticion que contesta JSON.
+ob_start();
+require_once __DIR__ . '/../src/TenantEntitlements.php';
+$s2Config = TenantEntitlements::config();
+$s2Salida = (string) ob_get_clean();
+wa_chk('incluir la clase y cargar config/editions.php no imprime nada', $s2Salida === '', $s2Salida);
+
+$s2Preset = ['facturacion', 'clientes', 'productos', 'usuarios', 'configuracion'];
+wa_chk('config(): preset, tipos de venta, permisos, rol Facturador y plazos como en el contrato',
+    $s2Config['modulos'] === $s2Preset
+    && $s2Config['tipos_venta'] === ['31', '32', '45']
+    && $s2Config['permisos'] === ['facturacion' => 'facturas', 'clientes' => 'clients', 'productos' => 'products', 'usuarios' => 'users', 'configuracion' => 'ncf']
+    && $s2Config['rol_user'] === ['facturas', 'clients', 'products', 'unidades']
+    && $s2Config['TOKEN_INACTIVIDAD_DIAS'] === 30 && $s2Config['CERT_POR_VENCER_DIAS'] === 60 && $s2Config['CERT_CRITICO_DIAS'] === 15
+    && is_array($s2Config['rutas']) && is_array($s2Config['CAPACIDADES']), $s2Config);
+// Un typo en un token (client por clients) negaria una pantalla entera sin avisar: los tokens que la config le da al
+// gate tienen que ser los del catalogo de permisos.
+$s2Catalogo = (static fn (): array => (require __DIR__ . '/../config/permissions.php')['catalog'])();
+$s2Fuera = array_values(array_diff(array_merge(array_values($s2Config['permisos']), $s2Config['rol_user'], ['unidades']), $s2Catalogo));
+wa_chk('los tokens de permisos y de rol_user existen en el catalogo de config/permissions.php', $s2Fuera === [], $s2Fuera);
+
+$s2Ref = new ReflectionClass('TenantEntitlements');
+wa_chk('TenantEntitlements es final, sin namespace y todos sus metodos son estaticos',
+    $s2Ref->isFinal() && !$s2Ref->inNamespace()
+    && array_filter($s2Ref->getMethods(), static fn (ReflectionMethod $m): bool => !$m->isStatic()) === []);
+
+/** Una fila de master.tenants de una empresa Express; $o pisa los campos que cada caso cambia. */
+$s2Fila = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null,
+];
+
+// --- csv y la edicion -------------------------------------------------------
+wa_chk('csv: trim, vacios fuera, sin repetidos, orden de aparicion',
+    TenantEntitlements::csv(' 45, ,31,45,') === ['45', '31'] && TenantEntitlements::csv(null) === []
+    && TenantEntitlements::csv('') === [] && TenantEntitlements::csv(' , ') === []);
+foreach (['express', ' Express ', 'EXPRESS'] as $s2V) {
+    wa_chk("esRestringido('{$s2V}')", TenantEntitlements::esRestringido($s2Fila(['edicion' => $s2V])) === true);
+}
+// 'completa', en cualquier forma, es un valor conocido: no escribe nada en el log.
+[, , $s2Log] = wa_con_log(function () use ($s2Fila) {
+    foreach (['completa', 'Completa', ' completa '] as $s2V) {
+        TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => $s2V]));
+    }
+});
+wa_chk("'completa' (con mayusculas o espacios) no escribe en el log", $s2Log === '', $s2Log);
+// Dentro de wa_con_log: las lineas de los valores desconocidos ('' y 'basico') no deben llegar a stderr.
+[, $s2Error, $s2Log] = wa_con_log(function () use ($s2Fila) {
+    foreach (['completa', 'Completa', ' completa ', '', 'basico'] as $s2V) {
+        wa_chk("esRestringido('{$s2V}') es false", TenantEntitlements::esRestringido($s2Fila(['edicion' => $s2V])) === false);
+    }
+});
+wa_chk('esRestringido con una edicion que no es express no lanza', $s2Error === null, $s2Error?->getMessage());
+wa_chk("valores desconocidos: el vacio y 'basico' escriben una linea cada uno (completa, ninguna)",
+    substr_count($s2Log, "\n") === 2 && substr_count($s2Log, 'basico') === 1, $s2Log);
+wa_chk('integracion con edicion express: false', !TenantEntitlements::esRestringido($s2Fila(['tipo' => 'integracion'])));
+wa_chk('columna ausente, sin fila: false', !TenantEntitlements::esRestringido(['tipo' => 'app']) && !TenantEntitlements::esRestringido(null));
+// La linea de log se memoriza una vez por valor distinto y por proceso: este caso usa un valor que ningun caso anterior uso.
+[, , $s2Log] = wa_con_log(function () use ($s2Fila) {
+    TenantEntitlements::esRestringido($s2Fila(['edicion' => 'desconocido-x']));
+    TenantEntitlements::esRestringido($s2Fila(['edicion' => 'desconocido-x']));
+    TenantEntitlements::esRestringido(['tipo' => 'app']);
+});
+wa_chk('valor desconocido: una sola linea de log; ausente: silencio', substr_count($s2Log, 'desconocido-x') === 1 && substr_count($s2Log, "\n") === 1, $s2Log);
+// Otro valor distinto escribe la suya; y un salto de linea dentro del valor no parte la linea (quien edite la columna
+// no puede inventar lineas de log).
+[, , $s2Log] = wa_con_log(function () use ($s2Fila) {
+    TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => "desconocido-y\nlinea falsa"]));
+    TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => 'desconocido-z']));
+});
+wa_chk('otro valor desconocido escribe su propia linea y el salto dentro del valor no parte la linea',
+    substr_count($s2Log, "\n") === 2 && substr_count($s2Log, 'desconocido-z') === 1, $s2Log);
+[$s2Norm] = wa_con_log(static fn (): array => [
+    TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => ' Express '])),
+    TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => 'Completa'])),
+    TenantEntitlements::normalizarEdicion($s2Fila(['edicion' => 'basico'])),
+    TenantEntitlements::normalizarEdicion(['tipo' => 'app']),
+    TenantEntitlements::normalizarEdicion(null),
+]);
+wa_chk('normalizarEdicion: express (con trim y minusculas) o completa', $s2Norm === ['express', 'completa', 'completa', 'completa', 'completa'], $s2Norm);
+
+// --- modulos, tipos y permisos efectivos (RF2: un typo angosta, nunca ensancha; el orden es el canonico) --------------
+foreach ([
+    [null, $s2Preset], ['', $s2Preset], [' , ', $s2Preset],
+    ['facturacion,configuracion', ['facturacion', 'configuracion']],
+    ['configuracion,facturacion', ['facturacion', 'configuracion']],
+    ['facturacion,cliente', ['facturacion']],
+    ['foo', []],
+] as [$s2Entrada, $s2Esperado]) {
+    $s2Obtenido = TenantEntitlements::modulosEfectivos($s2Fila(['modulos_habilitados' => $s2Entrada]));
+    wa_chk('modulosEfectivos(' . var_export($s2Entrada, true) . ')', $s2Obtenido === $s2Esperado, $s2Obtenido);
+}
+foreach ([
+    ['45', ['45']], ['45, 31,', ['31', '45']],
+    ['e45', []], ['44,46,41,43,47', []], ['33', []], [null, []], ['', []],
+] as [$s2Entrada, $s2Esperado]) {
+    $s2Obtenido = TenantEntitlements::tiposVenta($s2Fila(['tipos_ecf_habilitados' => $s2Entrada]));
+    wa_chk('tiposVenta(' . var_export($s2Entrada, true) . ')', $s2Obtenido === $s2Esperado, $s2Obtenido);
+}
+// El 34 se deriva de cualquier tipo de venta; el 33 solo si esta en la lista, y va siempre al final.
+foreach ([
+    ['45', ['45', '34']], ['31,32,45', ['31', '32', '45', '34']], ['45,33', ['45', '34', '33']], ['33,45', ['45', '34', '33']],
+    ['33', ['33']], [null, []], ['', []],
+] as [$s2Entrada, $s2Esperado]) {
+    $s2Obtenido = TenantEntitlements::tiposEfectivos($s2Fila(['tipos_ecf_habilitados' => $s2Entrada]));
+    wa_chk('tiposEfectivos(' . var_export($s2Entrada, true) . ')', $s2Obtenido === $s2Esperado, $s2Obtenido);
+}
+// Permisos: el rol cruzado con los tokens habilitados; '*' se expande; 'unidades' (catalogos compartidos) va
+// siempre que facturacion, clientes o productos este habilitado.
+$s2Todos = ['facturas', 'clients', 'products', 'users', 'ncf', 'unidades'];
+$s2Facturador = ['facturas', 'clients', 'products', 'unidades'];
+foreach ([
+    ['admin (*), todo habilitado', ['*'], [], $s2Todos],
+    ['rol user con gastos de mas: gastos no esta entre los habilitados', [...$s2Facturador, 'gastos'], [], $s2Facturador],
+    ['admin angostado a facturacion,configuracion', ['*'], ['modulos_habilitados' => 'facturacion,configuracion'], ['facturas', 'ncf', 'unidades']],
+    ['solo usuarios habilitado: sin unidades', ['*'], ['modulos_habilitados' => 'usuarios'], ['users']],
+    ['solo configuracion habilitado: sin unidades', ['*'], ['modulos_habilitados' => 'configuracion'], ['ncf']],
+    ['solo clientes habilitado: con unidades', ['*'], ['modulos_habilitados' => 'clientes'], ['clients', 'unidades']],
+    ['solo productos habilitado: con unidades', ['*'], ['modulos_habilitados' => 'productos'], ['products', 'unidades']],
+    ['rol user angostado a facturacion: ni clients ni products', $s2Facturador, ['modulos_habilitados' => 'facturacion'], ['facturas', 'unidades']],
+    ['rol sin permisos', [], [], []],
+] as [$s2Desc, $s2Rol, $s2Cambios, $s2Esperado]) {
+    $s2Obtenido = TenantEntitlements::permisosEfectivos($s2Rol, $s2Fila($s2Cambios));
+    wa_chk("permisosEfectivos: {$s2Desc}", $s2Obtenido === $s2Esperado, $s2Obtenido);
+}
+
+// --- bloque (contrato 4.3(a)): solo campos de la lista blanca ----------------------------------------------------------
+$s2Bloque = TenantEntitlements::bloque($s2Fila());
+wa_chk('bloque: la forma exacta del contrato 4.3(a)',
+    $s2Bloque === [
+        'edicion' => 'express',
+        'tenant' => ['id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'ambiente' => 'ecf'],
+        'modulos' => $s2Preset,
+        'tipos_ecf' => ['45', '34'],
+        'capacidades' => ['idempotencia' => false, 'reconciliador' => false, 'certificado' => true],
+    ], $s2Bloque);
+$s2Secretos = [
+    'cert_path' => 'MARCA-cert-path', 'cert_pass_encrypted' => 'MARCA-cert-pass', 'api_secret_hash' => 'MARCA-api-secret',
+    'db_pass_encrypted' => 'MARCA-db-pass', 'webhook_secret_encrypted' => 'MARCA-webhook',
+];
+$s2ConSecretos = TenantEntitlements::bloque($s2Fila($s2Secretos));
+$s2Json = (string) json_encode($s2ConSecretos);
+$s2Filtrados = array_keys(array_filter($s2Secretos, static fn (string $marca): bool => str_contains($s2Json, $marca)));
+wa_chk('bloque: ningun campo secreto de la fila llega al JSON, y el bloque no depende de ellos',
+    $s2Json !== '' && $s2Filtrados === [] && $s2ConSecretos === $s2Bloque, $s2Filtrados);
+$s2Angosto = TenantEntitlements::bloque($s2Fila(['id' => '12', 'modulos_habilitados' => 'facturacion,configuracion', 'tipos_ecf_habilitados' => '31,45,33']));
+wa_chk('bloque: usa lo efectivo (no el preset) y el id sale entero aunque la fila lo traiga como texto, como lo da PDO',
+    $s2Angosto['tenant']['id'] === 12 && $s2Angosto['modulos'] === ['facturacion', 'configuracion']
+    && $s2Angosto['tipos_ecf'] === ['31', '45', '34', '33'], $s2Angosto);
+
+// --- null = la empresa resuelta (TenantResolver::current()) -------------------------------------------------------
+require_once __DIR__ . '/../src/TenantResolver.php';
+$s2Resuelta = static function (?array $tenant): void {
+    (new ReflectionProperty(TenantResolver::class, 'current'))->setValue(null, $tenant);
+};
+$s2Resuelta(null);
+wa_chk('sin empresa resuelta (el caso de este proceso): restringido() es false', TenantEntitlements::restringido() === false);
+$s2Resuelta($s2Fila(['modulos_habilitados' => 'facturacion', 'tipos_ecf_habilitados' => '31']));
+try {
+    wa_chk('con una empresa express resuelta: restringido() es true y, sin argumento, las funciones leen su fila',
+        TenantEntitlements::restringido() === true
+        && TenantEntitlements::modulosEfectivos() === ['facturacion']
+        && TenantEntitlements::tiposVenta() === ['31']
+        && TenantEntitlements::tiposEfectivos() === ['31', '34']
+        && TenantEntitlements::permisosEfectivos(['*']) === ['facturas', 'unidades']);
+    wa_chk('una fila que se pasa de forma explicita gana sobre la empresa resuelta',
+        TenantEntitlements::modulosEfectivos($s2Fila(['modulos_habilitados' => 'usuarios'])) === ['usuarios']);
+    $s2Resuelta($s2Fila(['edicion' => 'completa']));
+    wa_chk('con una empresa completa resuelta: restringido() es false', TenantEntitlements::restringido() === false);
+} finally {
+    $s2Resuelta(null);   // no dejar una empresa resuelta a las secciones que siguen
+}
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();
