@@ -863,6 +863,26 @@ function express_una_linea(string $texto): string
 }
 
 /**
+ * Una excepcion como la linea de un error inesperado que SI se puede imprimir: la clase y archivo:linea y, de una PDOException, solo el SQLSTATE y
+ * el codigo del driver (su mensaje trae el usuario y el servidor, y no sale nunca); de las excepciones de la biblioteca y de las herramientas
+ * (InvalidArgument, Runtime y Logic) y de los errores del motor (Error), su mensaje en una sola linea (no lleva secretos). De cualquier otra solo
+ * la clase. Es el unico lugar donde vive esta politica: tools/tenant_edicion.php y tools/create_tenant.php la llaman y ninguna la copia, para que
+ * no se desvien.
+ */
+function express_describir_fallo(Throwable $e): string
+{
+    $texto = get_class($e) . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
+    if ($e instanceof PDOException) {
+        $info = (array) $e->errorInfo;
+        return $texto . ($info !== [] ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?') : ' codigo ' . $e->getCode());
+    }
+    if ($e instanceof InvalidArgumentException || $e instanceof RuntimeException || $e instanceof LogicException || $e instanceof Error) {
+        return $texto . ': ' . express_una_linea($e->getMessage());
+    }
+    return $texto;
+}
+
+/**
  * El informe de una evaluacion: una linea por item, "[OK  ] id: detalle", "[CORR] id: detalle" o "[RECH] id: detalle" segun su estado, en el
  * orden de los items. Los detalles de express_preflight_evaluar y los de las ordenes de abajo no llevan secretos ni rutas.
  *

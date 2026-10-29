@@ -650,7 +650,7 @@ if ($expressPedido) {
         $expressConvertido = $conversion['ok'] === true && $conversion['aplicado'] === true;
         $codigoSalida = $expressConvertido ? 0 : 3;
     } catch (Throwable $e) {
-        echo '[FALLO] ' . describirFalloExpress($e) . "\n";
+        echo '[FALLO] ' . express_describir_fallo($e) . "\n";
         $codigoSalida = 1;
     }
 }
@@ -857,25 +857,6 @@ function saveTenantLogo(int $tenantId, array $file): array
     }
     $rel = 'logos/' . $tenantId . '.' . $ext;
     return ['path' => $rel, 'msg' => "logo guardado en {$rel}"];
-}
-
-/**
- * Un fallo inesperado de la conversion a Express como una sola linea que se puede imprimir: la clase y
- * archivo:linea y, de una PDOException, el SQLSTATE y el codigo del driver (su mensaje trae el usuario y el
- * servidor); de las excepciones de la propia biblioteca y de los errores del motor, su mensaje (no lleva
- * secretos). De cualquier otra, solo la clase. Es lo mismo que hace tools/tenant_edicion.php.
- */
-function describirFalloExpress(Throwable $e): string
-{
-    $texto = get_class($e) . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
-    if ($e instanceof PDOException) {
-        $info = (array) $e->errorInfo;
-        return $texto . ($info !== [] ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?') : ' codigo ' . $e->getCode());
-    }
-    if ($e instanceof InvalidArgumentException || $e instanceof RuntimeException || $e instanceof LogicException || $e instanceof Error) {
-        return $texto . ': ' . trim((string) preg_replace('/\s+/', ' ', $e->getMessage()));
-    }
-    return $texto;
 }
 
 function fail(string $msg): void

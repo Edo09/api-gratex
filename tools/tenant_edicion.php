@@ -181,24 +181,6 @@ function tenant_edicion_conectar_master(): PDO
     }
 }
 
-/**
- * Una excepcion como la linea de un error inesperado: la clase y archivo:linea, mas, de una PDOException, el SQLSTATE y el codigo del driver (su
- * mensaje trae el usuario y el servidor) y, de las excepciones de la propia herramienta y los errores del motor, su mensaje (no lleva secretos). De
- * cualquier otra solo la clase.
- */
-function tenant_edicion_describir(Throwable $e): string
-{
-    $texto = get_class($e) . ' (' . basename($e->getFile()) . ':' . $e->getLine() . ')';
-    if ($e instanceof PDOException) {
-        $info = (array) $e->errorInfo;
-        return $texto . ($info !== [] ? ' SQLSTATE ' . ($info[0] ?? '?') . ' errno ' . ($info[1] ?? '?') : ' codigo ' . $e->getCode());
-    }
-    if ($e instanceof InvalidArgumentException || $e instanceof RuntimeException || $e instanceof LogicException || $e instanceof Error) {
-        return $texto . ': ' . express_una_linea($e->getMessage());
-    }
-    return $texto;
-}
-
 /** El programa: lee la linea de comandos, corre la orden y imprime su informe. Devuelve el codigo de salida (0, 1, 2 o 3). */
 function tenant_edicion_main(array $argv): int
 {
@@ -219,7 +201,7 @@ function tenant_edicion_main(array $argv): int
             default => express_refrescar_cert($master, $peticion['tenant'], $peticion['apply']),
         };
     } catch (Throwable $e) {
-        fwrite(STDERR, '[FALLO] ' . tenant_edicion_describir($e) . "\n");
+        fwrite(STDERR, '[FALLO] ' . express_describir_fallo($e) . "\n");
         if ($peticion['apply']) {
             fwrite(STDERR, "Con --apply, lo que ya se escribio en la base de la empresa se queda (cada paso es idempotente: se puede volver a correr) y lo de la master solo si ya se confirmo. Corre un ensayo para ver como quedo.\n");
         }

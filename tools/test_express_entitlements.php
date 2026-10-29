@@ -3908,30 +3908,85 @@ wa_chk('create_tenant.php: las dos lineas del resumen de Express son las de la t
 wa_chk('create_tenant.php: el informe del preflight (las lineas [OK  ], [CORR] y [RECH] y su RECHAZADO o APLICADO) se imprime antes del resumen, tanto si convierte como si rechaza',
     str_contains($s10Fuente, "echo implode(\"\\n\", \$conversion['lineas']), \"\\n\";") && substr_count($s10Fuente, "\$conversion['lineas']") === 1
     && (int) strpos($s10Fuente, "\$conversion['lineas']") < (int) strpos($s10Fuente, '== Tenant creado OK =='));
-// describirFalloExpress es el unico lugar donde un fallo inesperado de la conversion llega a la pantalla: se corre su codigo, tal como esta escrito, en un hijo.
-// El mensaje de una PDOException trae el usuario y el servidor, y no puede salir; el de las excepciones de la propia biblioteca si.
-$s10Funcion = preg_match('/\nfunction describirFalloExpress\(Throwable \$e\): string\n\{.*?\n\}\n/s', $s10Fuente, $s10M) === 1 ? $s10M[0] : '';
-$s10Prueba = (string) tempnam(sys_get_temp_dir(), 'ent_desc_');
-file_put_contents($s10Prueba, "<?php\n" . $s10Funcion . <<<'PHP'
-$e1 = new PDOException("SQLSTATE[HY000] [1045] Access denied for user 'usuario_secreto'@'servidor_secreto'");
-$e1->errorInfo = ['HY000', 1045, "Access denied for user 'usuario_secreto'@'servidor_secreto'"];
-$e2 = new PDOException('sin errorInfo, con el usuario_secreto en el mensaje', 77);
-$e3 = new RuntimeException("No se pudo conectar\n   a la   base");
-$e4 = new JsonException('texto de una clase que no se imprime');
-$e5 = new TypeError('Argument #1 must be of type X');
-echo json_encode(array_map('describirFalloExpress', [$e1, $e2, $e3, $e4, $e5]));
-PHP);
-$s10R = wa_correr([PHP_BINARY, $s10Prueba]);
-@unlink($s10Prueba);
-$s10Lineas = (array) json_decode(trim($s10R['salida']), true);
-wa_chk('create_tenant.php: describirFalloExpress da la clase y archivo:linea; de una PDOException solo el SQLSTATE y el errno (o el codigo), nunca su mensaje; de una excepcion de la biblioteca o un Error su mensaje en una linea; de cualquier otra solo la clase',
-    $s10Funcion !== '' && count($s10Lineas) === 5
-    && preg_match('/^PDOException \([^)]+:\d+\) SQLSTATE HY000 errno 1045$/', (string) ($s10Lineas[0] ?? '')) === 1
-    && preg_match('/^PDOException \([^)]+:\d+\) codigo 77$/', (string) ($s10Lineas[1] ?? '')) === 1
-    && preg_match('/^RuntimeException \([^)]+:\d+\): No se pudo conectar a la base$/', (string) ($s10Lineas[2] ?? '')) === 1
-    && preg_match('/^JsonException \([^)]+:\d+\)$/', (string) ($s10Lineas[3] ?? '')) === 1
-    && preg_match('/^TypeError \([^)]+:\d+\): Argument #1 must be of type X$/', (string) ($s10Lineas[4] ?? '')) === 1
-    && !str_contains((string) $s10R['salida'], 'secreto'), [$s10Funcion !== '', $s10R]);
+// La linea de un fallo inesperado de la conversion sale de express_describir_fallo, la funcion de la biblioteca que tambien usa tenant_edicion.php: la politica de que el mensaje
+// de una PDOException (trae el usuario y el servidor) no sale nunca vive en un solo lugar. Se prueba la funcion misma (la biblioteca ya esta cargada desde la seccion 8), no una
+// copia de su texto, y las dos herramientas la llaman sin tener copia propia (los dos pins de abajo). El mensaje de las excepciones de la propia herramienta y de los errores del
+// motor si sale, en una sola linea; de cualquier otra excepcion sale solo la clase.
+$s10Biblioteca = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/express_edicion_lib.php'));
+$s10Edicion = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/tenant_edicion.php'));
+$s10Existe = function_exists('express_describir_fallo');
+$s10F1 = new PDOException("SQLSTATE[HY000] [1045] Access denied for user 'usuario_secreto'@'servidor_secreto'");
+$s10F1->errorInfo = ['HY000', 1045, "Access denied for user 'usuario_secreto'@'servidor_secreto'"];
+$s10F2 = new PDOException('sin errorInfo, con el usuario_secreto en el mensaje', 77);
+$s10F3 = new PDOException('solo el SQLSTATE, con el usuario_secreto en el mensaje');
+$s10F3->errorInfo = ['42S02'];
+$s10Casos = [
+    'PDOException con errorInfo: solo el SQLSTATE y el errno del driver' => [$s10F1, '/^PDOException \([^)]+:\d+\) SQLSTATE HY000 errno 1045$/'],
+    'PDOException sin errorInfo: solo el codigo' => [$s10F2, '/^PDOException \([^)]+:\d+\) codigo 77$/'],
+    'PDOException con un errorInfo que trae solo el SQLSTATE: el errno es ?' => [$s10F3, '/^PDOException \([^)]+:\d+\) SQLSTATE 42S02 errno \?$/'],
+    'RuntimeException: su mensaje, en una sola linea' => [new RuntimeException("No se pudo conectar\n   a la   base"), '/^RuntimeException \([^)]+:\d+\): No se pudo conectar a la base$/'],
+    'InvalidArgumentException: su mensaje, sin tabuladores ni espacios de mas' => [new InvalidArgumentException("  un tipo\tmal   escrito \n"), '/^InvalidArgumentException \([^)]+:\d+\): un tipo mal escrito$/'],
+    'una excepcion de logica (DomainException es LogicException): su mensaje' => [new DomainException('el estado no es posible'), '/^DomainException \([^)]+:\d+\): el estado no es posible$/'],
+    'un Error del motor (TypeError): su mensaje' => [new TypeError('Argument #1 must be of type X'), '/^TypeError \([^)]+:\d+\): Argument #1 must be of type X$/'],
+    'cualquier otra excepcion (JsonException): solo la clase, nunca su mensaje' => [new JsonException('texto de una clase que no se imprime con el usuario_secreto'), '/^JsonException \([^)]+:\d+\)$/'],
+];
+$s10Mal = [];
+if ($s10Existe) {
+    foreach ($s10Casos as $s10Desc => [$s10Excepcion, $s10Patron]) {
+        $s10Linea = express_describir_fallo($s10Excepcion);
+        if (preg_match($s10Patron, $s10Linea) !== 1 || str_contains($s10Linea, 'secreto') || str_contains($s10Linea, "\n")) {
+            $s10Mal[$s10Desc] = $s10Linea;
+        }
+    }
+}
+wa_chk('express_edicion_lib.php: express_describir_fallo(Throwable $e): string da la clase y archivo:linea; de una PDOException solo el SQLSTATE y el errno (o el codigo), nunca su mensaje; de una excepcion de la herramienta o un Error su mensaje en una linea; de cualquier otra solo la clase',
+    $s10Existe && $s8Firma('express_describir_fallo') === 'express_describir_fallo(Throwable $e): string' && $s10Mal === [], $s10Existe ? $s10Mal : 'la funcion no existe');
+$s10Declarada = preg_match('/\nfunction express_describir_fallo\(Throwable \$e\): string\n\{.*?\n\}\n/s', $s10Biblioteca, $s10M) === 1 ? $s10M[0] : '';
+wa_chk('express_edicion_lib.php: express_describir_fallo se declara una sola vez y se apoya en express_una_linea (no repite su preg_replace)',
+    substr_count($s10Biblioteca, 'function express_describir_fallo(') === 1 && $s10Declarada !== ''
+    && str_contains($s10Declarada, 'express_una_linea($e->getMessage())') && !str_contains($s10Declarada, 'preg_replace'), $s10Declarada);
+wa_chk('create_tenant.php: el fallo inesperado de la conversion se imprime con express_describir_fallo (la de la biblioteca) y la herramienta no tiene copia propia (ni describirFalloExpress ni la politica de la PDOException)',
+    substr_count($s10Fuente, 'express_describir_fallo(') === 1
+    && preg_match('/catch \(Throwable \$e\) \{\s*echo \'\[FALLO\] \' \. express_describir_fallo\(\$e\) \. "\\\\n";\s*\$codigoSalida = 1;/', $s10Fuente) === 1
+    && !str_contains($s10Fuente, 'describirFalloExpress') && !str_contains($s10Fuente, 'errorInfo') && !str_contains($s10Fuente, 'instanceof PDOException'));
+// Y el bloque de la conversion de create_tenant.php, tal como esta escrito y con la biblioteca de verdad, contra una master que se cae a media conversion (el PDO de mentira de la
+// seccion 9 lanza al leer el tenant). Ningun hijo llega hasta ahi sin una base de empresa de verdad, asi que esto es lo que de verdad corre el catch de esa herramienta.
+$s10Bloque = preg_match('/\n(\$expressConvertido = false;\n\$codigoSalida = 0;\nif \(\$expressPedido\) \{\n.*?\n\}\n)\n\/\/ =+\n\/\/ Listo\n/s', $s10Fuente, $s10N) === 1 ? $s10N[1] : '';
+/** Corre el bloque en el ambito de esta funcion, con las variables que el script tiene a esa altura, y devuelve lo que imprimio, el codigo de salida que dejo y si convirtio. */
+$s10Correr = static function (string $bloque, PDO $master): array {
+    $expressPedido = true;
+    $tenantId = 12;
+    $tiposEcf = ['45'];
+    $archivo = (string) tempnam(sys_get_temp_dir(), 'ent_conv_');
+    file_put_contents($archivo, "<?php\n" . $bloque);
+    ob_start();
+    try {
+        include $archivo;
+    } finally {
+        $salida = (string) ob_get_clean();
+        @unlink($archivo);
+    }
+    return ['salida' => $salida, 'codigo' => $codigoSalida ?? null, 'convertido' => $expressConvertido ?? null];
+};
+$s10Caida = new PDOException("SQLSTATE[HY000] [1045] Access denied for user 'usuario_secreto'@'servidor_secreto'");
+$s10Caida->errorInfo = ['HY000', 1045, "Access denied for user 'usuario_secreto'@'servidor_secreto'"];
+$s10Master = new ExpPdoGuion('master', new ExpGuionLog());
+$s10Master->errores[] = ['FROM tenants', $s10Caida];
+$s10Glue = $s10Bloque === '' ? null : $s10Correr($s10Bloque, $s10Master);
+wa_chk('create_tenant.php: si la master falla a media conversion (una PDOException al leer el tenant), el bloque imprime UNA linea [FALLO] de express_describir_fallo (clase, archivo:linea, SQLSTATE y errno) sin el mensaje del driver, deja el tenant sin convertir y sale con 1',
+    $s10Glue !== null && substr_count($s10Glue['salida'], '[FALLO]') === 1
+    && preg_match('/^\[FALLO\] PDOException \([^)]+:\d+\) SQLSTATE HY000 errno 1045$/m', $s10Glue['salida']) === 1
+    && !str_contains($s10Glue['salida'], 'secreto') && !str_contains($s10Glue['salida'], 'Access denied')
+    && $s10Glue['codigo'] === 1 && $s10Glue['convertido'] === false, $s10Glue ?? 'no se encontro el bloque de la conversion en create_tenant.php');
+wa_chk('tenant_edicion.php: el error inesperado se imprime con express_describir_fallo (la de la biblioteca) y la herramienta no tiene copia propia (ni tenant_edicion_describir ni la politica de la PDOException)',
+    substr_count($s10Edicion, 'express_describir_fallo(') === 1
+    && str_contains($s10Edicion, "fwrite(STDERR, '[FALLO] ' . express_describir_fallo(\$e) . \"\\n\");")
+    && !str_contains($s10Edicion, 'tenant_edicion_describir') && !str_contains($s10Edicion, 'errorInfo') && !str_contains($s10Edicion, 'instanceof PDOException'));
+// Y por la herramienta de verdad: con la master inalcanzable, la excepcion de MasterDatabase sale como la linea de la funcion compartida (clase, archivo:linea y su mensaje).
+$s10R = $s9Hijo(['--tenant=12', '--edicion=completa']);
+wa_chk('tenant_edicion.php con la master inalcanzable: su linea [FALLO] es la de express_describir_fallo (clase, archivo:linea y el mensaje de la excepcion en una linea), sin usuario, servidor ni clave',
+    $s10R['codigo'] === 1 && preg_match('/^\[FALLO\] RuntimeException \(MasterDatabase\.php:\d+\): No se pudo conectar a la base de datos maestra\.\r?$/m', $s10R['salida']) === 1
+    && !preg_match('/127\.0\.0\.1|aislado_usuario|aislado_clave|MasterDB|Stack trace|Warning/', $s10R['salida']), $s10R);
 wa_chk('create_tenant.php: la cabecera de uso documenta las tres banderas nuevas (--edicion=express, --tipos-ecf y --telefono=809-555-1234)',
     preg_match('/\A<\?php\s*\/\*\*.*?\*\//s', $s10Fuente, $s10Cabecera) === 1
     && array_filter(['--edicion=express', '--tipos-ecf', '--telefono=809-555-1234'], static fn (string $bandera): bool => !str_contains($s10Cabecera[0], $bandera)) === [],
