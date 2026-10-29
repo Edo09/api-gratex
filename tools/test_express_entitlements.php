@@ -10,7 +10,8 @@
  *
  * Uso:
  *   php tools/test_express_entitlements.php      (sale con 1 si algo falla)
- *   (--hijo=validar --escenario=<base64 de un JSON> es el modo hijo de la seccion 4: lo usa la propia suite, no se llama a mano)
+ *   (--hijo=validar y --hijo=emisor, cada uno con --escenario=<base64 de un JSON>, son los modos hijo de las secciones 4 y 7: los usa la
+ *   propia suite, no se llaman a mano)
  */
 
 require_once __DIR__ . '/write_ahead_test_lib.php';
@@ -116,8 +117,55 @@ function ent_hijo_validar(array $escenario): never
     exit(0);
 }
 
+/**
+ * Modo hijo de la seccion 7: corre src/Controllers/emisorController.php de una copia del arbol del API en un proceso aparte (el
+ * controller termina la peticion con exit) y, por ese exit, imprime UNA linea JSON:
+ *   {salida, http, clase_cargada, log}
+ * donde salida es el cuerpo que contesto, http el codigo que dejo puesto (false si nadie lo puso), clase_cargada si TenantEntitlements
+ * llego a cargarse y log lo que se escribio con error_log.
+ *
+ * Escenario (JSON): tenant (la fila de master.tenants que queda resuelta, o null) y raiz (la copia del arbol; obligatoria). El
+ * controller, TenantResolver y TenantEntitlements son los de esa copia, sin tocar; AuthMiddleware y EmisorConfigModel de la copia
+ * son dobles que arma la seccion 7 (los reales abren una base en el constructor), y AuthMiddleware deja pasar la sesion siempre: el
+ * real contesta 403 antes de que corra el controller cuando la clase de una empresa Express no carga (seccion 4).
+ */
+function ent_hijo_emisor(array $escenario): never
+{
+    error_reporting(E_ALL);
+    ini_set('display_errors', '1');   // un aviso suelto cae en "salida" y rompe sus pruebas, sea cual sea el php.ini
+    $raiz = (string) ($escenario['raiz'] ?? '');
+    if ($raiz === '' || !is_file($raiz . '/src/Controllers/emisorController.php')) {
+        echo "\n", json_encode(['error' => 'el escenario no trae una raiz con src/Controllers/emisorController.php']), "\n";
+        exit(2);
+    }
+    $logArchivo = (string) tempnam(sys_get_temp_dir(), 'ent_emi_');
+    ini_set('error_log', $logArchivo);
+    require_once $raiz . '/src/TenantResolver.php';
+    (new ReflectionProperty('TenantResolver', 'current'))->setValue(null, $escenario['tenant'] ?? null);
+    $_SERVER['REQUEST_METHOD'] = 'GET';
+
+    ob_start();
+    register_shutdown_function(static function () use ($logArchivo): void {
+        $salida = ob_get_level() > 0 ? (string) ob_get_clean() : '';
+        $http = http_response_code();
+        $log = (string) @file_get_contents($logArchivo);
+        @unlink($logArchivo);
+        echo "\n", json_encode([
+            'salida' => $salida,
+            'http' => $http,
+            'clase_cargada' => class_exists('TenantEntitlements', false),
+            'log' => $log,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR), "\n";
+    });
+    require $raiz . '/src/Controllers/emisorController.php';
+    exit(0);
+}
+
 if (wa_arg('hijo') === 'validar') {
     ent_hijo_validar((array) json_decode((string) base64_decode((string) wa_arg('escenario')), true));
+}
+if (wa_arg('hijo') === 'emisor') {
+    ent_hijo_emisor((array) json_decode((string) base64_decode((string) wa_arg('escenario')), true));
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,6 +2165,155 @@ try {
     date_default_timezone_set($s7Zona);
 }
 wa_chk('la zona horaria de este proceso quedo como estaba', date_default_timezone_get() === $s7Zona, [date_default_timezone_get(), $s7Zona]);
+
+// --- emisorController: con la clase que no carga, la clave certificado se omite (el controller real, en un hijo) ------------------
+// Por HTTP esa rama no se alcanza: para una empresa Express cuya clase no carga, AuthMiddleware ya contesto 403 (seccion 4) antes de
+// que corra el controller. Por eso se corre el controller de verdad, sin tocar, en un proceso aparte (ent_hijo_emisor) sobre una COPIA
+// del arbol (src/ y config/, sin .env) con TenantEntitlements.php ausente o roto, y con dos dobles en la copia: AuthMiddleware (la
+// sesion pasa; el real abre una base en el constructor) y EmisorConfigModel (el emisor sale de una fila fija). El repo no se toca y el
+// codigo de produccion no lleva ningun interruptor de prueba. TenantResolver, TenantEntitlements y la config son los de src/.
+$s7DobleAuth = <<<'PHP'
+<?php
+// Doble de AuthMiddleware para la prueba de emisorController: la sesion siempre es valida y no abre ninguna base.
+require_once(__DIR__ . '/../TenantResolver.php');
+
+class AuthMiddleware
+{
+    public function validateRequest()
+    {
+        return ['valid' => true, 'user_id' => 7, 'tenant_id' => 12, 'role' => 'admin', 'message' => 'Token validated'];
+    }
+
+    public function sendUnauthorized($mensaje)
+    {
+        http_response_code(401);
+        echo json_encode(['status' => false, 'error' => $mensaje]);
+        exit;
+    }
+}
+PHP;
+$s7DobleEmisor = <<<'PHP'
+<?php
+// Doble de EmisorConfigModel para la prueba de emisorController: el emisor sale de una fila fija, sin base de datos.
+class EmisorConfigModel
+{
+    public function get(): ?array
+    {
+        return ['id' => 1, 'rnc' => '131000001', 'razon_social' => 'Constructora X', 'ambiente' => 'testecf', 'telefono' => '809-000-0000'];
+    }
+}
+PHP;
+$s7Raiz = dirname(__DIR__);
+$s7Arbol = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ent_emisor_' . bin2hex(random_bytes(4));
+$s7Clase = $s7Arbol . '/src/TenantEntitlements.php';
+try {
+    foreach (['src', 'config'] as $s7Carpeta) {
+        @mkdir($s7Arbol . DIRECTORY_SEPARATOR . $s7Carpeta, 0777, true);
+        $s7Recorrido = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator("{$s7Raiz}/{$s7Carpeta}", FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($s7Recorrido as $s7Item) {
+            $s7Destino = $s7Arbol . DIRECTORY_SEPARATOR . $s7Carpeta . DIRECTORY_SEPARATOR . $s7Recorrido->getSubPathname();
+            $s7Item->isDir() ? @mkdir($s7Destino, 0777, true) : copy($s7Item->getPathname(), $s7Destino);
+        }
+    }
+    file_put_contents($s7Arbol . '/src/Middleware/AuthMiddleware.php', $s7DobleAuth);
+    file_put_contents($s7Arbol . '/src/Models/EmisorConfigModel.php', $s7DobleEmisor);
+    $s7ClaseReal = (string) file_get_contents($s7Raiz . '/src/TenantEntitlements.php');
+    /** Deja en la copia el contenido dado para TenantEntitlements.php; null lo borra. */
+    $s7PonerClase = static function (?string $contenido) use ($s7Clase): void {
+        if ($contenido === null) {
+            @unlink($s7Clase);
+        } else {
+            file_put_contents($s7Clase, $contenido);
+        }
+    };
+    /**
+     * GET /api/emisor contra el controller de la copia con la empresa $empresa ya resuelta (o ninguna). Devuelve la linea JSON del
+     * hijo, decodificada, con 'cuerpo' (la salida decodificada), o ['hijo_sin_linea_json' => lo que imprimio] si no hubo linea.
+     */
+    $s7Emisor = static function (?array $empresa) use ($s7Arbol): array {
+        $r = wa_correr([PHP_BINARY, __FILE__, '--hijo=emisor', '--escenario=' . base64_encode((string) json_encode(['tenant' => $empresa, 'raiz' => $s7Arbol]))]);
+        $lineas = array_values(array_filter(array_map('trim', explode("\n", $r['salida'])), static fn (string $linea): bool => $linea !== ''));
+        $dejo = json_decode((string) end($lineas), true);
+        if (!is_array($dejo) || !array_key_exists('salida', $dejo)) {
+            return ['hijo_sin_linea_json' => $r];
+        }
+        $dejo['cuerpo'] = json_decode((string) $dejo['salida'], true);
+        return $dejo;
+    };
+    /** El data de una respuesta del hijo, o null si no trae. */
+    $s7Datos = static fn (array $r): ?array => is_array($r['cuerpo']['data'] ?? null) ? $r['cuerpo']['data'] : null;
+
+    wa_chk('la copia del arbol trae emisorController.php y TenantResolver.php identicos a los de src/, los dos dobles en su sitio y ningun .env',
+        md5_file($s7Arbol . '/src/Controllers/emisorController.php') === md5_file($s7Raiz . '/src/Controllers/emisorController.php')
+        && md5_file($s7Arbol . '/src/TenantResolver.php') === md5_file($s7Raiz . '/src/TenantResolver.php')
+        && str_contains((string) file_get_contents($s7Arbol . '/src/Middleware/AuthMiddleware.php'), 'Doble de AuthMiddleware')
+        && str_contains((string) file_get_contents($s7Arbol . '/src/Models/EmisorConfigModel.php'), 'Doble de EmisorConfigModel')
+        && is_file($s7Clase) && is_file($s7Arbol . '/config/editions.php') && !is_file($s7Arbol . '/.env'), $s7Arbol);
+
+    // Control: con la clase cargable, el mismo hijo SI llega al bloque. Sin esto, lo que sigue podria pasar sin haber llegado a el.
+    $s7R = $s7Emisor($s7Fila(['cert_vence' => '2099-12-31']));
+    $s7DatosA = $s7Datos($s7R);
+    $s7CertA = is_array($s7DatosA) ? ($s7DatosA['certificado'] ?? null) : null;
+    wa_chk('emisorController (control), empresa Express con la clase cargable: 200 y data.certificado al final, despues de fuente, vigente, con la fecha de la fila y dias entero',
+        ($s7R['http'] ?? null) === 200 && ($s7R['cuerpo']['status'] ?? null) === true && is_array($s7DatosA)
+        && array_slice(array_keys($s7DatosA), -2) === ['fuente', 'certificado'] && is_array($s7CertA) && array_keys($s7CertA) === $s7Claves
+        && $s7CertA['estado'] === 'vigente' && $s7CertA['vence'] === '2099-12-31' && is_int($s7CertA['dias']) && $s7CertA['dias'] > 0
+        && ($s7R['clase_cargada'] ?? null) === true && ($s7R['log'] ?? null) === '', $s7R);
+    $s7SinBloque = is_array($s7DatosA) ? array_diff_key($s7DatosA, ['certificado' => true]) : null;
+    wa_chk('emisorController (control): sin el bloque, data es la fila del emisor sin id, con el ambiente de la empresa (no el de la fila) y fuente emisor_config',
+        $s7SinBloque === ['rnc' => '131000001', 'razon_social' => 'Constructora X', 'ambiente' => 'ecf', 'telefono' => '809-000-0000', 'fuente' => 'emisor_config'], $s7SinBloque);
+
+    // Una empresa Express y una clase que no carga: la clave se omite y todo lo demas sale igual, con 200 y UNA linea de log.
+    foreach ([
+        'ausente' => null,
+        'rota (error de sintaxis)' => "<?php\nesto no es php {{{\n",
+        'sin declarar (el archivo carga pero no declara la clase)' => "<?php\n// archivo vacio\n",
+    ] as $s7Modo => $s7Contenido) {
+        $s7PonerClase($s7Contenido);
+        $s7R = $s7Emisor($s7Fila(['cert_vence' => '2099-12-31']));
+        wa_chk("emisorController, empresa Express con la clase {$s7Modo}: 200 (nunca un 500) con los datos del emisor de siempre, sin la clave certificado, y la clase sin cargar",
+            ($s7R['http'] ?? null) === 200 && ($s7R['cuerpo']['status'] ?? null) === true && $s7SinBloque !== null
+            && $s7Datos($s7R) === $s7SinBloque && ($s7R['clase_cargada'] ?? null) === false, $s7R);
+        wa_chk("emisorController, la clase {$s7Modo}: deja UNA linea de log que nombra la clase",
+            substr_count((string) ($s7R['log'] ?? ''), "\n") === 1 && str_contains((string) ($s7R['log'] ?? ''), 'TenantEntitlements'), $s7R['log'] ?? null);
+    }
+
+    // Todo lo que no es una empresa Express: la respuesta de siempre, y la clase (que aqui SI esta disponible) ni se carga ni deja log.
+    $s7PonerClase($s7ClaseReal);
+    $s7SinMigrar = ['id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf'];   // master sin migrar
+    foreach ([
+        "edicion 'completa' (con cert_path y cert_vence en su fila)" => $s7Fila(['edicion' => 'completa', 'cert_vence' => '2099-12-31']),
+        "edicion 'basico' (desconocida: completa)" => $s7Fila(['edicion' => 'basico']),
+        "edicion '' (vacia: completa)" => $s7Fila(['edicion' => '']),
+        'edicion NULL' => $s7Fila(['edicion' => null]),
+        'una fila sin la clave edicion (master sin migrar)' => $s7SinMigrar,
+    ] as $s7Desc => $s7Empresa) {
+        $s7R = $s7Emisor($s7Empresa);
+        wa_chk("emisorController, {$s7Desc}, con la clase disponible: la respuesta de siempre sin certificado, y TenantEntitlements ni se carga",
+            ($s7R['http'] ?? null) === 200 && $s7SinBloque !== null && $s7Datos($s7R) === $s7SinBloque
+            && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
+    }
+    $s7R = $s7Emisor($s7Fila(['tipo' => 'integracion']));   // la fila dice express, pero una empresa de integracion no tiene emisor_config
+    wa_chk("emisorController, tipo 'integracion' (aunque la fila diga express): los datos del registro de la empresa, sin certificado y sin cargar la clase",
+        ($s7R['http'] ?? null) === 200 && $s7Datos($s7R) === ['rnc' => '131000001', 'razon_social' => 'Constructora X', 'ambiente' => 'ecf', 'fuente' => 'tenant']
+        && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
+    $s7R = $s7Emisor(null);
+    wa_chk('emisorController, sin empresa resuelta: los datos del emisor tal cual (con su propio ambiente), sin certificado y sin cargar la clase',
+        ($s7R['http'] ?? null) === 200
+        && $s7Datos($s7R) === ['rnc' => '131000001', 'razon_social' => 'Constructora X', 'ambiente' => 'testecf', 'telefono' => '809-000-0000', 'fuente' => 'emisor_config']
+        && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
+} finally {
+    if (is_dir($s7Arbol)) {
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($s7Arbol, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $s7Item) {
+            $s7Item->isDir() ? @rmdir($s7Item->getPathname()) : @unlink($s7Item->getPathname());
+        }
+        @rmdir($s7Arbol);
+    }
+}
+wa_chk('la copia del arbol de la prueba del controller se borro al terminar', !is_dir($s7Arbol), $s7Arbol);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
