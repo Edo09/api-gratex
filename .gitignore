@@ -8,3 +8,5 @@ certificados/
 tools/xml_integracion/
 # Fotos de productos que suben las empresas (migracion 032): datos de clientes, viven solo en el servidor
 public/uploads/productos/
+# Copia preparada de la sonda del spike S2 de Express (tools/express_p0/preparar_probe.php): se sube a mano al hosting y no va al repo
+/public/express_probe.php
