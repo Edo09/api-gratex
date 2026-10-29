@@ -301,11 +301,21 @@ de otro contribuyente, un tenant de `integracion` que no tiene BD — la RI se
 genera sin tocar la base de datos:
 
 ```
-php tools/ri_desde_xml.php factura.xml [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72] [--ambiente=ecf|certecf|testecf]
+php tools/ri_desde_xml.php factura.xml [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72] [--ambiente=ecf|certecf|testecf] [--direccion="..."] [--telefono="..."] [--correo="..."]
 ```
 
 Imprime en pantalla la URL del timbre, que es la forma rápida de comprobar que la
 DGII reconoce el comprobante sin escanear el papel.
+
+La DGII rechaza la RI que no muestra la **dirección y el teléfono del emisor**. Los
+XML de una certificación por integración suelen traer `DireccionEmisor` "N/D" y
+ningún teléfono (el formulario de fase 4 los dejaba así), y el XML firmado ya no
+se puede cambiar: `--direccion`, `--telefono` y `--correo` los ponen en el impreso y
+mandan sobre el XML. "N/D" cuenta como vacío, y si la RI va a salir sin dirección
+o sin teléfono el comando lo avisa por stderr. También avisa cuando lo que imprime
+no coincide con el XML: la RI muestra un dato que el e-CF firmado no tiene. Eso saca
+del paso; lo correcto es volver a emitir con los datos reales en el XML (el
+formulario de fase 4 de `integracion.html` ya no acepta "N/D" ni teléfono vacío).
 
 Todo sale del XML: el código de seguridad son los primeros 6 caracteres del
 `SignatureValue` (igual que al emitir), los totales y la razón social del
@@ -317,7 +327,9 @@ Tres cosas que hacen falta para que el papel diga la verdad:
 - **`$factura['emisor']`** manda sobre `emisor_config`. Sin eso, el impreso
   llevaría el emisor del tenant conectado (o los datos históricos de Gratex en
   CLI) sobre el comprobante de otro. Con emisor explícito, lo que el XML no traiga
-  queda en blanco: no se completa con datos ajenos.
+  queda en blanco: no se completa con datos ajenos. `EcfDocumento::emisor()` ni
+  siquiera lee `emisor_config` en ese caso; antes, corriendo en el server (con BD),
+  la dirección o el teléfono que faltaban salían del `emisor_config` de Gratex.
 - **`BrandingResolver::sinMarcaGlobal()`** apaga `logo2020.png` y `sello.png`,
   que son los de Gratex y sin tenant resuelto serían el fallback.
 - **Sin logo se escribe la razón social** en su lugar (`drawLogoOrNombre`). En

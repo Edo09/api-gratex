@@ -90,6 +90,8 @@
       Al crear, el .p12 se abre aquí con esa clave. Si viene con cifrado legacy (RC2-40, lo normal en los
       de la CA), se re-cifra en este navegador a AES-256 con la <b>misma clave</b> antes de subirlo: el servidor
       no puede leer el legacy. La llave y el certificado no cambian.
+      <b>App sin .p12:</b> el alta reserva la ruta del certificado y no se puede emitir e-CF hasta cargarlo
+      con <a href="set_tenant_cert.html" style="color:var(--accent)">set_tenant_cert.html</a>.
     </div>
 
     <!-- Integración -->

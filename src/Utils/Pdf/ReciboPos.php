@@ -480,6 +480,12 @@ final class ReciboPos
         if ($doc->esElectronica()) {
             // La norma DGII prohibe rotular el e-NCF como "Factura No.".
             $pares[] = ['e-NCF', $doc->eNcf()];
+            // Notas E33/E34: el comprobante que modifican va al lado de su
+            // e-NCF (la DGII rechazo la RI que lo ponia aparte).
+            $nota = $doc->notaModificacion();
+            if ($nota !== null && $nota['ncf'] !== '') {
+                $pares[] = ['NCF Modificado', $nota['ncf'] . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : '')];
+            }
             $pares[] = ['Fecha de Emisión', $doc->fechaLarga()];
             // E32/E34 no llevan vencimiento: sin linea, ni vacia.
             if ($doc->fechaVencimiento() !== '') {
@@ -491,12 +497,6 @@ final class ReciboPos
                 $pares[] = ['NCF', $doc->ncfTradicional()];
             }
             $pares[] = ['Fecha', $doc->fechaLarga()];
-        }
-
-        // Notas E33/E34: el NCF modificado es obligatorio en la RI.
-        $nota = $doc->notaModificacion();
-        if ($nota !== null && $nota['ncf'] !== '') {
-            $pares[] = ['NCF Modificado', $nota['ncf'] . ($nota['fecha'] !== '' ? ' (' . $nota['fecha'] . ')' : '')];
         }
         return $pares;
     }

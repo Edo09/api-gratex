@@ -29,7 +29,8 @@ Por **cada empresa** (cada RNC) que facture electrónicamente:
 |---|---|---|
 | **RNC de la empresa** | Sí | 9 u 11 dígitos |
 | **Razón social y dirección fiscal** | Sí | Como aparecen en la DGII. La dirección sale en cada comprobante |
-| **Teléfono y correo** | Recomendado | Salen en la Representación Impresa |
+| **Teléfono** | Sí | Sale en la Representación Impresa y la DGII la rechaza sin él. 10 dígitos (`809-555-0100`) |
+| **Correo** | Recomendado | Sale en la Representación Impresa |
 | **Certificado digital `.p12`** | Sí | El de esa empresa, emitido por una entidad certificadora autorizada (Viafirma, Cámara de Comercio, etc.). Si está a nombre de una persona física, esa persona tiene que estar **delegada** para firmar por el RNC de la empresa en la Oficina Virtual de la DGII |
 | **Contraseña del certificado** | Sí | Envíela por un canal aparte del archivo |
 
@@ -181,8 +182,10 @@ Un RNC que no sea de su grupo devuelve `422`; no hay forma de emitir por una emp
 1. **Usted asigna el `e_ncf`.** Nosotros no llevamos su secuencia. Debe ser `E` + tipo +
    10 dígitos (ej. `E310000000001`) y estar dentro del rango que la DGII le autorizó.
    Es su responsabilidad no repetir ni saltar números.
-2. **El objeto `emisor` va completo** en cada llamada, con al menos `rnc`, `razon_social`
-   y `direccion`.
+2. **El objeto `emisor` va completo** en cada llamada, con al menos `rnc`, `razon_social`,
+   `direccion` y `telefono`. Dirección y teléfono reales: salen en la Representación Impresa
+   y la DGII la rechaza sin ellos ("N/D" no cuenta). El teléfono, con 10 dígitos
+   (`809-555-0100`): con otro formato el XML no es válido.
 3. **`emisor.rnc` debe ser el RNC de su empresa** — el mismo con el que se registró, o el de
    otra de **sus** empresas si administra varias (ver sección 3). No se puede emitir por
    cuenta de un tercero.
@@ -500,7 +503,10 @@ descripcion.replace(/\r\n?/g, '\n')
 
 La DGII exige que todo e-CF impreso o en PDF contenga, como mínimo:
 
-- **Emisor**: razón social, RNC, dirección, contacto
+- **Emisor**: razón social, RNC, dirección y teléfono (la DGII rechaza la Representación
+  Impresa que no muestra dirección y teléfono; "N/D" no cuenta). Correo, opcional. Envíe
+  `direccion` y `telefono` reales en el `emisor` de cada e-CF: lo que va en el XML firmado es
+  lo que usted imprime
 - **Identificación del comprobante**: denominación del tipo, e-NCF, fecha de emisión y de
   vencimiento. **E32 y E34 no llevan fecha de vencimiento**: su XML no tiene
   `FechaVencimientoSecuencia` y la DGII rechaza la Representación Impresa que la muestra
@@ -511,7 +517,8 @@ La DGII exige que todo e-CF impreso o en PDF contenga, como mínimo:
   **Fecha de Firma** (`DD-MM-AAAA HH:MM:SS`). El código y la fecha van **debajo del QR**, no
   a su lado: la DGII rechaza la Representación Impresa que los pone a la derecha
 - `Página X de Y` si tiene más de una hoja
-- En notas de crédito/débito: el campo **NCF Modificado**
+- En notas de crédito/débito: el campo **NCF Modificado**, al lado del e-NCF de la nota (la DGII
+  rechaza la Representación Impresa que lo pone aparte)
 
 El código de seguridad y la fecha de firma salen de la respuesta de emisión:
 `codigo_seguridad` y `fecha_emision`. Ese `fecha_emision` de la respuesta es la **fecha y hora
@@ -809,6 +816,8 @@ mezclan los dos ambientes.
 - [ ] El API SECRET está en un gestor de secretos, no en el repositorio, y solo se usa desde su servidor (nunca en el navegador ni en apps móviles)
 - [ ] La Representación Impresa incluye QR, y debajo de él el código de seguridad y la fecha de firma
 - [ ] La Representación Impresa de E32 y E34 no muestra fecha de vencimiento
+- [ ] La Representación Impresa muestra la dirección y el teléfono reales del emisor
+- [ ] En E33 y E34, el NCF Modificado aparece al lado del e-NCF de la nota
 
 ---
 

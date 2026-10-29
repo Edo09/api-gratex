@@ -155,10 +155,10 @@ La empresa que factura. Va completo en cada llamada.
 |---|---|---|
 | `rnc` | Sí | Debe ser una de sus empresas. Elige el certificado que firma y el ambiente |
 | `razon_social` | Sí | Como aparece en la DGII |
-| `direccion` | Sí | Dirección fiscal |
+| `direccion` | Sí | Dirección fiscal, hasta 100 caracteres. La real: sale en la Representación Impresa y la DGII rechaza la RI con "N/D" |
 | `nombre_comercial` | No | |
 | `municipio`, `provincia` | No | Códigos DGII de 6 dígitos (ej. `010100`, `010000`) |
-| `telefono` | No | Ej. `809-555-0100` |
+| `telefono` | No para la API, sí para la RI | 10 dígitos, ej. `809-555-0100`: con otro formato el XML no es válido. La API acepta el e-CF sin él, pero la DGII rechaza la Representación Impresa que no muestra el teléfono del emisor |
 | `correo` | No | |
 
 También acepta, opcionales: `sucursal`, `website`, `actividad_economica`, `codigo_vendedor`,

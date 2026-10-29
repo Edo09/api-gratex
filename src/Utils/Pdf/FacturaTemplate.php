@@ -101,6 +101,31 @@ abstract class FacturaTemplate
     }
 
     /**
+     * true = el motor arma la hoja carta como el modelo de RI de la DGII: el
+     * emisor y su fecha de emision a la izquierda (los dibuja drawCompanyHeader),
+     * el comprobante (titulo, e-NCF, NCF Modificado, vencimiento) a la derecha,
+     * el cliente en su propia franja bajo una linea de color, la tabla con
+     * bordes y el pie con QR a la izquierda y totales a la derecha. Las demas
+     * plantillas (y los disenos a la medida de un cliente) conservan su
+     * disposicion.
+     */
+    public function usaDisposicionNorma(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Colores de la disposicion de la norma: 'titulo' (nombre del emisor y
+     * titulo del comprobante) y 'linea' (las reglas que separan las franjas).
+     *
+     * @return array{titulo:array{0:int,1:int,2:int},linea:array{0:int,1:int,2:int}}
+     */
+    public function coloresNorma(): array
+    {
+        return ['titulo' => [0, 0, 0], 'linea' => [0, 0, 0]];
+    }
+
+    /**
      * Parametros tipograficos que el motor aplica al cuerpo del documento.
      * Las subclases pueden sobreescribir entradas individuales via
      * array_merge(parent::style(), [...]).

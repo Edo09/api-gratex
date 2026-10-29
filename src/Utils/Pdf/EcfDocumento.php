@@ -93,8 +93,12 @@ final class EcfDocumento
      */
     public function emisor(): array
     {
-        $e = $this->emisorConfig();
         $o = $this->emisorOverride();
+        // Con emisor explicito (RI desde el XML de otro contribuyente) el
+        // emisor_config de la BD conectada no aplica: en el server, por CLI,
+        // es el de Gratex, y su direccion o telefono rellenaban lo que el XML
+        // no traia, bajo el nombre y el RNC de otra empresa.
+        $e = $o === [] ? $this->emisorConfig() : [];
         $sinTenant = !class_exists('TenantResolver') || TenantResolver::current() === null;
         // Con emisor explicito los valores historicos de Gratex NO aplican: el
         // impreso dice quien firmo el documento y lo que este no traiga se deja
@@ -992,15 +996,18 @@ final class EcfDocumento
     // ------------------------------------------------------------------
 
     /**
-     * Sigla a imprimir en "Und. Medida" (norma DGII: siglas estandar, ej. UND,
+     * Texto a imprimir en "Unidad de Medida" (norma DGII: siglas estandar, ej.
      * PZA, CAJ). Las lineas guardan el CODIGO DGII (43 = unidad); valores no
-     * numericos se asumen ya como sigla.
+     * numericos se asumen ya como sigla. Un codigo que no se puede traducir
+     * (sin catalogo, o que no esta en el) NUNCA se imprime tal cual: "43" no es
+     * una unidad de medida y la DGII rechazo la RI que lo mostraba. En ese caso
+     * y cuando la linea no trae unidad, sale "Unidad".
      */
     public function unidadSigla($value): string
     {
         $value = trim((string) $value);
         if ($value === '') {
-            return 'UND';
+            return 'Unidad';
         }
         if (!ctype_digit($value)) {
             return strtoupper($value);
@@ -1017,7 +1024,8 @@ final class EcfDocumento
                 $map = [];
             }
         }
-        return $map[(int) $value] ?? $value;
+        $sigla = trim((string) ($map[(int) $value] ?? ''));
+        return $sigla !== '' ? $sigla : 'Unidad';
     }
 
     // ------------------------------------------------------------------

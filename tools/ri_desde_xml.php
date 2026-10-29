@@ -5,6 +5,13 @@
  * Uso:
  *   php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72]
  *                              [--ambiente=ecf|certecf|testecf]
+ *                              [--direccion="..."] [--telefono="..."] [--correo="..."]
+ *
+ * --direccion / --telefono / --correo: contacto del emisor cuando el XML no lo
+ * trae. La DGII rechaza la RI sin direccion y telefono del emisor, y el XML de
+ * una certificacion por integracion suele traer la direccion "N/D" y ningun
+ * telefono (el formulario de fase 4 los dejaba asi). El XML firmado no se puede
+ * cambiar: estos datos solo van al impreso y mandan sobre lo que diga el XML.
  *
  * Para que sirve: reimprimir un comprobante teniendo solo su XML — respaldos,
  * documentos recibidos de otro contribuyente, soporte a un tenant de
@@ -44,7 +51,7 @@ foreach (array_slice($argv, 1) as $a) {
 }
 
 if ($rutaXml === null || !is_file($rutaXml)) {
-    fwrite(STDERR, "Uso: php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72] [--ambiente=ecf|certecf|testecf]\n");
+    fwrite(STDERR, "Uso: php tools/ri_desde_xml.php <archivo.xml> [--out=ruta.pdf] [--formato=carta|pos|pos76|pos72] [--ambiente=ecf|certecf|testecf] [--direccion=\"...\"] [--telefono=\"...\"] [--correo=\"...\"]\n");
     exit(1);
 }
 
@@ -152,6 +159,19 @@ if ($ambiente === '') {
     fwrite(STDERR, "       Si el comprobante es de certificacion, repetir con --ambiente=certecf.\n");
 }
 
+// Contacto del emisor: el de la linea de comandos manda sobre el del XML. Un
+// relleno como "N/D" no es una direccion: cuenta como vacio.
+$sinRelleno = static function (string $v): string {
+    $v = trim($v);
+    return preg_match('#^(n[\s./]*[da][\s.]*|-+|\.+)$#i', $v) ? '' : $v;
+};
+$emisorDireccion = $sinRelleno((string) ($opciones['direccion'] ?? ''));
+$emisorDireccion = $emisorDireccion !== '' ? $emisorDireccion : $sinRelleno($txt('DireccionEmisor'));
+$emisorTelefono = $sinRelleno((string) ($opciones['telefono'] ?? ''));
+$emisorTelefono = $emisorTelefono !== '' ? $emisorTelefono : $sinRelleno($txt('TelefonoEmisor'));
+$emisorCorreo = $sinRelleno((string) ($opciones['correo'] ?? ''));
+$emisorCorreo = $emisorCorreo !== '' ? $emisorCorreo : $sinRelleno($txt('CorreoEmisor'));
+
 // El comprador no existe en E43 (Gastos Menores) y en E47 (Pagos al Exterior)
 // llega como IdentificadorExtranjero: EcfDocumento ya sabe como rotularlo.
 $rncComprador = $txt('RNCComprador');
@@ -201,9 +221,9 @@ $factura = [
     // El emisor del documento, no el del tenant conectado.
     'emisor' => [
         'razon_social' => $txt('RazonSocialEmisor'),
-        'direccion'    => $txt('DireccionEmisor'),
-        'telefono'     => $txt('TelefonoEmisor'),
-        'correo'       => $txt('CorreoEmisor'),
+        'direccion'    => $emisorDireccion,
+        'telefono'     => $emisorTelefono,
+        'correo'       => $emisorCorreo,
         'rnc'          => $rncEmisor,
     ],
     // Notas de debito/credito (E33/E34): la norma exige NCF modificado + motivo.
@@ -232,6 +252,29 @@ if ($out === '') {
 
 $ecfDoc = new EcfDocumento($factura, $cliente);
 
+// Los avisos salen de lo que de verdad se imprime (EcfDocumento::emisor): la
+// RI sin direccion o sin telefono del emisor la rechaza la DGII.
+$impreso = $ecfDoc->emisor();
+$faltan = array_keys(array_filter(
+    ['direccion' => $impreso['direccion'], 'telefono' => $impreso['telefono']],
+    static fn(string $v) => trim($v) === ''
+));
+if ($faltan !== []) {
+    fwrite(STDERR, 'Aviso: la RI sale sin ' . implode(' ni ', $faltan) . " del emisor y la DGII la rechaza.\n");
+    fwrite(STDERR, "       Repetir con --direccion=\"...\" --telefono=\"...\" (el XML no los trae o trae N/D).\n");
+}
+// Un dato de la linea de comandos que el XML firmado no tiene deja una RI que
+// no coincide con el e-CF que guarda la DGII. Saca del paso; lo correcto es
+// volver a emitir con esos datos en el XML.
+foreach (['direccion' => 'DireccionEmisor', 'telefono' => 'TelefonoEmisor', 'correo' => 'CorreoEmisor'] as $campo => $tag) {
+    $pedido = $sinRelleno((string) ($opciones[$campo] ?? ''));
+    $delXml = $txt($tag);
+    if ($pedido !== '' && $pedido !== $delXml) {
+        fwrite(STDERR, "Aviso: el XML firmado trae {$tag} " . ($delXml !== '' ? "'{$delXml}'" : 'vacio')
+            . ": la RI muestra un dato ({$campo}) que el e-CF no tiene.\n");
+    }
+}
+
 // Sin marca: el logo2020.png y el sello.png del repo son los de Gratex y, sin
 // tenant resuelto, serian el fallback de esta RI. Un e-CF que llega como XML se
 // imprime con el NOMBRE del emisor que lo firmo (la plantilla escribe la razon
@@ -249,6 +292,15 @@ if (file_put_contents($out, $pdf) === false) {
 $timbre = $ecfDoc->timbre();
 echo "e-NCF:    {$eNcf} (tipo {$tipoEcf})\n";
 echo "Ambiente: {$ambiente} ({$origenAmbiente})\n";
+echo 'Emisor:   ' . implode(' | ', array_filter([
+    $impreso['razon_social'],
+    trim($impreso['direccion']) !== '' ? $impreso['direccion'] : 'SIN DIRECCION',
+    trim($impreso['telefono']) !== '' ? 'Tel. ' . $impreso['telefono'] : 'SIN TELEFONO',
+    $impreso['correo'],
+])) . "\n";
+if ($factura['ncf_modificado'] !== '') {
+    echo "Modifica: {$factura['ncf_modificado']}\n";
+}
 echo 'PDF:      ' . $out . ' (' . strlen($pdf) . ' bytes, ' . ($anchoPos !== null ? "tirilla {$anchoPos} mm" : 'hoja carta') . ")\n";
 if ($timbre !== null) {
     echo "Timbre:   {$timbre['url']}\n";

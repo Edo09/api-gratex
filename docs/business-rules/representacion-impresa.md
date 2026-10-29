@@ -5,13 +5,32 @@ elementos debe contener todo documento impreso/PDF. El motor que las implementa 
 `src/Utils/FacturaPdfGenerator.php`; cómo se aplican por plantilla y branding está en
 [../modules/branding-plantillas.md](../modules/branding-plantillas.md).
 
+## 0. Disposición del modelo DGII (hoja carta, plantilla `clasico`)
+
+La plantilla `clasico` (la de todo tenant sin otra configurada y la de `ri_desde_xml.php`) sigue el
+modelo de RI de la DGII; moderno, compacto y los diseños a la medida conservan el suyo
+(`FacturaTemplate::usaDisposicionNorma()`):
+
+*   **Izquierda:** nombre del emisor (azul), RNC, Dirección, Teléfono/Correo y **Fecha Emisión** (DD-MM-AAAA).
+*   **Derecha:** título del comprobante, **e-NCF**, **NCF Modificado** (E33/E34, justo bajo el e-NCF) y
+    **Fecha Vencimiento** (DD-MM-AAAA; no va en E32/E34).
+*   **Franja del cliente** entre dos reglas de color: *Razón Social Cliente* y *RNC Cliente*.
+*   **Tabla con bordes** (Cantidad, Descripción, Unidad de Medida, Precio, ITBIS, Valor; Valor sombreado).
+    La unidad sale como la sigla del catálogo; sin catálogo o con un código que no está en él (p.ej. `43`) sale
+    **"Unidad"**, nunca el código.
+*   **Pie:** QR a la izquierda con *Código de Seguridad* y *Fecha Firma* debajo; a la derecha el cuadro de
+    totales (Subtotal Gravado, Total ITBIS, Total), con borde.
+
 ## 1. Encabezado de la Identidad Legal (Emisor)
 
 Debe identificar claramente a la entidad que emite el documento:
 *   **Nombre/Razón Social del Emisor:** Nombre legal de la empresa o persona física.
 *   **RNC del Emisor:** Registro Nacional de Contribuyentes.
 *   **Dirección Comercial:** Ubicación física, ciudad y sector.
-*   **Información de Contacto:** Teléfono y correo electrónico (opcional pero recomendado).
+*   **Información de Contacto:** Teléfono **obligatorio**; correo electrónico opcional. La DGII
+    rechazó RI de certificación que no mostraban dirección ni teléfono del emisor ("N/D" no
+    cuenta como dirección). Para una RI desde XML sin esos datos: `tools/ri_desde_xml.php
+    --direccion=... --telefono=...`.
 
 ## 2. Identificación del Comprobante (e-CF)
 
@@ -56,7 +75,7 @@ la RI que los tenía a la derecha. Vale para la hoja carta y para la tirilla POS
 
 ## 7. Variaciones según Casos Especiales
 
-*   **Notas de Crédito (E34) / Débito (E33):** Deben incluir el campo **"NCF Modificado"** para referenciar la factura original.
+*   **Notas de Crédito (E34) / Débito (E33):** Deben incluir el campo **"NCF Modificado"** para referenciar la factura original, **al lado del e-NCF** de la nota (justo debajo, en la identificación del comprobante). La DGII rechazó la RI que lo ponía aparte, bajo los datos del emisor.
 *   **Modalidad de Envío Diferido:** Debe incluir una leyenda informativa indicando que la validez fiscal podrá consultarse tras 24 horas.
 *   **Modalidad de Contingencia (Incapacidad Técnica):** Si el sistema falla, el modelo cambia a un formato **no electrónico** (Serie B), eliminando el QR y la firma digital en ese momento.
 *   **Paginación:** Si el documento tiene más de una hoja, debe indicar "Página X de Y".
