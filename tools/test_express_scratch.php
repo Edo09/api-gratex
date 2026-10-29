@@ -24,11 +24,19 @@
  *      las sentencias del plan que borran en la base de la empresa corren contra su esquema real (sin llaves foraneas hacia clients, en
  *      una transaccion que se deshace), y D4: lo que certificacion dejo en certecf (una factura, un contador) no cambia ningun hecho de
  *      ecf ni suma ningun rechazo.
+ *   5) tools/tenant_edicion.php sobre la empresa A, en un hijo (express_cli): el ensayo no escribe nada, los rechazos (un tipo que Express
+ *      no vende, un tipo mal escrito, un modulo que no existe, la migracion de tenant 036 ausente, una empresa que no existe) salen con 3 sin
+ *      tocar ninguna base, aplicar convierte a A (edicion, tipos, vencimiento del certificado, POS, inventario, credencial de integracion,
+ *      rol user, rangos ecf sin limite y clientes de prueba sin facturas) con UNA fila de auditoria, lo de certecf nunca bloquea (D4), la
+ *      credencial de integracion de A funciona antes y no despues (y de nuevo tras revertir), --refrescar-cert deja a cert_vence en la fecha
+ *      del certificado y GET /api/emisor la informa, revertir deja a A en completa con su hash de integracion y su token ya no recibe
+ *      entitlements, y express_aplicar hace rollback de verdad (InnoDB) cuando falla un paso de la master.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
- * raiz), express_login, express_h (la cabecera de sesion) y express_usar_master (apunta MasterDatabase y
- * TenantResolver de ESTE proceso a la master scratch).
+ * raiz), express_login, express_h (la cabecera de sesion), express_usar_master (apunta MasterDatabase y
+ * TenantResolver de ESTE proceso a la master scratch) y express_cli (corre tools/tenant_edicion.php, o la herramienta
+ * que se pida, en un php hijo contra esa master).
  *
  * Nunca produccion: wa_pdo() se niega a usar una base sin la tabla marca zz_write_ahead_scratch y
  * pos_scratch_exigir() una que no se llame wa_scratch o wa_scratch_sin_gate. Las credenciales salen de
@@ -243,6 +251,41 @@ function express_usar_master(array $ctx): void
         $_ENV[$clave] = $valor;
         putenv("{$clave}={$valor}");
     }
+}
+
+/**
+ * Corre una herramienta de linea de comandos de tools/ (tenant_edicion.php) contra la master scratch: un php hijo con la raiz del API de
+ * directorio de trabajo, las extensiones que el php.ini no carga (wa_php_flags), -d variables_order=EGPCS (MasterDatabase lee su configuracion de
+ * $_ENV y no de getenv) y la zona horaria por defecto de ESTE proceso (-d date.timezone=, que el hijo no hereda por si solo: lo que escribe una
+ * herramienta con fechas, como el cert_vence de tenant_edicion.php, se cuenta en esa zona y la prueba lo compara con su propio calendario).
+ * $args son los argumentos despues de php: el script, relativo a la raiz del API, y los suyos.
+ *
+ * La master y la clave maestra de prueba le llegan por el entorno de ESTE proceso, donde las puso express_usar_master($ctx): hay que haberla
+ * llamado antes. Se niega (salida 1) si falta alguna de esas variables, si MASTER_DB_NAME no es la master scratch o si la raiz del API trae un
+ * .env (MasterDatabase lo cargaria). No imprime nada por si misma.
+ *
+ * @param string[] $args
+ * @return array{codigo:int, salida:string} lo de wa_correr: stdout y stderr juntos
+ */
+function express_cli(array $args): array
+{
+    if (is_file(dirname(__DIR__) . '/.env')) {
+        echo "[FALLO] la raiz del API tiene un .env: la herramienta lo cargaria y podria caer en la base que diga\n";
+        exit(1);
+    }
+    $faltan = array_values(array_filter(
+        ['MASTER_DB_HOST', 'MASTER_DB_PORT', 'MASTER_DB_NAME', 'MASTER_DB_USER', 'MASTER_DB_PASS', 'MASTER_ENCRYPTION_KEY'],
+        static fn (string $nombre): bool => (string) getenv($nombre) === ''
+    ));
+    if ($faltan !== []) {
+        echo '[FALLO] express_cli necesita que express_usar_master($ctx) se haya llamado antes: falta ' . implode(', ', $faltan) . "\n";
+        exit(1);
+    }
+    if (getenv('MASTER_DB_NAME') !== wa_base_real(POS_SCRATCH_BASE_MASTER)) {
+        echo '[FALLO] express_cli solo corre contra la master scratch (' . wa_base_corta(wa_base_real(POS_SCRATCH_BASE_MASTER)) . "): MASTER_DB_NAME es otra\n";
+        exit(1);
+    }
+    return wa_correr(array_merge([PHP_BINARY], wa_php_flags(), ['-d', 'variables_order=EGPCS', '-d', 'date.timezone=' . date_default_timezone_get()], $args));
 }
 
 // Modo hijo: lo lanza la seccion 1 para ver la restauracion de al terminar. Ensucia las dos empresas (columnas
@@ -1078,6 +1121,443 @@ wa_chk('D4: al terminar no queda la factura de prueba, el contador certecf vuelv
     (int) $s4Uno('SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s4Marca]) === 0
     && (!is_array($s4Rango) || (int) $s4Uno('SELECT current_value FROM ncf_sequences WHERE id = :id', [':id' => $s4Rango['id']]) === (int) $s4Rango['current_value'])
     && ($s4ClienteNuevo === null || (int) $s4Uno('SELECT COUNT(*) FROM clients WHERE id = :id', [':id' => $s4ClienteNuevo]) === 0));
+
+// ---------------------------------------------------------------------------
+// 5) tools/tenant_edicion.php sobre la empresa A: ensayo, rechazos, aplicar, auditar, refrescar el certificado y revertir
+// ---------------------------------------------------------------------------
+echo "\n== 5) tenant_edicion.php sobre la empresa A ==\n";
+$s5Master = $ctx['pdo'];
+$s5IdA = (int) $ctx['tenantA'];
+$s5IdB = (int) $ctx['tenantB'];
+$s5Cred = $ctx['cred'];
+$s5Secretos = pos_scratch_secretos($s5Cred['pass']);
+$s5Cert = wa_cert_prueba();   // el .p12 desechable de este proceso: vale dos dias y su clave es al azar
+express_usar_master($ctx);    // la master de prueba y su clave maestra: para TenantResolver::encrypt aqui y, por el entorno, para la herramienta
+$s5Pdo = wa_pdo(POS_SCRATCH_BASE_A);   // la base de A, con la guarda de la marca de las bases de prueba
+
+/** Un escalar de una consulta sobre la master o sobre la base de A. */
+$s5Uno = static function (PDO $pdo, string $sql, array $params = []): mixed {
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+    return $st->fetchColumn();
+};
+/** La fila completa de una empresa en master.tenants (SELECT *, como la leen MasterDatabase y la herramienta). */
+$s5Fila = static function (int $id) use ($s5Master): array {
+    $st = $s5Master->prepare('SELECT * FROM tenants WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return (array) $st->fetch();
+};
+/** Los nombres de las columnas en que difieren dos filas, en orden alfabetico (nunca sus valores: algunas son secretos). */
+$s5Difieren = static function (array $a, array $b): array {
+    $nombres = [];
+    foreach (array_unique(array_merge(array_keys($a), array_keys($b))) as $columna) {
+        if (($a[$columna] ?? null) !== ($b[$columna] ?? null)) {
+            $nombres[] = $columna;
+        }
+    }
+    sort($nombres);
+    return $nombres;
+};
+/** Los permisos del rol user de una empresa, en orden alfabetico. */
+$s5Rol = static function (int $id) use ($s5Master): array {
+    $st = $s5Master->prepare("SELECT rp.permission FROM role_permissions rp JOIN roles r ON r.id = rp.role_id WHERE r.tenant_id = :t AND r.name = 'user' ORDER BY rp.permission");
+    $st->execute([':t' => $id]);
+    return array_column($st->fetchAll(), 'permission');
+};
+/** Las filas de auditoria de la edicion de A (module edicion), de la mas vieja a la mas nueva. */
+$s5Auditoria = static function () use ($s5Master, $s5IdA): array {
+    $st = $s5Master->prepare("SELECT * FROM audit_logs WHERE tenant_id = :t AND module = 'edicion' ORDER BY id");
+    $st->execute([':t' => $s5IdA]);
+    return $st->fetchAll();
+};
+
+// Lo que nunca debe salir en lo que imprime la herramienta: las credenciales de las bases, los secretos derivados, el certificado y su clave, la
+// credencial de integracion de A. Se llena mas abajo con lo de A; cada corrida de la herramienta guarda su salida para revisarla al final.
+$s5Prohibidos = [
+    'la clave de la base' => $s5Cred['pass'], 'el usuario de la base' => $s5Cred['user'], 'el servidor' => $s5Cred['host'],
+    'la clave maestra' => $s5Secretos['clave_maestra'], 'el pepper' => $s5Secretos['pepper'], 'la clave de los usuarios' => $s5Secretos['clave_usuarios'],
+    'la clave del certificado' => $s5Cert['password'], 'la ruta del certificado' => $s5Cert['path'], 'el archivo del certificado' => basename($s5Cert['path']),
+];
+$s5Salidas = [];
+/** tenant_edicion.php sobre A con los argumentos dados; guarda la salida para la revision de secretos del final. */
+$s5Corre = static function (string ...$args) use ($s5IdA, &$s5Salidas): array {
+    $r = express_cli(array_merge(['tools/tenant_edicion.php', "--tenant={$s5IdA}"], $args));
+    $s5Salidas[] = $r['salida'];
+    return $r;
+};
+/** Lo que se muestra de una corrida cuando una prueba falla: el codigo y la salida enmascarada y acotada. */
+$s5Ver = static fn (array $r): array => ['codigo' => $r['codigo'], 'salida' => pos_scratch_enmascarar(substr($r['salida'], 0, 1800), array_values($s5Prohibidos))];
+/** ¿Tiene la salida una linea que empieza con $prefijo ("[RECH] m036")? */
+$s5Tiene = static fn (array $r, string $prefijo): bool => preg_match('/^' . preg_quote($prefijo, '/') . '/m', $r['salida']) === 1;
+
+// La columna facturas.idempotency_key (migracion de tenant 036, del plan 04): la herramienta rechaza sin ella. Se guarda como esta (la definicion,
+// su indice uk_facturas_idem y la columna que la antecede, tal como las muestra SHOW CREATE TABLE) para dejarla igual al terminar.
+$s5Columna = static fn (): bool => (int) $s5Uno($s5Pdo, "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas' AND COLUMN_NAME = 'idempotency_key'") === 1;
+$s5Indice = static fn (): bool => (int) $s5Uno($s5Pdo, "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'facturas' AND INDEX_NAME = 'uk_facturas_idem'") > 0;
+/** @return ?array{columna:?string,previa:?string,indice:?string} null si la columna no existe */
+$s5Definicion = static function () use ($s5Pdo, $s5Columna): ?array {
+    if (!$s5Columna()) {
+        return null;
+    }
+    $ddl = (string) ($s5Pdo->query('SHOW CREATE TABLE facturas')->fetch(PDO::FETCH_NUM)[1] ?? '');
+    $lineas = array_map('trim', explode("\n", $ddl));
+    $definicion = ['columna' => null, 'previa' => null, 'indice' => null];
+    foreach ($lineas as $i => $linea) {
+        if (str_starts_with($linea, '`idempotency_key` ')) {
+            $definicion['columna'] = rtrim($linea, ',');
+            $definicion['previa'] = preg_match('/^`([^`]+)`/', $lineas[$i - 1] ?? '', $m) === 1 ? $m[1] : null;
+        } elseif (preg_match('/^(UNIQUE KEY|KEY) `uk_facturas_idem` /', $linea) === 1) {
+            $definicion['indice'] = rtrim($linea, ',');
+        }
+    }
+    return $definicion;
+};
+/** Deja la columna como la definicion dada ("como se encontro") o, con null, sin ella (y sin su indice). */
+$s5Restaurar = static function (?array $definicion) use ($s5Pdo, $s5Columna, $s5Indice): void {
+    if ($definicion === null) {
+        if ($s5Indice()) {
+            $s5Pdo->exec('ALTER TABLE facturas DROP INDEX uk_facturas_idem');
+        }
+        if ($s5Columna()) {
+            $s5Pdo->exec('ALTER TABLE facturas DROP COLUMN idempotency_key');
+        }
+        return;
+    }
+    if (!$s5Columna()) {
+        $s5Pdo->exec('ALTER TABLE facturas ADD COLUMN ' . $definicion['columna'] . ($definicion['previa'] !== null ? ' AFTER `' . $definicion['previa'] . '`' : ''));
+    }
+    if ($definicion['indice'] !== null && !$s5Indice()) {
+        $s5Pdo->exec('ALTER TABLE facturas ADD ' . $definicion['indice']);
+    }
+};
+$s5Def0 = $s5Definicion();
+if ($s5Def0 !== null && $s5Def0['indice'] === null) {
+    // Una columna sin su indice uk_facturas_idem no es la de la migracion 036 (esa siempre lo trae): es la de prueba de una corrida de esta seccion que murio
+    // a medias, y no cuenta como "encontrada": se quita para que no se quede para siempre al "restaurarla".
+    $s5Restaurar(null);
+    $s5Def0 = null;
+}
+wa_chk('precondicion: la definicion de facturas.idempotency_key se pudo leer tal como esta (o la columna no existe todavia), para dejarla igual al terminar',
+    $s5Def0 === null || ($s5Def0['columna'] !== null && $s5Def0['previa'] !== null), $s5Def0);
+
+// Lo que esta seccion toca fuera de lo que restaura express_scratch_preparar(): inventario_estricto de A, las filas de prueba de la base de A
+// (facturas, clientes, rangos) y la columna de arriba. Todo vuelve a su sitio en el finally.
+$s5Inventario0 = (int) $s5Uno($s5Master, 'SELECT inventario_estricto FROM tenants WHERE id = :id', [':id' => $s5IdA]);
+$s5Marca = 'ZZ-EXPRESS-T9';
+$s5Fila0 = $s5Fila($s5IdA);
+$s5FilaB0 = $s5Fila($s5IdB);
+$s5RolB0 = $s5Rol($s5IdB);
+$s5Hash0 = (string) $s5Fila0['api_secret_hash'];
+$s5Prohibidos['el hash de la credencial de integracion'] = $s5Hash0;
+$s5Prohibidos['la api key de A'] = (string) $s5Fila0['api_key'];
+// La credencial de integracion de A, derivada como lo hace pos_scratch_preparar (la clave tal cual; el secreto, la cadena cuyo sha256 es el hash guardado).
+$s5ApiKey = hash('sha256', 'wa_pos_scratch|api_key|A|' . $s5Cred['pass']);
+$s5ApiSecret = 'wa_pos_scratch|api_secret|A|' . $s5Cred['pass'];
+$s5Prohibidos['el secreto de integracion de A'] = $s5ApiSecret;
+$s5TokenViejo = null;
+$s5Libre = $s5EnUso = null;
+$s5Rango = null;
+$s5Api = null;
+/** ¿Funciona la credencial de integracion de A? (TenantResolver::resolveByCredentials, que la resolucion de una peticion de integracion usa.) Limpia lo que la resolucion deja puesto. */
+$s5Credencial = static function () use ($s5ApiKey, $s5ApiSecret): bool {
+    try {
+        return TenantResolver::resolveByCredentials($s5ApiKey, $s5ApiSecret);
+    } finally {
+        Database::clearCredentials();
+        (new ReflectionProperty('TenantResolver', 'current'))->setValue(null, null);
+    }
+};
+$s5Final = null;
+
+try {
+    // --- A queda lista para convertir: nueva, con certificado, con emisor completo y con algo que corregir en cada item que corrige ------------------
+    wa_limpiar($s5Pdo);   // sin facturas y con los contadores al inicio (la guarda de la marca ya paso): A es nueva sea lo que sea que otras suites dejaron en ecf
+    $s5Master->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s5IdA]);   // por si una corrida anterior murio a medias
+    $s5Pdo->prepare('DELETE FROM facturas WHERE no_factura = :m')->execute([':m' => $s5Marca]);
+    $s5Pdo->prepare('DELETE FROM clients WHERE client_name LIKE :m')->execute([':m' => "{$s5Marca}%"]);
+    if ($s5Def0 === null) {
+        // La columna presente para el ensayo (la de la migracion 036 si el plan 04 ya la agrego a la base scratch; si no, la de prueba de esta tarea).
+        $s5Pdo->exec('ALTER TABLE facturas ADD COLUMN idempotency_key CHAR(36) NULL');
+    }
+    $s5Cambio = $s5Master->prepare('UPDATE tenants SET cert_path = :p, cert_pass_encrypted = :c, pos_enabled = 1, inventario_estricto = 1 WHERE id = :id');
+    $s5Cambio->bindValue(':p', $s5Cert['path']);
+    $s5Cambio->bindValue(':c', TenantResolver::encrypt($s5Cert['password']), PDO::PARAM_LOB);   // binario, como create_tenant.php y set_tenant_cert.php
+    $s5Cambio->bindValue(':id', $s5IdA, PDO::PARAM_INT);
+    $s5Cambio->execute();
+    $s5Pdo->prepare('UPDATE emisor_config SET rnc = :r WHERE id = 1')->execute([':r' => (string) $s5Fila0['rnc']]);
+    // Un rango ecf sin limite (lo que siembra el esquema y el apply borra) y dos clientes de prueba de la DGII: uno que ninguna factura usa y otro que usa
+    // una factura de certecf. Y D4: el contador de un rango certecf en 9 y esa factura. Nada de eso puede producir un [RECH].
+    $s5Pdo->exec("INSERT INTO ncf_sequences (type, prefix, current_value, numero_desde, numero_hasta, description, ambiente)
+                  VALUES ('E99', 'E99', 0, 1, NULL, 'Express T9', 'ecf')
+                  ON DUPLICATE KEY UPDATE numero_hasta = NULL, current_value = 0");
+    $s5NuevoCliente = static function (string $rnc, string $nombre) use ($s5Pdo): int {
+        $s5Pdo->prepare(
+            "INSERT INTO clients (email, client_name, company_name, rnc, razon_social, direccion, phone_number)
+             VALUES ('t9-prueba@example.com', :n1, :n2, :r, :n3, 'Direccion de prueba', '')"
+        )->execute([':n1' => $nombre, ':n2' => $nombre, ':n3' => $nombre, ':r' => $rnc]);
+        return (int) $s5Pdo->lastInsertId();
+    };
+    $s5Libre = $s5NuevoCliente('131880681', "{$s5Marca} sin facturas");
+    $s5EnUso = $s5NuevoCliente('533445861', "{$s5Marca} con factura de certecf");
+    $s5Pdo->prepare(
+        "INSERT INTO facturas (no_factura, client_id, client_name, tipo_ecf, e_ncf, ambiente_dgii, estado_dgii)
+         VALUES (:m, :c, :n, '31', 'E319999999997', 'certecf', 'ACEPTADO')"
+    )->execute([':m' => $s5Marca, ':c' => $s5EnUso, ':n' => "{$s5Marca} con factura de certecf"]);
+    $s5Rango = $s5Pdo->query("SELECT id, current_value FROM ncf_sequences WHERE ambiente = 'certecf' AND type = 'E31' ORDER BY numero_desde LIMIT 1")->fetch();
+    if (is_array($s5Rango)) {
+        $s5Pdo->prepare('UPDATE ncf_sequences SET current_value = 9 WHERE id = :id')->execute([':id' => $s5Rango['id']]);
+    }
+    $s5Vence = null;
+    $s5Partes = [];
+    if (@openssl_pkcs12_read((string) file_get_contents($s5Cert['path']), $s5Partes, $s5Cert['password'])) {
+        $s5Datos = openssl_x509_parse((string) $s5Partes['cert']);
+        $s5Vence = is_array($s5Datos) && is_int($s5Datos['validTo_time_t'] ?? null) ? date('Y-m-d', $s5Datos['validTo_time_t']) : null;   // el dia del notAfter, en la zona de este proceso
+    }
+    unset($s5Partes);
+    $s5Ilimitados = static fn (): int => (int) $s5Uno($s5Pdo, "SELECT COUNT(*) FROM ncf_sequences WHERE ambiente = 'ecf' AND numero_hasta IS NULL");
+    $s5Existe = static fn (?int $clienteId): bool => $clienteId !== null && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM clients WHERE id = :id', [':id' => $clienteId]) === 1;
+    $s5Prueba = static fn (): int => (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s5Marca]);
+    $s5Rol0 = $s5Rol($s5IdA);
+    $s5Antes = $s5Fila($s5IdA);
+    wa_chk('precondicion: A es nueva (ni una factura ni un contador ecf), tiene el POS y el control de existencias prendidos, rangos ecf sin limite, un cliente de prueba libre y otro usado por una factura de certecf, y el certificado de prueba abre',
+        (int) $s5Uno($s5Pdo, "SELECT COUNT(*) FROM facturas WHERE ambiente_dgii = 'ecf'") === 0
+        && (int) $s5Uno($s5Pdo, "SELECT COUNT(*) FROM ncf_sequences WHERE ambiente = 'ecf' AND current_value > 0") === 0
+        && (int) $s5Antes['pos_enabled'] === 1 && (int) $s5Antes['inventario_estricto'] === 1 && $s5Antes['edicion'] === 'completa' && $s5Antes['api_secret_hash'] !== ''
+        && $s5Ilimitados() >= 1 && $s5Existe($s5Libre) && $s5Existe($s5EnUso) && $s5Prueba() === 1 && is_string($s5Vence) && $s5Rol0 !== [] && $s5Auditoria() === [],
+        ['ilimitados' => $s5Ilimitados(), 'libre' => $s5Existe($s5Libre), 'en_uso' => $s5Existe($s5EnUso), 'vence' => $s5Vence, 'rol' => $s5Rol0]);
+    wa_chk('(4) la credencial de integracion de A funciona antes de convertirla (TenantResolver::resolveByCredentials con su api key y su secreto)', $s5Credencial() === true);
+
+    // --- (1) ensayo: ni una escritura ---------------------------------------------------------------------------------------------------------
+    $r = $s5Corre('--edicion=express', '--tipos=45');
+    wa_chk('(1) ensayo (--tipos=45 sin --apply): sale con 0 y dice DRY-RUN: no se escribio nada, sin APLICADO ni RECHAZADO',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.')
+        && !str_contains($r['salida'], 'APLICADO') && !str_contains($r['salida'], 'RECHAZADO'), $s5Ver($r));
+    wa_chk('(1) el ensayo marca [CORR] lo que la conversion corregiria (pos, inventario, ilimitados, clientes_prueba, integracion y roles) y no hay ningun [RECH]: lo de certecf (D4) no bloquea',
+        array_filter(['pos', 'inventario', 'ilimitados', 'clientes_prueba', 'integracion', 'roles'], static fn (string $id): bool => !$s5Tiene($r, "[CORR] {$id}:")) === []
+        && preg_match('/^\[RECH\]/m', $r['salida']) === 0 && $s5Tiene($r, '[OK  ] cert:') && $s5Tiene($r, '[OK  ] emisor:') && $s5Tiene($r, '[OK  ] m036:'), $s5Ver($r));
+    wa_chk('(1) el ensayo no escribio nada: la fila de A en tenants es identica, el rol user igual, los rangos ecf sin limite, los clientes de prueba y la factura de certecf siguen, y no hay fila de auditoria',
+        $s5Difieren($s5Antes, $s5Fila($s5IdA)) === [] && $s5Rol($s5IdA) === $s5Rol0 && $s5Ilimitados() >= 1 && $s5Existe($s5Libre) && $s5Existe($s5EnUso) && $s5Prueba() === 1
+        && $s5Auditoria() === [], $s5Difieren($s5Antes, $s5Fila($s5IdA)));
+    $r = $s5Corre('--edicion=express', '--tipos=45, 31,');
+    wa_chk('(1) con los tipos escritos a mano con espacios y coma al final ("45, 31,") el ensayo los entiende: sale con 0 y el encabezado nombra el 45 y el 31',
+        $r['codigo'] === 0 && str_contains($r['salida'], "'45'") && str_contains($r['salida'], "'31'") && str_contains($r['salida'], 'DRY-RUN'), $s5Ver($r));
+
+    // --- (2) lo que se rechaza: sale con 3, no se cambia nada ---------------------------------------------------------------------------------------
+    foreach ([
+        '--tipos=44 (un tipo que Express no vende)' => [['--edicion=express', '--tipos=44', '--apply'], 'tipos', "'44'"],
+        '--tipos=e45 (un tipo mal escrito: RF2)' => [['--edicion=express', '--tipos=e45', '--apply'], 'tipos', "'e45'"],
+        '--modulos=facturacion,cliente (un modulo mal escrito: RF2)' => [['--edicion=express', '--tipos=45', '--modulos=facturacion,cliente', '--apply'], 'modulos', "'cliente'"],
+        '--tipos=45 con --modulos=facturacion (sin clientes no se puede el 45)' => [['--edicion=express', '--tipos=45', '--modulos=facturacion', '--apply'], 'clientes_modulo', 'clientes'],
+    ] as $s5Desc => [$s5Args, $s5Item, $s5Aguja]) {
+        $r = $s5Corre(...$s5Args);
+        wa_chk("(2) {$s5Desc} con --apply: sale con 3, RECHAZADO, el item [RECH] {$s5Item} nombra {$s5Aguja}, y no cambia nada (la fila de A identica, nada borrado, sin fila de auditoria)",
+            $r['codigo'] === 3 && str_contains($r['salida'], 'RECHAZADO:') && str_contains($r['salida'], 'No se cambio nada.') && $s5Tiene($r, "[RECH] {$s5Item}:") && str_contains($r['salida'], $s5Aguja)
+            && !str_contains($r['salida'], 'APLICADO') && $s5Difieren($s5Antes, $s5Fila($s5IdA)) === [] && $s5Rol($s5IdA) === $s5Rol0 && $s5Ilimitados() >= 1
+            && $s5Existe($s5Libre) && $s5Auditoria() === [], $s5Ver($r));
+    }
+    $r = express_cli(['tools/tenant_edicion.php', '--tenant=2147483000', '--edicion=completa', '--apply']);
+    $s5Salidas[] = $r['salida'];
+    wa_chk('(2) una empresa que no existe (id 2147483000): sale con 3 con [RECH] tenant y RECHAZADO, sin escribir nada',
+        $r['codigo'] === 3 && $s5Tiene($r, '[RECH] tenant:') && str_contains($r['salida'], 'RECHAZADO: 1 item(s). No se cambio nada.'), $s5Ver($r));
+
+    // --- (3) sin la migracion de tenant 036 se rechaza; con ella, se aplica -----------------------------------------------------------------------
+    $s5Restaurar(null);   // facturas.idempotency_key ausente (con su indice, si lo tenia): se restaura como se encontro en el finally
+    $r = $s5Corre('--edicion=express', '--tipos=45', '--apply');
+    wa_chk('(3) sin facturas.idempotency_key (la columna se quito de la base de A): --tipos=45 --apply sale con 3 y m036 es la linea [RECH]; la fila de A sigue igual y no hay auditoria',
+        $r['codigo'] === 3 && $s5Tiene($r, '[RECH] m036:') && preg_match_all('/^\[RECH\]/m', $r['salida']) === 1 && str_contains($r['salida'], 'RECHAZADO: 1 item(s). No se cambio nada.')
+        && $s5Difieren($s5Antes, $s5Fila($s5IdA)) === [] && $s5Rol($s5IdA) === $s5Rol0 && $s5Ilimitados() >= 1 && $s5Auditoria() === [], $s5Ver($r));
+    // La columna de prueba de esta tarea (contratos 4.1: el plan 04 quita este ALTER cuando agregue la migracion 036 al esquema scratch).
+    $s5Pdo->exec('ALTER TABLE facturas ADD COLUMN idempotency_key CHAR(36) NULL');
+    $r = $s5Corre('--edicion=express', '--tipos=45', '--apply');
+    wa_chk("(3) con facturas.idempotency_key: --tipos=45 --apply sale con 0 e imprime APLICADO: el tenant #{$s5IdA} ahora es express., sin ningun [RECH] (el D4 de nuevo: la factura y el contador de certecf no bloquean)",
+        $r['codigo'] === 0 && str_contains($r['salida'], "APLICADO: el tenant #{$s5IdA} ahora es express.") && preg_match('/^\[RECH\]/m', $r['salida']) === 0
+        && !str_contains($r['salida'], 'DRY-RUN') && !str_contains($r['salida'], 'RECHAZADO'), $s5Ver($r));
+    $s5Despues = $s5Fila($s5IdA);
+    wa_chk('(3) en la master: edicion express, tipos_ecf_habilitados 45, sin modulos (el preset), cert_vence el dia del notAfter del certificado, POS e inventario en 0 y la credencial de integracion en blanco',
+        $s5Despues['edicion'] === 'express' && $s5Despues['tipos_ecf_habilitados'] === '45' && $s5Despues['modulos_habilitados'] === null && $s5Despues['cert_vence'] === $s5Vence
+        && (int) $s5Despues['pos_enabled'] === 0 && (int) $s5Despues['inventario_estricto'] === 0 && $s5Despues['api_secret_hash'] === '',
+        array_intersect_key($s5Despues, array_flip(['edicion', 'tipos_ecf_habilitados', 'modulos_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'])) + ['vence_esperado' => $s5Vence]);
+    wa_chk('(3) solo cambian en A las columnas que la conversion toca: edicion, tipos, vencimiento del certificado, POS, inventario y hash de integracion (lo demas de la fila, incluidos cert_path y las claves, queda igual)',
+        array_diff($s5Difieren($s5Antes, $s5Despues), ['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto', 'api_secret_hash']) === []
+        && array_diff(['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto', 'api_secret_hash'], $s5Difieren($s5Antes, $s5Despues)) === [], $s5Difieren($s5Antes, $s5Despues));
+    $s5Facturador = ['facturas', 'clients', 'products', 'unidades'];
+    sort($s5Facturador);
+    wa_chk('(3) el rol user de A tiene exactamente los permisos del Facturador (facturas, clients, products y unidades) y antes tenia otros',
+        $s5Rol($s5IdA) === $s5Facturador && $s5Rol0 !== $s5Facturador, [$s5Rol($s5IdA), $s5Rol0]);
+    wa_chk('(3) en la base de A: ya no hay ningun rango ecf con numero_hasta NULL (antes habia), el cliente de prueba sin facturas se borro y el que usa una factura de certecf sigue',
+        $s5Ilimitados() === 0 && !$s5Existe($s5Libre) && $s5Existe($s5EnUso), [$s5Ilimitados(), $s5Existe($s5Libre), $s5Existe($s5EnUso)]);
+    wa_chk('(3) D4: lo de certecf quedo como estaba: la factura de certecf sigue ahi y el contador certecf del rango sigue en 9',
+        $s5Prueba() === 1 && (!is_array($s5Rango) || (int) $s5Uno($s5Pdo, 'SELECT current_value FROM ncf_sequences WHERE id = :id', [':id' => $s5Rango['id']]) === 9), $s5Prueba());
+    $s5Filas = $s5Auditoria();
+    $s5AuditoriaAntes = json_decode((string) ($s5Filas[0]['old_values'] ?? ''), true);
+    $s5AuditoriaDespues = json_decode((string) ($s5Filas[0]['new_values'] ?? ''), true);
+    wa_chk('(3) hay UNA fila de auditoria, con module edicion, action EDICION_CAMBIO, entity_type tenant, el id de A, username tools/tenant_edicion.php y success 1',
+        count($s5Filas) === 1 && $s5Filas[0]['module'] === 'edicion' && $s5Filas[0]['action'] === 'EDICION_CAMBIO' && $s5Filas[0]['entity_type'] === 'tenant'
+        && (int) $s5Filas[0]['tenant_id'] === $s5IdA && (string) $s5Filas[0]['entity_id'] === (string) $s5IdA && $s5Filas[0]['username'] === 'tools/tenant_edicion.php' && (int) $s5Filas[0]['success'] === 1,
+        array_diff_key($s5Filas[0] ?? [], ['old_values' => 1, 'new_values' => 1]));
+    wa_chk('(3) su old_values trae integracion_hash_anterior (el hash que se dejo en blanco) y el estado de antes (completa, POS e inventario en 1); su new_values, el de despues, sin ese hash',
+        is_array($s5AuditoriaAntes) && is_array($s5AuditoriaDespues) && ($s5AuditoriaAntes['integracion_hash_anterior'] ?? null) === $s5Hash0 && $s5Hash0 !== ''
+        && $s5AuditoriaAntes['edicion'] === 'completa' && $s5AuditoriaAntes['pos_enabled'] === 1 && $s5AuditoriaAntes['inventario_estricto'] === 1
+        && $s5AuditoriaDespues['edicion'] === 'express' && $s5AuditoriaDespues['tipos_ecf_habilitados'] === '45' && $s5AuditoriaDespues['cert_vence'] === $s5Vence
+        && $s5AuditoriaDespues['pos_enabled'] === 0 && $s5AuditoriaDespues['inventario_estricto'] === 0 && !array_key_exists('integracion_hash_anterior', $s5AuditoriaDespues),
+        ['antes' => array_diff_key((array) $s5AuditoriaAntes, ['integracion_hash_anterior' => 1]), 'despues' => $s5AuditoriaDespues]);
+    wa_chk('(3) la fila de auditoria no lleva la ruta ni la clave del certificado ni las claves de las bases',
+        array_filter(array_diff_key($s5Prohibidos, ['el hash de la credencial de integracion' => 1]), static fn (string $v): bool => str_contains((string) ($s5Filas[0]['old_values'] ?? '') . ($s5Filas[0]['new_values'] ?? '') . ($s5Filas[0]['description'] ?? ''), $v)) === []);
+    wa_chk('(4) la credencial de integracion de A ya no funciona despues de convertirla: el resolvedor rechaza un hash vacio', $s5Credencial() === false);
+    wa_chk('la conversion solo toco a A: la fila de B en tenants y los permisos de su rol user siguen identicos',
+        $s5Difieren($s5FilaB0, $s5Fila($s5IdB)) === [] && $s5Rol($s5IdB) === $s5RolB0, $s5Difieren($s5FilaB0, $s5Fila($s5IdB)));
+
+    // --- (5) --refrescar-cert: cert_vence sigue al archivo, y GET /api/emisor lo informa (RF4) ---------------------------------------------------
+    $s5Api = express_api('express_api', 8294);
+    $s5TokenViejo = express_login($s5Api, 'admin_pos_a')['token'];   // la sesion de A mientras es Express: la de (6) ya no recibira entitlements
+    $s5Emisor = static fn (): array => wa_http('GET', $s5Api . '/api/emisor', null, express_h((string) $s5TokenViejo));
+    $s5Master->prepare('UPDATE tenants SET cert_vence = :v WHERE id = :id')->execute([':v' => '2020-01-01', ':id' => $s5IdA]);
+    $s5Mal = $s5Emisor();
+    wa_chk('(5) con cert_vence en una fecha equivocada (2020-01-01), GET /api/emisor la informa tal cual: certificado vencido',
+        $s5Mal['status'] === 200 && ($s5Mal['json']['data']['certificado']['vence'] ?? null) === '2020-01-01' && ($s5Mal['json']['data']['certificado']['estado'] ?? null) === 'vencido', [$s5Mal['status'], $s5Mal['json']['data']['certificado'] ?? null]);
+    $s5AntesRefresco = $s5Fila($s5IdA);
+    $r = $s5Corre('--refrescar-cert');
+    wa_chk('(5) --refrescar-cert en ensayo: sale con 0, dice DRY-RUN y no escribe (cert_vence sigue en 2020-01-01)',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.') && $s5Difieren($s5AntesRefresco, $s5Fila($s5IdA)) === []
+        && $s5Fila($s5IdA)['cert_vence'] === '2020-01-01', $s5Ver($r));
+    $r = $s5Corre('--refrescar-cert', '--apply');
+    wa_chk('(5) --refrescar-cert --apply: sale con 0 y cert_vence es otra vez la fecha del notAfter del certificado; solo esa columna cambia',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'APLICADO:') && $s5Fila($s5IdA)['cert_vence'] === $s5Vence && $s5Difieren($s5AntesRefresco, $s5Fila($s5IdA)) === ['cert_vence'], $s5Ver($r));
+    $s5Bien = $s5Emisor();
+    $s5Hoy = new DateTimeImmutable(date('Y-m-d') . ' 00:00:00', new DateTimeZone('UTC'));
+    $s5Dias = is_string($s5Vence) ? (int) $s5Hoy->diff(new DateTimeImmutable($s5Vence . ' 00:00:00', new DateTimeZone('UTC')))->format('%r%a') : null;
+    wa_chk('(5) GET /api/emisor (la misma sesion, la peticion siguiente) informa ya la fecha del certificado: por_vencer, con su vence y los dias que faltan',
+        $s5Bien['status'] === 200 && ($s5Bien['json']['data']['certificado'] ?? null) === ['estado' => 'por_vencer', 'vence' => $s5Vence, 'dias' => $s5Dias], [$s5Bien['status'], $s5Bien['json']['data']['certificado'] ?? null, $s5Dias]);
+    $r = $s5Corre('--refrescar-cert', '--apply');
+    wa_chk('(5) --refrescar-cert cuando cert_vence ya es la fecha del certificado: sale con 0 sin escribir nada (SIN CAMBIOS)',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'SIN CAMBIOS:') && !str_contains($r['salida'], 'APLICADO') && $s5Difieren($s5AntesRefresco, $s5Fila($s5IdA)) === ['cert_vence'] && count($s5Auditoria()) === 1, $s5Ver($r));
+    wa_chk('(5) refrescar el certificado no escribe fila de auditoria (no cambia la edicion): sigue la de la conversion',
+        count($s5Auditoria()) === 1 && $s5Auditoria()[0]['action'] === 'EDICION_CAMBIO');
+    $r = express_cli(['tools/tenant_edicion.php', "--tenant={$s5IdB}", '--refrescar-cert', '--apply']);
+    $s5Salidas[] = $r['salida'];
+    wa_chk('(5) --refrescar-cert sobre B (completa): sale con 3 con [RECH] edicion y no cambia la fila de B',
+        $r['codigo'] === 3 && $s5Tiene($r, '[RECH] edicion:') && $s5Difieren($s5FilaB0, $s5Fila($s5IdB)) === [], $s5Ver($r));
+
+    // --- (6) --edicion=completa: solo la edicion, el hash de integracion de vuelta, y la sesion de antes ya no recibe entitlements -------------------
+    $s5MeAntes = wa_http('GET', $s5Api . '/api/auth/me', null, express_h((string) $s5TokenViejo));
+    wa_chk('(6) precondicion: mientras A es Express, GET /api/auth/me con su sesion trae user.entitlements',
+        $s5MeAntes['status'] === 200 && is_array($s5MeAntes['json']['data']['user']['entitlements'] ?? null), [$s5MeAntes['status']]);
+    $s5AntesRevertir = $s5Fila($s5IdA);
+    $s5RolAntesRevertir = $s5Rol($s5IdA);
+    $r = $s5Corre('--edicion=completa');
+    wa_chk('(6) revertir en ensayo: sale con 0, avisa que levanta toda restriccion y que no es una parada segura, dice DRY-RUN y no escribe nada',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'DRY-RUN: no se escribio nada.') && str_contains($r['salida'], 'no es una parada segura') && str_contains($r['salida'], 'tipos_ecf_habilitados') && str_contains($r['salida'], 'tokens')
+        && $s5Difieren($s5AntesRevertir, $s5Fila($s5IdA)) === [] && count($s5Auditoria()) === 1, $s5Ver($r));
+    $r = $s5Corre('--edicion=completa', '--apply');
+    $s5Revertida = $s5Fila($s5IdA);
+    wa_chk("(6) --edicion=completa --apply: sale con 0 e imprime APLICADO: el tenant #{$s5IdA} ahora es completa. y avisa que no es una parada segura",
+        $r['codigo'] === 0 && str_contains($r['salida'], "APLICADO: el tenant #{$s5IdA} ahora es completa.") && str_contains($r['salida'], 'no es una parada segura'), $s5Ver($r));
+    wa_chk('(6) en la master: edicion completa y api_secret_hash restaurado al original; no cambia nada mas de la fila (tipos, vencimiento, POS, inventario siguen como la conversion los dejo) ni los permisos del rol user',
+        $s5Revertida['edicion'] === 'completa' && $s5Revertida['api_secret_hash'] === $s5Hash0 && $s5Difieren($s5AntesRevertir, $s5Revertida) === ['api_secret_hash', 'edicion'] && $s5Rol($s5IdA) === $s5RolAntesRevertir,
+        $s5Difieren($s5AntesRevertir, $s5Revertida));
+    $s5MeDespues = wa_http('GET', $s5Api . '/api/auth/me', null, express_h((string) $s5TokenViejo));
+    wa_chk('(6) la sesion de antes (el mismo token) ya no recibe entitlements en GET /api/auth/me: el cambio de edicion se aplica en la peticion siguiente',
+        $s5MeDespues['status'] === 200 && is_array($s5MeDespues['json']['data']['user'] ?? null) && !array_key_exists('entitlements', $s5MeDespues['json']['data']['user']), [$s5MeDespues['status'], array_keys((array) ($s5MeDespues['json']['data']['user'] ?? []))]);
+    wa_chk('(6) la credencial de integracion de A vuelve a funcionar tras revertir (su hash se restauro de la bitacora)', $s5Credencial() === true);
+    $s5Filas = $s5Auditoria();
+    wa_chk('(6) hay dos filas de auditoria EDICION_CAMBIO: la conversion y la reversion (la de ahora no trae hash anterior: ya estaba en blanco y pasa a completa)',
+        count($s5Filas) === 2 && array_unique(array_column($s5Filas, 'action')) === ['EDICION_CAMBIO']
+        && (json_decode((string) ($s5Filas[1]['old_values'] ?? ''), true)['integracion_hash_anterior'] ?? null) === ''
+        && (json_decode((string) ($s5Filas[1]['new_values'] ?? ''), true)['edicion'] ?? null) === 'completa'
+        && (json_decode((string) ($s5Filas[1]['old_values'] ?? ''), true)['edicion'] ?? null) === 'express', array_column($s5Filas, 'action'));
+    $r = $s5Corre('--edicion=completa', '--apply');
+    wa_chk('(6) revertir otra vez a una empresa que ya es completa y tiene su hash: sale con 0, dice SIN CAMBIOS y no escribe (ni una tercera fila de auditoria)',
+        $r['codigo'] === 0 && str_contains($r['salida'], 'SIN CAMBIOS:') && !str_contains($r['salida'], 'APLICADO') && $s5Difieren($s5Revertida, $s5Fila($s5IdA)) === [] && count($s5Auditoria()) === 2, $s5Ver($r));
+
+    // --- el ciclo que pasa de verdad: convertir, volver a convertir con otros tipos (el hash ya esta en blanco) y revertir: el hash vuelve de la fila que lo trae ---
+    $r = $s5Corre('--edicion=express', '--tipos=45,31', '--apply');
+    $s5Ciclo1 = $r['codigo'] === 0 && $s5Fila($s5IdA)['edicion'] === 'express' && $s5Fila($s5IdA)['tipos_ecf_habilitados'] === '45,31' && $s5Fila($s5IdA)['api_secret_hash'] === '';
+    wa_chk('ciclo: convertir otra vez a A con --tipos=45,31 sale con 0 y deja su credencial de integracion en blanco de nuevo (la fila de auditoria nueva guarda el hash que habia)',
+        $s5Ciclo1 && (json_decode((string) ($s5Auditoria()[2]['old_values'] ?? ''), true)['integracion_hash_anterior'] ?? null) === $s5Hash0, $s5Ver($r));
+    $r = $s5Corre('--edicion=express', '--tipos=45', '--apply');
+    wa_chk('ciclo: volver a convertir con --tipos=45 (A ya es Express, sin nada que borrar) sale con 0 y su fila de auditoria trae el hash anterior en blanco: ya estaba en blanco',
+        $r['codigo'] === 0 && $s5Fila($s5IdA)['tipos_ecf_habilitados'] === '45' && count($s5Auditoria()) === 4
+        && (json_decode((string) ($s5Auditoria()[3]['old_values'] ?? ''), true)['integracion_hash_anterior'] ?? null) === '', $s5Ver($r));
+    $r = $s5Corre('--edicion=completa', '--apply');
+    wa_chk('ciclo: revertir restaura el hash de integracion de la fila mas nueva que lo trae (salta la ultima, que lo tiene en blanco) y la credencial de A vuelve a funcionar',
+        $r['codigo'] === 0 && $s5Fila($s5IdA)['edicion'] === 'completa' && $s5Fila($s5IdA)['api_secret_hash'] === $s5Hash0 && $s5Credencial() === true && count($s5Auditoria()) === 5, $s5Ver($r));
+
+    // --- express_aplicar contra InnoDB de verdad: si falla un paso de la master, no queda ni el cambio ni su fila de auditoria -----------------------
+    $s5Motores = (int) $s5Uno($s5Master, "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND ENGINE = 'InnoDB' AND TABLE_NAME IN ('tenants', 'audit_logs', 'roles', 'role_permissions')");
+    wa_chk('precondicion: tenants, audit_logs, roles y role_permissions son InnoDB en la master scratch (el rollback de la prueba que sigue es de verdad)', $s5Motores === 4, $s5Motores);
+    if ($s5Motores === 4) {
+        $s5Estado = ['edicion' => 'express', 'tipos_ecf_habilitados' => '31', 'modulos_habilitados' => null, 'cert_vence' => null, 'pos_enabled' => 0, 'inventario_estricto' => 0];
+        $s5AuditoriaPrueba = ['tenant_id' => $s5IdA, 'old_values' => ['edicion' => 'completa', 'integracion_hash_anterior' => ''], 'new_values' => $s5Estado, 'description' => 'Prueba T9 del rollback'];
+        $s5PasoUpdate = ['donde' => 'master', 'que' => 'UPDATE valido', 'sql' => "UPDATE tenants SET edicion = 'express', tipos_ecf_habilitados = '31', modulos_habilitados = NULL, cert_vence = NULL WHERE id = :id", 'params' => [':id' => $s5IdA]];
+        $s5PasoMalo = ['donde' => 'master', 'que' => 'UPDATE de una columna que no existe', 'sql' => 'UPDATE tenants SET zz_columna_que_no_existe = 1 WHERE id = :id', 'params' => [':id' => $s5IdA]];
+        $s5BorraLibre = ['donde' => 'tenant', 'que' => 'Borrar un cliente de prueba', 'sql' => 'DELETE FROM clients WHERE id = :id', 'params' => [':id' => $s5EnUso]];
+        $s5FilaAntes = $s5Fila($s5IdA);
+        $s5NAuditoria = count($s5Auditoria());
+        try {
+            express_aplicar($s5Master, $s5Pdo, [$s5BorraLibre, $s5PasoUpdate, $s5PasoMalo], $s5AuditoriaPrueba);
+            $s5Error = null;
+        } catch (Throwable $s5Error) {
+        }
+        wa_chk('express_aplicar sobre la master scratch: si falla el segundo paso (una columna que no existe) lanza PDOException y el UPDATE de tenants que ya habia corrido se deshizo: la fila de A es identica y no hay fila de auditoria nueva',
+            $s5Error instanceof PDOException && $s5Difieren($s5FilaAntes, $s5Fila($s5IdA)) === [] && count($s5Auditoria()) === $s5NAuditoria && !$s5Master->inTransaction(),
+            [$s5Error === null ? null : wa_describir_excepcion($s5Error), $s5Difieren($s5FilaAntes, $s5Fila($s5IdA)), count($s5Auditoria()) - $s5NAuditoria]);
+        wa_chk('...y el paso de la base de la empresa que corrio antes (la baja de un cliente de prueba) SI quedo: sus pasos son idempotentes y no se deshacen con la transaccion de la master',
+            !$s5Existe($s5EnUso));
+        $s5EnUso = null;   // ya se borro: el finally no lo busca
+        try {
+            // El UPDATE deja la empresa en express/31 pero la auditoria afirma otra cosa (tipos 45): la lectura posterior lo ve y lanza, con el cambio ya confirmado.
+            express_aplicar($s5Master, null, [$s5PasoUpdate], ['new_values' => ['tipos_ecf_habilitados' => '45'] + $s5Estado] + $s5AuditoriaPrueba);
+            $s5Error = null;
+        } catch (Throwable $s5Error) {
+        }
+        wa_chk('express_aplicar sobre la master scratch: si la lectura de despues del commit no coincide con el plan (la auditoria dice tipos 45 y quedo 31) lanza RuntimeException que nombra la columna, con el cambio ya confirmado y su fila de auditoria escrita',
+            $s5Error instanceof RuntimeException && str_contains($s5Error->getMessage(), 'tipos_ecf_habilitados') && $s5Fila($s5IdA)['tipos_ecf_habilitados'] === '31' && count($s5Auditoria()) === $s5NAuditoria + 1,
+            [$s5Error === null ? null : get_class($s5Error) . ': ' . $s5Error->getMessage(), $s5Fila($s5IdA)['tipos_ecf_habilitados'], count($s5Auditoria()) - $s5NAuditoria]);
+        try {
+            express_aplicar($s5Master, null, [$s5PasoUpdate], $s5AuditoriaPrueba);   // y la misma, con la auditoria que dice lo mismo que el UPDATE: pasa limpia
+            $s5Error = null;
+        } catch (Throwable $s5Error) {
+        }
+        wa_chk('express_aplicar sobre la master scratch: con la auditoria igual al plan la lectura posterior coincide y no lanza', $s5Error === null, $s5Error === null ? null : wa_describir_excepcion($s5Error));
+    }
+    $s5Final = ['b' => $s5Difieren($s5FilaB0, $s5Fila($s5IdB)), 'rol_b' => $s5Rol($s5IdB) === $s5RolB0];
+} finally {
+    // Todo vuelve a su sitio: la columna como se encontro, las filas de prueba de la base de A, la auditoria de A en la master, A y B como completas y
+    // con su credencial, POS y roles (express_scratch_preparar() llama a pos_scratch_preparar()), inventario_estricto de A y lo que dejo puesto el resolvedor.
+    $s5Restaurar($s5Def0);
+    $s5Pdo->prepare('DELETE FROM facturas WHERE no_factura = :m')->execute([':m' => $s5Marca]);
+    if (is_array($s5Rango)) {
+        $s5Pdo->prepare('UPDATE ncf_sequences SET current_value = :v WHERE id = :id')->execute([':v' => $s5Rango['current_value'], ':id' => $s5Rango['id']]);   // el valor que dejo wa_limpiar, leido antes de subirlo a 9
+    }
+    $s5Pdo->prepare('DELETE FROM clients WHERE client_name LIKE :m')->execute([':m' => "{$s5Marca}%"]);
+    $s5Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf' AND type = 'E99'");
+    $s5Master->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s5IdA]);
+    express_scratch_preparar();
+    $s5Master->prepare('UPDATE tenants SET inventario_estricto = :v WHERE id = :id')->execute([':v' => $s5Inventario0, ':id' => $s5IdA]);
+    Database::clearCredentials();
+    (new ReflectionProperty('TenantResolver', 'current'))->setValue(null, null);
+}
+wa_chk('la conversion y la reversion solo tocaron a A: la fila de B en tenants y los permisos de su rol user quedaron identicos hasta el final',
+    is_array($s5Final) && $s5Final['b'] === [] && $s5Final['rol_b'] === true, $s5Final);
+// Ninguna corrida imprimio un secreto ni una ruta: la clave de las bases, los secretos derivados, el certificado y su clave, el hash y la clave de integracion de A.
+$s5Fugas = [];
+foreach ($s5Salidas as $s5I => $s5Salida) {
+    foreach ($s5Prohibidos as $s5Que => $s5Valor) {
+        if ($s5Valor !== '' && str_contains($s5Salida, $s5Valor)) {
+            $s5Fugas[] = "corrida {$s5I}: {$s5Que}";
+        }
+    }
+}
+wa_chk('ninguna de las corridas de tenant_edicion.php imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base',
+    count($s5Salidas) >= 15 && $s5Fugas === [], $s5Fugas);
+$s5Limpia = $s5Fila($s5IdA);
+wa_chk('al terminar A vuelve a ser completa, sin certificado ni listas, con el POS prendido, su inventario, su hash de integracion de siempre y los permisos del rol user de antes; sin auditoria de edicion; y la columna idempotency_key como se encontro',
+    $s5Limpia['edicion'] === 'completa' && $s5Limpia['tipos_ecf_habilitados'] === null && $s5Limpia['modulos_habilitados'] === null && $s5Limpia['cert_vence'] === null
+    && $s5Limpia['cert_path'] === null && $s5Limpia['cert_pass_encrypted'] === null && (int) $s5Limpia['pos_enabled'] === 1 && (int) $s5Limpia['inventario_estricto'] === $s5Inventario0
+    && $s5Limpia['api_secret_hash'] === $s5Hash0 && $s5Rol($s5IdA) === $s5Rol0 && $s5Auditoria() === [] && $s5Definicion() === $s5Def0
+    && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM facturas WHERE no_factura = :m', [':m' => $s5Marca]) === 0
+    && (int) $s5Uno($s5Pdo, 'SELECT COUNT(*) FROM clients WHERE client_name LIKE :m', [':m' => "{$s5Marca}%"]) === 0,
+    array_intersect_key($s5Limpia, array_flip(['edicion', 'tipos_ecf_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'])) + ['columna' => $s5Definicion() === $s5Def0]);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

@@ -12,9 +12,17 @@
  *   php tools/test_express_entitlements.php      (sale con 1 si algo falla)
  *   (--hijo=validar y --hijo=emisor, cada uno con --escenario=<base64 de un JSON>, son los modos hijo de las secciones 4 y 7: los usa la
  *   propia suite, no se llaman a mano)
+ *
+ * express_hijo_aislado() corre un php hijo (las herramientas de linea de comandos: tenant_edicion.php en la seccion 9, create_tenant.php
+ * en la 10) con la master apuntando a un puerto donde no escucha nadie: ver su comentario.
  */
 
 require_once __DIR__ . '/write_ahead_test_lib.php';
+// pos_scratch_revisar_raiz() (la raiz del API no puede traer un .env) y lo que trae consigo. Incluirlos solo define funciones y constantes:
+// ni abren una conexion ni corren su programa principal (el de cada uno solo corre cuando es ese archivo el que se ejecuta).
+require_once __DIR__ . '/pos_scratch_guard.php';
+require_once __DIR__ . '/pos_scratch_prepare.php';
+require_once __DIR__ . '/test_pos_scratch.php';
 
 /**
  * Modo hijo de la seccion 4: corre AuthMiddleware::validateRequest en un proceso aparte (la guarda de rutas termina la
@@ -159,6 +167,51 @@ function ent_hijo_emisor(array $escenario): never
     });
     require $raiz . '/src/Controllers/emisorController.php';
     exit(0);
+}
+
+/**
+ * Corre un php hijo, pensado para las herramientas de linea de comandos que validan sus argumentos antes de abrir ninguna conexion
+ * (tools/tenant_edicion.php, tools/create_tenant.php). $args son los argumentos despues de php: el script, relativo a la raiz del API, y los
+ * suyos. Devuelve lo de wa_correr: ['codigo' => salida del proceso, 'salida' => stdout y stderr juntos].
+ *
+ * Por que hace falta aislar al hijo: getopt ignora las opciones que todavia no existen, asi que una herramienta a medio escribir (el paso
+ * rojo de una prueba) correria su camino completo contra lo que diga el .env de la raiz o el entorno. Aqui el hijo nunca puede alcanzar una
+ * base de verdad:
+ *   - se niega (imprime [ALTO] y sale con 2) si la raiz del API trae un .env (pos_scratch_revisar_raiz): MasterDatabase lo cargaria;
+ *   - corre con -d variables_order=EGPCS, que es como MasterDatabase lee su configuracion ($_ENV), y con MASTER_DB_HOST=127.0.0.1,
+ *     MASTER_DB_PORT=1 (un puerto de loopback donde no escucha nadie) y usuarios y claves de mentira para la master (MASTER_DB_*) y para el
+ *     administrador de MySQL de create_tenant.php (ADMIN_DB_*). Quien lo llame con create_tenant.php agrega --db-host=127.0.0.1 --db-port=1
+ *     a $args: esos dos salen de la linea de comandos y no del entorno.
+ * El entorno de este proceso se restaura al terminar, tambien si el hijo falla.
+ *
+ * @param string[] $args
+ * @return array{codigo:int, salida:string}
+ */
+function express_hijo_aislado(array $args): array
+{
+    $motivo = pos_scratch_revisar_raiz(dirname(__DIR__));
+    if ($motivo !== '') {
+        echo "[ALTO] {$motivo}\n";
+        exit(2);
+    }
+    $aislado = [
+        'MASTER_DB_HOST' => '127.0.0.1', 'MASTER_DB_PORT' => '1', 'MASTER_DB_USER' => 'aislado_usuario', 'MASTER_DB_PASS' => 'aislado_clave',
+        'ADMIN_DB_USER' => 'aislado_admin', 'ADMIN_DB_PASS' => 'aislado_clave_admin',
+    ];
+    $previo = [];
+    foreach (array_keys($aislado) as $nombre) {
+        $previo[$nombre] = getenv($nombre);   // false si no estaba puesta
+    }
+    try {
+        foreach ($aislado as $nombre => $valor) {
+            putenv("{$nombre}={$valor}");
+        }
+        return wa_correr(array_merge([PHP_BINARY, '-d', 'variables_order=EGPCS'], $args));
+    } finally {
+        foreach ($previo as $nombre => $valor) {
+            putenv($valor === false ? $nombre : "{$nombre}={$valor}");   // sin valor, putenv la quita del entorno
+        }
+    }
 }
 
 if (wa_arg('hijo') === 'validar') {
@@ -2952,6 +3005,766 @@ $s8E2 = express_preflight_evaluar($s8Hechos);
 wa_chk('hechos (dobles) -> evaluar: el telefono NULL rechaza el emisor y, con el rango E45 en current_value 7, la empresa ya no es nueva, asi que el rango E31 sin limite se rechaza (no se borra)',
     $s8E2['items']['emisor']['estado'] === 'rechazar' && $s8E2['nuevo'] === false && $s8E2['items']['ilimitados']['estado'] === 'rechazar'
     && $s8E2['items']['pos']['estado'] === 'ok' && $s8E2['items']['inventario']['estado'] === 'ok', $s8E2['items']);
+
+// ---------------------------------------------------------------------------
+// 9) tools/tenant_edicion.php: aplicar, auditar, convertir, revertir y refrescar (la biblioteca y la herramienta de linea de comandos)
+// ---------------------------------------------------------------------------
+echo "\n== 9) tenant_edicion.php: aplicar, auditar, convertir, revertir y refrescar ==\n";
+
+/**
+ * El registro que comparten los dos PDO de mentira de un guion (el de la base de la empresa y el de la master): cada llamada que les llega,
+ * en el orden en que ocurre, como [quien, tipo, sql, parametros]. tipo es begin, commit, rollback o execute; sql y parametros solo van en execute.
+ */
+final class ExpGuionLog
+{
+    /** @var list<array{0:string,1:string,2:string,3:array<string,mixed>}> */
+    public array $eventos = [];
+}
+
+/**
+ * PDO de mentira de la seccion 9 para express_aplicar y las funciones de la biblioteca que escriben. Sabe de transacciones (anota begin, commit y
+ * rollback en el registro y se acuerda de si hay una abierta), anota cada execute y entrega las filas que le da `respuesta`. Lo que no implementa
+ * (query, exec, quote...) lanza "PDO object is uninitialized": la biblioteca solo puede usar prepare, execute, las tres llamadas de la
+ * transaccion, inTransaction y lastInsertId. No llama al constructor del padre, asi que no abre nada.
+ */
+final class ExpPdoGuion extends PDO
+{
+    public bool $enTransaccion = false;
+    /** @var ?Closure(string,array<string,mixed>,ExpPdoGuion):list<array<string,mixed>> las filas de cada consulta: recibe el sql, los parametros y este PDO */
+    public ?Closure $respuesta = null;
+    /** @var list<array{0:string,1:Throwable}> errores por consumir: el primero cuyo fragmento de SQL calce lanza en su execute */
+    public array $errores = [];
+    /** @var list<array{sql:string,params:array<string,mixed>}> las sentencias que no son SELECT, en orden */
+    public array $escritas = [];
+    public string|false $idInsertado = '41';
+    /** Un commit que devuelve false (PDO en modo silencioso) y deja la transaccion abierta. */
+    public bool $commitOk = true;
+    public ?Throwable $commitLanza = null;
+    public ?Throwable $rollBackLanza = null;
+
+    public function __construct(public string $quien, public ExpGuionLog $log)
+    {
+    }
+
+    public function beginTransaction(): bool
+    {
+        $this->log->eventos[] = [$this->quien, 'begin', '', []];
+        $this->enTransaccion = true;
+        return true;
+    }
+
+    public function commit(): bool
+    {
+        $this->log->eventos[] = [$this->quien, 'commit', '', []];
+        if ($this->commitLanza !== null) {
+            throw $this->commitLanza;
+        }
+        $this->enTransaccion = !$this->commitOk;
+        return $this->commitOk;
+    }
+
+    public function rollBack(): bool
+    {
+        $this->log->eventos[] = [$this->quien, 'rollback', '', []];
+        if ($this->rollBackLanza !== null) {
+            throw $this->rollBackLanza;
+        }
+        $this->enTransaccion = false;
+        return true;
+    }
+
+    public function inTransaction(): bool
+    {
+        return $this->enTransaccion;
+    }
+
+    public function lastInsertId(?string $name = null): string|false
+    {
+        return $this->idInsertado;
+    }
+
+    public function prepare(string $query, array $options = []): PDOStatement|false
+    {
+        $sentencia = (new ReflectionClass(ExpSentenciaGuion::class))->newInstanceWithoutConstructor();
+        $sentencia->origen = $this;
+        $sentencia->sql = $query;
+        return $sentencia;
+    }
+}
+
+/** La sentencia de ExpPdoGuion: execute() anota la llamada, lanza el error del guion que calce y pide las filas; fetch() y fetchAll() las entregan. */
+final class ExpSentenciaGuion extends PDOStatement
+{
+    public ExpPdoGuion $origen;
+    public string $sql = '';
+    /** @var list<array<string,mixed>> */
+    private array $filas = [];
+
+    public function execute(?array $params = null): bool
+    {
+        $params ??= [];
+        $this->origen->log->eventos[] = [$this->origen->quien, 'execute', $this->sql, $params];
+        if (preg_match('/^\s*SELECT\b/i', $this->sql) !== 1) {
+            $this->origen->escritas[] = ['sql' => $this->sql, 'params' => $params];
+        }
+        foreach ($this->origen->errores as $i => [$fragmento, $error]) {
+            if (str_contains($this->sql, $fragmento)) {
+                unset($this->origen->errores[$i]);
+                throw $error;
+            }
+        }
+        $this->filas = $this->origen->respuesta === null ? [] : ($this->origen->respuesta)($this->sql, $params, $this->origen);
+        return true;
+    }
+
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        return $this->filas[0] ?? false;
+    }
+
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        return $this->filas;
+    }
+}
+
+// --- express_hijo_aislado: el hijo ve la master apuntando a un puerto sin nadie, y este proceso recupera su entorno -----------------------------
+$s9Nombres = ['MASTER_DB_HOST', 'MASTER_DB_PORT', 'MASTER_DB_USER', 'MASTER_DB_PASS', 'ADMIN_DB_USER', 'ADMIN_DB_PASS'];
+$s9Sonda = (string) tempnam(sys_get_temp_dir(), 'ent_aislado_');
+file_put_contents($s9Sonda, <<<'PHP'
+<?php
+// Hijo de la seccion 9: lo que ve de la master y del administrador de MySQL por $_ENV, que es lo unico que lee MasterDatabase.
+$nombres = ['MASTER_DB_HOST', 'MASTER_DB_PORT', 'MASTER_DB_USER', 'MASTER_DB_PASS', 'ADMIN_DB_USER', 'ADMIN_DB_PASS'];
+echo json_encode(array_combine($nombres, array_map(static fn (string $n): ?string => $_ENV[$n] ?? null, $nombres)));
+PHP);
+$s9EntornoAntes = [];
+foreach ($s9Nombres as $s9N) {
+    $s9EntornoAntes[$s9N] = getenv($s9N);   // false si no estaba puesta
+}
+try {
+    putenv('MASTER_DB_HOST=marca-del-padre');   // el padre tiene una master en su entorno: el hijo no la ve
+    putenv('MASTER_DB_PORT');                   // y un puerto sin poner: tampoco queda puesto al terminar
+    $s9R = express_hijo_aislado([$s9Sonda]);
+    $s9Despues = [getenv('MASTER_DB_HOST'), getenv('MASTER_DB_PORT')];
+} finally {
+    foreach ($s9EntornoAntes as $s9N => $s9V) {
+        putenv($s9V === false ? $s9N : "{$s9N}={$s9V}");
+    }
+    @unlink($s9Sonda);
+}
+$s9Ve = json_decode(trim($s9R['salida']), true);
+wa_chk('express_hijo_aislado: el hijo ve la master en 127.0.0.1 puerto 1 (loopback, sin nadie) y usuarios y claves de mentira para la master y el administrador, por $_ENV',
+    $s9R['codigo'] === 0 && is_array($s9Ve) && $s9Ve['MASTER_DB_HOST'] === '127.0.0.1' && $s9Ve['MASTER_DB_PORT'] === '1'
+    && array_filter(['MASTER_DB_USER', 'MASTER_DB_PASS', 'ADMIN_DB_USER', 'ADMIN_DB_PASS'], static fn (string $n): bool => !is_string($s9Ve[$n] ?? null) || $s9Ve[$n] === '') === [], $s9R);
+wa_chk('express_hijo_aislado: al terminar este proceso recupera su entorno (la master que tenia puesta y el puerto que no tenia)',
+    $s9Despues === ['marca-del-padre', false], $s9Despues);
+wa_chk('express_hijo_aislado: la raiz del API de esta suite no trae un .env (si lo trae, express_hijo_aislado se niega con [ALTO] y salida 2)',
+    pos_scratch_revisar_raiz(dirname(__DIR__)) === '', pos_scratch_revisar_raiz(dirname(__DIR__)));
+wa_chk('express_hijo_aislado(array $args): array{codigo, salida} es la firma del contrato de las tareas 9 y 10',
+    $s8Firma('express_hijo_aislado') === 'express_hijo_aislado(array $args): array', $s8Firma('express_hijo_aislado'));
+
+// --- los dobles valen en PHP 8.3 (produccion y CI), como los de la seccion 6: sus firmas, contra copias de las de 8.3 en un php aparte ----------
+// Misma tecnica que la seccion 6 ($s6TextoClase y $s6Propios son de ahi): las copias de ExpPdoGuion y ExpSentenciaGuion heredan de copias de
+// usuario de las firmas que PDO y PDOStatement tienen en 8.3, y el motor les aplica las reglas de herencia sea cual sea el PHP que corre la suite.
+// Cada control cambia UNA firma y tiene que ser rechazado: sin ellos, un cambio de nombres que no se aplicara dejaria la prueba aceptando todo.
+$s9Firmas83 = <<<'PHP'
+class Firma83Pdo9
+{
+    public function __construct(string $dsn, ?string $username = null, #[\SensitiveParameter] ?string $password = null, ?array $options = null) {}
+    public function prepare(string $query, array $options = []): PDOStatement|false {}
+    public function beginTransaction(): bool {}
+    public function commit(): bool {}
+    public function rollBack(): bool {}
+    public function inTransaction(): bool {}
+    public function lastInsertId(?string $name = null): string|false {}
+}
+class Firma83PdoStatement9
+{
+    public function execute(?array $params = null): bool {}
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed {}
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array {}
+}
+PHP;
+$s9Copias = strtr($s6TextoClase('ExpPdoGuion') . "\n" . $s6TextoClase('ExpSentenciaGuion'), [
+    'ExpPdoGuion' => 'Firma83PdoGuion', 'ExpSentenciaGuion' => 'Firma83SentenciaGuion',
+    'extends PDOStatement' => 'extends Firma83PdoStatement9', 'extends PDO' => 'extends Firma83Pdo9',
+]);
+/** Declara las copias de los dobles (con $cambio, un 'texto' => 'reemplazo' que altera una firma) en un php nuevo: [codigo de salida, lo que imprimio]. */
+$s9Declarar = static function (array $cambio = []) use ($s9Firmas83, $s9Copias): array {
+    $archivo = (string) tempnam(sys_get_temp_dir(), 'ent_firmas9_');
+    file_put_contents($archivo, "<?php\n{$s9Firmas83}\n" . strtr($s9Copias, $cambio) . "\necho 'ACEPTADO';\n");
+    $r = wa_correr([PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=-1', $archivo]);
+    @unlink($archivo);
+    return [$r['codigo'], $r['salida']];
+};
+wa_chk('dobles de la seccion 9: las copias heredan de las firmas de 8.3 de arriba y de ninguna clase del PHP que corre la suite (el cambio de nombres se aplico)',
+    preg_match_all('/extends Firma83Pdo9\b/', $s9Copias) === 1 && preg_match_all('/extends Firma83PdoStatement9\b/', $s9Copias) === 1
+    && !preg_match('/extends\s+PDO/', $s9Copias), $s9Copias);
+[$s9Cod, $s9Sal] = $s9Declarar();
+wa_chk('dobles de la seccion 9: sobre las firmas de PDO y PDOStatement de PHP 8.3 (prepare, las tres de la transaccion, inTransaction, lastInsertId, execute, fetch y fetchAll) el motor los acepta',
+    $s9Cod === 0 && str_contains($s9Sal, 'ACEPTADO') && !str_contains($s9Sal, 'Fatal error'), [$s9Cod, $s9Sal]);
+foreach ([
+    'beginTransaction con otro retorno (int en lugar de bool)' => ['public function beginTransaction(): bool' => 'public function beginTransaction(): int'],
+    'inTransaction con otro retorno (string en lugar de bool)' => ['public function inTransaction(): bool' => 'public function inTransaction(): string'],
+    'lastInsertId con un parametro mas estrecho (string en lugar de ?string)' => ['lastInsertId(?string $name = null): string|false' => 'lastInsertId(string $name = ""): string|false'],
+    'execute con un parametro mas estrecho (array en lugar de ?array)' => ['execute(?array $params = null): bool' => 'execute(array $params = []): bool'],
+    'fetchAll con un retorno mas ancho (iterable en lugar de array)' => ['mixed ...$args): array' => 'mixed ...$args): iterable'],
+] as $s9Desc => $s9Cambio) {
+    [$s9Cod, $s9Sal] = $s9Declarar($s9Cambio);
+    wa_chk("control, {$s9Desc}: el motor lo rechaza (Declaration ... must be compatible con la firma de 8.3)",
+        $s9Cod !== 0 && str_contains($s9Sal, 'must be compatible with Firma83'), [$s9Cod, $s9Sal]);
+}
+wa_chk('...y los dobles solo sobreescriben metodos cuya firma de 8.3 esta en la copia de arriba (agregar otro obliga a sumar su firma)',
+    $s6Propios('ExpPdoGuion') === ['beginTransaction', 'commit', 'inTransaction', 'lastInsertId', 'prepare', 'rollBack']
+    && $s6Propios('ExpSentenciaGuion') === ['execute', 'fetch', 'fetchAll'], [$s6Propios('ExpPdoGuion'), $s6Propios('ExpSentenciaGuion')]);
+
+// --- express_aplicar: tenant primero, UNA transaccion en la master con sus pasos y la auditoria, y la lectura de despues del commit ---------------
+// El plan es el real de la empresa nueva de la seccion 8 (dos pasos de la base de la empresa y seis de la master). La auditoria se arma a mano: lo
+// que se prueba aqui es express_aplicar, no el armado de la fila.
+$s9Estado0 = ['edicion' => 'completa', 'tipos_ecf_habilitados' => null, 'modulos_habilitados' => null, 'cert_vence' => null, 'pos_enabled' => 1, 'inventario_estricto' => 0];
+$s9Estado1 = ['edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'cert_vence' => date('Y-m-d', $s8Vence), 'pos_enabled' => 0, 'inventario_estricto' => 0];
+$s9Auditoria = [
+    'tenant_id' => 12,
+    'old_values' => $s9Estado0 + ['integracion_hash_anterior' => 'MARCA-hash-anterior'],
+    'new_values' => $s9Estado1,
+    'description' => 'Prueba de la seccion 9',
+];
+$s9Columnas4 = ['edicion', 'tipos_ecf_habilitados', 'modulos_habilitados', 'cert_vence'];
+/**
+ * La fila de audit_logs que dejo el ultimo INSERT de auditoria que recibio $master (con $cambio encima), tal como la leeria la lectura de despues
+ * del commit; [] (ninguna fila) si no hubo INSERT.
+ * @return list<array<string,mixed>>
+ */
+$s9LeeAuditoria = static function (ExpPdoGuion $master, array $cambio = []): array {
+    $insert = null;
+    foreach ($master->escritas as $escrita) {
+        if (str_contains($escrita['sql'], 'INSERT INTO audit_logs')) {
+            $insert = $escrita['params'];
+        }
+    }
+    return $insert === null ? [] : [array_replace([
+        'id' => '41', 'tenant_id' => (string) $insert[':tenant_id'], 'module' => $insert[':module'], 'action' => $insert[':action'],
+        'new_values' => $insert[':new_values'],
+    ], $cambio)];
+};
+/**
+ * Un par de PDO de mentira con su registro compartido: [la base de la empresa, la master, el registro]. La master contesta las dos lecturas de
+ * despues del commit: la fila de tenants ($filaLeida, o la que dejo el plan) y la de audit_logs (la que escribio el INSERT de auditoria, con
+ * $cambioAuditoria encima; con $auditoriaPresente en false, ninguna).
+ * @return array{0:ExpPdoGuion,1:ExpPdoGuion,2:ExpGuionLog}
+ */
+$s9Par = static function (?array $filaLeida = null, bool $auditoriaPresente = true, array $cambioAuditoria = []) use ($s9Estado1, $s9Columnas4, $s9LeeAuditoria): array {
+    $log = new ExpGuionLog();
+    $empresa = new ExpPdoGuion('tenant', $log);
+    $master = new ExpPdoGuion('master', $log);
+    $master->respuesta = static function (string $sql, array $params, ExpPdoGuion $yo) use ($filaLeida, $auditoriaPresente, $cambioAuditoria, $s9Estado1, $s9Columnas4, $s9LeeAuditoria): array {
+        if (str_contains($sql, 'FROM tenants')) {
+            return [$filaLeida ?? array_intersect_key($s9Estado1, array_flip($s9Columnas4))];
+        }
+        if (str_contains($sql, 'FROM audit_logs')) {
+            return $auditoriaPresente ? $s9LeeAuditoria($yo, $cambioAuditoria) : [];
+        }
+        return [];
+    };
+    return [$empresa, $master, $log];
+};
+/** Los eventos de un registro como 'quien:tipo', en orden. */
+$s9Eventos = static fn (ExpGuionLog $log): array => array_map(static fn (array $e): string => $e[0] . ':' . $e[1], $log->eventos);
+/** Los execute de $quien en el registro: [quien, 'execute', sql, parametros]. */
+$s9Ejecutadas = static fn (ExpGuionLog $log, string $quien): array => array_values(array_filter($log->eventos, static fn (array $e): bool => $e[0] === $quien && $e[1] === 'execute'));
+/** [sql, parametros] de cada paso del plan de $donde, en orden. */
+$s9PasosDe = static fn (array $plan, string $donde): array => array_map(
+    static fn (array $p): array => [$p['sql'], $p['params']],
+    array_values(array_filter($plan, static fn (array $p): bool => $p['donde'] === $donde))
+);
+/** Corre express_aplicar atrapando todo: [excepcion o null, lo que escribio en el log, lo que imprimio]. */
+$s9Corre = static function (ExpPdoGuion $master, ?ExpPdoGuion $empresa, array $plan, array $auditoria): array {
+    ob_start();
+    [, $error, $log] = wa_con_log(static fn () => express_aplicar($master, $empresa, $plan, $auditoria));
+    return [$error, $log, (string) ob_get_clean()];
+};
+
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9ArchivoLog = (string) tempnam(sys_get_temp_dir(), 'ent_aplicar_');
+$s9LogPrevio = ini_set('error_log', $s9ArchivoLog);
+ob_start();
+try {
+    // La primera llamada va sin atrapar a proposito: si la funcion no existe, el Error corta la suite (exit 255) y no queda una fila de "FALLO" por prueba.
+    express_aplicar($s9M, $s9T, $s8Plan, $s9Auditoria);
+} finally {
+    $s9Salida = (string) ob_get_clean();
+    ini_set('error_log', $s9LogPrevio === false ? '' : $s9LogPrevio);
+    $s9LogTexto = (string) file_get_contents($s9ArchivoLog);
+    @unlink($s9ArchivoLog);
+}
+$s9Esperado = array_merge(['tenant:execute', 'tenant:execute', 'master:begin'], array_fill(0, 7, 'master:execute'), ['master:commit', 'master:execute', 'master:execute']);
+wa_chk('express_aplicar: primero los dos pasos de la base de la empresa, despues UNA transaccion en la master (begin, los seis pasos y el INSERT de auditoria, commit) y recien despues las dos lecturas',
+    $s9Eventos($s9Log) === $s9Esperado, $s9Eventos($s9Log));
+wa_chk('express_aplicar: la base de la empresa recibe exactamente sus pasos del plan (sql y parametros, en orden) y la master los suyos y despues el INSERT de auditoria',
+    array_map(static fn (array $e): array => [$e[2], $e[3]], $s9Ejecutadas($s9Log, 'tenant')) === $s9PasosDe($s8Plan, 'tenant')
+    && array_map(static fn (array $e): array => [$e[2], $e[3]], array_slice($s9Ejecutadas($s9Log, 'master'), 0, 6)) === $s9PasosDe($s8Plan, 'master')
+    && str_starts_with(trim($s9Ejecutadas($s9Log, 'master')[6][2]), 'INSERT INTO audit_logs'), array_column($s9Ejecutadas($s9Log, 'master'), 2));
+wa_chk('express_aplicar: la base de la empresa nunca abre transaccion ni recibe un commit (sus pasos son idempotentes y cada uno vale solo) y no hay rollback',
+    array_filter($s9Log->eventos, static fn (array $e): bool => $e[0] === 'tenant' && $e[1] !== 'execute') === []
+    && !in_array('master:rollback', $s9Eventos($s9Log), true), $s9Eventos($s9Log));
+$s9Insert = $s9Ejecutadas($s9Log, 'master')[6];
+$s9InsertParams = $s9Insert[3];
+wa_chk('express_aplicar: la fila de auditoria lleva module edicion, action EDICION_CAMBIO, entity_type tenant, el id de la empresa, username tools/tenant_edicion.php, success 1 y las dos listas de valores como JSON',
+    ($s9InsertParams[':tenant_id'] ?? null) === 12 && ($s9InsertParams[':entity_id'] ?? null) === '12' && ($s9InsertParams[':module'] ?? null) === 'edicion'
+    && ($s9InsertParams[':action'] ?? null) === 'EDICION_CAMBIO' && ($s9InsertParams[':entity_type'] ?? null) === 'tenant'
+    && ($s9InsertParams[':username'] ?? null) === 'tools/tenant_edicion.php' && ($s9InsertParams[':success'] ?? null) === 1
+    && ($s9InsertParams[':description'] ?? null) === 'Prueba de la seccion 9'
+    && json_decode((string) ($s9InsertParams[':old_values'] ?? ''), true) === $s9Auditoria['old_values']
+    && json_decode((string) ($s9InsertParams[':new_values'] ?? ''), true) === $s9Auditoria['new_values'], $s9InsertParams);
+wa_chk('express_aplicar: el INSERT de auditoria nombra sus diez columnas y lleva todos los valores en parametros (ninguno pegado al texto del SQL)',
+    preg_match('/INSERT INTO audit_logs \(tenant_id, username, module, entity_type, entity_id, action, old_values, new_values, description, success\)/', $s9Insert[2]) === 1
+    && !preg_match('/MARCA|tools\/tenant_edicion|EDICION_CAMBIO|express/', $s9Insert[2]), $s9Insert[2]);
+wa_chk('express_aplicar: no imprime nada ni escribe en el log cuando todo sale bien', $s9Salida === '' && $s9LogTexto === '', [$s9Salida, $s9LogTexto]);
+wa_chk('express_aplicar: tras el commit relee tenants (sus cuatro columnas, por el id de la empresa) y la fila de auditoria (por el id que dio el INSERT)',
+    count($s9Ejecutadas($s9Log, 'master')) === 9
+    && str_contains($s9Ejecutadas($s9Log, 'master')[7][2], 'FROM tenants') && ($s9Ejecutadas($s9Log, 'master')[7][3][':id'] ?? null) === 12
+    && str_contains($s9Ejecutadas($s9Log, 'master')[8][2], 'FROM audit_logs') && ($s9Ejecutadas($s9Log, 'master')[8][3][':id'] ?? null) === 41,
+    array_map(static fn (array $e): array => [$e[2], $e[3]], array_slice($s9Ejecutadas($s9Log, 'master'), 7)));
+
+$s9Resumen = static function (ExpPdoGuion $m, ExpGuionLog $log) use ($s9Eventos): array {
+    return ['eventos' => $s9Eventos($log), 'abierta' => $m->enTransaccion];
+};
+// Cuando algo falla dentro de la transaccion: rollBack, jamas commit, y se relanza la misma excepcion.
+foreach ([
+    'el INSERT de auditoria lanza' => ['INSERT INTO audit_logs', array_merge(['tenant:execute', 'tenant:execute', 'master:begin'], array_fill(0, 7, 'master:execute'), ['master:rollback'])],
+    'el UPDATE de tenants lanza (el INSERT de auditoria ni se intenta)' => ["UPDATE tenants SET edicion = 'express'", array_merge(['tenant:execute', 'tenant:execute', 'master:begin', 'master:execute', 'master:rollback'])],
+    'el primer INSERT del rol user lanza (ya corrieron el UPDATE y el DELETE de sus permisos)' => ['INSERT INTO role_permissions', array_merge(['tenant:execute', 'tenant:execute', 'master:begin'], array_fill(0, 3, 'master:execute'), ['master:rollback'])],
+] as $s9Desc => [$s9Fragmento, $s9EventosEsperados]) {
+    [$s9T, $s9M, $s9Log] = $s9Par();
+    $s9Cae = new PDOException("SQLSTATE[HY000]: General error: simulacro ({$s9Desc})");
+    $s9M->errores[] = [$s9Fragmento, $s9Cae];
+    [$s9Error, $s9LogErr, $s9Salida] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+    wa_chk("express_aplicar, {$s9Desc}: hace rollBack, nunca commit, relanza la misma excepcion y no lee nada despues",
+        $s9Error === $s9Cae && $s9Eventos($s9Log) === $s9EventosEsperados && !in_array('master:commit', $s9Eventos($s9Log), true) && !$s9M->enTransaccion,
+        [$s9Error?->getMessage(), $s9Resumen($s9M, $s9Log)]);
+    wa_chk("express_aplicar, {$s9Desc}: no imprime nada ni escribe en el log", $s9Salida === '' && $s9LogErr === '', [$s9Salida, $s9LogErr]);
+}
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9Cae = new PDOException('SQLSTATE[HY000]: General error: el INSERT de auditoria');
+$s9M->errores[] = ['INSERT INTO audit_logs', $s9Cae];
+$s9M->rollBackLanza = new RuntimeException('el rollback tambien falla');
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si el rollBack tambien lanza, la excepcion que sale es la original (la que explica el fallo), no la del rollback', $s9Error === $s9Cae, $s9Error?->getMessage());
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9M->commitLanza = new PDOException('SQLSTATE[HY000]: General error: se cayo la conexion al confirmar');
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: un commit que lanza (la conexion se cae al confirmar) deja la transaccion abierta en el PDO: se intenta rollBack y se relanza esa excepcion, sin lecturas',
+    $s9Error === $s9M->commitLanza && in_array('master:rollback', $s9Eventos($s9Log), true) && !in_array('master:execute', array_slice($s9Eventos($s9Log), -1), true), $s9Eventos($s9Log));
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9M->commitOk = false;
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: un commit que devuelve false (PDO en modo silencioso) es un fallo: RuntimeException, rollBack y sin lecturas posteriores',
+    $s9Error instanceof RuntimeException && in_array('master:rollback', $s9Eventos($s9Log), true) && !$s9M->enTransaccion
+    && array_values(array_filter($s9Eventos($s9Log), static fn (string $e): bool => $e === 'master:execute')) === array_fill(0, 7, 'master:execute'), $s9Eventos($s9Log));
+
+// Un paso de la base de la empresa que falla: la master ni se toca (los pasos que ya corrieron se quedan: son idempotentes).
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9Cae = new PDOException('SQLSTATE[HY000]: General error: el DELETE de clientes de prueba');
+$s9T->errores[] = ['DELETE FROM clients', $s9Cae];
+[$s9Error, $s9LogErr, $s9Salida] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si un paso de la base de la empresa falla, relanza esa excepcion y la master no recibe nada (ni begin): el primer DELETE ya corrio y se queda',
+    $s9Error === $s9Cae && $s9Eventos($s9Log) === ['tenant:execute', 'tenant:execute'] && $s9Salida === '' && $s9LogErr === '', [$s9Error?->getMessage(), $s9Eventos($s9Log)]);
+
+// La lectura de despues del commit contra el plan: lo que difiere se nombra, y el cambio ya esta confirmado (no hay rollback posible).
+$s9Mala = static fn (string $columna, mixed $valor): array => array_replace(array_intersect_key($s9Estado1, array_flip($s9Columnas4)), [$columna => $valor]);
+foreach ([
+    'edicion' => ['edicion', 'completa'], 'tipos_ecf_habilitados' => ['tipos_ecf_habilitados', '31'],
+    'modulos_habilitados' => ['modulos_habilitados', 'facturacion'], 'cert_vence' => ['cert_vence', '2030-01-01'],
+    'modulos_habilitados vacio en lugar de NULL (se compara estricto)' => ['modulos_habilitados', ''],
+] as $s9Desc => [$s9Columna, $s9Valor]) {
+    [$s9T, $s9M, $s9Log] = $s9Par($s9Mala($s9Columna, $s9Valor));
+    [$s9Error, $s9LogErr, $s9Salida] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+    wa_chk("express_aplicar, la fila releida trae otra {$s9Desc}: RuntimeException que nombra la columna y dice que el cambio ya se confirmo, despues del commit y sin rollback",
+        $s9Error instanceof RuntimeException && str_contains($s9Error->getMessage(), $s9Columna) && str_contains($s9Error->getMessage(), 'confirm')
+        && array_search('master:commit', $s9Eventos($s9Log), true) !== false && !in_array('master:rollback', $s9Eventos($s9Log), true)
+        && $s9Salida === '' && $s9LogErr === '', [$s9Error?->getMessage(), $s9Eventos($s9Log)]);
+}
+[$s9T, $s9M, $s9Log] = $s9Par($s9Mala('edicion', 'completa'));
+$s9Mensaje = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria)[0]?->getMessage() ?? '';
+wa_chk('express_aplicar: el mensaje de la diferencia dice lo esperado y lo leido de esa columna y no lleva el hash anterior ni nada de la fila fuera de las cuatro columnas',
+    str_contains($s9Mensaje, 'express') && str_contains($s9Mensaje, 'completa') && !str_contains($s9Mensaje, 'MARCA'), $s9Mensaje);
+[$s9T, $s9M, $s9Log] = $s9Par(null, false);
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si la fila de auditoria no se encuentra al releerla, lanza RuntimeException (confirmado el cambio, falta su registro)',
+    $s9Error instanceof RuntimeException && str_contains($s9Error->getMessage(), 'audit'), $s9Error?->getMessage());
+[$s9T, $s9M, $s9Log] = $s9Par(null, true, ['new_values' => json_encode(array_replace($s9Estado1, ['edicion' => 'completa']))]);
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si el new_values de la fila de auditoria releida difiere del plan (otra edicion), lanza RuntimeException',
+    $s9Error instanceof RuntimeException && str_contains($s9Error->getMessage(), 'audit'), $s9Error?->getMessage());
+[$s9T, $s9M, $s9Log] = $s9Par(null, true, ['action' => 'OTRA_ACCION']);
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si la fila de auditoria releida no es una EDICION_CAMBIO, lanza RuntimeException', $s9Error instanceof RuntimeException, $s9Error?->getMessage());
+foreach (['cero' => '0', 'false' => false] as $s9Desc => $s9Id) {
+    [$s9T, $s9M, $s9Log] = $s9Par();
+    $s9M->idInsertado = $s9Id;
+    [$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+    wa_chk("express_aplicar: si lastInsertId da {$s9Desc} (el INSERT de auditoria no dio un id que releer), lanza RuntimeException ANTES de confirmar: rollBack y ningun commit, para que lo confirmado siempre tenga su fila de auditoria verificable",
+        $s9Error instanceof RuntimeException && str_contains($s9Error->getMessage(), 'audit') && in_array('master:rollback', $s9Eventos($s9Log), true)
+        && !in_array('master:commit', $s9Eventos($s9Log), true) && !$s9M->enTransaccion, [$s9Error?->getMessage(), $s9Eventos($s9Log)]);
+}
+[$s9T, $s9M, $s9Log] = $s9Par();
+$s9M->errores[] = ['SELECT edicion', new PDOException('SQLSTATE[HY000]: General error: se cayo la conexion al releer')];
+[$s9Error] = $s9Corre($s9M, $s9T, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: si la lectura de despues del commit falla, lanza RuntimeException que dice que el cambio SI se confirmo y trae la causa como previa',
+    $s9Error instanceof RuntimeException && str_contains($s9Error->getMessage(), 'confirm') && $s9Error->getPrevious() instanceof PDOException, $s9Error?->getMessage());
+
+// Sin conexion a la base de la empresa solo vale un plan que no la necesita; y un plan o una auditoria mal armados se rechazan antes de tocar nada.
+[$s9T, $s9M, $s9Log] = $s9Par();
+[$s9Error] = $s9Corre($s9M, null, $s8Plan, $s9Auditoria);
+wa_chk('express_aplicar: un plan con pasos de la base de la empresa y sin conexion a ella lanza InvalidArgumentException antes de tocar nada (ni begin en la master)',
+    $s9Error instanceof InvalidArgumentException && $s9Log->eventos === [], [$s9Error?->getMessage(), $s9Log->eventos]);
+[$s9T, $s9M, $s9Log] = $s9Par();
+[$s9Error] = $s9Corre($s9M, null, array_slice($s8Plan, 2), $s9Auditoria);
+wa_chk('express_aplicar: un plan solo de la master (revertir, refrescar, o convertir una empresa que ya emitio) no necesita conexion a la base de la empresa y sigue la misma secuencia',
+    $s9Error === null && $s9Eventos($s9Log) === array_merge(['master:begin'], array_fill(0, 7, 'master:execute'), ['master:commit', 'master:execute', 'master:execute']), [$s9Error?->getMessage(), $s9Eventos($s9Log)]);
+foreach ([
+    'un paso con donde desconocido' => [array_merge([['donde' => 'otra', 'que' => 'x', 'sql' => 'SELECT 1', 'params' => []]], $s8Plan), $s9Auditoria],
+    'un paso sin sql' => [array_merge($s8Plan, [['donde' => 'master', 'que' => 'x', 'sql' => '', 'params' => []]]), $s9Auditoria],
+    'un paso sin params' => [array_merge($s8Plan, [['donde' => 'master', 'que' => 'x', 'sql' => 'SELECT 1']]), $s9Auditoria],
+    'una auditoria sin tenant_id' => [$s8Plan, array_diff_key($s9Auditoria, ['tenant_id' => true])],
+    'una auditoria con tenant_id 0' => [$s8Plan, ['tenant_id' => 0] + $s9Auditoria],
+    'una auditoria cuyo new_values no trae cert_vence' => [$s8Plan, ['new_values' => array_diff_key($s9Estado1, ['cert_vence' => true])] + $s9Auditoria],
+    'una auditoria sin new_values' => [$s8Plan, array_diff_key($s9Auditoria, ['new_values' => true])],
+] as $s9Desc => [$s9Plan, $s9Aud]) {
+    [$s9T, $s9M, $s9Log] = $s9Par();
+    [$s9Error] = $s9Corre($s9M, $s9T, $s9Plan, $s9Aud);
+    wa_chk("express_aplicar, {$s9Desc}: InvalidArgumentException antes de tocar ninguna base (ni un execute, ni begin)",
+        $s9Error instanceof InvalidArgumentException && $s9Log->eventos === [], [$s9Error === null ? null : get_class($s9Error) . ': ' . $s9Error->getMessage(), $s9Log->eventos]);
+}
+wa_chk('express_aplicar(PDO $master, ?PDO $tenantDb, array $plan, array $auditoria): void es la firma del contrato',
+    $s8Firma('express_aplicar') === 'express_aplicar(PDO $master, ?PDO $tenantDb, array $plan, array $auditoria): void', $s8Firma('express_aplicar'));
+wa_chk('las otras tres funciones del contrato tienen las firmas del plan: express_convertir, express_revertir y express_refrescar_cert',
+    array_map($s8Firma, ['express_convertir', 'express_revertir', 'express_refrescar_cert']) === [
+        'express_convertir(PDO $master, int $tenantId, array $pedido, bool $apply): array',
+        'express_revertir(PDO $master, int $tenantId, bool $apply): array',
+        'express_refrescar_cert(PDO $master, int $tenantId, bool $apply): array',
+    ], array_map($s8Firma, ['express_convertir', 'express_revertir', 'express_refrescar_cert']));
+
+// --- el estado que guarda la bitacora, la fila de auditoria y las lineas del informe: funciones puras de la biblioteca --------------------------
+$s9Fila = [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'activo' => 1, 'ambiente' => 'testecf',
+    'edicion' => 'completa', 'tipos_ecf_habilitados' => null, 'modulos_habilitados' => null, 'cert_vence' => null,
+    'pos_enabled' => '1', 'inventario_estricto' => '0', 'api_secret_hash' => str_repeat('ab', 32),
+    'cert_path' => 'certificado_dgii/131000001/MARCA-ruta-del-p12.p12', 'cert_pass_encrypted' => 'MARCA-clave-cifrada', 'db_pass_encrypted' => 'MARCA-clave-de-la-base',
+];
+wa_chk('express_estado_auditado: las seis columnas de la bitacora en su orden (las cuatro de la edicion como texto o NULL, POS e inventario como enteros) y nada mas de la fila',
+    express_estado_auditado($s9Fila) === $s9Estado0 && array_keys(express_estado_auditado($s9Fila)) === ['edicion', 'tipos_ecf_habilitados', 'modulos_habilitados', 'cert_vence', 'pos_enabled', 'inventario_estricto'],
+    express_estado_auditado($s9Fila));
+wa_chk('express_estado_auditado: una fila sin esas columnas (master sin migrar) da NULL y ceros, sin avisos',
+    express_estado_auditado([]) === ['edicion' => null, 'tipos_ecf_habilitados' => null, 'modulos_habilitados' => null, 'cert_vence' => null, 'pos_enabled' => 0, 'inventario_estricto' => 0]);
+$s9Cambios = ['edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'cert_vence' => '2027-03-15', 'pos_enabled' => 0];
+$s9A = express_auditoria($s9Fila, $s9Cambios, 'Descripcion de prueba');
+wa_chk('express_auditoria: tenant_id, old_values (las seis columnas de la fila y integracion_hash_anterior al final), new_values (las mismas con los cambios encima) y description',
+    array_keys($s9A) === ['tenant_id', 'old_values', 'new_values', 'description'] && $s9A['tenant_id'] === 12
+    && $s9A['old_values'] === $s9Estado0 + ['integracion_hash_anterior' => str_repeat('ab', 32)]
+    && $s9A['new_values'] === ['edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'cert_vence' => '2027-03-15', 'pos_enabled' => 0, 'inventario_estricto' => 0]
+    && $s9A['description'] === 'Descripcion de prueba', $s9A);
+wa_chk('express_auditoria: integracion_hash_anterior solo va en old_values, su nombre no lleva secret, token ni api_key (AuditLogger los redacta) y la fila no filtra la ruta del certificado ni las claves',
+    !array_key_exists('integracion_hash_anterior', $s9A['new_values']) && preg_match('/secret|token|api_key/i', 'integracion_hash_anterior') === 0
+    && !preg_match('/MARCA|certificado_dgii/', (string) json_encode($s9A)), $s9A);
+$s9EvLineas = ['items' => [
+    'tenant' => ['estado' => 'ok', 'detalle' => 'La empresa es de tipo app.'],
+    'pos' => ['estado' => 'corregir', 'detalle' => "Se apaga.\nEn dos lineas\ty con tabulador."],
+    'cert' => ['estado' => 'rechazar', 'detalle' => 'CERT_FALTA: no hay certificado.'],
+]];
+wa_chk('express_lineas_evaluacion: una linea por item, con [OK  ], [CORR] o [RECH], el id y el detalle, en el orden de los items y sin saltos de linea ni tabuladores dentro',
+    express_lineas_evaluacion($s9EvLineas) === ['[OK  ] tenant: La empresa es de tipo app.', '[CORR] pos: Se apaga. En dos lineas y con tabulador.', '[RECH] cert: CERT_FALTA: no hay certificado.']
+    && express_lineas_evaluacion(['items' => []]) === [] && express_lineas_evaluacion([]) === [], express_lineas_evaluacion($s9EvLineas));
+$s9LineasBase = express_lineas_evaluacion($s8E0);
+wa_chk('express_lineas_evaluacion: la evaluacion de la empresa nueva de la base da 16 lineas, solo integracion con [CORR] y el resto [OK  ], cada una con el detalle del item',
+    count($s9LineasBase) === 16 && $s9LineasBase[0] === '[OK  ] tenant: ' . $s8E0['items']['tenant']['detalle']
+    && count(array_filter($s9LineasBase, static fn (string $l): bool => str_starts_with($l, '[CORR] '))) === 1
+    && array_values(array_filter($s9LineasBase, static fn (string $l): bool => str_starts_with($l, '[CORR] '))) === ['[CORR] integracion: ' . $s8E0['items']['integracion']['detalle']], $s9LineasBase);
+$s9LineasPlan = express_lineas_plan($s8Plan);
+wa_chk('express_lineas_plan: un encabezado, un renglon numerado por paso (los de la base de la empresa marcados [empresa] y los de la master [master]) y uno mas para la fila de auditoria; un plan vacio no da lineas',
+    count($s9LineasPlan) === 10 && !str_starts_with($s9LineasPlan[0], ' ') && str_starts_with($s9LineasPlan[1], '  1. [empresa] ') && str_starts_with($s9LineasPlan[3], '  3. [master] ')
+    && str_contains($s9LineasPlan[9], 'audit_logs') && str_contains($s9LineasPlan[1], $s8Plan[0]['que']) && str_contains($s9LineasPlan[8], $s8Plan[7]['que'])
+    && express_lineas_plan([]) === [], $s9LineasPlan);
+wa_chk('express_lineas_plan: no lleva ningun valor de los parametros (ni los RNC de los clientes de prueba ni el id de la empresa dentro del SQL)',
+    !preg_match('/131880681|533445861|:r1|:id/', implode("\n", $s9LineasPlan)), $s9LineasPlan);
+
+// --- express_revertir, express_refrescar_cert y express_convertir contra un master de mentira (solo lo que no necesita la base de la empresa) ----
+// El master contesta la fila de la empresa ($fila; null = no existe), la bitacora ($bitacora: el old_values de cada fila de auditoria, la mas
+// nueva primero), la lectura de despues del commit ($despues) y las consultas de la master del preflight. Cualquier otra consulta lanza.
+$s9Maestro = static function (?array $fila, array $bitacora = [], ?array $despues = null) use ($s9LeeAuditoria): ExpPdoGuion {
+    $master = new ExpPdoGuion('master', new ExpGuionLog());
+    $master->respuesta = static function (string $sql, array $params, ExpPdoGuion $yo) use ($fila, $bitacora, $despues, $s9LeeAuditoria): array {
+        return match (true) {
+            preg_match('/^\s*SELECT\b/i', $sql) !== 1 => [],   // las escrituras (UPDATE, INSERT, DELETE) no devuelven filas: el master de mentira las anota y ya
+            str_contains($sql, 'SELECT * FROM tenants') => $fila === null ? [] : [$fila],
+            str_contains($sql, 'SELECT old_values FROM audit_logs') => array_map(static fn (string $json): array => ['old_values' => $json], $bitacora),
+            str_contains($sql, 'FROM audit_logs') => $s9LeeAuditoria($yo),
+            str_contains($sql, 'FROM tenants') => [$despues ?? []],
+            str_contains($sql, 'information_schema.COLUMNS') => [['n' => '4']],
+            str_contains($sql, 'FROM roles') => [['id' => '5']],
+            str_contains($sql, 'FROM role_permissions') => array_map(static fn (string $p): array => ['permission' => $p], ['clients', 'facturas', 'products', 'unidades']),
+            default => throw new LogicException('consulta inesperada en el master de mentira: ' . $sql),
+        };
+    };
+    return $master;
+};
+$s9FilaExpress = array_replace($s9Fila, ['edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'cert_vence' => '2027-03-15', 'pos_enabled' => '0', 'api_secret_hash' => '']);
+$s9Hash = hash('sha256', 'marca-del-secreto-de-integracion');   // un sha256 como el que guarda TenantResolver::hashSecret
+/** El old_values de una fila de auditoria por cada hash dado: lo que escribio express_aplicar, de la mas nueva a la mas vieja. */
+$s9Bitacora = static fn (string ...$hashes): array => array_map(
+    static fn (string $hash): string => (string) json_encode(express_estado_auditado($s9FilaExpress) + ['integracion_hash_anterior' => $hash]),
+    $hashes
+);
+$s9Despues = ['edicion' => 'completa', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'cert_vence' => '2027-03-15'];
+/** Corre una funcion de la biblioteca atrapando todo: [resultado o null, excepcion o null, lo que escribio en el log, lo que imprimio]. */
+$s9Lib = static function (callable $fn): array {
+    ob_start();
+    [$resultado, $error, $log] = wa_con_log($fn);
+    return [$resultado, $error, $log, (string) ob_get_clean()];
+};
+/** Las lineas del informe de un resultado como un solo texto. */
+$s9Texto = static fn (?array $r): string => implode("\n", (array) ($r['lineas'] ?? []));
+/** La primera linea del informe que empieza con $prefijo, o null. */
+$s9Linea = static fn (?array $r, string $prefijo): ?string => array_values(array_filter((array) ($r['lineas'] ?? []), static fn (string $l): bool => str_starts_with($l, $prefijo)))[0] ?? null;
+/** Las sentencias de lectura y de escritura que recibio un master de mentira: ¿todas SELECT? */
+$s9SoloLee = static fn (ExpPdoGuion $m): bool => $m->escritas === [] && array_filter($m->log->eventos, static fn (array $e): bool => in_array($e[1], ['begin', 'commit', 'rollback'], true)) === [];
+
+// revertir, en ensayo: solo cambia la edicion, y el hash que la conversion dejo en blanco se restaura desde la bitacora
+$s9M = $s9Maestro($s9FilaExpress, $s9Bitacora('', $s9Hash, str_repeat('cd', 32)));
+[$s9R, $s9Error, $s9LogErr, $s9Salida] = $s9Lib(static fn (): array => express_revertir($s9M, 12, false));
+wa_chk('express_revertir (ensayo): ok, sin aplicar, con exactamente ok, aplicado, plan y lineas (sin evaluacion), y no escribe nada: solo SELECT, sin transaccion',
+    $s9Error === null && is_array($s9R) && array_keys($s9R) === ['ok', 'aplicado', 'plan', 'lineas'] && $s9R['ok'] === true && $s9R['aplicado'] === false && $s9SoloLee($s9M),
+    [$s9Error?->getMessage(), $s9R, $s9Eventos($s9M->log)]);
+wa_chk('express_revertir (ensayo): el plan es el UPDATE de la edicion (solo ella) y el que restaura api_secret_hash con el hash mas nuevo de la bitacora que es un sha256 (se salta la fila sin hash), solo si sigue vacio',
+    ($s9R['plan'] ?? null) === [
+        ['donde' => 'master', 'que' => $s9R['plan'][0]['que'] ?? '', 'sql' => "UPDATE tenants SET edicion = 'completa' WHERE id = :id AND tipo = 'app'", 'params' => [':id' => 12]],
+        ['donde' => 'master', 'que' => $s9R['plan'][1]['que'] ?? '', 'sql' => "UPDATE tenants SET api_secret_hash = :h WHERE id = :id AND tipo = 'app' AND api_secret_hash = ''", 'params' => [':h' => $s9Hash, ':id' => 12]],
+    ] && is_string($s9R['plan'][0]['que'] ?? null) && $s9R['plan'][0]['que'] !== '' && is_string($s9R['plan'][1]['que'] ?? null) && $s9R['plan'][1]['que'] !== '', $s9R['plan'] ?? null);
+wa_chk('express_revertir (ensayo): el informe marca [CORR] la edicion y la integracion, avisa que volver a completa levanta toda restriccion y que no es una parada segura (las palancas: tipos_ecf_habilitados vacio y revocar tokens) y termina con DRY-RUN',
+    $s9Linea($s9R, '[CORR] edicion:') !== null && $s9Linea($s9R, '[CORR] integracion:') !== null
+    && preg_match('/^ADVERTENCIA:.*levanta.*no es una parada segura.*tipos_ecf_habilitados.*tokens/s', (string) $s9Linea($s9R, 'ADVERTENCIA:')) === 1
+    && ($s9R['lineas'][count($s9R['lineas']) - 1] ?? null) === 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.', $s9R['lineas'] ?? null);
+wa_chk('express_revertir: no imprime ni escribe en el log, y el hash que restauraria no sale en el informe (solo viaja como parametro del UPDATE)',
+    $s9Salida === '' && $s9LogErr === '' && !str_contains($s9Texto($s9R), $s9Hash) && !str_contains($s9Texto($s9R), str_repeat('cd', 32)), [$s9Salida, $s9LogErr]);
+
+// revertir, aplicado: UPDATE de la edicion, restauracion del hash y la fila de auditoria, todo en UNA transaccion de la master
+$s9M = $s9Maestro($s9FilaExpress, $s9Bitacora('', $s9Hash), $s9Despues);
+[$s9R, $s9Error, $s9LogErr, $s9Salida] = $s9Lib(static fn (): array => express_revertir($s9M, 12, true));
+wa_chk('express_revertir (--apply): lee la fila y la bitacora, abre UNA transaccion con el UPDATE de la edicion, el del hash y el INSERT de auditoria, confirma y relee; ok y aplicado, y el informe termina con APLICADO',
+    $s9Error === null && ($s9R['ok'] ?? null) === true && ($s9R['aplicado'] ?? null) === true
+    && $s9Eventos($s9M->log) === ['master:execute', 'master:execute', 'master:begin', 'master:execute', 'master:execute', 'master:execute', 'master:commit', 'master:execute', 'master:execute']
+    && ($s9R['lineas'][count($s9R['lineas']) - 1] ?? null) === 'APLICADO: el tenant #12 ahora es completa.', [$s9Error?->getMessage(), $s9Eventos($s9M->log), $s9R['lineas'] ?? null]);
+$s9Escritas = array_map(static fn (array $e): array => [$e['sql'], $e['params']], $s9M->escritas);
+wa_chk('express_revertir (--apply): escribe, en ese orden, el UPDATE de la edicion, el UPDATE del hash (con el hash de la bitacora como parametro) y el INSERT de auditoria',
+    count($s9Escritas) === 3 && $s9Escritas[0] === ["UPDATE tenants SET edicion = 'completa' WHERE id = :id AND tipo = 'app'", [':id' => 12]]
+    && $s9Escritas[1] === ["UPDATE tenants SET api_secret_hash = :h WHERE id = :id AND tipo = 'app' AND api_secret_hash = ''", [':h' => $s9Hash, ':id' => 12]]
+    && str_starts_with(trim($s9Escritas[2][0]), 'INSERT INTO audit_logs'), array_column($s9Escritas, 0));
+$s9Par3 = $s9Escritas[2][1] ?? [];
+$s9Antes = json_decode((string) ($s9Par3[':old_values'] ?? ''), true);
+$s9Nuevo = json_decode((string) ($s9Par3[':new_values'] ?? ''), true);
+wa_chk('express_revertir (--apply): la fila de auditoria guarda la edicion que habia (express, con el hash en blanco) y la que queda (completa); lo demas es igual en las dos listas',
+    ($s9Par3[':module'] ?? null) === 'edicion' && ($s9Par3[':action'] ?? null) === 'EDICION_CAMBIO' && ($s9Par3[':tenant_id'] ?? null) === 12
+    && is_array($s9Antes) && is_array($s9Nuevo) && $s9Antes['edicion'] === 'express' && $s9Antes['integracion_hash_anterior'] === ''
+    && $s9Nuevo['edicion'] === 'completa' && !array_key_exists('integracion_hash_anterior', $s9Nuevo)
+    && array_diff_key($s9Antes, ['edicion' => 1, 'integracion_hash_anterior' => 1]) === array_diff_key($s9Nuevo, ['edicion' => 1]), [$s9Antes, $s9Nuevo]);
+wa_chk('express_revertir (--apply): el hash restaurado no queda en la fila de auditoria, ni en el informe, ni se imprime',
+    !str_contains((string) ($s9Par3[':old_values'] ?? '') . (string) ($s9Par3[':new_values'] ?? '') . (string) ($s9Par3[':description'] ?? ''), $s9Hash)
+    && !str_contains($s9Texto($s9R), $s9Hash) && $s9Salida === '' && $s9LogErr === '', [$s9Salida, $s9LogErr]);
+
+// revertir, los demas casos: con hash no hay nada que restaurar (ni se mira la bitacora), sin hash en la bitacora tampoco, un hash mal formado no se restaura
+$s9M = $s9Maestro(array_replace($s9FilaExpress, ['api_secret_hash' => $s9Hash]), $s9Bitacora($s9Hash));
+[$s9R] = $s9Lib(static fn (): array => express_revertir($s9M, 12, false));
+wa_chk('express_revertir: si la empresa ya tiene hash de integracion solo cambia la edicion (un paso) y ni consulta la bitacora',
+    count($s9R['plan'] ?? []) === 1 && str_contains($s9R['plan'][0]['sql'] ?? '', "SET edicion = 'completa'") && $s9Linea($s9R, '[CORR] integracion:') === null
+    && array_filter($s9M->log->eventos, static fn (array $e): bool => str_contains($e[2], 'audit_logs')) === [], $s9R['lineas'] ?? null);
+foreach ([
+    'una bitacora vacia' => [[], 'bitacora'],
+    'solo filas sin hash o con un valor que no es un sha256 (redactado, corto, en mayusculas, JSON roto)' => [
+        array_merge($s9Bitacora('', '***REDACTED***', 'abc', strtoupper($s9Hash)), ['{no es json', '[]', '"texto"']), 'bitacora'],
+] as $s9Desc => [$s9Rows, $s9Aguja]) {
+    $s9M = $s9Maestro($s9FilaExpress, $s9Rows);
+    [$s9R, $s9Error] = $s9Lib(static fn (): array => express_revertir($s9M, 12, false));
+    wa_chk("express_revertir con {$s9Desc}: no hay hash que restaurar, el plan es solo el UPDATE de la edicion y el informe lo dice sin marcarlo como correccion",
+        $s9Error === null && count($s9R['plan'] ?? []) === 1 && str_contains($s9Linea($s9R, '[OK  ] integracion:') ?? '', $s9Aguja) && ($s9R['ok'] ?? null) === true,
+        [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+}
+$s9M = $s9Maestro($s9FilaExpress, $s9Bitacora('***REDACTED***', $s9Hash));
+[$s9R] = $s9Lib(static fn (): array => express_revertir($s9M, 12, false));
+wa_chk('express_revertir: salta un valor que no es un sha256 y restaura el hash valido mas viejo que encuentra', ($s9R['plan'][1]['params'] ?? null) === [':h' => $s9Hash, ':id' => 12], $s9R['plan'] ?? null);
+// ya es completa
+$s9FilaCompleta = array_replace($s9Fila, ['api_secret_hash' => $s9Hash]);
+$s9M = $s9Maestro($s9FilaCompleta);
+[$s9R, $s9Error, $s9LogErr] = $s9Lib(static fn (): array => express_revertir($s9M, 12, true));
+wa_chk('express_revertir de una empresa que ya es completa y tiene su hash: ok sin aplicar, plan vacio, no escribe nada ni con --apply (sin fila de auditoria) y el informe termina con SIN CAMBIOS',
+    $s9Error === null && ($s9R['ok'] ?? null) === true && ($s9R['aplicado'] ?? null) === false && ($s9R['plan'] ?? null) === [] && $s9SoloLee($s9M)
+    && str_starts_with((string) ($s9R['lineas'][count($s9R['lineas'] ?? []) - 1] ?? ''), 'SIN CAMBIOS:') && !str_contains($s9Texto($s9R), 'ADVERTENCIA'), [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+$s9M = $s9Maestro(array_replace($s9Fila, ['api_secret_hash' => '']), $s9Bitacora($s9Hash), array_replace($s9Despues, ['tipos_ecf_habilitados' => null, 'cert_vence' => null]));
+[$s9R, $s9Error] = $s9Lib(static fn (): array => express_revertir($s9M, 12, true));
+wa_chk('express_revertir de una empresa ya completa pero con el hash en blanco: solo restaura el hash (un paso, sin UPDATE de la edicion) y lo aplica con su fila de auditoria',
+    $s9Error === null && ($s9R['aplicado'] ?? null) === true && count($s9R['plan'] ?? []) === 1 && str_contains($s9R['plan'][0]['sql'] ?? '', 'SET api_secret_hash = :h')
+    && count($s9M->escritas) === 2, [$s9Error?->getMessage(), $s9R['plan'] ?? null, array_column($s9M->escritas, 'sql')]);
+// una edicion guardada que no es ni completa ni express: se trata como completa, se avisa UNA vez en el log y se reescribe
+$s9M = $s9Maestro(array_replace($s9Fila, ['edicion' => 'zz-edicion-invalida-t9']));
+[$s9R, $s9Error, $s9LogErr, $s9Salida] = $s9Lib(static fn (): array => express_revertir($s9M, 12, false));
+wa_chk('express_revertir con una edicion guardada que no es ni completa ni express: el valor se trata como completa (una linea en el log, no en la salida) y se reescribe como completa',
+    $s9Error === null && substr_count($s9LogErr, 'edicion desconocida') === 1 && str_contains($s9LogErr, 'zz-edicion-invalida-t9') && $s9Salida === ''
+    && str_contains($s9R['plan'][0]['sql'] ?? '', "SET edicion = 'completa'") && $s9Linea($s9R, '[CORR] edicion:') !== null, [$s9Error?->getMessage(), $s9LogErr, $s9R['plan'] ?? null]);
+// la empresa no existe o no es de tipo app
+foreach (['no existe' => [null, 'No existe'], "es de tipo 'integracion'" => [array_replace($s9Fila, ['tipo' => 'integracion']), 'app']] as $s9Desc => [$s9FilaRara, $s9Aguja]) {
+    $s9M = $s9Maestro($s9FilaRara);
+    [$s9R, $s9Error] = $s9Lib(static fn (): array => express_revertir($s9M, 12, true));
+    wa_chk("express_revertir de una empresa que {$s9Desc}: ok false, no aplica nada, [RECH] tenant y RECHAZADO: 1 item(s). No se cambio nada.",
+        $s9Error === null && ($s9R['ok'] ?? null) === false && ($s9R['aplicado'] ?? null) === false && ($s9R['plan'] ?? null) === [] && $s9SoloLee($s9M)
+        && str_contains($s9Linea($s9R, '[RECH] tenant:') ?? '', $s9Aguja)
+        && ($s9R['lineas'][count($s9R['lineas'] ?? []) - 1] ?? null) === 'RECHAZADO: 1 item(s). No se cambio nada.', [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+}
+
+// refrescar el certificado: lo que se puede probar sin openssl (el camino feliz, con un .p12 de verdad, es de la suite scratch)
+foreach ([
+    'no existe' => [null, 'tenant', 'No existe'],
+    'es completa' => [array_replace($s9FilaExpress, ['edicion' => 'completa']), 'edicion', 'Express'],
+    "es de tipo 'integracion' (aunque su columna diga express)" => [array_replace($s9FilaExpress, ['tipo' => 'integracion']), 'edicion', 'Express'],
+    'es Express pero su certificado no se puede abrir (el archivo no esta)' => [array_replace($s9FilaExpress, ['cert_path' => '/ruta/que/no/existe/MARCA-ruta-del-p12.p12', 'cert_pass_encrypted' => 'MARCA-clave-cifrada']), 'cert', 'CERT_FALTA'],
+] as $s9Desc => [$s9FilaRara, $s9Item, $s9Aguja]) {
+    $s9M = $s9Maestro($s9FilaRara);
+    [$s9R, $s9Error, $s9LogErr, $s9Salida] = $s9Lib(static fn (): array => express_refrescar_cert($s9M, 12, true));
+    wa_chk("express_refrescar_cert de una empresa que {$s9Desc}: ok false, nada escrito (ni con --apply), [RECH] {$s9Item}, RECHAZADO y solo las claves ok, aplicado, plan y lineas",
+        $s9Error === null && is_array($s9R) && array_keys($s9R) === ['ok', 'aplicado', 'plan', 'lineas'] && $s9R['ok'] === false && $s9R['aplicado'] === false && $s9R['plan'] === [] && $s9SoloLee($s9M)
+        && str_contains($s9Linea($s9R, "[RECH] {$s9Item}:") ?? '', $s9Aguja) && str_starts_with((string) ($s9R['lineas'][count($s9R['lineas']) - 1] ?? ''), 'RECHAZADO: ')
+        && $s9Salida === '' && $s9LogErr === '' && !preg_match('/MARCA|certificado_dgii|ruta\/que/', $s9Texto($s9R)), [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+}
+
+// convertir: lo que se rechaza antes de conectar a la base de la empresa (una de integracion no tiene) y lo que ni se intenta
+$s9FilaIntegracion = array_replace($s9Fila, ['id' => 5, 'tipo' => 'integracion', 'ambiente' => 'ecf', 'api_secret_hash' => 'MARCA-hash-de-integracion']);
+$s9Pedido = ['edicion' => 'express', 'tipos' => ['45'], 'modulos' => null];
+$s9M = $s9Maestro($s9FilaIntegracion);
+[$s9R, $s9Error, $s9LogErr, $s9Salida] = $s9Lib(static fn (): array => express_convertir($s9M, 5, $s9Pedido, true));
+wa_chk('express_convertir de una empresa de integracion con --apply: ok false, nada aplicado, plan vacio, nada escrito en ninguna base, y las claves son ok, aplicado, evaluacion, plan y lineas',
+    $s9Error === null && is_array($s9R) && array_keys($s9R) === ['ok', 'aplicado', 'evaluacion', 'plan', 'lineas'] && $s9R['ok'] === false && $s9R['aplicado'] === false && $s9R['plan'] === []
+    && $s9SoloLee($s9M) && $s9Salida === '' && $s9LogErr === '', [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+wa_chk('express_convertir (rechazo): la evaluacion es la de express_preflight_evaluar (tenant y m036 entre los rechazos), el informe lleva [RECH] tenant y [RECH] m036 y termina con RECHAZADO: <n> item(s). No se cambio nada.',
+    is_array($s9R) && array_keys($s9R['evaluacion']) === ['items', 'nuevo', 'rechazos', 'acciones'] && in_array('tenant', $s9R['evaluacion']['rechazos'], true) && in_array('m036', $s9R['evaluacion']['rechazos'], true)
+    && $s9Linea($s9R, '[RECH] tenant:') !== null && $s9Linea($s9R, '[RECH] m036:') !== null
+    && ($s9R['lineas'][count($s9R['lineas']) - 1] ?? null) === 'RECHAZADO: ' . count($s9R['evaluacion']['rechazos']) . ' item(s). No se cambio nada.'
+    && count(array_filter($s9R['lineas'], static fn (string $l): bool => str_starts_with($l, '[RECH] '))) === count($s9R['evaluacion']['rechazos']), $s9R['lineas'] ?? null);
+wa_chk('express_convertir (rechazo): el informe no lleva el hash de integracion ni la ruta o la clave del certificado de la fila',
+    !preg_match('/MARCA|certificado_dgii/', $s9Texto($s9R)), $s9Texto($s9R));
+$s9M = $s9Maestro(null);
+[$s9R, $s9Error] = $s9Lib(static fn (): array => express_convertir($s9M, 999, $s9Pedido, false));
+wa_chk('express_convertir de una empresa que no existe: ok false, [RECH] tenant que dice que no existe, RECHAZADO: 1 item(s) y la misma forma de resultado (evaluacion con ese unico rechazo)',
+    $s9Error === null && ($s9R['ok'] ?? null) === false && ($s9R['evaluacion']['rechazos'] ?? null) === ['tenant'] && ($s9R['plan'] ?? null) === [] && $s9SoloLee($s9M)
+    && str_contains($s9Linea($s9R, '[RECH] tenant:') ?? '', 'No existe') && ($s9R['lineas'][count($s9R['lineas'] ?? []) - 1] ?? null) === 'RECHAZADO: 1 item(s). No se cambio nada.',
+    [$s9Error?->getMessage(), $s9R['lineas'] ?? null]);
+[$s9R, $s9Error] = $s9Lib(static fn (): array => express_convertir($s9Maestro($s9FilaIntegracion), 5, ['edicion' => 'completa'] + $s9Pedido, false));
+wa_chk('express_convertir solo convierte a express: un pedido de otra edicion lanza InvalidArgumentException antes de leer nada', $s9Error instanceof InvalidArgumentException, $s9Error?->getMessage());
+
+// --- tools/tenant_edicion.php: el analizador de argumentos, el texto de ayuda y la herramienta en un php hijo aislado --------------------------
+// Incluir el archivo solo define funciones: su programa principal corre unicamente cuando es ese archivo el que se ejecuta.
+require_once __DIR__ . '/tenant_edicion.php';
+$s9Herramienta = __DIR__ . '/tenant_edicion.php';
+/** Lo que el analizador devuelve para una linea de comandos valida. */
+$s9Valida = static fn (string $modo, int $tenant, array $tipos = [], ?array $modulos = null, bool $apply = false): array => [
+    'modo' => $modo, 'tenant' => $tenant, 'tipos' => $tipos, 'modulos' => $modulos, 'apply' => $apply,
+];
+foreach ([
+    'express con un tipo: el ensayo es lo que se pide por omision' => [['--tenant=12', '--edicion=express', '--tipos=45'], $s9Valida('express', 12, ['45'])],
+    'express con tipos y modulos a mano (espacios y coma al final: "45, 31,") y --apply' => [
+        ['--tenant=12', '--edicion=express', '--tipos=45, 31,', '--modulos=facturacion, clientes', '--apply'], $s9Valida('express', 12, ['45', '31'], ['facturacion', 'clientes'], true)],
+    'un tipo repetido se queda una vez y un id con ceros a la izquierda es el mismo id' => [['--tenant=0012', '--edicion=express', '--tipos=45,45,31'], $s9Valida('express', 12, ['45', '31'])],
+    'un tipo mal escrito (e45) llega tal cual: lo rechaza el preflight, no el analizador' => [['--tenant=12', '--edicion=express', '--tipos=e45'], $s9Valida('express', 12, ['e45'])],
+    '--modulos vacio es una lista vacia (todo el preset)' => [['--tenant=12', '--edicion=express', '--tipos=45', '--modulos='], $s9Valida('express', 12, ['45'], [])],
+    'completa' => [['--tenant=7', '--edicion=completa'], $s9Valida('completa', 7)],
+    'completa con --apply' => [['--tenant=7', '--edicion=completa', '--apply'], $s9Valida('completa', 7, [], null, true)],
+    '--refrescar-cert, con las opciones en cualquier orden' => [['--refrescar-cert', '--tenant=7'], $s9Valida('refrescar-cert', 7)],
+    '--refrescar-cert con --apply' => [['--tenant=7', '--refrescar-cert', '--apply'], $s9Valida('refrescar-cert', 7, [], null, true)],
+    '--help gana a todo lo demas, aunque lo demas sea basura' => [['--tenant=1', '--help', '--no-existe'], ['ayuda' => true]],
+] as $s9Desc => [$s9Args, $s9Esperada]) {
+    wa_chk("analizador, {$s9Desc}", tenant_edicion_parsear($s9Args) === $s9Esperada, tenant_edicion_parsear($s9Args));
+}
+foreach ([
+    ['sin ningun argumento', [], '--tenant'],
+    ['sin --tenant', ['--edicion=express', '--tipos=45'], '--tenant'],
+    ['--tenant que no es un numero', ['--tenant=abc', '--edicion=completa'], '--tenant'],
+    ['--tenant 0', ['--tenant=0', '--edicion=completa'], '--tenant'],
+    ['--tenant negativo', ['--tenant=-3', '--edicion=completa'], '--tenant'],
+    ['--tenant con decimales', ['--tenant=1.5', '--edicion=completa'], '--tenant'],
+    ['--tenant vacio', ['--tenant=', '--edicion=completa'], '--tenant'],
+    ['--tenant sin valor', ['--tenant', '--edicion=completa'], '--tenant'],
+    ['--tenant demasiado largo para ser un id', ['--tenant=99999999999', '--edicion=completa'], '--tenant'],
+    ['--tenant dos veces', ['--tenant=1', '--tenant=2', '--edicion=completa'], 'repetido'],
+    ['--edicion=basica', ['--tenant=12', '--edicion=basica'], "'basica'"],
+    ['--edicion=Express (se escribe exacta, en minusculas)', ['--tenant=12', '--edicion=Express', '--tipos=45'], "'Express'"],
+    ['--edicion sin valor', ['--tenant=12', '--edicion'], '--edicion'],
+    ['sin decir que hacer (ni --edicion ni --refrescar-cert)', ['--tenant=12'], '--refrescar-cert'],
+    ['--edicion=express junto con --refrescar-cert', ['--tenant=12', '--edicion=express', '--tipos=45', '--refrescar-cert'], '--refrescar-cert'],
+    ['express sin --tipos', ['--tenant=12', '--edicion=express'], '--tipos'],
+    ['express con --tipos vacio', ['--tenant=12', '--edicion=express', '--tipos='], '--tipos'],
+    ['express con --tipos de solo comas', ['--tenant=12', '--edicion=express', '--tipos=,'], '--tipos'],
+    ['--tipos con --edicion=completa', ['--tenant=12', '--edicion=completa', '--tipos=45'], '--tipos'],
+    ['--modulos con --edicion=completa', ['--tenant=12', '--edicion=completa', '--modulos=facturacion'], '--modulos'],
+    ['--tipos con --refrescar-cert', ['--tenant=12', '--refrescar-cert', '--tipos=45'], '--tipos'],
+    ['--apply con un valor', ['--tenant=12', '--edicion=completa', '--apply=1'], '--apply'],
+    ['--apply dos veces', ['--tenant=12', '--edicion=completa', '--apply', '--apply'], 'repetido'],
+    ['una opcion que no existe (--tipo en lugar de --tipos)', ['--tenant=12', '--edicion=express', '--tipo=45'], '--tipo=45'],
+    ['un argumento suelto', ['--tenant=12', '--edicion=completa', '45'], "'45'"],
+    ['una opcion corta', ['-t', '12'], "'-t'"],
+] as [$s9Desc, $s9Args, $s9Aguja]) {
+    $s9P = tenant_edicion_parsear($s9Args);
+    wa_chk("analizador, {$s9Desc}: un error que nombra {$s9Aguja}", array_keys($s9P) === ['error'] && str_contains((string) ($s9P['error'] ?? ''), $s9Aguja), $s9P);
+}
+$s9P = tenant_edicion_parsear(['--tenant=12', '--edicion=completa', "--ra\x00ro\x1b[31m\n=1" . str_repeat('x', 200)]);
+wa_chk('analizador: lo que el operador teclea y no se reconoce sale en el mensaje solo como ASCII imprimible y acotado (sin NUL, escapes ni saltos de linea, y sin los 200 caracteres)',
+    array_keys($s9P) === ['error'] && !preg_match('/[^\x20-\x7E]/', (string) ($s9P['error'] ?? '')) && strlen((string) ($s9P['error'] ?? '')) < 300 && !str_contains((string) ($s9P['error'] ?? ''), str_repeat('x', 60)), $s9P);
+$s9Ayuda = tenant_edicion_ayuda();
+wa_chk('tenant_edicion_ayuda: el texto de --help (en espanol) trae los tres usos, las opciones, que el ensayo es lo normal, los cuatro codigos de salida y el aviso de que volver a completa no es una parada segura',
+    array_filter(['--tenant=ID', '--edicion=express', '--tipos=', '--modulos=', '--edicion=completa', '--refrescar-cert', '--apply', 'ensayo', 'Salida', 'preflight', 'no es una parada segura'],
+        static fn (string $aguja): bool => !str_contains($s9Ayuda, $aguja)) === [] && !preg_match('/[^\x20-\x7E\n]/', $s9Ayuda), $s9Ayuda);
+
+/** tenant_edicion.php en un hijo aislado (ver express_hijo_aislado): la master apunta a un puerto sin nadie, asi que ninguna conexion puede salir bien. */
+$s9Hijo = static fn (array $args): array => express_hijo_aislado(array_merge(['tools/tenant_edicion.php'], $args));
+foreach ([
+    'sin --tenant' => [['--edicion=express', '--tipos=45'], '--tenant'],
+    'con --edicion=basica' => [['--tenant=12', '--edicion=basica'], 'basica'],
+    'con --tipos y --edicion=completa' => [['--tenant=12', '--edicion=completa', '--tipos=45'], '--tipos'],
+    'sin ninguna opcion' => [[], '--tenant'],
+    'con una opcion que no existe (--aply)' => [['--tenant=12', '--edicion=completa', '--aply'], '--aply'],
+] as $s9Desc => [$s9Args, $s9Aguja]) {
+    $s9R = $s9Hijo($s9Args);
+    wa_chk("tenant_edicion.php {$s9Desc}: sale con 2 antes de abrir ninguna conexion, con el motivo en el texto, la invitacion a --help y sin avisos de PHP",
+        $s9R['codigo'] === 2 && str_contains($s9R['salida'], $s9Aguja) && str_contains($s9R['salida'], '--help') && !preg_match('/Fatal error|Warning|Notice|Deprecated|Stack trace/i', $s9R['salida']), $s9R);
+}
+$s9R = $s9Hijo(['--help']);
+wa_chk('tenant_edicion.php --help: sale con 0 y escribe la ayuda (la de tenant_edicion_ayuda), sin avisos de PHP',
+    $s9R['codigo'] === 0 && trim($s9R['salida']) === trim($s9Ayuda) && !preg_match('/Fatal error|Warning|Notice|Deprecated/i', $s9R['salida']), $s9R);
+$s9R = $s9Hijo(['--tenant=12', '--edicion=completa']);
+wa_chk('tenant_edicion.php con argumentos validos y la master inalcanzable (puerto 1 de loopback): sale con 1, dice que no pudo conectar a la base de datos maestra y no nombra el servidor, el usuario ni la clave ni deja la linea que MasterDatabase manda al log',
+    $s9R['codigo'] === 1 && str_contains($s9R['salida'], 'base de datos maestra') && !preg_match('/127\.0\.0\.1|aislado_usuario|aislado_clave|MasterDB|Stack trace|Warning/', $s9R['salida']), $s9R);
+
+$s9Fuente = (string) file_get_contents($s9Herramienta);
+$s9PosGuarda = strpos($s9Fuente, "PHP_SAPI !== 'cli'");
+$s9PosRequire = strpos($s9Fuente, 'require_once');
+wa_chk('tenant_edicion.php: empieza en <?php sin BOM y rechaza lo que no es linea de comandos (PHP_SAPI !== cli, con 403) antes de cargar nada: el directorio tools del hosting se puede abrir desde un navegador',
+    str_starts_with($s9Fuente, '<?php') && $s9PosGuarda !== false && $s9PosRequire !== false && $s9PosGuarda < $s9PosRequire && str_contains($s9Fuente, 'http_response_code(403)'),
+    [$s9PosGuarda, $s9PosRequire]);
+wa_chk('tenant_edicion.php: carga MasterDatabase.php, TenantResolver.php y la biblioteca con require_once, y nunca lee $_GET, $_POST, $_REQUEST ni $_COOKIE',
+    preg_match_all("~require_once __DIR__ \\. '/(\\.\\./src/MasterDatabase|\\.\\./src/TenantResolver|express_edicion_lib)\\.php';~", $s9Fuente) === 3
+    && !preg_match('/\$_(GET|POST|REQUEST|COOKIE)\b/', $s9Fuente), $s9Fuente === '' ? 'sin fuente' : null);
+$s9Imprime = [];
+foreach (token_get_all($s9Fuente) as $s9T) {
+    if (is_array($s9T) && $s9T[0] === T_STRING && in_array(strtolower($s9T[1]), ['print_r', 'var_dump', 'var_export', 'debug_zval_dump', 'phpinfo', 'getenv', 'putenv'], true)) {
+        $s9Imprime[] = $s9T[1] . ' (linea ' . $s9T[2] . ')';
+    }
+}
+wa_chk('tenant_edicion.php: no vuelca variables ni toca el entorno (ni print_r, var_dump, var_export, phpinfo, getenv ni putenv): lo que imprime es el informe de la biblioteca y sus propios avisos',
+    $s9Imprime === [], $s9Imprime);
+$s9Hallado = $s8Ocho3($s8SinTextos($s9Fuente));
+wa_chk('PHP 8.3 (produccion y CI): tenant_edicion.php no usa funciones ni sintaxis de PHP 8.4 o 8.5', $s9Hallado === [], $s9Hallado);
+$s9Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', $s9Herramienta]);
+wa_chk('php -l de tenant_edicion.php: sin errores de sintaxis ni deprecaciones', $s9Lint['codigo'] === 0 && str_starts_with(trim($s9Lint['salida']), 'No syntax errors detected')
+    && !str_contains($s9Lint['salida'], 'Deprecated'), $s9Lint);
+$s9Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_errors=1', '-l', __DIR__ . '/express_edicion_lib.php']);
+wa_chk('php -l de la biblioteca despues de la tarea 9: sin errores de sintaxis ni deprecaciones', $s9Lint['codigo'] === 0 && str_starts_with(trim($s9Lint['salida']), 'No syntax errors detected')
+    && !str_contains($s9Lint['salida'], 'Deprecated'), $s9Lint);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

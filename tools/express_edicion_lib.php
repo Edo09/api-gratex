@@ -7,11 +7,20 @@
  *   1. hechos       express_preflight_hechos lee de la master y de la base de la empresa lo que hace falta. Solo SELECT.
  *   2. evaluacion   express_preflight_evaluar da a cada item ok, corregir (el plan lo arregla) o rechazar (no se cambia nada).
  *   3. plan         express_plan arma las sentencias que convierten la empresa, en el orden en que se aplican: [] si algo se rechaza.
- * Aplicar el plan, auditar y revertir no estan aqui: esta biblioteca no escribe en ninguna base.
+ *   4. aplicar      express_aplicar escribe el plan con su fila de auditoria (la base de la empresa primero y despues UNA transaccion en la
+ *                   master) y relee lo escrito para compararlo con el plan.
+ * Encima de esos cuatro pasos estan las tres ordenes de tools/tenant_edicion.php, cada una con su informe (las lineas que la herramienta
+ * imprime) y sin escribir nada si no se pide: express_convertir (hechos, evaluacion, plan y, con $apply, aplicar), express_revertir (devuelve
+ * una empresa a completa: es lo que levanta toda restriccion, y el informe avisa que no es una parada segura) y express_refrescar_cert
+ * (recalcula tenants.cert_vence desde el archivo del certificado de una empresa Express).
  *
  * Reglas del archivo:
  *   - Se puede incluir desde donde sea: al incluirlo no imprime nada, no abre ninguna conexion y no cambia ninguna configuracion.
- *   - Evaluar y armar el plan son PURAS: reciben arreglos y devuelven arreglos; no tocan una base, ni el log, ni lo que reciben.
+ *   - Nunca imprime ni escribe en el log por si misma: el informe viaja en el arreglo que devuelve y quien llama lo imprime. La unica linea de
+ *     log que puede salir es la de TenantEntitlements::normalizarEdicion, que avisa una vez por valor cuando la edicion guardada no es ni
+ *     completa ni express (se trata como completa).
+ *   - Evaluar y armar el plan son PURAS: reciben arreglos y devuelven arreglos; no tocan una base, ni el log, ni lo que reciben. Solo
+ *     express_aplicar y el UPDATE de express_refrescar_cert escriben en una base, y solo cuando quien llama lo pide ($apply).
  *   - Nada de lo que devuelve la biblioteca se imprime con la fila de la empresa dentro: $hechos['tenant'] es la fila COMPLETA de
  *     master.tenants (con la clave de su base, la del certificado y el hash de integracion). La evaluacion y el plan no copian nada de ella:
  *     ni la ruta del certificado, ni ninguna clave, ni el hash, ni el servidor o el usuario de su base. Quien imprima, imprime de ahi.
@@ -34,6 +43,19 @@ const EXPRESS_RNC_CLIENTES_PRUEBA = ['131880681', '533445861'];
 /** Lo que deja sin llenar un emisor_config recien creado: la razon social de tenant_schema.sql y la direccion de ahi y de create_tenant.php. */
 const EXPRESS_RAZON_PENDIENTE = 'PENDIENTE ONBOARDING';
 const EXPRESS_DIRECCIONES_PENDIENTES = ['', 'pendiente', 'n/d'];
+
+/**
+ * La fila de audit_logs de cada cambio de edicion. Se escribe con un INSERT directo y no con AuditLogger: la fila tiene que ir en la misma
+ * transaccion que el cambio (AuditLogger traga sus propios errores y escribe aparte), asi que no pasa por su redaccion de secretos: ningun
+ * valor de la fila lo es (integracion_hash_anterior es un hash, y su nombre no lleva secret, token ni api_key por si algun dia pasara).
+ */
+const EXPRESS_AUDITORIA_USUARIO = 'tools/tenant_edicion.php';
+const EXPRESS_AUDITORIA_MODULO = 'edicion';
+const EXPRESS_AUDITORIA_ACCION = 'EDICION_CAMBIO';
+const EXPRESS_AUDITORIA_ENTIDAD = 'tenant';
+
+/** Las columnas de tenants que express_aplicar relee despues del commit y compara con lo que el plan dejo. */
+const EXPRESS_COLUMNAS_VERIFICADAS = ['edicion', 'tipos_ecf_habilitados', 'modulos_habilitados', 'cert_vence'];
 
 /**
  * Conexion PDO a la base de una empresa tipo app, con la clave que su fila trae cifrada (TenantResolver::decrypt) y la misma forma de
@@ -143,7 +165,7 @@ function express_leer_certificado(array $tenant, ?int $ahora = null): array
         : ['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => $vence];
 }
 
-/** Las filas de un SELECT como arreglos asociativos. Solo para consultas de lectura: es la unica puerta de la biblioteca a una base. */
+/** Las filas de un SELECT como arreglos asociativos. Solo para consultas de lectura: es la puerta de LECTURA de la biblioteca (las escrituras pasan por express_ejecutar). */
 function express_preflight_filas(PDO $pdo, string $sql, array $params = []): array
 {
     $sentencia = $pdo->prepare($sql);
@@ -583,4 +605,584 @@ function express_plan(array $hechos, array $evaluacion): array
         ];
     }
     return $plan;
+}
+
+/**
+ * Prepara y ejecuta una sentencia con sus parametros. Lanza RuntimeException (con un texto fijo: nada del SQL ni de los valores) si PDO no
+ * pudo: con las excepciones apagadas prepare y execute devuelven false en lugar de lanzar. Las conexiones de las herramientas las traen prendidas.
+ */
+function express_ejecutar(PDO $pdo, string $sql, array $params = []): PDOStatement
+{
+    $sentencia = $pdo->prepare($sql);
+    if ($sentencia === false || $sentencia->execute($params) === false) {
+        throw new RuntimeException('No se pudo ejecutar una sentencia de la edicion (la conexion no lanza excepciones).');
+    }
+    return $sentencia;
+}
+
+/** El valor de una columna en un mensaje: NULL, o el texto entre comillas, solo ASCII imprimible y de largo acotado (viene de una base). */
+function express_valor_visible(?string $valor): string
+{
+    return $valor === null ? 'NULL' : "'" . substr((string) preg_replace('/[^\x20-\x7E]/', '?', $valor), 0, 40) . "'";
+}
+
+/**
+ * Las cuatro columnas de la edicion de una empresa en master.tenants (EXPRESS_COLUMNAS_VERIFICADAS), cada una como texto o NULL, o null si la
+ * fila no existe. Es la lectura de despues del commit de express_aplicar y del UPDATE de express_refrescar_cert.
+ *
+ * @return ?array{edicion:?string,tipos_ecf_habilitados:?string,modulos_habilitados:?string,cert_vence:?string}
+ */
+function express_leer_estado(PDO $master, int $tenantId): ?array
+{
+    $fila = express_preflight_filas(
+        $master,
+        'SELECT edicion, tipos_ecf_habilitados, modulos_habilitados, cert_vence FROM tenants WHERE id = :id',
+        [':id' => $tenantId]
+    )[0] ?? null;
+    if (!is_array($fila)) {
+        return null;
+    }
+    $estado = [];
+    foreach (EXPRESS_COLUMNAS_VERIFICADAS as $columna) {
+        $estado[$columna] = ($fila[$columna] ?? null) === null ? null : (string) $fila[$columna];
+    }
+    return $estado;
+}
+
+/**
+ * En que difiere lo que se leyo ($leido; null = la fila no esta) de lo que el plan debia dejar ($esperado), por columna de
+ * EXPRESS_COLUMNAS_VERIFICADAS y como texto con el nombre de la columna, lo esperado y lo leido. La comparacion es estricta entre textos:
+ * NULL no es el texto vacio ('' en modulos_habilitados angosta distinto que NULL a ojos de quien lo escribio a mano).
+ *
+ * @return list<string> vacia si coinciden
+ */
+function express_diferencias(array $esperado, ?array $leido): array
+{
+    if ($leido === null) {
+        return ['la fila del tenant ya no esta'];
+    }
+    $difieren = [];
+    foreach (EXPRESS_COLUMNAS_VERIFICADAS as $columna) {
+        $quiero = ($esperado[$columna] ?? null) === null ? null : (string) $esperado[$columna];
+        $tengo = ($leido[$columna] ?? null) === null ? null : (string) $leido[$columna];
+        if ($quiero !== $tengo) {
+            $difieren[] = "{$columna} (esperado " . express_valor_visible($quiero) . ', leido ' . express_valor_visible($tengo) . ')';
+        }
+    }
+    return $difieren;
+}
+
+/**
+ * Aplica un plan (el de express_plan, o el de revertir) y lo audita. Es lo que escribe en las bases, y lo hace asi:
+ *   1. Valida el plan y la auditoria sin tocar ninguna base: un paso sin donde (tenant o master), sql y params, una auditoria sin tenant_id o
+ *      sin las cuatro columnas verificadas en new_values, o pasos de la base de la empresa sin una conexion a ella, lanzan
+ *      InvalidArgumentException antes de ejecutar nada.
+ *   2. Los pasos de la base de la empresa (donde = tenant), en orden y sin transaccion: cada uno es idempotente. Si uno falla se lanza esa
+ *      excepcion y la master no se toca; los que ya corrieron se quedan, y volver a correr el plan es seguro.
+ *   3. UNA transaccion en la master con sus pasos (donde = master), en orden, y el INSERT de la fila de audit_logs. Cualquier falla (un paso,
+ *      el INSERT, que lastInsertId no de el id de la fila, o un commit que lanza o devuelve false) hace rollBack, si la transaccion sigue
+ *      abierta, y relanza LA MISMA excepcion: el cambio de la master y su fila de auditoria son atomicos y, si algo sale mal, ni uno ni otro.
+ *   4. Despues del commit relee la fila de tenants y la de audit_logs (por el id que dio el INSERT) y las compara con lo que el plan debia
+ *      dejar, que es $auditoria['new_values']: si edicion, tipos_ecf_habilitados, modulos_habilitados o cert_vence difieren en cualquiera de las
+ *      dos filas, o la de auditoria no es la del cambio, lanza RuntimeException. El cambio YA esta confirmado: el mensaje lo dice y nombra
+ *      cada columna con lo esperado y lo leido (solo esas cuatro: ningun secreto), y no hay nada que deshacer aqui.
+ *
+ * Quien la llama arma $auditoria de lo que el plan va a escribir (express_auditoria): tenant_id; old_values y new_values con edicion,
+ * tipos_ecf_habilitados, modulos_habilitados, cert_vence, pos_enabled e inventario_estricto (old_values lleva ademas integracion_hash_anterior);
+ * description (de lo que no cabe en 255 caracteres se corta). La fila lleva module edicion, action EDICION_CAMBIO, entity_type tenant,
+ * entity_id el id de la empresa, username tools/tenant_edicion.php y success 1.
+ *
+ * @param ?PDO $tenantDb conexion a la base de la empresa (express_conectar_tenant); null solo si el plan no trae pasos para ella
+ * @param array $plan    lista de ['donde' => 'tenant'|'master', 'que' => texto, 'sql' => sentencia, 'params' => valores]
+ */
+function express_aplicar(PDO $master, ?PDO $tenantDb, array $plan, array $auditoria): void
+{
+    // 1. Lo que se decide sin tocar una base.
+    $tenantId = (int) ($auditoria['tenant_id'] ?? 0);
+    $antes = (array) ($auditoria['old_values'] ?? []);
+    $despues = (array) ($auditoria['new_values'] ?? []);
+    if ($tenantId <= 0) {
+        throw new InvalidArgumentException('La auditoria no trae el tenant_id de la empresa.');
+    }
+    $faltan = array_values(array_filter(EXPRESS_COLUMNAS_VERIFICADAS, static fn (string $columna): bool => !array_key_exists($columna, $despues)));
+    if ($faltan !== []) {
+        throw new InvalidArgumentException('new_values de la auditoria no trae ' . implode(', ', $faltan) . ': sin ellas no hay con que comparar la lectura de despues del commit.');
+    }
+    $formato = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
+    $jsonAntes = json_encode($antes, $formato);
+    $jsonDespues = json_encode($despues, $formato);
+    $descripcion = substr((string) ($auditoria['description'] ?? ''), 0, 255);
+    $deLaEmpresa = [];
+    $deLaMaster = [];
+    foreach (array_values($plan) as $i => $paso) {
+        $donde = is_array($paso) ? ($paso['donde'] ?? null) : null;
+        if (!in_array($donde, ['tenant', 'master'], true) || !is_string($paso['sql'] ?? null) || trim($paso['sql']) === '' || !is_array($paso['params'] ?? null)) {
+            throw new InvalidArgumentException('El paso #' . ($i + 1) . ' del plan no trae donde (tenant o master), sql y params.');
+        }
+        if ($donde === 'tenant') {
+            $deLaEmpresa[] = $paso;
+        } else {
+            $deLaMaster[] = $paso;
+        }
+    }
+    if ($deLaEmpresa !== [] && $tenantDb === null) {
+        throw new InvalidArgumentException('El plan trae pasos para la base de la empresa y no se dio conexion a ella.');
+    }
+
+    // 2. La base de la empresa primero: sus pasos son idempotentes y no se deshacen con la transaccion de la master.
+    foreach ($deLaEmpresa as $paso) {
+        express_ejecutar($tenantDb, $paso['sql'], $paso['params']);
+    }
+
+    // 3. La master: sus pasos y la fila de auditoria en UNA transaccion.
+    $master->beginTransaction();
+    try {
+        foreach ($deLaMaster as $paso) {
+            express_ejecutar($master, $paso['sql'], $paso['params']);
+        }
+        express_ejecutar(
+            $master,
+            'INSERT INTO audit_logs (tenant_id, username, module, entity_type, entity_id, action, old_values, new_values, description, success) '
+            . 'VALUES (:tenant_id, :username, :module, :entity_type, :entity_id, :action, :old_values, :new_values, :description, :success)',
+            [
+                ':tenant_id' => $tenantId, ':username' => EXPRESS_AUDITORIA_USUARIO, ':module' => EXPRESS_AUDITORIA_MODULO,
+                ':entity_type' => EXPRESS_AUDITORIA_ENTIDAD, ':entity_id' => (string) $tenantId, ':action' => EXPRESS_AUDITORIA_ACCION,
+                ':old_values' => $jsonAntes, ':new_values' => $jsonDespues, ':description' => $descripcion, ':success' => 1,
+            ]
+        );
+        // El id de la fila se toma ANTES del commit: despues, mysql_insert_id() ya no lo recuerda. Sin un id no se puede releer la fila de
+        // auditoria, y es mejor no confirmar que confirmar un cambio cuya fila no se puede verificar.
+        $auditoriaId = (int) $master->lastInsertId();
+        if ($auditoriaId <= 0) {
+            throw new RuntimeException('El INSERT de la fila de auditoria (audit_logs) no dio un id: no se puede verificar y no se confirma el cambio.');
+        }
+        if ($master->commit() === false) {
+            throw new RuntimeException('No se pudo confirmar la transaccion de la master.');
+        }
+    } catch (Throwable $e) {
+        if ($master->inTransaction()) {
+            try {
+                $master->rollBack();
+            } catch (Throwable) {
+                // Si el rollBack tambien falla, la excepcion que explica el fallo es la original.
+            }
+        }
+        throw $e;
+    }
+
+    // 4. Lo escrito, releido: la fila de la empresa y la de auditoria contra lo que el plan debia dejar.
+    try {
+        $leido = express_leer_estado($master, $tenantId);
+        $auditada = express_preflight_filas(
+            $master,
+            'SELECT id, tenant_id, module, action, new_values FROM audit_logs WHERE id = :id',
+            [':id' => $auditoriaId]
+        )[0] ?? null;
+    } catch (Throwable $e) {
+        throw new RuntimeException(
+            "El cambio del tenant #{$tenantId} se confirmo en la master, pero no se pudo leer de vuelta para verificarlo: revisa la fila del tenant y su fila de auditoria.",
+            0,
+            $e
+        );
+    }
+    $difieren = express_diferencias($despues, $leido);
+    if (!is_array($auditada)) {
+        $difieren[] = "la fila de auditoria #{$auditoriaId} (audit_logs) no se encontro";
+    } else {
+        if (($auditada['module'] ?? null) !== EXPRESS_AUDITORIA_MODULO || ($auditada['action'] ?? null) !== EXPRESS_AUDITORIA_ACCION
+            || (int) ($auditada['tenant_id'] ?? 0) !== $tenantId) {
+            $difieren[] = "la fila de auditoria #{$auditoriaId} no es la del cambio (otro modulo, otra accion u otra empresa)";
+        }
+        $valoresAuditados = json_decode((string) ($auditada['new_values'] ?? ''), true);
+        foreach (is_array($valoresAuditados) ? express_diferencias($despues, $valoresAuditados) : ['new_values de la fila de auditoria no es un JSON'] as $diferencia) {
+            $difieren[] = "auditoria: {$diferencia}";
+        }
+    }
+    if ($difieren !== []) {
+        throw new RuntimeException(
+            "El cambio del tenant #{$tenantId} ya se confirmo en la master, pero al releerlo no coincide con el plan: " . implode('; ', $difieren)
+            . '. Revisa la fila del tenant y su fila de auditoria antes de seguir.'
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// Las tres ordenes de tools/tenant_edicion.php y lo que arman: la fila de la empresa, lo que la bitacora guarda y el informe que se imprime.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+
+/** La fila completa de master.tenants de una empresa (de cualquier tipo, activa o no), o null si no existe. */
+function express_tenant_fila(PDO $master, int $tenantId): ?array
+{
+    $fila = express_preflight_filas($master, 'SELECT * FROM tenants WHERE id = :id LIMIT 1', [':id' => $tenantId])[0] ?? null;
+    return is_array($fila) ? $fila : null;
+}
+
+/**
+ * Lo que la bitacora guarda del estado de una empresa, de su fila de master.tenants: seis columnas, en este orden (las cuatro de la edicion
+ * como texto o NULL, y pos_enabled e inventario_estricto como enteros). Una columna que la fila no trae (master sin migrar) sale NULL, o 0.
+ *
+ * @return array{edicion:?string,tipos_ecf_habilitados:?string,modulos_habilitados:?string,cert_vence:?string,pos_enabled:int,inventario_estricto:int}
+ */
+function express_estado_auditado(array $tenant): array
+{
+    $texto = static fn (mixed $valor): ?string => $valor === null ? null : (string) $valor;
+    return [
+        'edicion' => $texto($tenant['edicion'] ?? null),
+        'tipos_ecf_habilitados' => $texto($tenant['tipos_ecf_habilitados'] ?? null),
+        'modulos_habilitados' => $texto($tenant['modulos_habilitados'] ?? null),
+        'cert_vence' => $texto($tenant['cert_vence'] ?? null),
+        'pos_enabled' => (int) ($tenant['pos_enabled'] ?? 0),
+        'inventario_estricto' => (int) ($tenant['inventario_estricto'] ?? 0),
+    ];
+}
+
+/**
+ * La $auditoria de express_aplicar para un cambio de la fila $tenant: old_values es el estado de la fila (express_estado_auditado) mas
+ * integracion_hash_anterior, el hash de integracion que tiene hoy ('' si ya esta en blanco); new_values, ese mismo estado con $cambios encima
+ * (solo las claves que el cambio toca; el resto queda como esta). integracion_hash_anterior solo va en old_values, y la fila no lleva nada mas
+ * de $tenant: ni la ruta del certificado, ni claves.
+ *
+ * @param array<string,mixed> $cambios claves de express_estado_auditado con el valor que el cambio les deja
+ * @return array{tenant_id:int,old_values:array,new_values:array,description:string}
+ */
+function express_auditoria(array $tenant, array $cambios, string $descripcion): array
+{
+    $antes = express_estado_auditado($tenant);
+    return [
+        'tenant_id' => (int) ($tenant['id'] ?? 0),
+        'old_values' => $antes + ['integracion_hash_anterior' => (string) ($tenant['api_secret_hash'] ?? '')],
+        'new_values' => array_replace($antes, $cambios),
+        'description' => $descripcion,
+    ];
+}
+
+/** Un texto en una sola linea: los espacios, tabuladores y saltos de linea seguidos pasan a un solo espacio. */
+function express_una_linea(string $texto): string
+{
+    return trim((string) preg_replace('/\s+/', ' ', $texto));
+}
+
+/**
+ * El informe de una evaluacion: una linea por item, "[OK  ] id: detalle", "[CORR] id: detalle" o "[RECH] id: detalle" segun su estado, en el
+ * orden de los items. Los detalles de express_preflight_evaluar y los de las ordenes de abajo no llevan secretos ni rutas.
+ *
+ * @param array $evaluacion lo que devuelve express_preflight_evaluar (solo se lee 'items'; una clave que falte no da lineas)
+ * @return list<string>
+ */
+function express_lineas_evaluacion(array $evaluacion): array
+{
+    $marcas = ['ok' => '[OK  ]', 'corregir' => '[CORR]', 'rechazar' => '[RECH]'];
+    $lineas = [];
+    foreach ((array) ($evaluacion['items'] ?? []) as $id => $item) {
+        $lineas[] = ($marcas[$item['estado'] ?? ''] ?? '[????]') . " {$id}: " . express_una_linea((string) ($item['detalle'] ?? ''));
+    }
+    return $lineas;
+}
+
+/**
+ * El informe de un plan: un encabezado y un renglon numerado por paso (los de la base de la empresa marcados [empresa] y los de la master
+ * [master]) y, con $conAuditoria, uno mas para la fila de auditoria que express_aplicar escribe en la misma transaccion de la master. Ningun
+ * valor de los parametros sale. Un plan vacio no da lineas.
+ *
+ * @return list<string>
+ */
+function express_lineas_plan(array $plan, bool $conAuditoria = true): array
+{
+    if ($plan === []) {
+        return [];
+    }
+    $lineas = [$conAuditoria
+        ? 'Pasos, en este orden (los de la empresa primero; los de la master van juntos, con la fila de auditoria, en una sola transaccion):'
+        : 'Paso (un solo UPDATE, sin fila de auditoria: no cambia la edicion):'];
+    $n = 0;
+    foreach (array_values($plan) as $paso) {
+        $n++;
+        $lineas[] = "  {$n}. [" . (($paso['donde'] ?? '') === 'tenant' ? 'empresa' : 'master') . '] ' . express_una_linea((string) ($paso['que'] ?? ''));
+    }
+    if ($conAuditoria) {
+        $lineas[] = '  ' . ($n + 1) . '. [master] Registrar el cambio en la bitacora (audit_logs, modulo ' . EXPRESS_AUDITORIA_MODULO . ', accion ' . EXPRESS_AUDITORIA_ACCION . ')';
+    }
+    return $lineas;
+}
+
+/**
+ * El informe de una orden que se rechaza antes de escribir: $previas (el encabezado), los items como lineas (express_lineas_evaluacion) y
+ * "RECHAZADO: <n> item(s). No se cambio nada." con cuantos items son [RECH].
+ *
+ * @param array<string,array{estado:string,detalle:string}> $items
+ * @param list<string> $previas
+ * @return list<string>
+ */
+function express_lineas_rechazo(array $items, array $previas = []): array
+{
+    $n = count(array_filter($items, static fn (array $item): bool => ($item['estado'] ?? '') === 'rechazar'));
+    return array_merge($previas, express_lineas_evaluacion(['items' => $items]), ["RECHAZADO: {$n} item(s). No se cambio nada."]);
+}
+
+/** El item de una orden sobre una empresa que no existe en master.tenants. @return array{tenant:array{estado:string,detalle:string}} */
+function express_item_sin_empresa(int $tenantId): array
+{
+    return ['tenant' => ['estado' => 'rechazar', 'detalle' => "No existe el tenant #{$tenantId} en master.tenants."]];
+}
+
+/** El encabezado del informe de una orden: la empresa (su id y su RNC, sin comillas ni nada que venga del operador) y lo que se pide. */
+function express_encabezado(array $tenant, int $tenantId, string $que): string
+{
+    return "Empresa #{$tenantId} (RNC " . express_preflight_nombrar([(string) ($tenant['rnc'] ?? '')]) . "): {$que}";
+}
+
+/**
+ * Pasa una empresa a Express, o dice por que no: el preflight completo (hechos, evaluacion y plan) y, con $apply y sin rechazos, express_aplicar
+ * con su fila de auditoria. Sin $apply solo lee: SELECT en la master y en la base de la empresa.
+ *
+ * Lee la fila de la empresa (de cualquier tipo, activa o no), abre su base con express_conectar_tenant (una empresa de integracion no tiene: sus
+ * hechos van sin ella y la evaluacion la rechaza) y deja pasar sus errores de conexion: cuando la base no se alcanza no hay hechos que juzgar, y
+ * un "m036 falta" falso seria peor que decir que no se pudo conectar. Una empresa que no existe sale rechazada, con un item tenant.
+ *
+ * El informe (lineas) es: el encabezado, un renglon por item ([OK  ], [CORR] o [RECH]) y, segun el caso, "RECHAZADO: <n> item(s). No se
+ * cambio nada." (hay algun [RECH]: ok false), o los pasos del plan y "DRY-RUN: no se escribio nada. Agrega --apply para aplicar." (ok, sin
+ * $apply) o "APLICADO: el tenant #<id> ahora es express." (ok, aplicado).
+ *
+ * @param array $pedido ['edicion' => 'express', 'tipos' => list<string>, 'modulos' => ?list<string>] (otra edicion lanza InvalidArgumentException)
+ * @return array{ok:bool,aplicado:bool,evaluacion:array,plan:list<array>,lineas:list<string>}
+ *         ok: no hubo rechazos (con $apply, ademas se aplico); aplicado: se escribio; plan: [] si hubo rechazos
+ */
+function express_convertir(PDO $master, int $tenantId, array $pedido, bool $apply): array
+{
+    $edicionPedida = $pedido['edicion'] ?? 'express';
+    if ($edicionPedida !== 'express') {
+        throw new InvalidArgumentException('express_convertir solo convierte a express (el pedido trae la edicion ' . express_preflight_nombrar([(string) $edicionPedida])
+            . '): para volver a completa esta express_revertir.');
+    }
+    $tenant = express_tenant_fila($master, $tenantId);
+    if ($tenant === null) {
+        $items = express_item_sin_empresa($tenantId);
+        return [
+            'ok' => false, 'aplicado' => false,
+            'evaluacion' => ['items' => $items, 'nuevo' => false, 'rechazos' => ['tenant'], 'acciones' => []],
+            'plan' => [], 'lineas' => express_lineas_rechazo($items),
+        ];
+    }
+    $actual = TenantEntitlements::normalizarEdicion($tenant);   // una edicion guardada que no es ni completa ni express se trata como completa y se avisa en el log
+    $tenantDb = ($tenant['tipo'] ?? 'app') === 'app' ? express_conectar_tenant($tenant) : null;
+    $hechos = express_preflight_hechos($master, $tenantDb, $tenant, $pedido);
+    $evaluacion = express_preflight_evaluar($hechos);
+    $plan = express_plan($hechos, $evaluacion);
+
+    $modulos = ($pedido['modulos'] ?? null) === null ? [] : array_values((array) $pedido['modulos']);
+    $lineas = [express_encabezado(
+        $tenant,
+        $tenantId,
+        "edicion {$actual} -> express, tipos " . ((array) ($pedido['tipos'] ?? []) === [] ? '(ninguno)' : express_preflight_nombrar((array) $pedido['tipos']))
+        . ($modulos === [] ? ', todos los modulos del preset.' : ', modulos ' . express_preflight_nombrar($modulos) . '.')
+    )];
+    $lineas = array_merge($lineas, express_lineas_evaluacion($evaluacion));
+    $rechazos = count($evaluacion['rechazos']);
+    if ($rechazos > 0) {
+        $lineas[] = "RECHAZADO: {$rechazos} item(s). No se cambio nada.";
+        return ['ok' => false, 'aplicado' => false, 'evaluacion' => $evaluacion, 'plan' => [], 'lineas' => $lineas];
+    }
+    $lineas = array_merge($lineas, express_lineas_plan($plan));
+    if (!$apply) {
+        $lineas[] = 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.';
+        return ['ok' => true, 'aplicado' => false, 'evaluacion' => $evaluacion, 'plan' => $plan, 'lineas' => $lineas];
+    }
+
+    // Lo que el plan va a dejar sale del UPDATE de tenants del propio plan (express_plan): ahi estan sus parametros.
+    $update = null;
+    foreach ($plan as $paso) {
+        if (($paso['donde'] ?? '') === 'master' && str_starts_with((string) ($paso['sql'] ?? ''), "UPDATE tenants SET edicion = 'express'")) {
+            $update = $paso;
+        }
+    }
+    if ($update === null) {
+        throw new LogicException('El plan de la conversion no trae el UPDATE de tenants: no se puede armar la auditoria.');
+    }
+    $auditoria = express_auditoria($tenant, [
+        'edicion' => 'express', 'tipos_ecf_habilitados' => $update['params'][':t'] ?? null, 'modulos_habilitados' => $update['params'][':m'] ?? null,
+        'cert_vence' => $update['params'][':v'] ?? null, 'pos_enabled' => 0, 'inventario_estricto' => 0,
+    ], "Conversion de la empresa #{$tenantId} a express (tipos " . ($update['params'][':t'] ?? '') . ')');
+    express_aplicar($master, $tenantDb, $plan, $auditoria);
+    $lineas[] = "APLICADO: el tenant #{$tenantId} ahora es express.";
+    return ['ok' => true, 'aplicado' => true, 'evaluacion' => $evaluacion, 'plan' => $plan, 'lineas' => $lineas];
+}
+
+/**
+ * El hash de integracion que una conversion dejo en blanco y la bitacora guardo: el integracion_hash_anterior de old_values de la fila de
+ * auditoria EDICION_CAMBIO mas nueva de la empresa que trae uno, o null si ninguna lo trae. Solo cuenta un sha256 en hexadecimal (el que guarda
+ * TenantResolver::hashSecret): una fila sin hash (la de una conversion o reversion con la credencial ya en blanco), con un valor redactado o
+ * roto, o un JSON que no se lee, se salta y se sigue con la anterior. Mira las 50 mas nuevas.
+ */
+function express_hash_anterior(PDO $master, int $tenantId): ?string
+{
+    $filas = express_preflight_filas(
+        $master,
+        'SELECT old_values FROM audit_logs WHERE tenant_id = :t AND module = :m AND action = :a ORDER BY id DESC LIMIT 50',
+        [':t' => $tenantId, ':m' => EXPRESS_AUDITORIA_MODULO, ':a' => EXPRESS_AUDITORIA_ACCION]
+    );
+    foreach ($filas as $fila) {
+        $valores = json_decode((string) ($fila['old_values'] ?? ''), true);
+        $hash = is_array($valores) ? ($valores['integracion_hash_anterior'] ?? null) : null;
+        if (is_string($hash) && preg_match('/^[0-9a-f]{64}$/D', $hash) === 1) {
+            return $hash;
+        }
+    }
+    return null;
+}
+
+/**
+ * Devuelve una empresa a completa, o dice por que no. Cambia SOLO la edicion (a completa) y, si el hash de integracion de la empresa esta en
+ * blanco y la bitacora guarda el anterior (express_hash_anterior), lo restaura: nada mas se revierte (los tipos, los modulos, el vencimiento del
+ * certificado, el POS, el control de existencias y los permisos del rol user se quedan como estan).
+ *
+ * Volver a completa levanta TODA restriccion de Express y no es una parada segura (anexo 14.5): el informe lo dice. Las palancas de verdad son
+ * dejar vacio tipos_ecf_habilitados (se niega toda emision) y revocar los tokens de la empresa.
+ *
+ * Una empresa que no existe o no es de tipo app, o una master sin la columna edicion, sale rechazada. Una que ya es completa (el valor guardado
+ * exacto) y no tiene hash que restaurar da ok sin aplicar nada y sin fila de auditoria ("SIN CAMBIOS"); una edicion guardada que no es ni
+ * completa ni express se trata como completa (se avisa una vez en el log) y se reescribe como completa.
+ *
+ * Informe: el encabezado, un renglon por item, los pasos, el aviso y "DRY-RUN: ..." o "APLICADO: el tenant #<id> ahora es completa.".
+ *
+ * @return array{ok:bool,aplicado:bool,plan:list<array>,lineas:list<string>}
+ */
+function express_revertir(PDO $master, int $tenantId, bool $apply): array
+{
+    $tenant = express_tenant_fila($master, $tenantId);
+    if ($tenant === null) {
+        return ['ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo(express_item_sin_empresa($tenantId))];
+    }
+    $rechazo = static fn (string $id, string $detalle): array => [
+        'ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo([$id => ['estado' => 'rechazar', 'detalle' => $detalle]]),
+    ];
+    if (($tenant['tipo'] ?? 'app') !== 'app') {
+        return $rechazo('tenant', "La empresa tiene que ser de tipo app (es tipo " . express_preflight_nombrar([(string) ($tenant['tipo'] ?? '')]) . '): una empresa de integracion no tiene edicion que revertir.');
+    }
+    if (!array_key_exists('edicion', $tenant)) {
+        return $rechazo('columnas', 'Faltan columnas de la migracion master 014: aplica db/master_migrations/014_tenants_edicion.sql en la master.');
+    }
+    TenantEntitlements::normalizarEdicion($tenant);   // una edicion guardada que no es ni completa ni express se trata como completa y se avisa en el log
+    $guardada = (string) $tenant['edicion'];
+    $yaCompleta = $guardada === 'completa';
+    $hash = (string) ($tenant['api_secret_hash'] ?? '');
+    $anterior = $hash === '' ? express_hash_anterior($master, $tenantId) : null;
+
+    $items = ['tenant' => ['estado' => 'ok', 'detalle' => 'La empresa es de tipo app.']];
+    if ($yaCompleta) {
+        $items['edicion'] = ['estado' => 'ok', 'detalle' => 'La edicion ya es completa.'];
+    } elseif (in_array($guardada, ['express', 'completa'], true)) {
+        $items['edicion'] = ['estado' => 'corregir', 'detalle' => "La edicion pasa de {$guardada} a completa."];
+    } else {
+        $items['edicion'] = ['estado' => 'corregir', 'detalle' => 'La edicion guardada (' . express_valor_visible($guardada) . ') no es valida y se trata como completa: se reescribe como completa.'];
+    }
+    if ($hash !== '') {
+        $items['integracion'] = ['estado' => 'ok', 'detalle' => 'La credencial de integracion ya tiene su hash: no se toca.'];
+    } elseif ($anterior !== null) {
+        $items['integracion'] = ['estado' => 'corregir', 'detalle' => 'api_secret_hash esta en blanco: se restaura el hash anterior que guardo la bitacora (el valor no se imprime).'];
+    } else {
+        $items['integracion'] = ['estado' => 'ok', 'detalle' => 'api_secret_hash esta en blanco y la bitacora no trae un hash anterior valido: no hay nada que restaurar (la credencial de integracion sigue sin servir).'];
+    }
+
+    $plan = [];
+    if (!$yaCompleta) {
+        $plan[] = [
+            'donde' => 'master', 'que' => 'Pasar la empresa a completa (solo la edicion)',
+            'sql' => "UPDATE tenants SET edicion = 'completa' WHERE id = :id AND tipo = 'app'", 'params' => [':id' => $tenantId],
+        ];
+    }
+    if ($anterior !== null) {
+        $plan[] = [
+            'donde' => 'master', 'que' => 'Restaurar api_secret_hash con el hash anterior de la bitacora (solo si sigue en blanco)',
+            'sql' => "UPDATE tenants SET api_secret_hash = :h WHERE id = :id AND tipo = 'app' AND api_secret_hash = ''", 'params' => [':h' => $anterior, ':id' => $tenantId],
+        ];
+    }
+    $lineas = array_merge(
+        [express_encabezado($tenant, $tenantId, 'volver a completa.')],
+        express_lineas_evaluacion(['items' => $items])
+    );
+    if ($plan === []) {
+        $lineas[] = "SIN CAMBIOS: el tenant #{$tenantId} ya es completa. No se escribio nada.";
+        return ['ok' => true, 'aplicado' => false, 'plan' => [], 'lineas' => $lineas];
+    }
+    $lineas = array_merge($lineas, express_lineas_plan($plan), [
+        'ADVERTENCIA: volver a completa levanta TODAS las restricciones de Express (modulos, tipos, rutas y vencimiento de las sesiones por inactividad) y no es una parada segura. '
+            . 'Para frenar a una empresa Express hay otras palancas: dejar vacio tipos_ecf_habilitados (se niega toda emision) o revocar los tokens de la empresa.',
+        'Esta orden solo cambia la edicion (y devuelve api_secret_hash si esta en blanco): tipos, modulos, vencimiento del certificado, POS, control de existencias y permisos del rol user se quedan como estan.',
+    ]);
+    if (!$apply) {
+        $lineas[] = 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.';
+        return ['ok' => true, 'aplicado' => false, 'plan' => $plan, 'lineas' => $lineas];
+    }
+    express_aplicar($master, null, $plan, express_auditoria(
+        $tenant,
+        ['edicion' => 'completa'],
+        "Reversion de la empresa #{$tenantId} a completa" . ($anterior !== null ? ' (api_secret_hash restaurado desde la bitacora)' : '')
+    ));
+    $lineas[] = "APLICADO: el tenant #{$tenantId} ahora es completa.";
+    return ['ok' => true, 'aplicado' => true, 'plan' => $plan, 'lineas' => $lineas];
+}
+
+/**
+ * Recalcula tenants.cert_vence de una empresa Express desde su certificado (express_leer_certificado: el cert_path de la fila, sin respaldo con
+ * el del .env) y lo escribe, o dice por que no. Sirve cuando se renueva el certificado: la fecha de la fila es solo informativa (GET /api/emisor
+ * la muestra en Configuracion) y no bloquea nada, pero tiene que seguir al archivo. La fecha es el dia del notAfter en la zona horaria por
+ * defecto de PHP, como la escribe express_plan y la lee TenantEntitlements::estadoCertificado.
+ *
+ * Una empresa que no existe, o que no es Express (tipo app y edicion express), sale rechazada; tambien una cuyo certificado no se puede abrir
+ * (CERT_FALTA: sin fecha que escribir, y borrar la que hay seria peor). Uno que abre pero ya vencio (CERT_VENCIDO) SI se escribe: su notAfter es
+ * la verdad y el aviso de Configuracion debe decir que vencio. Con la fecha ya al dia da ok sin escribir ("SIN CAMBIOS").
+ *
+ * Escribe un solo UPDATE (donde la empresa sigue siendo Express) y relee la fila: si la fecha no quedo, lanza RuntimeException. NO escribe fila
+ * de auditoria: no cambia la edicion ni nada que decida una peticion (EDICION_CAMBIO es de los cambios de edicion).
+ *
+ * @return array{ok:bool,aplicado:bool,plan:list<array>,lineas:list<string>}
+ */
+function express_refrescar_cert(PDO $master, int $tenantId, bool $apply): array
+{
+    $tenant = express_tenant_fila($master, $tenantId);
+    if ($tenant === null) {
+        return ['ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo(express_item_sin_empresa($tenantId))];
+    }
+    $rechazo = static fn (array $items): array => ['ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo($items)];
+    if (!TenantEntitlements::esRestringido($tenant)) {
+        return $rechazo(['edicion' => ['estado' => 'rechazar', 'detalle' => '--refrescar-cert es solo para empresas Express (tipo app y edicion express): esta empresa es de tipo '
+            . express_preflight_nombrar([(string) ($tenant['tipo'] ?? '')]) . ' y su edicion ' . express_valor_visible(isset($tenant['edicion']) ? (string) $tenant['edicion'] : null) . '.']]);
+    }
+    $cert = express_leer_certificado($tenant);
+    if (!is_int($cert['vence'])) {
+        return $rechazo(['edicion' => ['estado' => 'ok', 'detalle' => 'La empresa es Express.'], 'cert' => ['estado' => 'rechazar',
+            'detalle' => 'CERT_FALTA: la empresa no tiene un certificado propio que se pueda abrir (cert_path vacio, archivo que no se lee, o clave que falta o no lo abre): no hay fecha que calcular y la que tiene no se borra. Cargalo con tools/set_tenant_cert.php.']]);
+    }
+    $nueva = date('Y-m-d', $cert['vence']);
+    $actual = ($tenant['cert_vence'] ?? null) === null ? null : (string) $tenant['cert_vence'];
+    $items = [
+        'edicion' => ['estado' => 'ok', 'detalle' => 'La empresa es Express.'],
+        'cert' => ['estado' => 'ok', 'detalle' => $cert['ok']
+            ? "Certificado propio legible, con su clave y vigente hasta {$nueva}."
+            : "CERT_VENCIDO: el certificado abre pero ya vencio el {$nueva}: se registra esa fecha (es solo informativa)."],
+        'cert_vence' => $actual === $nueva
+            ? ['estado' => 'ok', 'detalle' => "cert_vence ya es {$nueva}."]
+            : ['estado' => 'corregir', 'detalle' => 'cert_vence pasa de ' . express_valor_visible($actual) . ' a ' . express_valor_visible($nueva) . '.'],
+    ];
+    $lineas = array_merge([express_encabezado($tenant, $tenantId, 'refrescar el vencimiento del certificado.')], express_lineas_evaluacion(['items' => $items]));
+    if ($actual === $nueva) {
+        $lineas[] = "SIN CAMBIOS: cert_vence del tenant #{$tenantId} ya es {$nueva}. No se escribio nada.";
+        return ['ok' => true, 'aplicado' => false, 'plan' => [], 'lineas' => $lineas];
+    }
+    $plan = [[
+        'donde' => 'master', 'que' => 'Escribir cert_vence con el dia del notAfter del certificado',
+        'sql' => "UPDATE tenants SET cert_vence = :v WHERE id = :id AND tipo = 'app' AND edicion = 'express'", 'params' => [':v' => $nueva, ':id' => $tenantId],
+    ]];
+    $lineas = array_merge($lineas, express_lineas_plan($plan, false));   // esta orden no escribe fila de auditoria
+    if (!$apply) {
+        $lineas[] = 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.';
+        return ['ok' => true, 'aplicado' => false, 'plan' => $plan, 'lineas' => $lineas];
+    }
+    express_ejecutar($master, $plan[0]['sql'], $plan[0]['params']);
+    $difieren = express_diferencias(['cert_vence' => $nueva] + express_estado_auditado($tenant), express_leer_estado($master, $tenantId));
+    if ($difieren !== []) {
+        throw new RuntimeException("El UPDATE de cert_vence del tenant #{$tenantId} no dejo lo esperado al releerlo: " . implode('; ', $difieren) . '.');
+    }
+    $lineas[] = "APLICADO: cert_vence del tenant #{$tenantId} ahora es {$nueva}.";
+    return ['ok' => true, 'aplicado' => true, 'plan' => $plan, 'lineas' => $lineas];
 }
