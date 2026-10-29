@@ -7,7 +7,8 @@ require_once(__DIR__ . '/TenantResolver.php');
  * master.tenants.edicion (migracion 014) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
  * resuelve, para una empresa Express, lo que su fila le da: los modulos (el preset de config/editions.php angostado por
  * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen, el bloque que se le
- * entrega al cliente al iniciar sesion y que rutas de la API puede llamar (la guarda de rutas).
+ * entrega al cliente al iniciar sesion, que rutas de la API puede llamar (la guarda de rutas) y cuando vence por
+ * inactividad el token de su sesion (tokenCaducado).
  *
  * Reglas del archivo:
  *   - Todo es estatico y no hay namespace. Incluirlo no imprime nada: se carga en medio de una peticion que contesta
@@ -23,17 +24,22 @@ require_once(__DIR__ . '/TenantResolver.php');
  */
 final class TenantEntitlements
 {
-    /** Codigo de la negativa por una ruta o un modulo que la edicion no incluye. El cliente se guia por el codigo, nunca por el texto. */
-    public const CODIGO_EDICION_NO_INCLUYE = 'EDICION_NO_INCLUYE';
+    /**
+     * Codigo de la negativa por una ruta o un modulo que la edicion no incluye. El cliente se guia por el codigo, nunca por el
+     * texto. Alias de TenantResolver::CODIGO_EDICION_NO_INCLUYE (ver MSG_EDICION).
+     */
+    public const CODIGO_EDICION_NO_INCLUYE = TenantResolver::CODIGO_EDICION_NO_INCLUYE;
 
     /** Codigo de la solicitud rechazada por su forma: un segmento '..' en la ruta o '/api/' dentro de la consulta. */
     public const CODIGO_SOLICITUD_INVALIDA = 'SOLICITUD_INVALIDA';
 
     /**
-     * Texto de EDICION_NO_INCLUYE, sin punto final. Es la unica copia en la API (todo lo que conteste esa negativa lo lee
-     * de aqui) y tiene que ser igual, byte a byte, a MSG_EDICION del mock del front (express/dev/mock-api.mjs).
+     * Texto de EDICION_NO_INCLUYE, sin punto final. Es un alias de TenantResolver::MSG_EDICION, que es la unica copia en la
+     * API: vive alli porque AuthMiddleware tiene que contestar esa misma negativa cuando esta clase no carga, y una clase que
+     * no carga no puede dar su propio texto. Todo lo que conteste la negativa lo lee de una de las dos constantes, nunca de
+     * un literal. Tiene que ser igual, byte a byte, a MSG_EDICION del mock del front (express/dev/mock-api.mjs).
      */
-    public const MSG_EDICION = 'Tu plan Express no incluye esta función';
+    public const MSG_EDICION = TenantResolver::MSG_EDICION;
 
     /** Texto de SOLICITUD_INVALIDA. */
     public const MSG_SOLICITUD = 'La solicitud no es válida.';
@@ -386,6 +392,42 @@ final class TenantEntitlements
         // Con bytes que no son UTF-8 en $extra, un cuerpo vacio rompe el JSON del cliente: se sustituyen y se sigue.
         echo json_encode($cuerpo + $extra, JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR);
         exit;
+    }
+
+    /**
+     * ¿Venció por inactividad el token de sesion de una empresa Express? Es PURA: la hora de la peticion la pone quien llama.
+     *
+     * Cuenta desde el ultimo uso ($ultimoUso, api_tokens.last_used) o, si el token nunca se uso, desde que se creo
+     * ($creado, api_tokens.created_at): COALESCE(last_used, created_at). Un valor vacio, que no se puede leer como fecha o que
+     * es la fecha cero de MySQL ('0000-...') cuenta como ausente y pasa al siguiente; sin ninguno de los dos no vence.
+     * Vence solo el que es ESTRICTAMENTE mas viejo que $dias dias: a exactamente $dias dias aun vale, y un ultimo uso en el
+     * futuro (reloj corrido) tampoco vence. Un token recien creado, un reloj adelantado o un dato roto no dejan a nadie fuera
+     * (RF3): ante la duda, no vence.
+     *
+     * @param ?string $ultimoUso fecha 'Y-m-d H:i:s' del ultimo uso, o null
+     * @param ?string $creado    fecha 'Y-m-d H:i:s' de la creacion, o null
+     * @param int     $ahora     marca de tiempo de la peticion (time())
+     * @param ?int    $dias      dias de inactividad que se toleran; null = TOKEN_INACTIVIDAD_DIAS de config()
+     */
+    public static function tokenCaducado(?string $ultimoUso, ?string $creado, int $ahora, ?int $dias = null): bool
+    {
+        $momento = self::momentoDeToken($ultimoUso) ?? self::momentoDeToken($creado);
+        if ($momento === null) {
+            return false;
+        }
+        $dias ??= (int) self::config()['TOKEN_INACTIVIDAD_DIAS'];
+        return $ahora - $momento > $dias * 86400;
+    }
+
+    /** Una fecha de api_tokens como marca de tiempo; null si esta vacia, es la fecha cero de MySQL o no se puede leer. */
+    private static function momentoDeToken(?string $fecha): ?int
+    {
+        $fecha = trim((string) $fecha);
+        if ($fecha === '' || str_starts_with($fecha, '0000-')) {
+            return null;
+        }
+        $marca = strtotime($fecha);
+        return $marca === false ? null : $marca;
     }
 
     /** El resultado de evaluarRuta: siempre las mismas cuatro claves y en el mismo orden. */

@@ -37,11 +37,13 @@ class authModel
             $token_hash = TokenGenerator::hashToken($token);
             // JOIN a users para traer el rol (RBAC). users vive en la misma
             // conexion que api_tokens (master en MT, tenant DB en single).
+            // last_used y created_at son para el vencimiento por inactividad de las
+            // empresas Express (AuthMiddleware::validateRequest); el resto los ignora.
             $sql = self::multiTenant()
-                ? "SELECT t.user_id, t.tenant_id, t.is_active, u.role
+                ? "SELECT t.user_id, t.tenant_id, t.is_active, u.role, t.last_used, t.created_at
                      FROM api_tokens t JOIN users u ON u.id = t.user_id
                     WHERE t.token_hash = :token_hash LIMIT 1"
-                : "SELECT t.user_id, t.is_active, u.role
+                : "SELECT t.user_id, t.is_active, u.role, t.last_used, t.created_at
                      FROM api_tokens t JOIN users u ON u.id = t.user_id
                     WHERE t.token_hash = :token_hash LIMIT 1";
             $stmt = $this->conexion->prepare($sql);
@@ -54,6 +56,8 @@ class authModel
                     'user_id' => (int)$row['user_id'],
                     'tenant_id' => isset($row['tenant_id']) ? (int)$row['tenant_id'] : null,
                     'role' => $row['role'] ?? null,
+                    'last_used' => isset($row['last_used']) ? (string) $row['last_used'] : null,
+                    'created_at' => isset($row['created_at']) ? (string) $row['created_at'] : null,
                 ];
             }
             return ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'role' => null];

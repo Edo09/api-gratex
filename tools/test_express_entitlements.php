@@ -10,9 +10,115 @@
  *
  * Uso:
  *   php tools/test_express_entitlements.php      (sale con 1 si algo falla)
+ *   (--hijo=validar --escenario=<base64 de un JSON> es el modo hijo de la seccion 4: lo usa la propia suite, no se llama a mano)
  */
 
 require_once __DIR__ . '/write_ahead_test_lib.php';
+
+/**
+ * Modo hijo de la seccion 4: corre AuthMiddleware::validateRequest en un proceso aparte (la guarda de rutas termina la
+ * peticion con exit, y eso no se puede probar dentro del proceso de la suite) y, al terminar, tambien por ese exit,
+ * imprime UNA linea JSON:
+ *   {salida, http, llamadas: {actualizar, revocar}, hashes: {actualizar, revocar}, clase_cargada, pasos, retorno, contexto, log}
+ * donde salida es lo que la peticion imprimio, http el codigo que dejo puesto (false si nadie lo puso), llamadas y hashes lo que
+ * recibieron updateLastUsed y revokeTokenByHash, clase_cargada si TenantEntitlements llego a cargarse, pasos cuantas
+ * llamadas a validateRequest volvieron, retorno el resultado de la ultima, contexto la identidad que quedo en
+ * RequestContext (user_id, tenant_id y hash del token) y log lo que se escribio con error_log.
+ *
+ * Escenario (JSON): tenant (la fila de master.tenants que queda resuelta, o null), validacion (lo que devuelve
+ * validateToken), metodo, uri, token, peticiones (cuantas veces se llama validateRequest en el mismo proceso; por omision
+ * 1), entre (fila que reemplaza a tenant entre una llamada y la siguiente; opcional) y raiz (copia del arbol del API de la
+ * que se cargan las clases; por omision, este).
+ *
+ * Ninguna parte toca una base de datos: la bitacora va apagada, authModel es un doble sin conexion, el middleware se crea
+ * sin constructor y MULTI_TENANT_ENABLED no esta puesta (la empresa no se resuelve aqui: la fija el escenario).
+ */
+function ent_hijo_validar(array $escenario): never
+{
+    error_reporting(E_ALL);
+    ini_set('display_errors', '1');   // un aviso suelto cae en "salida" y rompe sus pruebas, sea cual sea el php.ini
+    putenv('AUDIT_LOG_ENABLED=false');
+    putenv('MULTI_TENANT_ENABLED');   // sin valor: la quita del entorno que heredo del proceso padre
+    unset($_ENV['MULTI_TENANT_ENABLED'], $_SERVER['HTTP_X_API_SECRET']);
+    $logArchivo = (string) tempnam(sys_get_temp_dir(), 'ent_val_');
+    ini_set('error_log', $logArchivo);
+    $raiz = (string) ($escenario['raiz'] ?? dirname(__DIR__));
+    require_once $raiz . '/src/Middleware/AuthMiddleware.php';
+
+    $modelo = new class ($escenario['validacion'] ?? []) extends authModel {
+        /** @var array{actualizar:int,revocar:int} */
+        public array $contadores = ['actualizar' => 0, 'revocar' => 0];
+        /** @var array{actualizar:list<string>,revocar:list<string>} */
+        public array $hashes = ['actualizar' => [], 'revocar' => []];
+
+        // Sin parent::__construct: el constructor de authModel abre la base.
+        public function __construct(private array $validacion)
+        {
+        }
+
+        public function validateToken($token)
+        {
+            return $this->validacion;
+        }
+
+        public function updateLastUsed($token_hash)
+        {
+            $this->contadores['actualizar']++;
+            $this->hashes['actualizar'][] = $token_hash;
+        }
+
+        public function revokeTokenByHash($token_hash)
+        {
+            $this->contadores['revocar']++;
+            $this->hashes['revocar'][] = $token_hash;
+            return ['success', 'revocado por la prueba'];
+        }
+    };
+    $middleware = (new ReflectionClass('AuthMiddleware'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('AuthMiddleware', 'authModel'))->setValue($middleware, $modelo);
+    $actual = new ReflectionProperty('TenantResolver', 'current');
+    $actual->setValue(null, $escenario['tenant'] ?? null);
+
+    $_SERVER['REQUEST_METHOD'] = (string) ($escenario['metodo'] ?? 'GET');
+    $_SERVER['REQUEST_URI'] = (string) ($escenario['uri'] ?? '/api/facturas');
+    $_SERVER['HTTP_X_API_KEY'] = (string) ($escenario['token'] ?? '');
+
+    $estado = ['pasos' => 0, 'retorno' => null];
+    ob_start();
+    register_shutdown_function(static function () use (&$estado, $modelo, $logArchivo): void {
+        $salida = ob_get_level() > 0 ? (string) ob_get_clean() : '';
+        $http = http_response_code();
+        $log = (string) @file_get_contents($logArchivo);
+        @unlink($logArchivo);
+        echo "\n", json_encode([
+            'salida' => $salida,
+            'http' => $http,
+            'llamadas' => $modelo->contadores,
+            'hashes' => $modelo->hashes,
+            'clase_cargada' => class_exists('TenantEntitlements', false),
+            'pasos' => $estado['pasos'],
+            'retorno' => $estado['retorno'],
+            'contexto' => [
+                'user_id' => RequestContext::userId(),
+                'tenant_id' => RequestContext::tenantId(),
+                'token_hash' => RequestContext::sessionTokenHash(),
+            ],
+            'log' => $log,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PARTIAL_OUTPUT_ON_ERROR), "\n";
+    });
+    for ($i = 0, $n = max(1, (int) ($escenario['peticiones'] ?? 1)); $i < $n; $i++) {
+        if ($i > 0 && array_key_exists('entre', $escenario)) {
+            $actual->setValue(null, $escenario['entre']);
+        }
+        $estado['retorno'] = $middleware->validateRequest();
+        $estado['pasos']++;
+    }
+    exit(0);
+}
+
+if (wa_arg('hijo') === 'validar') {
+    ent_hijo_validar((array) json_decode((string) base64_decode((string) wa_arg('escenario')), true));
+}
 
 // ---------------------------------------------------------------------------
 // 1) Migracion master 014 y sus espejos (esquema, verificador, README, schema.md)
@@ -855,6 +961,373 @@ $s3G = $s3Guarda($s3Fila(), [
 ]);
 wa_chk('guardaRuta: el metodo es parte de la clave de la memoria (el GET permitido no permite el POST)',
     $s3G['pasos'] === 1 && $s3G['http'] === 403 && $s3Cuerpo($s3G) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN], $s3G);
+
+// ---------------------------------------------------------------------------
+// 4) AuthMiddleware::validateRequest: columnas del token, vencimiento por inactividad y guarda de rutas
+// ---------------------------------------------------------------------------
+echo "\n== 4) validateRequest: vencimiento por inactividad y guarda de rutas ==\n";
+
+// --- tokenCaducado (RF3: ni un token recien creado, ni un reloj adelantado, ni una fecha cero dejan a nadie fuera) -----------
+// La tabla cuenta dias exactos con strtotime: mientras corre se fija UTC, porque en una zona con cambio de hora entre el
+// 27-09 y el 27-10 "exactamente 30 dias" mediria una hora de mas. La zona vuelve a la de antes al terminar.
+$s4Zona = date_default_timezone_get();
+date_default_timezone_set('UTC');
+try {
+    $s4Ahora = strtotime('2026-10-27 12:00:00');
+    foreach ([
+        ['2026-09-27 12:00:00', null, false],   // exactamente 30 dias: aun vale
+        ['2026-09-27 11:59:59', null, true],    // un segundo mas: vence
+        [null, '2026-10-20 00:00:00', false],   // nunca se uso: cuenta desde que se creo
+        [null, '2026-09-01 00:00:00', true],
+        [null, null, false],                    // sin ningun dato no vence
+        ['', '', false],
+        ['2026-10-28 12:00:00', null, false],   // ultimo uso en el futuro (reloj corrido)
+        ['0000-00-00 00:00:00', '2026-10-26 00:00:00', false],   // la fecha cero cuenta como ausente
+    ] as [$s4Uso, $s4Crea, $s4Esperado]) {
+        $s4Obtenido = TenantEntitlements::tokenCaducado($s4Uso, $s4Crea, $s4Ahora);
+        wa_chk('tokenCaducado(' . json_encode([$s4Uso, $s4Crea]) . ')', $s4Obtenido === $s4Esperado, $s4Obtenido);
+    }
+    // Mas alla de la tabla: el plazo explicito, COALESCE (el ultimo uso gana sobre un created_at viejo) y los datos ausentes.
+    wa_chk('tokenCaducado: el plazo se puede pasar (con 1 dia, 24 h exactas valen y un segundo mas vence)',
+        TenantEntitlements::tokenCaducado('2026-10-26 12:00:00', null, $s4Ahora, 1) === false
+        && TenantEntitlements::tokenCaducado('2026-10-26 11:59:59', null, $s4Ahora, 1) === true);
+    // Sin plazo explicito el plazo sale de config(): se prueba con otro valor en la config, no con el 30 que hoy trae.
+    $s4Config = TenantEntitlements::config();
+    $s4Cache = new ReflectionProperty('TenantEntitlements', 'config');
+    $s4Cache->setValue(null, ['TOKEN_INACTIVIDAD_DIAS' => 1] + $s4Config);
+    try {
+        $s4PorConfig = [
+            TenantEntitlements::tokenCaducado('2026-10-26 12:00:00', null, $s4Ahora),
+            TenantEntitlements::tokenCaducado('2026-10-26 11:59:59', null, $s4Ahora),
+        ];
+    } finally {
+        $s4Cache->setValue(null, $s4Config);
+    }
+    wa_chk('tokenCaducado: sin plazo explicito lo toma de config()[TOKEN_INACTIVIDAD_DIAS] (con 1 dia: false y true)',
+        $s4PorConfig === [false, true] && TenantEntitlements::config() === $s4Config, $s4PorConfig);
+    wa_chk('tokenCaducado: un ultimo uso un ano en el futuro (reloj muy corrido) tampoco vence: la edad negativa no se mide en valor absoluto',
+        TenantEntitlements::tokenCaducado('2027-10-27 12:00:00', null, $s4Ahora) === false
+        && TenantEntitlements::tokenCaducado(null, '2027-10-27 12:00:00', $s4Ahora) === false);
+    wa_chk('tokenCaducado: el ultimo uso gana sobre un created_at mas viejo, y created_at solo cuenta si no hay ultimo uso',
+        TenantEntitlements::tokenCaducado('2026-10-26 00:00:00', '2026-01-01 00:00:00', $s4Ahora) === false
+        && TenantEntitlements::tokenCaducado(null, '2026-01-01 00:00:00', $s4Ahora) === true);
+    wa_chk('tokenCaducado: un ultimo uso vacio, ilegible o con la fecha cero pasa a created_at; sin otro dato no vence',
+        TenantEntitlements::tokenCaducado('', '2026-01-01 00:00:00', $s4Ahora) === true
+        && TenantEntitlements::tokenCaducado('0000-00-00 00:00:00', '2026-01-01 00:00:00', $s4Ahora) === true
+        && TenantEntitlements::tokenCaducado('basura', '2026-01-01 00:00:00', $s4Ahora) === true
+        && TenantEntitlements::tokenCaducado('basura', null, $s4Ahora) === false
+        && TenantEntitlements::tokenCaducado('0000-00-00 00:00:00', null, $s4Ahora) === false
+        && TenantEntitlements::tokenCaducado(null, '0000-00-00 00:00:00', $s4Ahora) === false);
+} finally {
+    date_default_timezone_set($s4Zona);
+}
+
+// --- cargarEntitlements y el texto de EDICION_NO_INCLUYE -----------------------------------------------------------------------
+// La seccion 2 ya cargo la clase en este proceso: aqui solo se prueba que, con el archivo en su sitio, es true y no hace ruido.
+ob_start();
+[$s4Carga, $s4Error, $s4Log] = wa_con_log(static fn (): bool => TenantResolver::cargarEntitlements());
+$s4Salida = (string) ob_get_clean();
+wa_chk('cargarEntitlements(): con src/TenantEntitlements.php en su sitio devuelve true, sin imprimir ni escribir al log',
+    $s4Carga === true && $s4Error === null && $s4Salida === '' && $s4Log === '', [$s4Carga, $s4Error?->getMessage(), $s4Salida, $s4Log]);
+// Una peticion con la clase rota o ausente contesta el 403 desde AuthMiddleware con el codigo y el texto de TenantResolver
+// (la clase siempre cargada): TenantEntitlements los repite como alias, no como una segunda copia.
+wa_chk('EDICION_NO_INCLUYE: el codigo y el texto de TenantEntitlements son los de TenantResolver, y el texto no termina en punto',
+    TenantResolver::CODIGO_EDICION_NO_INCLUYE === 'EDICION_NO_INCLUYE'
+    && TenantEntitlements::CODIGO_EDICION_NO_INCLUYE === TenantResolver::CODIGO_EDICION_NO_INCLUYE
+    && TenantEntitlements::MSG_EDICION === TenantResolver::MSG_EDICION
+    && TenantResolver::MSG_EDICION !== '' && !str_ends_with(TenantResolver::MSG_EDICION, '.'),
+    [TenantResolver::MSG_EDICION, TenantEntitlements::MSG_EDICION]);
+// Un solo archivo de src/ lleva el texto, y una sola vez: una segunda copia (en AuthMiddleware, en una clase nueva) se desvia
+// del mock del front sin que nada lo note. Se busca el prefijo, sin la o acentuada.
+$s4Raiz = dirname(__DIR__);
+$s4Texto = 'Tu plan Express no incluye esta funci';
+$s4Archivos = [];
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($s4Raiz . '/src', FilesystemIterator::SKIP_DOTS)) as $s4Item) {
+    if ($s4Item->isFile() && str_ends_with($s4Item->getFilename(), '.php')) {
+        $s4Veces = substr_count((string) file_get_contents($s4Item->getPathname()), $s4Texto);
+        if ($s4Veces > 0) {
+            $s4Archivos[str_replace('\\', '/', substr($s4Item->getPathname(), strlen($s4Raiz) + 1))] = $s4Veces;
+        }
+    }
+}
+wa_chk('el texto de EDICION_NO_INCLUYE esta una sola vez en src/ y en TenantResolver.php (la constante compartida)',
+    $s4Archivos === ['src/TenantResolver.php' => 1], $s4Archivos);
+
+// --- validateToken: last_used y created_at en el SELECT y en el resultado, en los dos modos -------------------------------------
+require_once __DIR__ . '/../src/Models/authModel.php';
+
+/** Sentencia de mentira de authModel: anota el SQL y los parametros del execute y devuelve la fila que lleva la conexion. */
+final class ExpSentenciaFalsa
+{
+    public function __construct(private ExpConexionFalsa $conexion, private string $sql)
+    {
+    }
+
+    public function execute(?array $params = null): bool
+    {
+        $this->conexion->consultas[] = ['sql' => $this->sql, 'params' => $params ?? []];
+        return true;
+    }
+
+    public function fetch(): array|false
+    {
+        return $this->conexion->fila;
+    }
+}
+
+/** Conexion de mentira: la propiedad conexion de authModel no tiene tipo, asi que no hace falta un PDO. */
+final class ExpConexionFalsa
+{
+    /** @var list<array{sql:string,params:array<string,mixed>}> */
+    public array $consultas = [];
+
+    public function __construct(public array|false $fila)
+    {
+    }
+
+    public function prepare(string $sql): ExpSentenciaFalsa
+    {
+        return new ExpSentenciaFalsa($this, $sql);
+    }
+}
+
+/** authModel sin constructor (el constructor abre la base) y con la conexion de mentira. */
+$s4Modelo = static function (ExpConexionFalsa $conexion): authModel {
+    $modelo = (new ReflectionClass('authModel'))->newInstanceWithoutConstructor();
+    (new ReflectionProperty('authModel', 'conexion'))->setValue($modelo, $conexion);
+    return $modelo;
+};
+$s4MtAntes = getenv('MULTI_TENANT_ENABLED');
+try {
+    foreach (['multi-tenant' => true, 'un solo tenant' => false] as $s4Modo => $s4Mt) {
+        putenv('MULTI_TENANT_ENABLED=' . ($s4Mt ? 'true' : 'false'));
+        $s4Fila = ['user_id' => '7', 'is_active' => '1', 'role' => 'admin', 'last_used' => '2026-10-20 10:00:00', 'created_at' => '2026-10-01 08:00:00']
+            + ($s4Mt ? ['tenant_id' => '12'] : []);
+        $s4Con = new ExpConexionFalsa($s4Fila);
+        $s4R = $s4Modelo($s4Con)->validateToken('token-de-prueba');
+        wa_chk("validateToken ({$s4Modo}): el SELECT pide t.last_used, t.created_at y sigue buscando por el hash del token",
+            count($s4Con->consultas) === 1 && str_contains($s4Con->consultas[0]['sql'], 't.last_used, t.created_at')
+            && $s4Con->consultas[0]['params'] === [':token_hash' => hash('sha256', 'token-de-prueba')], $s4Con->consultas);
+        wa_chk("validateToken ({$s4Modo}): el resultado lleva last_used y created_at como texto, y lo de siempre en el mismo orden",
+            $s4R === ['valid' => true, 'user_id' => 7, 'tenant_id' => $s4Mt ? 12 : null, 'role' => 'admin',
+                'last_used' => '2026-10-20 10:00:00', 'created_at' => '2026-10-01 08:00:00'], $s4R);
+        $s4R = $s4Modelo(new ExpConexionFalsa(['last_used' => null] + $s4Fila))->validateToken('token-de-prueba');
+        wa_chk("validateToken ({$s4Modo}): un last_used NULL sale como null (la clave esta) y created_at sigue",
+            array_key_exists('last_used', $s4R) && $s4R['last_used'] === null && $s4R['created_at'] === '2026-10-01 08:00:00', $s4R);
+        $s4R = $s4Modelo(new ExpConexionFalsa(['is_active' => '0'] + $s4Fila))->validateToken('token-de-prueba');
+        wa_chk("validateToken ({$s4Modo}): un token inactivo sigue siendo valid false, con la forma de siempre",
+            $s4R === ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'role' => null], $s4R);
+    }
+} finally {
+    putenv($s4MtAntes === false ? 'MULTI_TENANT_ENABLED' : 'MULTI_TENANT_ENABLED=' . $s4MtAntes);
+}
+
+// --- validateRequest en un hijo (ent_hijo_validar, arriba): la guarda termina la peticion con exit -------------------------
+$s4Token = 'tok-' . str_repeat('1a2b3c4d', 4);
+/** Una fila de master.tenants de una empresa Express; $o pisa los campos que cada caso cambia. */
+$s4Empresa = static fn (array $o = []): array => $o + [
+    'id' => 12, 'nombre' => 'Constructora X', 'rnc' => '131000001', 'tipo' => 'app', 'ambiente' => 'ecf',
+    'edicion' => 'express', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null,
+];
+/** Hace $dias dias, con el formato de api_tokens. */
+$s4Hace = static fn (int $dias): string => date('Y-m-d H:i:s', time() - $dias * 86400);
+/** Lo que devolveria validateToken para el administrador 7 de la empresa 12 con un token recien creado; $o pisa campos. */
+$s4Valida = static fn (array $o = []): array => $o + [
+    'valid' => true, 'user_id' => 7, 'tenant_id' => 12, 'role' => 'admin', 'last_used' => null, 'created_at' => date('Y-m-d H:i:s'),
+];
+/**
+ * Corre validateRequest de una peticion (metodo y uri) con la empresa $tenant ya resuelta y $validacion sobre lo que devuelve
+ * validateToken; $extra suma claves al escenario del hijo (peticiones, entre, raiz). Devuelve la linea JSON del hijo,
+ * decodificada, o ['hijo_sin_linea_json' => lo que imprimio] si no hubo.
+ */
+$s4Validar = static function (?array $tenant, string $metodo, string $uri, array $validacion = [], array $extra = []) use ($s4Token, $s4Valida): array {
+    $escenario = ['tenant' => $tenant, 'metodo' => $metodo, 'uri' => $uri, 'token' => $s4Token, 'validacion' => $s4Valida($validacion)] + $extra;
+    $r = wa_correr([PHP_BINARY, __FILE__, '--hijo=validar', '--escenario=' . base64_encode((string) json_encode($escenario))]);
+    $lineas = array_values(array_filter(array_map('trim', explode("\n", $r['salida'])), static fn (string $linea): bool => $linea !== ''));
+    $dejo = json_decode((string) end($lineas), true);
+    return is_array($dejo) ? $dejo : ['hijo_sin_linea_json' => $r];
+};
+// El resultado de siempre de una validacion buena: ni last_used ni created_at se filtran a lo que ven los llamadores.
+$s4Valido = ['valid' => true, 'user_id' => 7, 'tenant_id' => 12, 'role' => 'admin', 'message' => 'Token validated'];
+$s4SinCambios = ['actualizar' => 0, 'revocar' => 0];
+
+$s4R = $s4Validar($s4Empresa(['edicion' => 'completa']), 'GET', '/api/gastos');
+wa_chk('(a) empresa completa, GET /api/gastos: valida con el resultado de siempre, last_used una vez y TenantEntitlements no se carga',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+    && $s4R['salida'] === '' && $s4R['http'] === false && $s4R['log'] === '', $s4R);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas?lean=1');
+wa_chk('(b) empresa Express, GET /api/facturas: valida con el mismo resultado, last_used una vez, sin revocar ni cortar',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === true
+    && $s4R['salida'] === '' && $s4R['http'] === false && $s4R['log'] === '', $s4R);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/gastos');
+$s4Cuerpo = json_decode($s4R['salida'], true);
+wa_chk('(c) empresa Express, GET /api/gastos: 403 EDICION_NO_INCLUYE con el texto de la constante, validateRequest no vuelve y last_used no se toca',
+    $s4R['http'] === 403 && $s4Cuerpo === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+    && $s4R['pasos'] === 0 && $s4R['retorno'] === null && $s4R['llamadas'] === $s4SinCambios, $s4R);
+wa_chk('(c) la negativa llega con la identidad ya puesta en RequestContext (usuario, empresa y hash del token): la fila de auditoria nombra al usuario',
+    $s4R['contexto'] === ['user_id' => 7, 'tenant_id' => 12, 'token_hash' => hash('sha256', $s4Token)], $s4R['contexto'] ?? null);
+// El rol que devuelve validateToken llega a la guarda (RF1): una fila de administrador es del admin y no del Facturador, y
+// esa negativa no lleva codigo (nunca EDICION_NO_INCLUYE, nunca un 401).
+$s4R = $s4Validar($s4Empresa(), 'POST', '/api/ncf/rangos');
+wa_chk('el rol admin de validateToken llega a la guarda: POST /api/ncf/rangos (fila de administrador) valida',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['http'] === false, $s4R);
+$s4R = $s4Validar($s4Empresa(), 'POST', '/api/ncf/rangos', ['role' => 'user']);
+wa_chk('RF1: el rol user (Facturador) en POST /api/ncf/rangos recibe 403 con el texto de administrador y SIN codigo; last_used no se toca',
+    $s4R['http'] === 403 && json_decode($s4R['salida'], true) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN]
+    && $s4R['pasos'] === 0 && $s4R['llamadas'] === $s4SinCambios, $s4R);
+foreach (['/api/facturas' => 'una ruta permitida', '/api/gastos' => 'una ruta negada'] as $s4Uri => $s4Cual) {
+    $s4R = $s4Validar($s4Empresa(), 'GET', $s4Uri, ['last_used' => $s4Hace(31)]);
+    wa_chk("(d) empresa Express, last_used de hace 31 dias en {$s4Cual}: valid false con el texto de inactividad, token revocado con su hash, last_used sin tocar y ningun 403",
+        $s4R['retorno'] === ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'message' => 'Tu sesión venció por inactividad']
+        && $s4R['llamadas'] === ['actualizar' => 0, 'revocar' => 1] && $s4R['hashes']['revocar'] === [hash('sha256', $s4Token)]
+        && $s4R['http'] === false && $s4R['salida'] === '', $s4R);
+}
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => null, 'created_at' => date('Y-m-d H:i:s')]);
+wa_chk('(e) empresa Express, last_used NULL y created_at de ahora: valida',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['http'] === false, $s4R);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => $s4Hace(29)]);
+wa_chk('(e) empresa Express, last_used de hace 29 dias: valida (el plazo es de 30)',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0], $s4R);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => null, 'created_at' => $s4Hace(31)]);
+wa_chk('(e) empresa Express, last_used NULL y created_at de hace 31 dias: vence (cuenta desde que se creo)',
+    ($s4R['retorno']['valid'] ?? null) === false && $s4R['llamadas'] === ['actualizar' => 0, 'revocar' => 1], $s4R);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => null, 'created_at' => null]);
+wa_chk('(e) empresa Express, sin ningun dato de uso (last_used y created_at NULL): valida, nunca vence',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0], $s4R);
+$s4R = $s4Validar($s4Empresa(['edicion' => 'completa']), 'GET', '/api/gastos', ['last_used' => $s4Hace(400)]);
+wa_chk('una empresa completa con un token de hace 400 dias sigue valida: el vencimiento es solo de las Express',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false, $s4R);
+$s4R = $s4Validar($s4Empresa(['tipo' => 'integracion']), 'GET', '/api/gastos');
+wa_chk("(f) tipo 'integracion' con edicion 'express', GET /api/gastos: valida, la clase no se carga y no hay ruido en el log",
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+    && $s4R['salida'] === '' && $s4R['http'] === false && $s4R['log'] === '', $s4R);
+// (g) RF5: una decision por peticion. Dos validateRequest en el mismo proceso (el gate y el controller las hacen) con el
+// modulo angostado entre una y otra: las dos vuelven. Un proceso nuevo (la peticion siguiente) lee la fila nueva.
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', [], ['peticiones' => 2, 'entre' => $s4Empresa(['modulos_habilitados' => 'usuarios'])]);
+wa_chk('(g) RF5: dos validateRequest de la misma peticion con el modulo facturacion quitado entre una y otra: las dos vuelven sin cortar',
+    $s4R['pasos'] === 2 && $s4R['retorno'] === $s4Valido && $s4R['http'] === false && $s4R['salida'] === ''
+    && $s4R['llamadas'] === ['actualizar' => 2, 'revocar' => 0], $s4R);
+$s4R = $s4Validar($s4Empresa(['modulos_habilitados' => 'usuarios']), 'GET', '/api/facturas');
+$s4Cuerpo = json_decode($s4R['salida'], true);
+wa_chk('(g) RF5: un proceso nuevo con la fila angostada niega esa misma ruta con 403 EDICION_NO_INCLUYE (nada se recuerda de una peticion a otra)',
+    $s4R['http'] === 403 && ($s4Cuerpo['codigo'] ?? null) === 'EDICION_NO_INCLUYE' && $s4R['llamadas'] === $s4SinCambios, $s4R);
+// (h) una edicion que no es completa ni express se trata como completa y deja UNA linea de log, sin cargar la clase.
+foreach (['basico', ''] as $s4Valor) {
+    $s4R = $s4Validar($s4Empresa(['edicion' => $s4Valor]), 'GET', '/api/gastos');
+    wa_chk("(h) edicion '{$s4Valor}', GET /api/gastos: se trata como completa (valida, last_used una vez, sin cargar la clase) y deja UNA linea de log con el tenant y el valor",
+        $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+        && $s4R['http'] === false && $s4R['salida'] === ''
+        && substr_count($s4R['log'], 'valor desconocido') === 1 && substr_count($s4R['log'], "\n") === 1
+        && str_contains($s4R['log'], "[Edicion] valor desconocido en el tenant #12: {$s4Valor}"), $s4R);
+}
+$s4SinEdicion = $s4Empresa();
+unset($s4SinEdicion['edicion']);
+$s4SinTipo = $s4Empresa();
+unset($s4SinTipo['tipo']);
+// Los valores conocidos no escriben nada, y se prueban en una ruta que Express niega: asi se ve que 'completa' (en cualquier
+// forma) deja pasar y que 'express' (con mayusculas o espacios) es Express de verdad.
+foreach (['completa', 'Completa', ' completa '] as $s4Valor) {
+    $s4R = $s4Validar($s4Empresa(['edicion' => $s4Valor]), 'GET', '/api/gastos');
+    wa_chk("(h) edicion '{$s4Valor}' es completa: valida en una ruta que Express niega, sin cargar la clase y sin linea de log",
+        $s4R['retorno'] === $s4Valido && $s4R['clase_cargada'] === false && $s4R['log'] === '', $s4R);
+}
+foreach (['Express', ' EXPRESS '] as $s4Valor) {
+    $s4R = $s4Validar($s4Empresa(['edicion' => $s4Valor]), 'GET', '/api/gastos');
+    $s4Cuerpo = json_decode($s4R['salida'], true);
+    wa_chk("(h) edicion '{$s4Valor}' es express (las mayusculas y los espacios no la cambian): GET /api/gastos da 403 EDICION_NO_INCLUYE, sin linea de log",
+        $s4R['http'] === 403 && ($s4Cuerpo['codigo'] ?? null) === 'EDICION_NO_INCLUYE' && $s4R['log'] === '', $s4R);
+}
+$s4R = $s4Validar($s4SinTipo, 'GET', '/api/gastos');
+$s4Cuerpo = json_decode($s4R['salida'], true);
+wa_chk("una fila sin la clave tipo cuenta como app (igual que en TenantResolver): con edicion express, GET /api/gastos da 403 EDICION_NO_INCLUYE",
+    $s4R['http'] === 403 && ($s4Cuerpo['codigo'] ?? null) === 'EDICION_NO_INCLUYE' && $s4R['clase_cargada'] === true, $s4R);
+foreach (['una fila sin la clave edicion (master sin migrar)' => $s4SinEdicion, 'edicion NULL' => $s4Empresa(['edicion' => null]), 'ninguna empresa resuelta' => null] as $s4Desc => $s4Fila) {
+    $s4R = $s4Validar($s4Fila, 'GET', '/api/gastos');
+    wa_chk("(h) {$s4Desc}: valida como completa, sin cargar la clase y sin linea de log",
+        $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+        && $s4R['log'] === '', $s4R);
+}
+$s4R = $s4Validar($s4Empresa(['edicion' => str_repeat('x', 40)]), 'GET', '/api/gastos');
+wa_chk('(h) el valor sale cortado a 32 caracteres en la linea de log',
+    str_contains($s4R['log'], ': ' . str_repeat('x', 32)) && !str_contains($s4R['log'], str_repeat('x', 33)), $s4R['log']);
+$s4R = $s4Validar($s4Empresa(['edicion' => "basico\nlinea falsa\x01"]), 'GET', '/api/gastos');
+wa_chk('(h) un salto de linea o un caracter de control dentro del valor no parte la linea de log: sigue siendo UNA linea',
+    substr_count($s4R['log'], "\n") === 1 && substr_count($s4R['log'], 'valor desconocido') === 1 && ($s4R['retorno']['valid'] ?? null) === true, $s4R['log']);
+$s4R = $s4Validar($s4Empresa(['edicion' => 'basico']), 'GET', '/api/gastos', [], ['peticiones' => 2]);
+wa_chk('(h) validateRequest corre dos veces por peticion (el gate y el controller): la linea de log sale una sola vez',
+    $s4R['pasos'] === 2 && substr_count($s4R['log'], 'valor desconocido') === 1 && substr_count($s4R['log'], "\n") === 1, $s4R);
+
+// --- una clase que no carga: la empresa Express recibe 403 (nunca 500) y las demas ni se enteran ---------------------------------
+// Se prueba en una COPIA del arbol (src/ y config/, sin .env) con TenantEntitlements.php borrado o roto: el repo no se toca y
+// el codigo de produccion no lleva ningun interruptor de prueba. La suite scratch repite esto por HTTP (plan 02, tarea 12).
+$s4Copia = null;
+register_shutdown_function(static function () use (&$s4Copia): void {
+    if ($s4Copia === null || !is_dir($s4Copia)) {
+        return;
+    }
+    foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($s4Copia, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST) as $s4Item) {
+        $s4Item->isDir() ? @rmdir($s4Item->getPathname()) : @unlink($s4Item->getPathname());
+    }
+    @rmdir($s4Copia);
+});
+$s4Copia = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ent_arbol_' . bin2hex(random_bytes(4));
+foreach (['src', 'config'] as $s4Carpeta) {
+    @mkdir($s4Copia . DIRECTORY_SEPARATOR . $s4Carpeta, 0777, true);
+    $s4Recorrido = new RecursiveIteratorIterator(
+        new RecursiveDirectoryIterator("{$s4Raiz}/{$s4Carpeta}", FilesystemIterator::SKIP_DOTS),
+        RecursiveIteratorIterator::SELF_FIRST
+    );
+    foreach ($s4Recorrido as $s4Item) {
+        $s4Destino = $s4Copia . DIRECTORY_SEPARATOR . $s4Carpeta . DIRECTORY_SEPARATOR . $s4Recorrido->getSubPathname();
+        $s4Item->isDir() ? @mkdir($s4Destino, 0777, true) : copy($s4Item->getPathname(), $s4Destino);
+    }
+}
+$s4ClaseEnCopia = $s4Copia . '/src/TenantEntitlements.php';
+wa_chk('la copia del arbol existe con TenantEntitlements.php y sin .env (de ahi se fabrican la clase ausente y la rota)',
+    is_file($s4ClaseEnCopia) && is_file($s4Copia . '/src/Middleware/AuthMiddleware.php') && !is_file($s4Copia . '/.env'), $s4Copia);
+foreach ([
+    'ausente' => null,
+    'rota (error de sintaxis)' => "<?php\nesto no es php {{{\n",
+    'sin la clase (el archivo carga pero no la declara)' => "<?php\n// archivo vacio\n",
+] as $s4Modo => $s4Contenido) {
+    if ($s4Contenido === null) {
+        @unlink($s4ClaseEnCopia);
+    } else {
+        file_put_contents($s4ClaseEnCopia, $s4Contenido);
+    }
+    $s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', [], ['raiz' => $s4Copia]);
+    $s4Cuerpo = json_decode($s4R['salida'], true);
+    wa_chk("clase {$s4Modo}, empresa Express (GET /api/facturas, una ruta permitida): 403 con el codigo y el texto de TenantResolver, ni un valid false ni un 500, y last_used sin tocar",
+        $s4R['http'] === 403 && $s4Cuerpo === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+        && $s4R['pasos'] === 0 && $s4R['retorno'] === null && $s4R['llamadas'] === $s4SinCambios && $s4R['clase_cargada'] === false, $s4R);
+    wa_chk("clase {$s4Modo}: deja UNA linea de log que nombra la clase",
+        substr_count($s4R['log'], "\n") === 1 && str_contains($s4R['log'], 'TenantEntitlements'), $s4R['log']);
+    $s4R = $s4Validar($s4Empresa(['edicion' => 'completa']), 'GET', '/api/gastos', ['last_used' => $s4Hace(400)], ['raiz' => $s4Copia]);
+    wa_chk("clase {$s4Modo}, empresa completa: valida como siempre (la clase no se pide jamas), sin log",
+        $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+        && $s4R['log'] === '' && $s4R['http'] === false, $s4R);
+}
+// El resultado se recuerda: varias partes de una misma peticion piden la clase (la guarda, el gate de permisos, el login), y un
+// archivo roto no se recompila ni se avisa de nuevo en cada llamada.
+file_put_contents($s4ClaseEnCopia, "<?php\nesto no es php {{{\n");
+$s4HijoCarga = (string) tempnam(sys_get_temp_dir(), 'ent_carga_');
+$s4LogCarga = (string) tempnam(sys_get_temp_dir(), 'ent_log_');
+file_put_contents($s4HijoCarga, <<<'PHP'
+<?php
+error_reporting(E_ALL);
+ini_set('error_log', $argv[2]);
+require $argv[1] . '/src/TenantResolver.php';
+$primera = TenantResolver::cargarEntitlements();
+$segunda = TenantResolver::cargarEntitlements();
+echo json_encode([$primera, $segunda, class_exists('TenantEntitlements', false), (string) file_get_contents($argv[2])]);
+PHP);
+$s4R = wa_correr([PHP_BINARY, $s4HijoCarga, $s4Copia, $s4LogCarga]);
+@unlink($s4HijoCarga);
+@unlink($s4LogCarga);
+$s4Dejo = json_decode(trim($s4R['salida']), true);
+wa_chk('cargarEntitlements con la clase rota: false las dos veces, la clase sigue sin cargarse y el intento deja UNA sola linea de log',
+    is_array($s4Dejo) && array_slice($s4Dejo, 0, 3) === [false, false, false]
+    && substr_count((string) $s4Dejo[3], "\n") === 1 && str_contains((string) $s4Dejo[3], 'TenantEntitlements'), $s4R);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

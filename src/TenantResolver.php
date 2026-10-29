@@ -15,7 +15,22 @@ require_once(__DIR__ . '/Database.php');
  */
 class TenantResolver
 {
+    /**
+     * Codigo y texto de la negativa EDICION_NO_INCLUYE (403): una ruta o un modulo que la edicion Express no incluye.
+     * Viven aqui y no en TenantEntitlements porque son lo unico que una peticion necesita cuando esa clase no carga
+     * (cargarEntitlements() devuelve false): AuthMiddleware contesta con ellos. TenantEntitlements::CODIGO_EDICION_NO_INCLUYE
+     * y TenantEntitlements::MSG_EDICION son alias de estos, no otra copia.
+     *
+     * El texto no termina en punto y tiene que ser igual, byte a byte, a MSG_EDICION del mock del front
+     * (express/dev/mock-api.mjs); el cliente se guia por el codigo, nunca por el texto.
+     */
+    public const CODIGO_EDICION_NO_INCLUYE = 'EDICION_NO_INCLUYE';
+    public const MSG_EDICION = 'Tu plan Express no incluye esta función';
+
     private static ?array $current = null;
+
+    /** Resultado de cargarEntitlements() en este proceso; null = aun no se intento. */
+    private static ?bool $entitlementsCargados = null;
 
     /** @return array|null The resolved tenant row, or null if none resolved. */
     public static function current(): ?array
@@ -107,6 +122,40 @@ class TenantResolver
         return $tenant !== null
             && ($tenant['tipo'] ?? 'app') === 'app'
             && (int) ($tenant['inventario_estricto'] ?? 0) === 1;
+    }
+
+    /**
+     * Carga src/TenantEntitlements.php, la clase de la edicion Express, y dice si quedo disponible. Es el unico lugar que la
+     * carga, y solo se llama despues de la prueba en linea que ya probo que la empresa es Express: para una empresa completa,
+     * una de integracion o ninguna la clase no se incluye jamas, asi un archivo ausente o roto no le cambia nada a nadie mas.
+     *
+     * false si el archivo no esta, si no compila o lanza al cargarse, o si cargado no declara la clase. Entonces deja UNA linea
+     * en el log (el resultado se recuerda: un proceso no lo vuelve a intentar) y quien llama lo trata como una negativa para la
+     * empresa Express, nunca como un 500: sin su clase no se puede decidir y no pasa.
+     */
+    public static function cargarEntitlements(): bool
+    {
+        if (self::$entitlementsCargados !== null) {
+            return self::$entitlementsCargados;
+        }
+        $archivo = __DIR__ . '/TenantEntitlements.php';
+        $motivo = null;
+        if (!is_file($archivo)) {
+            $motivo = 'no existe src/TenantEntitlements.php';
+        } else {
+            try {
+                require_once $archivo;
+            } catch (Throwable $e) {
+                $motivo = get_class($e) . ': ' . $e->getMessage();
+            }
+            if ($motivo === null && !class_exists('TenantEntitlements', false)) {
+                $motivo = 'el archivo no declara la clase';
+            }
+        }
+        if ($motivo !== null) {
+            error_log('[TenantResolver] cargarEntitlements: no se pudo cargar TenantEntitlements (' . $motivo . '); las empresas Express se niegan');
+        }
+        return self::$entitlementsCargados = ($motivo === null);
     }
 
     // ------------------------------------------------------------------
