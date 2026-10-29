@@ -1578,6 +1578,73 @@ final class ExpSentenciaMaster extends PDOStatement
     }
 }
 
+// --- los dobles valen en PHP 8.3 (produccion y CI), no solo en el PHP que corre la suite -------------------------------------------
+// Las dos clases de arriba heredan de clases internas cuyas firmas cambian de una version de PHP a otra, y esta suite se escribe en un
+// PHP mas nuevo que el de produccion. Aqui se declaran OTRA VEZ, con su texto de arriba, en un proceso aparte y heredando de COPIAS DE
+// USUARIO de las firmas que PDO y PDOStatement tienen en 8.3 (ext/pdo/pdo_dbh.stub.php y pdo_stmt.stub.php, rama PHP-8.3 de php-src):
+// el motor les aplica las reglas de herencia con esas firmas sea cual sea la version que corre, y con mas rigor que con la clase
+// interna (de un tipo de retorno distinto esa solo avisa). Si el motor las acepta, la clase interna de 8.3 tambien. Cada control cambia
+// UNA firma y tiene que ser rechazado: sin ellos, un cambio de nombres que no se aplicara dejaria la prueba aceptando todo.
+$s6Firmas83 = <<<'PHP'
+class Firma83Pdo
+{
+    public function __construct(string $dsn, ?string $username = null, #[\SensitiveParameter] ?string $password = null, ?array $options = null) {}
+    public function prepare(string $query, array $options = []): PDOStatement|false {}
+}
+class Firma83PdoStatement
+{
+    public function execute(?array $params = null): bool {}
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed {}
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array {}
+}
+PHP;
+/** El texto de una clase de este archivo, de su linea de declaracion a su llave de cierre. */
+$s6TextoClase = static function (string $clase): string {
+    $ref = new ReflectionClass($clase);
+    $lineas = file((string) $ref->getFileName(), FILE_IGNORE_NEW_LINES) ?: [];
+    return implode("\n", array_slice($lineas, $ref->getStartLine() - 1, $ref->getEndLine() - $ref->getStartLine() + 1));
+};
+$s6Copias = strtr($s6TextoClase('ExpPdoMaster') . "\n" . $s6TextoClase('ExpSentenciaMaster'), [
+    'ExpPdoMaster' => 'Firma83PdoMaster', 'ExpSentenciaMaster' => 'Firma83SentenciaMaster',
+    'extends PDOStatement' => 'extends Firma83PdoStatement', 'extends PDO' => 'extends Firma83Pdo',
+]);
+/** Declara las copias de los dobles (con $cambio, un 'texto' => 'reemplazo' que altera una firma) en un php nuevo: [codigo de salida, lo que imprimio]. */
+$s6Declarar = static function (array $cambio = []) use ($s6Firmas83, $s6Copias): array {
+    $archivo = (string) tempnam(sys_get_temp_dir(), 'ent_firmas_');
+    file_put_contents($archivo, "<?php\n{$s6Firmas83}\n" . strtr($s6Copias, $cambio) . "\necho 'ACEPTADO';\n");
+    $r = wa_correr([PHP_BINARY, '-d', 'display_errors=1', '-d', 'error_reporting=-1', $archivo]);
+    @unlink($archivo);
+    return [$r['codigo'], $r['salida']];
+};
+wa_chk('dobles de PDO: las copias heredan de las firmas de 8.3 de arriba y de ninguna clase del PHP que corre la suite (el cambio de nombres se aplico)',
+    preg_match_all('/extends Firma83Pdo\b/', $s6Copias) === 1 && preg_match_all('/extends Firma83PdoStatement\b/', $s6Copias) === 1
+    && !preg_match('/extends\s+PDO/', $s6Copias), $s6Copias);
+[$s6Cod, $s6Sal] = $s6Declarar();
+wa_chk('dobles de PDO: sobre las firmas de PDO y PDOStatement de PHP 8.3 (prepare, execute, fetch y fetchAll) el motor los acepta',
+    $s6Cod === 0 && str_contains($s6Sal, 'ACEPTADO') && !str_contains($s6Sal, 'Fatal error'), [$s6Cod, $s6Sal]);
+foreach ([
+    'execute con un parametro mas estrecho (array en lugar de ?array)' => ['execute(?array $params = null): bool' => 'execute(array $params = []): bool'],
+    'fetch con un parametro menos' => [', int $cursorOffset = 0): mixed' => '): mixed'],
+    'fetchAll con un retorno mas ancho (iterable en lugar de array)' => ['mixed ...$args): array' => 'mixed ...$args): iterable'],
+    'prepare con otro tipo de parametro (int en lugar de string)' => ['prepare(string $query,' => 'prepare(int $query,'],
+] as $s6Desc => $s6Cambio) {
+    [$s6Cod, $s6Sal] = $s6Declarar($s6Cambio);
+    wa_chk("control, {$s6Desc}: el motor lo rechaza (Declaration ... must be compatible with la firma de 8.3)",
+        $s6Cod !== 0 && str_contains($s6Sal, 'must be compatible with Firma83'), [$s6Cod, $s6Sal]);
+}
+/** Los metodos que una clase declara ella misma (sin el constructor y sin los heredados), ordenados. */
+$s6Propios = static function (string $clase): array {
+    $nombres = array_map(
+        static fn (ReflectionMethod $m): string => $m->getName(),
+        array_filter((new ReflectionClass($clase))->getMethods(), static fn (ReflectionMethod $m): bool => $m->class === $clase && !$m->isConstructor())
+    );
+    sort($nombres);
+    return array_values($nombres);
+};
+wa_chk('...y los dobles solo sobreescriben metodos cuya firma de 8.3 esta en la copia de arriba (agregar otro obliga a sumar su firma)',
+    $s6Propios('ExpPdoMaster') === ['prepare'] && $s6Propios('ExpSentenciaMaster') === ['execute', 'fetch', 'fetchAll'],
+    [$s6Propios('ExpPdoMaster'), $s6Propios('ExpSentenciaMaster')]);
+
 $s6Raiz = dirname(__DIR__);
 /** Una fila de master.tenants de una empresa Express, con las columnas que jamas deben llegar al cliente; $o pisa los campos que cada caso cambia. */
 $s6Fila = static fn (array $o = []): array => $o + [
@@ -1794,6 +1861,10 @@ try {
 // En un proceso nuevo por caso (la clase ya esta cargada en este), sin multi-tenant: RoleModel lee de Database, que aqui es una
 // conexion de mentira con los permisos '*' de un administrador. Las copias del arbol con la clase ausente, rota o sin declarar
 // son la de la seccion 4 ($s4Copia).
+// La otra mitad de esa decision (el login sale sin el bloque y el cliente falla cerrado ante su falta) es la peticion SIGUIENTE de esa
+// empresa: la guarda de AuthMiddleware le contesta 403 EDICION_NO_INCLUYE, ni un valid false (el SPA lo cerraria como un 401) ni un 500.
+// Eso lo fija la seccion 4 sobre estas mismas tres copias (las pruebas "clase <modo>, empresa Express (GET /api/facturas, una ruta
+// permitida)") y, por HTTP, la suite scratch (plan 02, tarea 12, seccion 11).
 $s6Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_sesion_');
 $s6HijoLog = (string) tempnam(sys_get_temp_dir(), 'ent_seslog_');
 file_put_contents($s6Hijo, <<<'PHP'
