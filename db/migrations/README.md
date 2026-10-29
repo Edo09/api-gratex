@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 008, 010, 011 y 014).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013 y 014).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una

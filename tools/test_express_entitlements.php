@@ -101,8 +101,11 @@ wa_chk('verificador del master: la cabecera menciona la 014',
     preg_match('/\A(?:--[^\n]*\n)+/', $s1Verificador, $s1Cabecera) === 1 && str_contains($s1Cabecera[0], '014'));
 
 // README de db/migrations y docs/database/schema.md (este estaba atrasado).
-wa_chk('README de migraciones: en el master, 008, 010, 011 y 014 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 008, 010, 011 y 014'));
+// La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
+// lo ejecutan con PREPARE/EXECUTE (007, 008, 010, 011, 012, 013 y 014; la lista del tenant, 018 y 026 a 035, ya
+// era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013 y 014 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013 y 014'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
