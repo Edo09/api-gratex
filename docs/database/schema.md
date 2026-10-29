@@ -37,6 +37,9 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `aprobaciones_comerciales` (+ `tenant_id`) | Espejo: aprobaciones de tenants `integracion` |
 | `unidades_medida` | Catálogo DGII de unidades de medida (compartido por todos los tenants) |
 | `roles` / `role_permissions` | RBAC per-tenant: roles del tenant + sus permisos (ver [../modules/roles-permisos.md](../modules/roles-permisos.md)) |
+| `audit_logs` | Bitácora de auditoría centralizada: quién hizo qué y cuándo (mutaciones, ciclo e-CF, auth), aislada por `tenant_id` (master_migration 006) |
+| `pos_handoff_codes` | Códigos de traspaso de un solo uso (60 s) con los que el admin abre el POS desde la app; solo guarda el sha256 del código (master_migration 012) |
+| `pos_equipos` | Equipos habilitados para el POS (token + caja) por tenant, con el bloqueo por PIN fallidos (master_migration 012) |
 
 ### `tenants`
 | Columna | Tipo | Notas |
@@ -47,6 +50,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `api_key` | varchar(64) | UNIQUE — identificador público (integración) |
 | `api_secret_hash` | varchar(64) | sha256 del `api_secret` (se muestra el secret una sola vez) |
 | `tipo` | varchar(12) | `app` \| `integracion` |
+| `grupo_id` | int NULL | Grupo de empresas de un mismo cliente: la credencial de cualquier tenant del grupo puede actuar por sus hermanos (el RNC del payload elige). `NULL` = aislado (master_migration 008) |
 | `db_host`/`db_name`/`db_user` | varchar | Solo `app`; `db_name` UNIQUE |
 | `db_pass_encrypted` | varbinary | AES-256-GCM: `iv(12)‖tag(16)‖ct` |
 | `cert_path` | varchar(255) | `.p12` del tenant (`certificado_dgii/<rnc>/cert.p12`) |
@@ -55,6 +59,12 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `pdf_template` | varchar | `clasico`/`moderno`/`compacto`/`custom:tenant<id>` (master_migration 002) |
 | `pdf_accent_color` | varchar(7) | `#RRGGBB` opcional |
 | `cotizacion_formato` | varchar(40) | `gratex` (default) \| `ferreteria`: formato de cotización (master_migration 011). Solo por SQL; lo devuelve `GET /api/branding` |
+| `pos_enabled` | tinyint(1) | Default 0. `1` = el tenant tiene el POS. Se activa solo por SQL (master_migration 012) |
+| `inventario_estricto` | tinyint(1) | Default 0. `1` = la empresa bloquea facturas (e-CF y simples) que piden más de la existencia del sistema; `0` = vende sin existencia como siempre. Lo cambia un admin en Configuración (master_migration 013) |
+| `edicion` | enum | `completa` (default, el sistema entero) \| `express` (solo el plan Express). Un valor distinto se trata como `completa` (master_migration 014) |
+| `modulos_habilitados` | text NULL | Solo `express`: módulos permitidos, separados por coma. Solo puede quitar módulos del plan, nunca agregar. `NULL` o vacío = los cinco (master_migration 014) |
+| `tipos_ecf_habilitados` | varchar(64) NULL | Solo `express`: tipos de e-CF que puede vender, separados por coma (`31`, `32`, `45` y `33` solo si se lista; ej. `31,32,45`). `NULL` o vacío = no puede emitir (master_migration 014) |
+| `cert_vence` | date NULL | Vencimiento del certificado de la empresa. Informativa: nunca bloquea nada; la actualiza `tools/tenant_edicion.php` (master_migration 014) |
 | `logo_path` | varchar | `logos/<tenant_id>.<ext>` |
 | `webhook_url`/`webhook_secret_encrypted` | varchar/varbinary | Push de documentos entrantes (integración) |
 | `activo` | tinyint(1) | |
@@ -66,7 +76,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 
 ## DB del tenant — Tablas de negocio
 
-Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–031).
+Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–035).
 
 | Tabla | Dominio |
 |---|---|
@@ -345,9 +355,9 @@ En master: `users 1───* api_tokens` (FK CASCADE); `tenants` referenciado p
 
 | Artefacto | Para qué |
 |---|---|
-| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–031). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
+| `db/tenant_schema.sql` | Snapshot consolidado de la DB de tenant (base + 001–035). Lo aplica `tools/create_tenant.php` a tenants **nuevos** |
 | `db/master_schema.sql` | Crea la DB master + tablas (instalaciones nuevas) |
-| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–031 |
+| `db/migrations/NNN_*.sql` | Cambios incrementales para DBs de tenant **ya desplegados** (Gratex). Activas: 012–035 |
 | `db/migrations/deprecated/001–011` | Ya consolidadas en `tenant_schema.sql` (2026-06-09). Historial; **no** correr en tenants nuevos |
 | `db/master_migrations/NNN_*.sql` | Cambios incrementales del master |
 

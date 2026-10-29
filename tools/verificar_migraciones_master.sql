@@ -13,6 +13,11 @@
 -- fallan, o duplican filas, si se repiten. Las nuevas (007 en adelante) se
 -- pueden repetir sin dano.
 --
+-- La 014 (edicion Express) agrega cuatro columnas a tenants (edicion,
+-- modulos_habilitados, tipos_ecf_habilitados y cert_vence): su fila dice APLICADA
+-- solo con las cuatro. Si dice FALTA porque quedo a medias, correrla de nuevo
+-- completa las que faltan.
+--
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
 
@@ -96,6 +101,12 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
                    AND COLUMN_NAME = 'inventario_estricto')
+  UNION ALL
+  SELECT '014', '014_tenants_edicion.sql',
+         'columnas tenants.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+            AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')) = 4
 ) m
 ORDER BY m.migracion;
 

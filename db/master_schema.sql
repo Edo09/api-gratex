@@ -57,6 +57,14 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT '1 = el tenant tiene el POS (pos.fiscalpoint.com.do). Se activa solo por SQL. Ver master_migrations/012',
   inventario_estricto TINYINT(1)     NOT NULL DEFAULT 0
                         COMMENT '1 = la empresa bloquea facturas (e-CF y simples) que piden mas de la existencia del sistema. 0 = vende sin existencia como siempre. Lo cambia un admin en Configuracion. Ver master_migrations/013',
+  edicion             ENUM('completa','express') NOT NULL DEFAULT 'completa'
+                        COMMENT 'Edicion del plan. completa = el sistema entero, como siempre. express = solo los modulos del plan Express (modulos_habilitados puede quitar alguno) y los tipos de e-CF de tipos_ecf_habilitados. Un valor distinto se trata como completa. Se cambia con tools/tenant_edicion.php, que revisa antes de cambiar. Ver master_migrations/014',
+  modulos_habilitados TEXT           NULL
+                        COMMENT 'Solo express: modulos permitidos, separados por coma (facturacion, clientes, productos, usuarios, configuracion). Solo puede quitar modulos del plan, nunca agregar. NULL o vacio = los cinco. Ver master_migrations/014',
+  tipos_ecf_habilitados VARCHAR(64)  NULL
+                        COMMENT 'Solo express: tipos de e-CF que la empresa puede vender, separados por coma. Validos 31, 32, 45 y 33 (el 33 solo si se lista), ejemplo 45 o 31,32,45. El 34 (nota de credito) se deriva de la venta. NULL o vacio = no puede emitir. Ver master_migrations/014',
+  cert_vence          DATE           NULL
+                        COMMENT 'Fecha en que vence el certificado digital de la empresa. Es solo informativa: GET /api/emisor devuelve con ella el estado del certificado y la opcion refrescar-cert de tools/tenant_edicion.php la actualiza al renovarlo. Una fecha vieja no bloquea nada. NULL = no se sabe. Ver master_migrations/014',
   ambiente            VARCHAR(20)    NOT NULL DEFAULT 'ecf',
   activo              TINYINT(1)     NOT NULL DEFAULT 1,
   created_at          DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
