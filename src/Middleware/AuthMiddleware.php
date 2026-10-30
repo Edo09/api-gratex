@@ -61,6 +61,22 @@ class AuthMiddleware
     }
 
     /**
+     * Niega a una empresa Express con el 403 EDICION_NO_INCLUYE y corta la peticion. Es la respuesta de todo lo que no se puede decidir sobre ella (la clase de la edicion no carga,
+     * su config no se puede leer): es un 403 y no un valid=false, porque los llamadores vuelven ese 401 y el cliente cerraria la sesion. El codigo y el texto salen de
+     * TenantResolver, que esta cargada siempre.
+     */
+    private static function denegarEdicion(): never
+    {
+        http_response_code(403);
+        echo json_encode([
+            'status' => false,
+            'error' => TenantResolver::MSG_EDICION,
+            'codigo' => TenantResolver::CODIGO_EDICION_NO_INCLUYE,
+        ]);
+        exit;
+    }
+
+    /**
      * Validate API credentials from request headers.
      *
      * Two schemes:
@@ -145,16 +161,8 @@ class AuthMiddleware
             if (($tenantActual['tipo'] ?? 'app') === 'app'
                 && strtolower(trim((string) ($tenantActual['edicion'] ?? ''))) === 'express') {
                 if (!TenantResolver::cargarEntitlements()) {
-                    // Sin la clase no se puede decidir y una empresa Express no pasa sin que se decida. Es un 403 y no un
-                    // valid=false: los llamadores lo vuelven 401 y el cliente cerraria la sesion. El codigo y el texto salen
-                    // de TenantResolver, que esta cargada siempre.
-                    http_response_code(403);
-                    echo json_encode([
-                        'status' => false,
-                        'error' => TenantResolver::MSG_EDICION,
-                        'codigo' => TenantResolver::CODIGO_EDICION_NO_INCLUYE,
-                    ]);
-                    exit;
+                    // Sin la clase no se puede decidir y una empresa Express no pasa sin que se decida (403, ver denegarEdicion).
+                    self::denegarEdicion();
                 }
                 // La identidad primero: la fila de auditoria de una negativa tiene que nombrar al usuario.
                 RequestContext::fromAuth([
@@ -162,8 +170,16 @@ class AuthMiddleware
                     'tenant_id' => $validation['tenant_id'] ?? null,
                     'role' => $validation['role'] ?? null,
                 ], $token);
-                // El vencimiento va antes que la guarda: un token ocioso recibe 401 en cualquier ruta.
-                if (TenantEntitlements::tokenCaducado($validation['last_used'] ?? null, $validation['created_at'] ?? null, time())) {
+                // El vencimiento va antes que la guarda: un token ocioso recibe 401 en cualquier ruta. tokenCaducado lee los dias de inactividad de config/editions.php: un archivo que
+                // no compila, que lanza al cargarse o que falta no se vuelve un 500. Sin su config no se puede decidir y una empresa Express no pasa: el mismo 403 que sin la clase.
+                try {
+                    $caducado = TenantEntitlements::tokenCaducado($validation['last_used'] ?? null, $validation['created_at'] ?? null, time());
+                } catch (Throwable $e) {
+                    error_log('[AuthMiddleware] edicion: no se pudo decidir el vencimiento de la sesion de la empresa Express #' . (int) ($tenantActual['id'] ?? 0)
+                        . ' (config/editions.php no carga o es invalido): ' . get_class($e) . ': ' . substr(trim((string) preg_replace('/\s+/', ' ', $e->getMessage())), 0, 300) . '; se niega con 403');
+                    self::denegarEdicion();
+                }
+                if ($caducado) {
                     $this->authModel->revokeTokenByHash(hash('sha256', $token));
                     return [
                         'valid' => false,

@@ -1106,6 +1106,41 @@ try {
     }
     wa_chk('tokenCaducado: sin plazo explicito lo toma de config()[TOKEN_INACTIVIDAD_DIAS] (con 1 dia: false y true)',
         $s4PorConfig === [false, true] && TenantEntitlements::config() === $s4Config, $s4PorConfig);
+    // Un config que compila pero trae mal ese dato (revision final): contar con 0 dias (un (int) de null) vencia y revocaba TODAS las sesiones de las empresas Express. Ahora lanza, y el
+    // gancho de AuthMiddleware niega (seccion 4 mas abajo). Un numero en texto ("30") si vale, y un plazo explicito no mira la config.
+    $s4SinDias = array_diff_key($s4Config, ['TOKEN_INACTIVIDAD_DIAS' => 1]);
+    $s4Rechazados = [];
+    foreach (['la clave ausente' => $s4SinDias, 'NULL' => ['TOKEN_INACTIVIDAD_DIAS' => null] + $s4SinDias, '0' => ['TOKEN_INACTIVIDAD_DIAS' => 0] + $s4SinDias,
+        'un negativo' => ['TOKEN_INACTIVIDAD_DIAS' => -5] + $s4SinDias, 'un texto que no es un numero' => ['TOKEN_INACTIVIDAD_DIAS' => 'treinta'] + $s4SinDias] as $s4Desc => $s4Mala) {
+        $s4Cache->setValue(null, $s4Mala);
+        try {
+            $s4Resultado = TenantEntitlements::tokenCaducado('2026-10-26 11:59:59', null, $s4Ahora);
+            $s4Rechazados[$s4Desc] = 'no lanzo y devolvio ' . var_export($s4Resultado, true);
+        } catch (RuntimeException $s4E) {
+            if (!str_contains($s4E->getMessage(), 'TOKEN_INACTIVIDAD_DIAS') || !str_contains($s4E->getMessage(), 'config/editions.php')) {
+                $s4Rechazados[$s4Desc] = 'lanzo, pero su mensaje no nombra la clave ni el archivo: ' . $s4E->getMessage();
+            }
+        } finally {
+            $s4Cache->setValue(null, $s4Config);
+        }
+    }
+    wa_chk('tokenCaducado: con TOKEN_INACTIVIDAD_DIAS ausente, NULL, 0, negativo o un texto que no es un numero lanza RuntimeException (nombra la clave y config/editions.php) en lugar de contar con 0 dias',
+        $s4Rechazados === [], $s4Rechazados);
+    $s4Cache->setValue(null, ['TOKEN_INACTIVIDAD_DIAS' => '1'] + $s4SinDias);
+    try {
+        $s4EnTexto = [TenantEntitlements::tokenCaducado('2026-10-26 12:00:00', null, $s4Ahora), TenantEntitlements::tokenCaducado('2026-10-26 11:59:59', null, $s4Ahora)];
+    } finally {
+        $s4Cache->setValue(null, $s4Config);
+    }
+    $s4Cache->setValue(null, $s4SinDias);
+    try {
+        $s4Explicito = TenantEntitlements::tokenCaducado('2026-10-26 11:59:59', null, $s4Ahora, 1);   // con el plazo en la mano, la config ni se mira
+        $s4SinMirar = TenantEntitlements::tokenCaducado(null, null, $s4Ahora);                          // y sin ningun dato de uso no vence, tampoco se mira
+    } finally {
+        $s4Cache->setValue(null, $s4Config);
+    }
+    wa_chk('tokenCaducado: TOKEN_INACTIVIDAD_DIAS "1" (un numero en texto) vale (false y true); con el plazo explicito, o sin ningun dato de uso, la config no se mira y no lanza; la config queda como estaba',
+        $s4EnTexto === [false, true] && $s4Explicito === true && $s4SinMirar === false && TenantEntitlements::config() === $s4Config, [$s4EnTexto, $s4Explicito, $s4SinMirar]);
     wa_chk('tokenCaducado: un ultimo uso un ano en el futuro (reloj muy corrido) tampoco vence: la edad negativa no se mide en valor absoluto',
         TenantEntitlements::tokenCaducado('2027-10-27 12:00:00', null, $s4Ahora) === false
         && TenantEntitlements::tokenCaducado(null, '2027-10-27 12:00:00', $s4Ahora) === false);
@@ -1429,6 +1464,50 @@ $s4Dejo = json_decode(trim($s4R['salida']), true);
 wa_chk('cargarEntitlements con la clase rota: false las dos veces, la clase sigue sin cargarse y el intento deja UNA sola linea de log',
     is_array($s4Dejo) && array_slice($s4Dejo, 0, 3) === [false, false, false]
     && substr_count((string) $s4Dejo[3], "\n") === 1 && str_contains((string) $s4Dejo[3], 'TenantEntitlements'), $s4R);
+
+// --- config/editions.php que no se puede leer: la empresa Express recibe 403 (nunca un 500) y las demas ni se enteran --------------------------------------------
+// Revision final. tokenCaducado, permisosEfectivos y bloque leen config() sin protegerse, y el gancho llama a tokenCaducado: un archivo de config con un error de sintaxis, que
+// lanza al cargarse, que no devuelve un arreglo o que falta (los planes siguientes le agregan filas a mano) volvia fatal cada peticion, login y /me de una empresa Express
+// (un 500 de ErrorHandler). Es lo mismo que la clase ausente o rota: sin su config no se puede decidir y una empresa Express no pasa, con el 403 EDICION_NO_INCLUYE.
+// La copia de arriba, con la clase repuesta (aqui lo que falla es la config) y la config rota de cada manera; al final se repone la sana. La suite scratch lo repite por HTTP.
+$s4ConfigEnCopia = $s4Copia . '/config/editions.php';
+$s4ConfigSana = (string) file_get_contents("{$s4Raiz}/config/editions.php");
+copy("{$s4Raiz}/src/TenantEntitlements.php", $s4ClaseEnCopia);
+foreach ([
+    'rota (error de sintaxis)' => "<?php\nreturn [\n    'modulos' => [\n",
+    'que lanza al cargarse' => "<?php\nthrow new RuntimeException('config roto por la prueba');\n",
+    'que no devuelve un arreglo' => "<?php\n\$sin_return = 1;\n",
+    'que compila pero sin TOKEN_INACTIVIDAD_DIAS (contar con 0 dias vencia y revocaba todas las sesiones)' => "<?php\nreturn ['modulos' => ['facturacion'], 'rutas' => []];\n",
+    'ausente' => null,
+] as $s4Modo => $s4Contenido) {
+    if ($s4Contenido === null) {
+        @unlink($s4ConfigEnCopia);
+    } else {
+        file_put_contents($s4ConfigEnCopia, $s4Contenido);
+    }
+    // El token se uso hace un dia: tokenCaducado tiene que leer la config para decidir (con un config sin su plazo, contar con 0 dias lo daria por vencido y lo revocaria).
+    $s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => $s4Hace(1)], ['raiz' => $s4Copia]);
+    $s4Cuerpo = json_decode($s4R['salida'], true);
+    wa_chk("config {$s4Modo}, empresa Express (GET /api/facturas, una ruta permitida): 403 con el codigo y el texto de TenantResolver, ni un valid false ni un 500; last_used sin tocar y el token sin revocar",
+        $s4R['http'] === 403 && $s4Cuerpo === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+        && $s4R['pasos'] === 0 && $s4R['retorno'] === null && $s4R['llamadas'] === $s4SinCambios && $s4R['clase_cargada'] === true, $s4R);
+    wa_chk("config {$s4Modo}: deja UNA linea de log que nombra config/editions.php",
+        substr_count($s4R['log'], "\n") === 1 && str_contains($s4R['log'], 'config/editions.php'), $s4R['log']);
+    // Un token que nunca se uso (sin last_used ni created_at): tokenCaducado no llega a mirar la config, y la guarda de rutas, que ya se protegia sola, niega igual.
+    $s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', ['last_used' => null, 'created_at' => null], ['raiz' => $s4Copia]);
+    $s4Cuerpo = json_decode($s4R['salida'], true);
+    wa_chk("config {$s4Modo}, token sin uso (last_used y created_at NULL): el mismo 403 EDICION_NO_INCLUYE, desde la guarda de rutas",
+        $s4R['http'] === 403 && $s4Cuerpo === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+        && $s4R['pasos'] === 0 && $s4R['llamadas'] === $s4SinCambios, $s4R);
+    $s4R = $s4Validar($s4Empresa(['edicion' => 'completa']), 'GET', '/api/gastos', ['last_used' => $s4Hace(400)], ['raiz' => $s4Copia]);
+    wa_chk("config {$s4Modo}, empresa completa: valida como siempre (ni la clase ni la config se piden jamas), sin log",
+        $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['clase_cargada'] === false
+        && $s4R['log'] === '' && $s4R['http'] === false, $s4R);
+}
+file_put_contents($s4ConfigEnCopia, $s4ConfigSana);
+$s4R = $s4Validar($s4Empresa(), 'GET', '/api/facturas', [], ['raiz' => $s4Copia]);
+wa_chk('con la config sana otra vez en la copia, la misma empresa Express y la misma ruta validan: la copia de las pruebas de arriba no es lo que niega',
+    $s4R['retorno'] === $s4Valido && $s4R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s4R['http'] === false && $s4R['log'] === '', $s4R);
 
 // ---------------------------------------------------------------------------
 // 5) PermissionGate::enforcing (forzado para Express) y PosAuth::exigirPosActivo
@@ -2053,6 +2132,33 @@ foreach ([
     wa_chk("clase {$s6Modo}, empresa completa: el login sale como siempre, la clase no se pide jamas y no hay log",
         $s6R === [['*'], $s6Usuario, false, ''], $s6R);
 }
+// La config de la edicion que no se puede leer (revision final): permisosEfectivos y bloque la leen. Con la clase en su sitio y la config rota de cada manera (la copia de la
+// seccion 4), el login sale igual que con la clase ausente: SIN el bloque y con los permisos del rol tal cual, sin lanzar (un 500) y con UNA linea de log; la peticion
+// siguiente de esa empresa la niega el gancho (403, seccion 4). Una empresa que no es Express no pide la clase ni la config.
+copy($s6Raiz . '/src/TenantEntitlements.php', $s6ClaseEnCopia);
+foreach ([
+    'rota (error de sintaxis)' => "<?php\nreturn [\n    'modulos' => [\n",
+    'que lanza al cargarse' => "<?php\nthrow new RuntimeException('config roto por la prueba');\n",
+    'que no devuelve un arreglo' => "<?php\n\$sin_return = 1;\n",
+    'ausente' => null,
+] as $s6Modo => $s6Contenido) {
+    if ($s6Contenido === null) {
+        @unlink($s4ConfigEnCopia);
+    } else {
+        file_put_contents($s4ConfigEnCopia, $s6Contenido);
+    }
+    $s6R = $s6EnHijo($s4Copia, $s6Express);
+    wa_chk("config {$s6Modo}, empresa Express: el login contesta SIN el bloque y con los permisos del rol tal cual (ni lanza ni niega) y el intento deja UNA linea de log que nombra config/editions.php",
+        array_slice($s6R, 0, 3) === [['*'], $s6Usuario, true] && substr_count((string) ($s6R[3] ?? ''), "\n") === 1
+        && str_contains((string) ($s6R[3] ?? ''), 'config/editions.php'), $s6R);
+    $s6R = $s6EnHijo($s4Copia, $s6Fila(['edicion' => 'completa']));
+    wa_chk("config {$s6Modo}, empresa completa: el login sale como siempre, ni la clase ni la config se piden jamas y no hay log",
+        $s6R === [['*'], $s6Usuario, false, ''], $s6R);
+}
+file_put_contents($s4ConfigEnCopia, $s4ConfigSana);
+$s6R = $s6EnHijo($s4Copia, $s6Express);
+wa_chk('con la config sana otra vez en la copia, el login de la empresa Express vuelve a traer el bloque y los permisos cruzados: lo que niega arriba es la config rota',
+    $s6R === $s6Esperado, $s6R);
 @unlink($s6Hijo);
 @unlink($s6HijoLog);
 

@@ -57,8 +57,9 @@
  *      En el proceso de la suite, la resolucion por RNC no filtra por edicion.
  *  10) el gate forzado a lanzar (servidor 8293, un arbol desechable donde PermissionGate::enforce lanza): la guarda de rutas vive en validateRequest, que llama cada
  *      controller, y sigue negando aunque el Router se trague la excepcion del gate.
- *  11) inyeccion de fallos (8292 sin src/TenantEntitlements.php, 8291 con un error de sintaxis): la empresa Express recibe 403 con cuerpo JSON y nunca un 500 ni HTML,
- *      la completa sigue igual, y el login sale sin el bloque entitlements y con los permisos crudos del rol.
+ *  11) inyeccion de fallos (8292 sin src/TenantEntitlements.php, 8291 con un error de sintaxis en ella, 8290 con un error de sintaxis en config/editions.php): la empresa
+ *      Express recibe 403 con cuerpo JSON y nunca un 500 ni HTML, la completa sigue igual, y el login sale sin el bloque entitlements y con los permisos crudos del rol.
+ *      Con la config rota, ademas, el log del servidor trae la linea del gancho (AuthMiddleware) y la de authModel: el 403 viene de ella y no de otra cosa.
  *  12) A de vuelta a completa: el login y /me pierden el bloque y el payload de B no cambia.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
@@ -76,7 +77,7 @@
  * proceso A y B quedan como completas): no corras a la vez otra suite que use esas bases. La 6 ademas quita de la
  * base de A sus rangos de ecf mientras corre y los repone en un finally.
  *
- * Las APIs que levanta express_api() (php -S, un puerto cada una; este plan usa del 8291 al 8294) corren con
+ * Las APIs que levanta express_api() (php -S, un puerto cada una; este plan usa del 8291 al 8294 y el 8290, el de la config rota de la seccion 11) corren con
  * PERMISSIONS_ENFORCE=false (modo sombra) o, con --enforce, en true: lo que prueba la suite tiene que valer en
  * los dos modos, y con la zona horaria por defecto de este proceso (la del php.ini o la de un -d date.timezone= al
  * correr la suite: el hijo no hereda ese -d, asi que express_api() se la pasa). Un php -S que quedo de una corrida
@@ -85,7 +86,7 @@
  *
  * Las secciones 7 a 12 no miran el modo y afirman lo mismo en los dos: la suite se corre dos veces, sin y con --enforce, y que
  * valga en los dos es lo que prueba que PermissionGate::enforcing() esta forzado para una empresa Express. Los arboles
- * desechables de express_arbol() (servidores 8293, 8292 y 8291) se borran al terminar el proceso.
+ * desechables de express_arbol() (servidores 8293, 8292, 8291 y 8290) se borran al terminar el proceso.
  *
  * Uso:
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_express_scratch.php [--enforce]
@@ -332,6 +333,8 @@ function express_cli(array $args): array
  *                      excepcion y el controller sigue, sin que el gate haya resuelto la empresa.
  *   sin-entitlements   se borra src/TenantEntitlements.php: TenantResolver::cargarEntitlements() da false.
  *   entitlements-roto  src/TenantEntitlements.php se sobrescribe con un error de sintaxis: cargarEntitlements() atrapa el ParseError y da false.
+ *   config-roto        config/editions.php se sobrescribe con un error de sintaxis (revision final): la clase carga, pero tokenCaducado, permisosEfectivos y bloque leen su
+ *                      config() y el require lanza ParseError; el gancho de AuthMiddleware lo atrapa y niega con 403, y el login sale sin el bloque.
  * El parche del gate es un str_replace sobre la firma de enforce() y su llave de apertura, con el salto de linea que traiga el archivo (CRLF en un checkout
  * de Windows, LF en otro). Si no se aplica exactamente una vez la funcion sale con 1 y la linea [FALLO]: una copia sana por descuido probaria lo contrario de
  * lo que dice. El arbol se borra al terminar el proceso, ya detenidos los servidores que corren en el: el cierre que lo borra se registra desde otro cierre para
@@ -340,7 +343,7 @@ function express_cli(array $args): array
  */
 function express_arbol(string $modo): string
 {
-    $modos = ['gate-lanza', 'sin-entitlements', 'entitlements-roto'];
+    $modos = ['gate-lanza', 'sin-entitlements', 'entitlements-roto', 'config-roto'];
     if (!in_array($modo, $modos, true)) {
         throw new InvalidArgumentException("modo de arbol desconocido '{$modo}': los validos son " . implode(', ', $modos));
     }
@@ -412,6 +415,13 @@ function express_arbol(string $modo): string
         $roto = "<?php\n// Roto a proposito por express_arbol('entitlements-roto'): no compila.\nfinal class TenantEntitlements\n{\n    public static function roto(\n";
         if (file_put_contents($entitlements, $roto) === false) {
             $fallar('no se pudo sobrescribir src/TenantEntitlements.php de la copia');
+        }
+    } elseif ($modo === 'config-roto') {
+        // Un arreglo que no cierra: el require de config() lanza ParseError. La clase y todo lo demas quedan sanos.
+        $configuracion = $raiz . DIRECTORY_SEPARATOR . 'config' . DIRECTORY_SEPARATOR . 'editions.php';
+        $roto = "<?php\n// Roto a proposito por express_arbol('config-roto'): no compila.\nreturn [\n    'modulos' => [\n";
+        if (!is_file($configuracion) || file_put_contents($configuracion, $roto) === false) {
+            $fallar('no se pudo sobrescribir config/editions.php de la copia');
         }
     } else {
         $archivo = $raiz . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'PermissionGate.php';
@@ -2388,19 +2398,31 @@ wa_chk('gate lanzando: el log del servidor trae el mensaje de la excepcion ("gat
     $s10Nombre !== '' && substr_count($s10Log, 'gate forzado por la prueba') >= 4, ['servidor_registrado' => $s10Nombre !== '', 'lineas_con_el_mensaje' => substr_count($s10Log, 'gate forzado por la prueba')]);
 
 // ---------------------------------------------------------------------------
-// 11) Inyeccion de fallos: la clase de la edicion no esta o no compila (servidores 8292 y 8291)
+// 11) Inyeccion de fallos: la clase de la edicion no esta o no compila, o su config no compila (servidores 8292, 8291 y 8290)
 // ---------------------------------------------------------------------------
-echo "\n== 11) Inyeccion de fallos (servidores 8292 y 8291) ==\n";
+echo "\n== 11) Inyeccion de fallos (servidores 8292, 8291 y 8290) ==\n";
 express_edicion($ctx, 'A', 'express', '45', null);
 $s11Pdo = $ctx['pdo'];
-// Los tres servidores comparten la master: la sesion de A sale de un login en el servidor sano (8294) y vale en los dos rotos.
+// Los cuatro servidores comparten la master: la sesion de A sale de un login en el servidor sano (8294) y vale en los tres rotos. El 8290 (config/editions.php roto) es de la
+// revision final: tokenCaducado, permisosEfectivos y bloque leian config() sin protegerse y un archivo roto volvia fatal (un 500) cada peticion y login de una empresa Express.
 $s11Sano = express_api('express_api', 8294);
 $s11TokenA = express_login($s11Sano, 'admin_pos_a')['token'];
 $s11TokenB = express_login($s11Sano, 'admin_pos_b')['token'];
+$s11ClaveConfig = 'con config/editions.php roto, un error de sintaxis (8290)';
 $s11Servidores = [
     'sin src/TenantEntitlements.php (8292)' => express_api('express_sin', 8292, express_arbol('sin-entitlements')),
     'con src/TenantEntitlements.php roto, un error de sintaxis (8291)' => express_api('express_roto', 8291, express_arbol('entitlements-roto')),
+    $s11ClaveConfig => express_api('express_config', 8290, express_arbol('config-roto')),
 ];
+// El log del servidor de la config rota (wa_servidor lo deja en el temp del sistema): cuantas lineas del gancho y de authModel tenia antes de las peticiones de abajo.
+$s11PuertoCfg = (int) parse_url($s11Servidores[$s11ClaveConfig], PHP_URL_PORT);
+$s11LogConfig = static function () use ($s11PuertoCfg): string {
+    $nombre = trim((string) @file_get_contents(sys_get_temp_dir() . DIRECTORY_SEPARATOR . "wa_servidor_{$s11PuertoCfg}.txt"));
+    return $nombre === '' ? '' : (string) @file_get_contents(sys_get_temp_dir() . DIRECTORY_SEPARATOR . "wa_{$nombre}_{$s11PuertoCfg}.log");
+};
+$s11LineasGancho = static fn (string $log): int => substr_count($log, '[AuthMiddleware] edicion: no se pudo decidir el vencimiento de la sesion');
+$s11LineasLogin = static fn (string $log): int => substr_count($log, '[authModel] edicion: no se pudo calcular lo de la edicion Express');
+$s11LogAntes = $s11LogConfig();
 /** POST /api/auth/login de $usuario en $api, tal cual contesta (estado y json), para ver el 200 y las claves del user; un fallo muestra las claves y nunca el cuerpo (trae el token). */
 $s11Entrar = static fn (string $api, string $usuario): array => wa_http('POST', $api . '/api/auth/login',
     ['emailOrUsername' => $usuario, 'password' => pos_scratch_secretos($ctx['cred']['pass'])['clave_usuarios']]);
@@ -2433,6 +2455,14 @@ foreach ($s11Servidores as $s11Caso => $s11Url) {
         $s11LoginB['status'] === 200 && ($s11LoginB['json']['data']['user'] ?? null) !== null
         && json_encode($s11LoginB['json']['data']['user']) === json_encode($s11SanoB['json']['data']['user'] ?? null), [$s11Ver($s11LoginB), $s11Ver($s11SanoB)]);
 }
+// El 403 y el login sin bloque del servidor de la config rota vienen de la config y no de otra cosa: el gancho deja en el log del servidor la linea que dice que no pudo decidir
+// el vencimiento (una por cada peticion negada de A) y authModel la suya por el login de A. Se cuentan las lineas NUEVAS (el log se abre en modo append: una corrida anterior
+// con el mismo servidor deja las suyas). Si falla no se muestra el log (puede traer rutas y conexiones).
+$s11LogDespues = $s11LogConfig();
+wa_chk('config roto (8290): el log del servidor tiene lineas nuevas del gancho de AuthMiddleware (config/editions.php no carga, se niega con 403) y de authModel (el login sale sin el bloque): lo que paso arriba fue por la config rota',
+    $s11LineasGancho($s11LogDespues) > $s11LineasGancho($s11LogAntes) && $s11LineasLogin($s11LogDespues) > $s11LineasLogin($s11LogAntes)
+    && str_contains($s11LogDespues, 'config/editions.php'),
+    ['lineas_del_gancho' => $s11LineasGancho($s11LogDespues) - $s11LineasGancho($s11LogAntes), 'lineas_de_authModel' => $s11LineasLogin($s11LogDespues) - $s11LineasLogin($s11LogAntes)]);
 
 // ---------------------------------------------------------------------------
 // 12) A de vuelta a completa: el login y /me pierden el bloque

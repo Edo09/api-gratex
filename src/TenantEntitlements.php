@@ -80,10 +80,22 @@ final class TenantEntitlements
      */
     private static array $rutasPermitidas = [];
 
-    /** config/editions.php: se lee con require una sola vez por proceso. */
+    /**
+     * config/editions.php: se lee con require una sola vez por proceso. Si el archivo no esta lanza RuntimeException (un require que falla antes escribe un aviso de PHP, que con
+     * display_errors prendido saldria delante del JSON de la respuesta); si no compila, lanza al cargarse o no devuelve un arreglo, la excepcion es la que el archivo dispare
+     * (ParseError, TypeError...). Quien la lee para decidir sobre una empresa Express (el gancho de AuthMiddleware, guardaRuta y el login de authModel) atrapa lo que sea y niega: un archivo roto
+     * no se vuelve un 500, igual que una clase que no carga.
+     */
     public static function config(): array
     {
-        return self::$config ??= require __DIR__ . '/../config/editions.php';
+        if (self::$config === null) {
+            $archivo = __DIR__ . '/../config/editions.php';
+            if (!is_file($archivo)) {
+                throw new RuntimeException('no existe config/editions.php');
+            }
+            self::$config = require $archivo;
+        }
+        return self::$config;
     }
 
     /**
@@ -408,7 +420,9 @@ final class TenantEntitlements
      * @param ?string $ultimoUso fecha 'Y-m-d H:i:s' del ultimo uso, o null
      * @param ?string $creado    fecha 'Y-m-d H:i:s' de la creacion, o null
      * @param int     $ahora     marca de tiempo de la peticion (time())
-     * @param ?int    $dias      dias de inactividad que se toleran; null = TOKEN_INACTIVIDAD_DIAS de config()
+     * @param ?int    $dias      dias de inactividad que se toleran; null = TOKEN_INACTIVIDAD_DIAS de config(), que tiene que ser un numero positivo
+     *                           (config() lanza si el archivo no se puede leer, y esta funcion tambien si la clave falta o no es positiva: un config a medias no cuenta con 0 dias,
+     *                           que vencerian y revocarian TODAS las sesiones de las empresas Express; quien llama niega la peticion, ver AuthMiddleware)
      */
     public static function tokenCaducado(?string $ultimoUso, ?string $creado, int $ahora, ?int $dias = null): bool
     {
@@ -416,7 +430,13 @@ final class TenantEntitlements
         if ($momento === null) {
             return false;
         }
-        $dias ??= (int) self::config()['TOKEN_INACTIVIDAD_DIAS'];
+        if ($dias === null) {
+            $configurado = self::config()['TOKEN_INACTIVIDAD_DIAS'] ?? null;
+            if (!is_numeric($configurado) || (int) $configurado < 1) {
+                throw new RuntimeException('config/editions.php: TOKEN_INACTIVIDAD_DIAS falta o no es un numero positivo');
+            }
+            $dias = (int) $configurado;
+        }
         return $ahora - $momento > $dias * 86400;
     }
 

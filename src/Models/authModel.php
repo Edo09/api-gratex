@@ -8,6 +8,9 @@ class authModel
 {
     private $conexion;
 
+    /** Ya se dejo en este proceso la linea del log de un fallo de la edicion (permissionsForUser y conEntitlements fallan juntos: UNA linea por peticion). */
+    private static bool $falloEdicionAvisado = false;
+
     public function __construct()
     {
         // In multi-tenant mode, auth (users + api_tokens) lives in the master DB
@@ -235,7 +238,7 @@ class authModel
     /**
      * Modulos (permisos) a los que da acceso un rol. Vacio si no resuelve. Con la fila de una empresa Express, los del rol
      * cruzados con los modulos que su edicion incluye (TenantEntitlements::permisosEfectivos); con cualquier otra fila, o
-     * sin ella, los del rol tal cual. Si la clase de la edicion no carga, tambien tal cual: ver conEntitlements.
+     * sin ella, los del rol tal cual. Si la clase de la edicion no carga o su config no se puede leer, tambien tal cual: ver conEntitlements.
      *
      * @param ?array $fila fila de master.tenants de la empresa del usuario (filaTenant), o null
      */
@@ -247,7 +250,11 @@ class authModel
             (string) $role
         );
         if (self::esFilaExpress($fila) && TenantResolver::cargarEntitlements()) {
-            return TenantEntitlements::permisosEfectivos($permisos, $fila);
+            try {
+                return TenantEntitlements::permisosEfectivos($permisos, $fila);
+            } catch (Throwable $e) {
+                self::avisarFalloEdicion($e);   // sin su config no se puede cruzar: los permisos del rol, tal cual
+            }
         }
         return $permisos;
     }
@@ -258,18 +265,37 @@ class authModel
      * bloque sale de TenantEntitlements::bloque, que lo arma campo por campo: la fila de tenants lleva certificado y claves y
      * jamas se serializa.
      *
-     * Si la clase de la edicion no carga (TenantResolver::cargarEntitlements() es false y deja su propia linea en el log), la
-     * respuesta sale normal SIN el bloque y con los permisos crudos del rol: el cliente falla cerrado ante la falta del bloque
-     * y la guarda de AuthMiddleware contesta 403 a toda peticion posterior de esa empresa.
+     * Si la clase de la edicion no carga (TenantResolver::cargarEntitlements() es false y deja su propia linea en el log), o si su
+     * config (config/editions.php) no se puede leer y bloque lanza, la respuesta sale normal SIN el bloque y con los permisos
+     * crudos del rol: el cliente falla cerrado ante la falta del bloque y la guarda de AuthMiddleware contesta 403 a toda
+     * peticion posterior de esa empresa. Un login nunca es un 500 por eso.
      *
      * @param ?array $fila fila de master.tenants de la empresa del usuario (filaTenant), o null
      */
     private function conEntitlements(array $user_data, ?array $fila): array
     {
         if (self::esFilaExpress($fila) && TenantResolver::cargarEntitlements()) {
-            $user_data['entitlements'] = TenantEntitlements::bloque($fila);
+            try {
+                $user_data['entitlements'] = TenantEntitlements::bloque($fila);
+            } catch (Throwable $e) {
+                self::avisarFalloEdicion($e);
+            }
         }
         return $user_data;
+    }
+
+    /**
+     * Deja UNA linea en el log por proceso cuando lo de la edicion Express no se puede calcular para un login o un /me (lo normal: config/editions.php roto o ausente). Lleva la
+     * clase y el mensaje de la excepcion en una sola linea y acotado; nunca la fila de la empresa.
+     */
+    private static function avisarFalloEdicion(Throwable $e): void
+    {
+        if (self::$falloEdicionAvisado) {
+            return;
+        }
+        self::$falloEdicionAvisado = true;
+        error_log('[authModel] edicion: no se pudo calcular lo de la edicion Express (config/editions.php no carga o es invalido, o fallo TenantEntitlements): ' . get_class($e) . ': '
+            . substr(trim((string) preg_replace('/\s+/', ' ', $e->getMessage())), 0, 300) . '; la respuesta sale sin el bloque de la edicion y con los permisos del rol');
     }
 
     /**
