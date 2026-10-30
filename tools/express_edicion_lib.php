@@ -19,6 +19,9 @@
  *   - Nunca imprime ni escribe en el log por si misma: el informe viaja en el arreglo que devuelve y quien llama lo imprime. La unica linea de
  *     log que puede salir es la de TenantEntitlements::normalizarEdicion, que avisa una vez por valor cuando la edicion guardada no es ni
  *     completa ni express (se trata como completa).
+ *   - De los valores de configuracion del php (ini_set) solo cambia error_log, y solo dentro de express_conectar_master, mientras conecta con la
+ *     master: lo desvia a un archivo temporal (lo que MasterDatabase escribe al fallar lleva el usuario y el servidor) y lo restaura al salir,
+ *     tambien si lanza.
  *   - Evaluar y armar el plan son PURAS: reciben arreglos y devuelven arreglos; no tocan una base, ni el log, ni lo que reciben. Solo
  *     express_aplicar y el UPDATE de express_refrescar_cert escriben en una base, y solo cuando quien llama lo pide ($apply).
  *   - Nada de lo que devuelve la biblioteca se imprime con la fila de la empresa dentro: $hechos['tenant'] es la fila COMPLETA de
@@ -33,6 +36,7 @@
  */
 
 require_once __DIR__ . '/../src/TenantEntitlements.php';   // trae TenantResolver (decrypt) y config/editions.php; no imprime ni conecta
+require_once __DIR__ . '/../src/MasterDatabase.php';       // express_conectar_master la usa (TenantResolver ya la trae); incluirla no conecta
 
 /** El almacen por defecto que siembra tenant_schema.sql (warehouseModel::DEFAULT_NOMBRE): crear un producto falla sin el. */
 const EXPRESS_ALMACEN_DEFECTO = 'Almacén Principal';
@@ -92,6 +96,31 @@ function express_conectar_tenant(array $tenant): PDO
         throw new RuntimeException("No se pudo conectar a la base de datos del tenant #{$id} (codigo " . ($info[1] ?? $e->getCode()) . ').');
     } finally {
         restore_error_handler();
+    }
+}
+
+/**
+ * La conexion a la master. MasterDatabase carga el .env de la raiz al crearse y lee su configuracion de $_ENV (con variables de entorno hay que correr el
+ * php con -d variables_order=EGPCS). Al fallar, deja en el log el usuario, el servidor y la base: en la consola eso saldria por stderr. Mientras conecta, el
+ * log va a un archivo temporal, que se borra al salir, y error_log se restaura (a vacio si no tenia), tambien si la conexion lanza: a quien llama le llega
+ * solo la RuntimeException de MasterDatabase, con su texto fijo (No se pudo conectar a la base de datos maestra.).
+ *
+ * Es el unico lugar donde vive esta precaucion: tools/tenant_edicion.php y tools/verificar_express.php la llaman y ninguna la copia, para que no se desvien.
+ *
+ * @param string $prefijo con que empieza el nombre del archivo temporal: el de la herramienta que llama, para saber de quien es uno que quedara si el proceso
+ *                        muriera conectando (en Windows tempnam solo usa las tres primeras letras)
+ */
+function express_conectar_master(string $prefijo): PDO
+{
+    $archivo = tempnam(sys_get_temp_dir(), $prefijo);
+    $previo = ini_set('error_log', (string) $archivo);
+    try {
+        return MasterDatabase::getInstance()->getConnection();
+    } finally {
+        ini_set('error_log', $previo === false ? '' : $previo);
+        if (is_string($archivo)) {
+            @unlink($archivo);
+        }
     }
 }
 

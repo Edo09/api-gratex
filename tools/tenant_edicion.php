@@ -162,25 +162,6 @@ function tenant_edicion_parsear(array $args): array
     return ['modo' => $modo, 'tenant' => (int) $valores['tenant'], 'tipos' => $tipos, 'modulos' => $modulos, 'apply' => isset($banderas['apply'])];
 }
 
-/**
- * La conexion a la master (MasterDatabase carga el .env de la raiz al crearla). Al fallar, MasterDatabase deja en el log el usuario, el servidor
- * y la base: en la consola eso saldria por stderr. Se manda a un archivo temporal que se borra, y a quien llama le llega solo la RuntimeException con
- * su texto fijo (No se pudo conectar a la base de datos maestra.).
- */
-function tenant_edicion_conectar_master(): PDO
-{
-    $archivo = tempnam(sys_get_temp_dir(), 'tenant_edicion_');
-    $previo = ini_set('error_log', (string) $archivo);
-    try {
-        return MasterDatabase::getInstance()->getConnection();
-    } finally {
-        ini_set('error_log', $previo === false ? '' : $previo);
-        if (is_string($archivo)) {
-            @unlink($archivo);
-        }
-    }
-}
-
 /** El programa: lee la linea de comandos, corre la orden y imprime su informe. Devuelve el codigo de salida (0, 1, 2 o 3). */
 function tenant_edicion_main(array $argv): int
 {
@@ -194,7 +175,7 @@ function tenant_edicion_main(array $argv): int
         return 2;
     }
     try {
-        $master = tenant_edicion_conectar_master();
+        $master = express_conectar_master('tenant_edicion_');   // la de la biblioteca: lo que MasterDatabase deja en el log al fallar (usuario y servidor) no sale
         $resultado = match ($peticion['modo']) {
             'express' => express_convertir($master, $peticion['tenant'], ['edicion' => 'express', 'tipos' => $peticion['tipos'], 'modulos' => $peticion['modulos']], $peticion['apply']),
             'completa' => express_revertir($master, $peticion['tenant'], $peticion['apply']),

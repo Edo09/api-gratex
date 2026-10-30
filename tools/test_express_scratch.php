@@ -18,6 +18,8 @@
  *      del certificado ni ninguna clave cert_), lo toma de la fila viva en cada peticion y, aun vencido, no bloquea nada; la
  *      B, completa, no lo recibe.
  *   4) la biblioteca de preflight (tools/express_edicion_lib.php) sobre la empresa A: express_conectar_tenant abre su base,
+ *      express_conectar_master (la conexion a la master de tenant_edicion.php y verificar_express.php, en un hijo con su propio temp) devuelve
+ *      la de MasterDatabase y deja error_log y el directorio temporal como estaban,
  *      express_leer_certificado abre el .p12 desechable (bueno, con otra clave, sin archivo, sin clave y vencido) y vence igual que la
  *      emision (ECFEmissionService::exigirCertificadoVigente), express_preflight_hechos lee los hechos de A y cada uno coincide con una
  *      lectura independiente de la base, el predicado de rangos coincide con ncfModel (dispenseNextECF y rangoCubre) sobre filas reales,
@@ -771,6 +773,58 @@ try {
 }
 wa_chk('express_conectar_tenant: una clave de base que no se descifra lanza RuntimeException (no abre nada) y el texto no lleva la clave',
     $s4Error instanceof RuntimeException && !str_contains($s4Error->getMessage(), 'zz-marca'), $s4Error === null ? null : get_class($s4Error) . ': ' . $s4Error->getMessage());
+
+// --- express_conectar_master: la conexion a la master de tenant_edicion.php y verificar_express.php, el camino que sale bien ------------------------------------
+// En un hijo (express_cli: la master scratch le llega por el entorno, como a las herramientas) y con un directorio temporal propio y vacio (-d sys_temp_dir: en Windows tempnam solo usa las tres
+// primeras letras del prefijo, asi que buscar el prefijo no probaria nada). La funcion devuelve la conexion de MasterDatabase (la scratch, y la misma cada vez), deja error_log donde estaba y no
+// deja el archivo temporal. El camino que falla (sin master) lo prueba la seccion 11 de la suite pura, en un hijo aislado.
+$s4Privado = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ent_master_' . bin2hex(random_bytes(6));
+mkdir($s4Privado);
+$s4LogPropio = (string) tempnam(sys_get_temp_dir(), 'ent_mlog_');
+$s4HijoMaster = (string) tempnam(sys_get_temp_dir(), 'ent_mhijo_');
+file_put_contents($s4HijoMaster, <<<'PHP'
+<?php
+// Hijo de la seccion 4: abre la master con express_conectar_master dos veces y cuenta lo que dejo.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+require $argv[1];
+ini_set('error_log', $argv[2]);   // el log que el proceso tenia antes de conectar: lo que la funcion tiene que dejar como estaba
+$primera = express_conectar_master('ent_hijo_');
+$logTrasLaPrimera = ini_get('error_log');
+$segunda = express_conectar_master('ent_hijo_');
+echo "\n", json_encode([
+    'clase' => get_class($primera),
+    'base' => $primera->query('SELECT DATABASE()')->fetchColumn(),
+    'misma' => $primera === $segunda && $primera === MasterDatabase::getInstance()->getConnection(),
+    'log_tras_la_primera' => $logTrasLaPrimera,
+    'log_actual' => ini_get('error_log'),
+    'log_propio' => (string) @file_get_contents($argv[2]),
+    'temporal' => sys_get_temp_dir(),
+    'restos' => array_values(array_diff(scandir(sys_get_temp_dir()) ?: [], ['.', '..'])),
+]), "\n";
+PHP);
+$s4RM = express_cli(['-d', 'sys_temp_dir=' . $s4Privado, $s4HijoMaster, __DIR__ . '/express_edicion_lib.php', $s4LogPropio]);
+foreach (scandir($s4Privado) ?: [] as $s4Resto) {   // lo que el hijo haya dejado (si algo falla), fuera: la suite no ensucia el temp
+    if ($s4Resto !== '.' && $s4Resto !== '..') {
+        @unlink($s4Privado . DIRECTORY_SEPARATOR . $s4Resto);
+    }
+}
+@rmdir($s4Privado);
+@unlink($s4LogPropio);
+@unlink($s4HijoMaster);
+$s4LineasM = array_values(array_filter(preg_split('/\R/', trim($s4RM['salida'])) ?: [], static fn (string $l): bool => $l !== ''));
+$s4JM = json_decode((string) end($s4LineasM), true);
+$s4Normal = static fn (string $ruta): string => str_replace('\\', '/', rtrim($ruta, '/\\'));
+/** Lo que se muestra del hijo cuando una prueba falla: el codigo y la salida, acotada y con las credenciales de la master scratch enmascaradas. */
+$s4Ver = static fn (array $r): array => ['codigo' => $r['codigo'], 'salida' => pos_scratch_enmascarar(substr($r['salida'], 0, 1800),
+    array_merge([$ctx['cred']['pass'], $ctx['cred']['user'], $ctx['cred']['host']], array_values(pos_scratch_secretos($ctx['cred']['pass']))))];
+// Cada prueba de abajo exige antes que la funcion SI conecto con la master scratch: sin eso, "no dejo nada" se cumpliria tambien cuando la funcion ni existe (el hijo muere antes de llamarla).
+$s4Corrio = is_array($s4JM) && $s4RM['codigo'] === 0 && $s4JM['clase'] === 'PDO' && $s4JM['base'] === $ctx['master'];
+wa_chk('express_conectar_master: con la master scratch devuelve su conexion (un PDO sobre la master scratch), la misma las dos veces y la misma que MasterDatabase::getInstance()',
+    $s4Corrio && $s4JM['misma'] === true, $s4Ver($s4RM));
+wa_chk('express_conectar_master: deja error_log donde estaba despues de cada llamada, no escribe nada en el log ni en la salida y no deja el archivo temporal (su directorio temporal propio queda vacio)',
+    $s4Corrio && $s4JM['log_tras_la_primera'] === $s4LogPropio && $s4JM['log_actual'] === $s4LogPropio && $s4JM['log_propio'] === '' && count($s4LineasM) === 1
+    && $s4Normal($s4JM['temporal']) === $s4Normal($s4Privado) && $s4JM['restos'] === [], $s4Ver($s4RM));
 
 // --- express_leer_certificado ---------------------------------------------------------------------------------------------------
 $s4Cert = wa_cert_prueba();   // un .p12 desechable en el temp del sistema, valido dos dias, con una clave al azar

@@ -43,7 +43,7 @@
  */
 
 require_once __DIR__ . '/../src/MasterDatabase.php';
-require_once __DIR__ . '/express_edicion_lib.php';   // trae TenantEntitlements, TenantResolver (decrypt) y express_conectar_tenant; no imprime ni conecta
+require_once __DIR__ . '/express_edicion_lib.php';   // trae TenantEntitlements, TenantResolver (decrypt), express_conectar_tenant y express_conectar_master; no imprime ni conecta
 
 /** A cuantos dias o menos del vencimiento de cert_vence se avisa (CERT_POR_VENCER). El aviso de Configuracion salta a los 60: ese es de pantalla, este es de alarma. */
 const EXPRESS_VERIFICAR_CERT_DIAS = 30;
@@ -264,30 +264,12 @@ function express_verificar(PDO $master, int $hoy): array
     return $lineas === [] ? ['codigo' => 0, 'lineas' => ['Sin problemas.']] : ['codigo' => 1, 'lineas' => $lineas];
 }
 
-/**
- * La conexion a la master (MasterDatabase carga el .env de la raiz al crearla). Al fallar, MasterDatabase deja en el log el usuario, el servidor y la base:
- * en la consola eso saldria por stderr. Se manda a un archivo temporal que se borra, y a quien llama le llega solo la RuntimeException con su texto fijo
- * (No se pudo conectar a la base de datos maestra.). Es la misma precaucion de tools/tenant_edicion.php.
- */
-function express_verificar_conectar_master(): PDO
-{
-    $archivo = tempnam(sys_get_temp_dir(), 'verificar_express_');
-    $previo = ini_set('error_log', (string) $archivo);
-    try {
-        return MasterDatabase::getInstance()->getConnection();
-    } finally {
-        ini_set('error_log', $previo === false ? '' : $previo);
-        if (is_string($archivo)) {
-            @unlink($archivo);
-        }
-    }
-}
-
 /** El programa: conecta, arma el informe y lo imprime. Devuelve el codigo de salida (0, 1 o 2). */
 function express_verificar_main(): int
 {
     try {
-        $informe = express_verificar(express_verificar_conectar_master(), time());
+        // La conexion es la de la biblioteca: lo que MasterDatabase deja en el log al fallar (usuario y servidor) no sale.
+        $informe = express_verificar(express_conectar_master('verificar_express_'), time());
     } catch (Throwable $e) {
         fwrite(STDERR, '[FALLO] ' . express_describir_fallo($e) . "\n");
         return 1;

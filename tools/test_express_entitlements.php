@@ -4345,6 +4345,82 @@ $s11Lint = wa_correr([PHP_BINARY, '-d', 'error_reporting=-1', '-d', 'display_err
 wa_chk('php -l de verificar_express.php: sin errores de sintaxis ni deprecaciones', $s11Lint['codigo'] === 0 && str_starts_with(trim($s11Lint['salida']), 'No syntax errors detected')
     && !str_contains($s11Lint['salida'], 'Deprecated'), $s11Lint);
 
+// --- la conexion a la master: UNA copia, la de la biblioteca (express_conectar_master) --------------------------------------------------------------------
+// tenant_edicion.php y verificar_express.php abren la master con la misma precaucion: cuando la conexion falla, MasterDatabase deja en el log el usuario y el servidor, y en la consola eso saldria
+// por stderr. La precaucion vive en un solo lugar, como express_describir_fallo: se prueba la funcion misma (en un php hijo aislado: MasterDatabase es un singleton y el log del proceso de la
+// suite no es suyo) y las dos herramientas la llaman sin tener copia propia. El camino que sale bien, con una master de verdad, lo prueba la seccion 4 de la suite scratch.
+$s11Biblioteca = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/express_edicion_lib.php'));
+$s11Edicion = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/tenant_edicion.php'));
+$s11Existe = function_exists('express_conectar_master');
+$s11CMaster = preg_match('/\nfunction express_conectar_master\(string \$prefijo\): PDO\n\{.*?\n\}\n/s', $s11Biblioteca, $s11CuerpoM) === 1 ? $s11CuerpoM[0] : '';
+$s11Efectos = '/\b(tempnam|ini_set)\s*\(/';
+wa_chk('express_edicion_lib.php: express_conectar_master(string $prefijo): PDO se declara una sola vez y es el unico lugar de la biblioteca que crea un archivo temporal y cambia error_log (un tempnam y dos ini_set: desviar y restaurar)',
+    $s11Existe && $s8Firma('express_conectar_master') === 'express_conectar_master(string $prefijo): PDO'
+    && substr_count($s11Biblioteca, 'function express_conectar_master(') === 1 && $s11CMaster !== ''
+    && preg_match_all($s11Efectos, $s8SinTextos("<?php\n" . $s11CMaster)) === 3 && preg_match_all($s11Efectos, $s8SinTextos($s11Biblioteca)) === 3,
+    $s11Existe ? [$s8Firma('express_conectar_master'), $s11CMaster === '' ? 'no se encontro su cuerpo' : 'con cuerpo'] : 'la funcion no existe');
+// La funcion misma, con la master inalcanzable, en un php hijo aislado (puerto 1 de loopback) y con un directorio temporal propio y vacio (-d sys_temp_dir): lanza la RuntimeException de texto fijo,
+// lo que MasterDatabase manda al log al fallar (el usuario y el servidor) no llega a ninguna parte visible, error_log queda donde estaba y el directorio temporal queda vacio. En Windows tempnam solo
+// usa las tres primeras letras del prefijo, asi que "no queda un archivo con el prefijo" no probaria nada: se mira el directorio entero.
+$s11Privado = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'ent_master_' . bin2hex(random_bytes(6));
+mkdir($s11Privado);
+$s11LogPropio = (string) tempnam(sys_get_temp_dir(), 'ent_mlog_');
+$s11HijoMaster = (string) tempnam(sys_get_temp_dir(), 'ent_mhijo_');
+file_put_contents($s11HijoMaster, <<<'PHP'
+<?php
+// Hijo de la seccion 11: llama a express_conectar_master con la master inalcanzable y cuenta lo que dejo.
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+require $argv[1];
+ini_set('error_log', $argv[2]);   // el log que el proceso tenia antes de conectar: lo que la funcion tiene que dejar como estaba
+$lanzo = null;
+try {
+    express_conectar_master('ent_hijo_');
+} catch (Throwable $e) {
+    $lanzo = [get_class($e), $e->getMessage()];
+}
+echo "\n", json_encode([
+    'lanzo' => $lanzo,
+    'log_actual' => ini_get('error_log'),
+    'log_propio' => (string) @file_get_contents($argv[2]),
+    'temporal' => sys_get_temp_dir(),
+    'restos' => array_values(array_diff(scandir(sys_get_temp_dir()) ?: [], ['.', '..'])),
+    'instancia' => (new ReflectionProperty('MasterDatabase', 'instance'))->getValue() !== null,
+]), "\n";
+PHP);
+$s11RM = express_hijo_aislado(['-d', 'sys_temp_dir=' . $s11Privado, $s11HijoMaster, __DIR__ . '/express_edicion_lib.php', $s11LogPropio]);
+foreach (scandir($s11Privado) ?: [] as $s11Resto) {   // lo que el hijo haya dejado (si algo falla), fuera: la suite no ensucia el temp
+    if ($s11Resto !== '.' && $s11Resto !== '..') {
+        @unlink($s11Privado . DIRECTORY_SEPARATOR . $s11Resto);
+    }
+}
+@rmdir($s11Privado);
+@unlink($s11LogPropio);
+@unlink($s11HijoMaster);
+$s11LineasM = array_values(array_filter(preg_split('/\R/', trim($s11RM['salida'])) ?: [], static fn (string $l): bool => $l !== ''));
+$s11JM = json_decode((string) end($s11LineasM), true);
+$s11Normal = static fn (string $ruta): string => str_replace('\\', '/', rtrim($ruta, '/\\'));
+// Cada prueba de abajo exige antes que la funcion SI corrio y fallo como se espera: sin eso, "no dejo nada" se cumpliria tambien cuando la funcion ni existe (el hijo muere antes de llamarla).
+$s11Corrio = is_array($s11JM) && $s11JM['lanzo'] === ['RuntimeException', 'No se pudo conectar a la base de datos maestra.'];
+wa_chk('express_conectar_master con la master inalcanzable (hijo aislado): lanza la RuntimeException de texto fijo "No se pudo conectar a la base de datos maestra." y no deja una instancia de MasterDatabase',
+    $s11Corrio && $s11JM['instancia'] === false, $s11RM);
+wa_chk('...no deja pasar la linea que MasterDatabase manda al log al fallar (el usuario y el servidor): ni al log que el proceso tenia, ni a stderr ni a la salida',
+    $s11Corrio && $s11JM['log_propio'] === '' && count($s11LineasM) === 1
+    && !preg_match('/127\.0\.0\.1|aislado_usuario|aislado_clave|MasterDB|Stack trace|Warning|Notice|Deprecated|Fatal/', $s11RM['salida']), $s11RM);
+wa_chk('...deja error_log donde estaba (el del proceso antes de conectar) y no deja el archivo temporal: su directorio temporal propio queda vacio',
+    $s11Corrio && $s11JM['log_actual'] === $s11LogPropio && $s11Normal($s11JM['temporal']) === $s11Normal($s11Privado) && $s11JM['restos'] === [], $s11RM);
+// Y las dos herramientas la llaman, cada una con su prefijo, sin tener copia propia: ni la funcion de antes, ni un tempnam, un ini_set, un unlink o un MasterDatabase::getInstance suyos.
+foreach ([
+    'tenant_edicion.php' => [$s11Edicion, 'tenant_edicion_', 'tenant_edicion_conectar_master'],
+    'verificar_express.php' => [$s11Fuente, 'verificar_express_', 'express_verificar_conectar_master'],
+] as $s11Quien => [$s11Texto, $s11Prefijo, $s11Viejo]) {
+    $s11Codigo2 = $s8SinTextos($s11Texto);   // sin comentarios ni textos: un comentario puede nombrar la funcion, el codigo la llama una sola vez
+    wa_chk("{$s11Quien}: abre la master con express_conectar_master (la de la biblioteca) y su propio prefijo, una sola vez, y no tiene copia propia (ni {$s11Viejo}, ni tempnam, ini_set, unlink ni MasterDatabase::getInstance)",
+        substr_count($s11Texto, "express_conectar_master('{$s11Prefijo}')") === 1 && preg_match_all('/\bexpress_conectar_master\b/', $s11Codigo2) === 1
+        && !str_contains($s11Texto, $s11Viejo) && preg_match('/\b(tempnam|ini_set|sys_get_temp_dir|unlink|getInstance)\b/', $s11Codigo2) !== 1,
+        ['con_su_prefijo' => substr_count($s11Texto, "express_conectar_master('{$s11Prefijo}')"), 'en_el_codigo' => preg_match_all('/\bexpress_conectar_master\b/', $s11Codigo2), 'funcion_vieja' => str_contains($s11Texto, $s11Viejo)]);
+}
+
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
