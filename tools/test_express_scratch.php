@@ -44,12 +44,29 @@
  *      el log); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 014 sale con 2; y
  *      ninguna corrida escribe nada ni imprime un secreto. La Consulta 4 se saca del archivo (sin el "-- " de sus lineas) y se corre en la master
  *      scratch: con A Express y tipos NULL devuelve a A con tipos_vacios 1 y no a B; con A completa, ninguna fila de A.
+ *   7) la lista de rutas de la edicion por HTTP (A Express con el E45, token de administrador): lo que Express no incluye (gastos, inventario, facturacion
+ *      electronica, cotizaciones, conduces, el POS, reportes, roles, la secuencia heredada PUT /api/ncf y el traspaso al POS) contesta 403 EDICION_NO_INCLUYE;
+ *      facturas, emisor, rangos, unidades, /me y clientes (aun con "..." en la consulta) contestan 200; un "/api/" dentro de la consulta es 400 SOLICITUD_INVALIDA
+ *      y uno dentro de la ruta no cambia la ruta; la B, completa, nunca recibe EDICION_NO_INCLUYE. RF1: el Facturador de A recibe en una ruta de administrador, y
+ *      en una cuyo modulo su rol no tiene, el 403 sin codigo ("No tienes permiso para hacer esto..."). RF5: una edicion que cambia entre dos peticiones del mismo
+ *      token rige en la siguiente.
+ *   8) el ciclo de vida del token: sin uso hace 31 dias vence (401 "Tu sesión venció por inactividad" y el token queda inactivo); una peticion negada no toca
+ *      last_used y una permitida lo adelanta.
+ *   9) la DGII entrante (POST /api/ecf/recepcion): sin sesion, o con un Bearer que no es de sesion (el de un caller de la DGII), contesta el controller (400) y la
+ *      guarda no interviene; con la sesion de A como Bearer contesta la guarda (403 EDICION_NO_INCLUYE: la ruta no esta en la lista); la de B llega al controller.
+ *      En el proceso de la suite, la resolucion por RNC no filtra por edicion.
+ *  10) el gate forzado a lanzar (servidor 8293, un arbol desechable donde PermissionGate::enforce lanza): la guarda de rutas vive en validateRequest, que llama cada
+ *      controller, y sigue negando aunque el Router se trague la excepcion del gate.
+ *  11) inyeccion de fallos (8292 sin src/TenantEntitlements.php, 8291 con un error de sintaxis): la empresa Express recibe 403 con cuerpo JSON y nunca un 500 ni HTML,
+ *      la completa sigue igual, y el login sale sin el bloque entitlements y con los permisos crudos del rol.
+ *  12) A de vuelta a completa: el login y /me pierden el bloque y el payload de B no cambia.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
  * raiz), express_login, express_h (la cabecera de sesion), express_usar_master (apunta MasterDatabase y
- * TenantResolver de ESTE proceso a la master scratch) y express_cli (corre tools/tenant_edicion.php, o la herramienta
- * que se pida, en un php hijo contra esa master).
+ * TenantResolver de ESTE proceso a la master scratch), express_cli (corre tools/tenant_edicion.php, o la herramienta
+ * que se pida, en un php hijo contra esa master) y express_arbol (arma en el temp una raiz del API desechable con un
+ * fallo puesto a proposito, para pasarsela a express_api).
  *
  * Nunca produccion: wa_pdo() se niega a usar una base sin la tabla marca zz_write_ahead_scratch y
  * pos_scratch_exigir() una que no se llame wa_scratch o wa_scratch_sin_gate. Las credenciales salen de
@@ -65,6 +82,10 @@
  * correr la suite: el hijo no hereda ese -d, asi que express_api() se la pasa). Un php -S que quedo de una corrida
  * interrumpida (Ctrl+C en Windows puede saltarse el cierre) en el modo contrario, de otro arbol o de otra zona, hace que
  * wa_servidor pare con "[FALLO] el puerto ... ya lo usa otro proceso": detenlo y vuelve a correr.
+ *
+ * Las secciones 7 a 12 no miran el modo y afirman lo mismo en los dos: la suite se corre dos veces, sin y con --enforce, y que
+ * valga en los dos es lo que prueba que PermissionGate::enforcing() esta forzado para una empresa Express. Los arboles
+ * desechables de express_arbol() (servidores 8293, 8292 y 8291) se borran al terminar el proceso.
  *
  * Uso:
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/test_express_scratch.php [--enforce]
@@ -300,6 +321,108 @@ function express_cli(array $args): array
         exit(1);
     }
     return wa_correr(array_merge([PHP_BINARY], wa_php_flags(), ['-d', 'variables_order=EGPCS', '-d', 'date.timezone=' . date_default_timezone_get()], $args));
+}
+
+/**
+ * Arma una raiz del API desechable en el temp del sistema y devuelve su ruta (para pasarsela a express_api() como $raiz): una copia de index.php, src/ y
+ * config/ (nada mas: sin .env, sin certificados, sin tools/) con UN fallo puesto a proposito. Asi se prueba por HTTP lo que la API hace cuando algo de la
+ * edicion se rompe, sin que el codigo de produccion lleve un interruptor de prueba: lo que se rompe se rompe en la copia.
+ *   gate-lanza         PermissionGate::enforce lanza RuntimeException('gate forzado por la prueba') como su primera sentencia: el Router se traga la
+ *                      excepcion y el controller sigue, sin que el gate haya resuelto la empresa.
+ *   sin-entitlements   se borra src/TenantEntitlements.php: TenantResolver::cargarEntitlements() da false.
+ *   entitlements-roto  src/TenantEntitlements.php se sobrescribe con un error de sintaxis: cargarEntitlements() atrapa el ParseError y da false.
+ * El parche del gate es un str_replace sobre la firma de enforce() y su llave de apertura, con el salto de linea que traiga el archivo (CRLF en un checkout
+ * de Windows, LF en otro). Si no se aplica exactamente una vez la funcion sale con 1 y la linea [FALLO]: una copia sana por descuido probaria lo contrario de
+ * lo que dice. El arbol se borra al terminar el proceso, ya detenidos los servidores que corren en el: el cierre que lo borra se registra desde otro cierre para
+ * que PHP lo ponga detras de los que detienen a los servidores (wa_servidor), y en Windows un directorio no se borra mientras es el de trabajo de un proceso.
+ * Cada corrida arma el suyo, con otro nombre: uno que quedo en el temp de una corrida muerta no estorba (y un php -S huerfano en el puerto lo ve wa_servidor).
+ */
+function express_arbol(string $modo): string
+{
+    $modos = ['gate-lanza', 'sin-entitlements', 'entitlements-roto'];
+    if (!in_array($modo, $modos, true)) {
+        throw new InvalidArgumentException("modo de arbol desconocido '{$modo}': los validos son " . implode(', ', $modos));
+    }
+    $fallar = static function (string $motivo) use ($modo): never {
+        echo "[FALLO] express_arbol({$modo}): {$motivo}\n";
+        exit(1);
+    };
+    $origen = dirname(__DIR__);
+    $raiz = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'express_arbol_' . $modo . '_' . getmypid() . '_' . bin2hex(random_bytes(3));
+    if (!mkdir($raiz, 0700, true)) {
+        $fallar('no se pudo crear el directorio desechable en el temp del sistema');
+    }
+    // El borrado: nunca de algo que no sea un arbol de esta funcion. En Windows el archivo de un php -S que acaba de morir puede tardar un instante en
+    // soltarse, asi que se reintenta unas veces; si el arbol no se va, un aviso (no es una prueba que falle).
+    $borrar = static function () use ($raiz): void {
+        if (!is_dir($raiz) || !str_starts_with(basename($raiz), 'express_arbol_')) {
+            return;
+        }
+        for ($intento = 0; $intento < 20 && is_dir($raiz); $intento++) {
+            $recorrido = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($raiz, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
+            foreach ($recorrido as $item) {
+                if ($item->isDir() && !$item->isLink()) {
+                    @rmdir($item->getPathname());
+                } else {
+                    @unlink($item->getPathname());
+                }
+            }
+            @rmdir($raiz);
+            if (is_dir($raiz)) {
+                usleep(100000);
+            }
+        }
+        if (is_dir($raiz)) {
+            echo "[AVISO] no se pudo borrar el arbol desechable {$raiz}: borralo a mano\n";
+        }
+    };
+    register_shutdown_function(static function () use ($borrar): void {
+        register_shutdown_function($borrar);
+    });
+
+    // La copia: index.php y, con RecursiveDirectoryIterator, src/ y config/.
+    if (!copy($origen . DIRECTORY_SEPARATOR . 'index.php', $raiz . DIRECTORY_SEPARATOR . 'index.php')) {
+        $fallar('no se pudo copiar index.php');
+    }
+    foreach (['src', 'config'] as $carpeta) {
+        if (!mkdir($raiz . DIRECTORY_SEPARATOR . $carpeta, 0700, true)) {
+            $fallar("no se pudo crear {$carpeta}/ en la copia");
+        }
+        $recorrido = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator($origen . DIRECTORY_SEPARATOR . $carpeta, FilesystemIterator::SKIP_DOTS),
+            RecursiveIteratorIterator::SELF_FIRST
+        );
+        foreach ($recorrido as $item) {
+            $destino = $raiz . DIRECTORY_SEPARATOR . $carpeta . DIRECTORY_SEPARATOR . $recorrido->getSubPathname();
+            if ($item->isDir() ? !mkdir($destino, 0700, true) : !copy($item->getPathname(), $destino)) {
+                $fallar("no se pudo copiar {$carpeta}/" . $recorrido->getSubPathname());
+            }
+        }
+    }
+
+    // El fallo de cada modo.
+    $entitlements = $raiz . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'TenantEntitlements.php';
+    if ($modo === 'sin-entitlements') {
+        if (!unlink($entitlements) || is_file($entitlements)) {
+            $fallar('no se pudo borrar src/TenantEntitlements.php de la copia');
+        }
+    } elseif ($modo === 'entitlements-roto') {
+        // Una clase que no cierra y una lista de parametros que no termina: no compila.
+        $roto = "<?php\n// Roto a proposito por express_arbol('entitlements-roto'): no compila.\nfinal class TenantEntitlements\n{\n    public static function roto(\n";
+        if (file_put_contents($entitlements, $roto) === false) {
+            $fallar('no se pudo sobrescribir src/TenantEntitlements.php de la copia');
+        }
+    } else {
+        $archivo = $raiz . DIRECTORY_SEPARATOR . 'src' . DIRECTORY_SEPARATOR . 'PermissionGate.php';
+        $fuente = (string) file_get_contents($archivo);
+        $salto = str_contains($fuente, "\r\n") ? "\r\n" : "\n";
+        $apertura = "public static function enforce(string \$route, string \$method, string \$sub = ''): void" . $salto . '    {';
+        $parcheado = str_replace($apertura, $apertura . $salto . "        throw new RuntimeException('gate forzado por la prueba');", $fuente, $veces);
+        if ($veces !== 1 || file_put_contents($archivo, $parcheado) === false) {
+            $fallar("el parche del gate no se aplico exactamente una vez (se aplico {$veces}): revisa si la firma de PermissionGate::enforce o su llave de apertura cambiaron");
+        }
+    }
+    return $raiz;
 }
 
 // Modo hijo: lo lanza la seccion 1 para ver la restauracion de al terminar. Ensucia las dos empresas (columnas
@@ -2007,6 +2130,314 @@ wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendi
     && $s6Pdo->query("SELECT * FROM ncf_sequences WHERE ambiente = 'ecf' ORDER BY id")->fetchAll() === $s6Rangos0
     && (int) $s6Master->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')")->fetchColumn() === 4,
     array_intersect_key($s6Final, array_flip(['edicion', 'ambiente', 'pos_enabled', 'tipos_ecf_habilitados', 'cert_vence', 'cert_path'])));
+
+// ---------------------------------------------------------------------------
+// 7) La lista de rutas de la edicion por HTTP: lo que Express incluye, RF1 y RF5
+// ---------------------------------------------------------------------------
+echo "\n== 7) La lista de rutas de la edicion por HTTP ==\n";
+// Las secciones 7 a 12 no miran el modo de la suite (PERMISSIONS_ENFORCE en false, o en true con --enforce): lo que afirman vale en los dos, y que valga
+// en los dos es lo que prueba que PermissionGate::enforcing() esta forzado para una empresa Express. Cada una abre sus propias sesiones (un login nuevo).
+$s7Pdo = $ctx['pdo'];
+$s7IdA = (int) $ctx['tenantA'];
+
+// Ayudas de las secciones 7 a 12 (las 8 a 12 usan estas):
+/** Una peticion a la API $api con la sesion de $token (sin cabecera de sesion con null). Un POST o un PUT lleva el cuerpo vacio: la guarda niega antes de leerlo. */
+$s7Pedir = static fn (string $api, string $metodo, string $uri, ?string $token = null): array => wa_http(
+    $metodo, $api . $uri, in_array($metodo, ['POST', 'PUT'], true) ? [] : null, $token === null ? [] : express_h($token)
+);
+/**
+ * ¿Es la negativa de la edicion? 403 con status false, el codigo EDICION_NO_INCLUYE y el texto de la edicion, que sale de la constante unica
+ * (TenantResolver::MSG_EDICION): una prueba que compara el texto no lleva una segunda copia de el.
+ */
+$s7Niega = static fn (array $r): bool => $r['status'] === 403 && is_array($r['json']) && ($r['json']['status'] ?? null) === false
+    && ($r['json']['codigo'] ?? null) === 'EDICION_NO_INCLUYE' && ($r['json']['error'] ?? null) === TenantResolver::MSG_EDICION;
+/** ¿Es el 403 del rol sin permiso? Ese texto y sin la clave codigo: no es un asunto de la edicion (el Facturador en una ruta de administrador, o un rol sin el modulo). */
+$s7SinPermiso = static fn (array $r): bool => $r['status'] === 403 && is_array($r['json']) && ($r['json']['status'] ?? null) === false
+    && ($r['json']['error'] ?? null) === 'No tienes permiso para hacer esto. Pídeselo a un administrador.' && !array_key_exists('codigo', $r['json']);
+/** Lo que se muestra de una respuesta cuando una prueba falla: el estado y el cuerpo, acotado y con los tokens (hex de 32 o mas) tapados. */
+$s7Ver = static fn (array $r): array => [$r['status'], pos_scratch_enmascarar(substr($r['body'], 0, 300), [])];
+
+// A es la empresa Express (solo el E45, todos los modulos del preset) y B, la de control, sigue completa.
+express_edicion($ctx, 'A', 'express', '45', null);
+express_edicion($ctx, 'B', null, null, null);
+$s7Api = express_api('express_api', 8294);
+$s7TokenA = express_login($s7Api, 'admin_pos_a')['token'];
+$s7TokenB = express_login($s7Api, 'admin_pos_b')['token'];
+
+// Lo que Express no incluye: 403 EDICION_NO_INCLUYE aunque el token sea el de un administrador (que tiene "*").
+$s7Denegadas = [
+    ['GET', '/api/gastos'], ['GET', '/api/inventario/movimientos'], ['GET', '/api/facturacion-electronica/estado'], ['GET', '/api/cotizaciones'],
+    ['GET', '/api/conduces'], ['GET', '/api/pos-admin/cajas'], ['GET', '/api/reportes/607'], ['GET', '/api/roles'],
+    ['PUT', '/api/ncf'], ['POST', '/api/auth/pos-handoff'],
+];
+foreach ($s7Denegadas as [$s7Metodo, $s7Uri]) {
+    $r = $s7Pedir($s7Api, $s7Metodo, $s7Uri, $s7TokenA);
+    wa_chk("A (Express, administrador) {$s7Metodo} {$s7Uri}: 403, status false, codigo EDICION_NO_INCLUYE y el texto de la edicion", $s7Niega($r), $s7Ver($r));
+}
+// Lo que si incluye: la lista de facturas, el emisor, los rangos, las unidades y quien soy.
+$s7Permitidas = ['/api/facturas?pageSize=1', '/api/emisor', '/api/ncf/rangos', '/api/unidades-medida', '/api/auth/me'];
+foreach ($s7Permitidas as $s7Uri) {
+    $r = $s7Pedir($s7Api, 'GET', $s7Uri, $s7TokenA);
+    wa_chk("A (Express, administrador) GET {$s7Uri}: 200 y sin codigo", $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+}
+// Los casos de forma: un /api/ dentro de la consulta se rechaza, uno dentro de la ruta no cambia la ruta, y una consulta con "..." se puede buscar.
+$s7Especiales = ['/api/facturas?x=/api/ncf/sequence', '/api/facturas/x/api/gastos', '/api/clients?query=Constr...'];
+$r = $s7Pedir($s7Api, 'GET', $s7Especiales[0], $s7TokenA);
+wa_chk("A GET {$s7Especiales[0]} (un /api/ dentro de la consulta): 400 SOLICITUD_INVALIDA, no llega al controller",
+    $r['status'] === 400 && is_array($r['json']) && ($r['json']['status'] ?? null) === false && ($r['json']['codigo'] ?? null) === 'SOLICITUD_INVALIDA', $s7Ver($r));
+$r = $s7Pedir($s7Api, 'GET', $s7Especiales[1], $s7TokenA);
+wa_chk("A GET {$s7Especiales[1]} (el /api/ de adentro no cambia la ruta, que es facturas): 403 EDICION_NO_INCLUYE", $s7Niega($r), $s7Ver($r));
+$r = $s7Pedir($s7Api, 'GET', $s7Especiales[2], $s7TokenA);
+wa_chk("A GET {$s7Especiales[2]} (puntos suspensivos en la consulta: se puede buscar asi): 200 y sin codigo",
+    $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+
+// La empresa completa no tiene guarda: los mismos GET de arriba, con el administrador de B, contestan lo que contesta su controller (un 200, un 400 por un
+// parametro que falta, un 404...) y ninguno trae EDICION_NO_INCLUYE ni SOLICITUD_INVALIDA (la prueba exige que contesten: un fallo de red no cuenta).
+$s7UrisGet = array_merge(
+    array_values(array_map(static fn (array $p): string => $p[1], array_filter($s7Denegadas, static fn (array $p): bool => $p[0] === 'GET'))),
+    $s7Permitidas,
+    $s7Especiales
+);
+$s7FallosB = [];
+foreach ($s7UrisGet as $s7Uri) {
+    $r = $s7Pedir($s7Api, 'GET', $s7Uri, $s7TokenB);
+    $s7Codigo = is_array($r['json']) ? ($r['json']['codigo'] ?? null) : null;
+    if ($r['status'] < 200 || in_array($s7Codigo, ['EDICION_NO_INCLUYE', 'SOLICITUD_INVALIDA'], true)) {
+        $s7FallosB[$s7Uri] = [$r['status'], $s7Codigo];
+    }
+}
+wa_chk('B (completa, administrador): ninguno de los ' . count($s7UrisGet) . ' GET de arriba contesta EDICION_NO_INCLUYE ni SOLICITUD_INVALIDA, y todos contestan',
+    count($s7UrisGet) === 16 && $s7FallosB === [], $s7FallosB);
+
+// RF1: el Facturador (rol user) de A en una ruta de administrador recibe el 403 de siempre, sin codigo; nunca EDICION_NO_INCLUYE ni un 401 (el SPA cierra la sesion con cualquier 401).
+$s7TokenU = express_login($s7Api, 'user_pos_a')['token'];
+foreach ([['POST', '/api/ncf/rangos'], ['GET', '/api/users']] as [$s7Metodo, $s7Uri]) {
+    $r = $s7Pedir($s7Api, $s7Metodo, $s7Uri, $s7TokenU);
+    wa_chk("RF1: user_pos_a (el Facturador de A, Express) {$s7Metodo} {$s7Uri}: 403 con 'No tienes permiso para hacer esto. Pídeselo a un administrador.' y sin la clave codigo", $s7SinPermiso($r), $s7Ver($r));
+}
+// Y en una ruta que la lista deja pasar a todo rol, pero cuyo modulo (ncf) el rol no tiene: la lectura de rangos es 200 con el permiso y el mismo 403 sin codigo cuando
+// se le quita, en los dos modos (con la sombra apagada el gate solo anotaria: aqui bloquea porque enforcing() esta forzado). Se repone el permiso al terminar.
+$s7Rol = $s7Pdo->prepare("SELECT id FROM roles WHERE tenant_id = :t AND name = 'user'");
+$s7Rol->execute([':t' => $s7IdA]);
+$s7RolId = (int) $s7Rol->fetchColumn();
+$s7TieneNcf = static function () use ($s7Pdo, $s7RolId): bool {
+    $st = $s7Pdo->prepare("SELECT COUNT(*) FROM role_permissions WHERE role_id = :r AND permission = 'ncf'");
+    $st->execute([':r' => $s7RolId]);
+    return (int) $st->fetchColumn() === 1;
+};
+$r = $s7Pedir($s7Api, 'GET', '/api/ncf/rangos', $s7TokenU);
+wa_chk('precondicion de RF1: con el permiso ncf en su rol, user_pos_a GET /api/ncf/rangos es 200 (la lista de la edicion deja pasar esa lectura y el gate tambien)',
+    $s7RolId > 0 && $s7TieneNcf() && $r['status'] === 200, $s7Ver($r));
+try {
+    $s7Pdo->prepare("DELETE FROM role_permissions WHERE role_id = :r AND permission = 'ncf'")->execute([':r' => $s7RolId]);
+    $r = $s7Pedir($s7Api, 'GET', '/api/ncf/rangos', $s7TokenU);
+    wa_chk('RF1: sin el permiso ncf en su rol, user_pos_a GET /api/ncf/rangos es el mismo 403 sin codigo (nunca 401 ni EDICION_NO_INCLUYE)', !$s7TieneNcf() && $s7SinPermiso($r), $s7Ver($r));
+} finally {
+    $s7Pdo->prepare("INSERT IGNORE INTO role_permissions (role_id, permission) VALUES (:r, 'ncf')")->execute([':r' => $s7RolId]);
+}
+wa_chk('RF1: el rol user de A recupero su permiso ncf (las secciones que siguen cuentan con el rol de siempre)', $s7TieneNcf());
+
+// RF5: la edicion de A cambia mientras un mismo token esta en uso y la peticion siguiente obedece la fila nueva: nada se guarda de una peticion a otra.
+$s7TokenCambio = express_login($s7Api, 'admin_pos_a')['token'];
+express_edicion($ctx, 'A', 'express', '45', 'facturacion,configuracion');
+$r = $s7Pedir($s7Api, 'GET', '/api/clients', $s7TokenCambio);
+wa_chk('RF5: con modulos_habilitados angostado a facturacion,configuracion, el mismo token recibe 403 EDICION_NO_INCLUYE en GET /api/clients', $s7Niega($r), $s7Ver($r));
+express_edicion($ctx, 'A', 'express', '45', null);
+$r = $s7Pedir($s7Api, 'GET', '/api/clients', $s7TokenCambio);
+wa_chk('RF5: con modulos_habilitados otra vez en NULL, el mismo token recibe 200 en GET /api/clients', $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+express_edicion($ctx, 'A', 'completa', null, null);
+$r = $s7Pedir($s7Api, 'GET', '/api/gastos', $s7TokenCambio);
+wa_chk('RF5: con la edicion de A de vuelta en completa, el mismo token ya no recibe 403 EDICION_NO_INCLUYE en GET /api/gastos (y la sesion sigue viva: ningun 401)',
+    !$s7Niega($r) && $r['status'] !== 401 && ($r['json']['codigo'] ?? null) !== 'EDICION_NO_INCLUYE', $s7Ver($r));
+
+// ---------------------------------------------------------------------------
+// 8) El ciclo de vida del token: vence por inactividad, y solo lo mantiene vivo una peticion que se atiende
+// ---------------------------------------------------------------------------
+echo "\n== 8) El ciclo de vida del token ==\n";
+$s8Pdo = $ctx['pdo'];
+express_edicion($ctx, 'A', 'express', '45', null);
+$s8Api = express_api('express_api', 8294);
+/** is_active y last_used de un token de sesion tal como estan en api_tokens de la master (la tabla guarda su sha256). */
+$s8Fila = static function (string $token) use ($s8Pdo): array {
+    $st = $s8Pdo->prepare('SELECT is_active, last_used FROM api_tokens WHERE token_hash = :h');
+    $st->execute([':h' => hash('sha256', $token)]);
+    return (array) $st->fetch();
+};
+/** Le pone a ese token el ultimo uso dado. */
+$s8Poner = static function (string $token, string $fecha) use ($s8Pdo): void {
+    $s8Pdo->prepare('UPDATE api_tokens SET last_used = :v WHERE token_hash = :h')->execute([':v' => $fecha, ':h' => hash('sha256', $token)]);
+};
+
+// Sin uso hace 31 dias: vence en cualquier ruta, y el token queda revocado.
+$s8Viejo = express_login($s8Api, 'admin_pos_a')['token'];
+$s8Hace31 = date('Y-m-d H:i:s', time() - 31 * 86400);
+$s8Poner($s8Viejo, $s8Hace31);
+wa_chk('precondicion: el token de A quedo activo y con el ultimo uso de hace 31 dias', (int) ($s8Fila($s8Viejo)['is_active'] ?? -1) === 1 && ($s8Fila($s8Viejo)['last_used'] ?? null) === $s8Hace31, $s8Fila($s8Viejo));
+$r = $s7Pedir($s8Api, 'GET', '/api/auth/me', $s8Viejo);
+wa_chk('GET /api/auth/me con un token sin uso hace 31 dias: 401 con "Tu sesión venció por inactividad"',
+    $r['status'] === 401 && is_array($r['json']) && ($r['json']['error'] ?? null) === 'Tu sesión venció por inactividad', $s7Ver($r));
+wa_chk('...y el token quedo revocado: is_active = 0 en api_tokens', (int) ($s8Fila($s8Viejo)['is_active'] ?? -1) === 0, $s8Fila($s8Viejo));
+
+// Un token de ayer: una peticion negada no lo mantiene vivo (no toca last_used) y una permitida lo adelanta.
+$s8Token = express_login($s8Api, 'admin_pos_a')['token'];
+$s8Ayer = date('Y-m-d H:i:s', time() - 86400);
+$s8Poner($s8Token, $s8Ayer);
+$r = $s7Pedir($s8Api, 'GET', '/api/gastos', $s8Token);
+wa_chk('un token de ayer pide GET /api/gastos (negada, 403 EDICION_NO_INCLUYE): last_used sigue siendo el de ayer', $s7Niega($r) && ($s8Fila($s8Token)['last_used'] ?? null) === $s8Ayer, [$s7Ver($r), $s8Fila($s8Token)]);
+$r = $s7Pedir($s8Api, 'GET', '/api/emisor', $s8Token);
+$s8Despues = (string) ($s8Fila($s8Token)['last_used'] ?? '');
+wa_chk('...y GET /api/emisor (permitida, 200) lo adelanta: last_used pasa a ser de ahora (dentro de dos minutos) y deja de ser el de ayer',
+    $r['status'] === 200 && $s8Despues !== $s8Ayer && strtotime($s8Despues) > strtotime($s8Ayer) && abs(time() - (int) strtotime($s8Despues)) < 120, [$s7Ver($r), $s8Despues]);
+
+// ---------------------------------------------------------------------------
+// 9) La DGII entrante: la guarda no contesta a un caller de la DGII, si a una sesion
+// ---------------------------------------------------------------------------
+echo "\n== 9) La DGII entrante (POST /api/ecf/recepcion) ==\n";
+express_edicion($ctx, 'A', 'express', '45', null);
+$s9Api = express_api('express_api', 8294);
+$s9TokenA = express_login($s9Api, 'admin_pos_a')['token'];
+$s9TokenB = express_login($s9Api, 'admin_pos_b')['token'];
+/** POST /api/ecf/recepcion sin cuerpo y, si se da, con ese Bearer (un caller de la DGII manda uno de la semilla, no de sesion). */
+$s9Pedir = static fn (?string $bearer): array => wa_http('POST', $s9Api . '/api/ecf/recepcion', null, $bearer === null ? [] : ['Authorization: Bearer ' . $bearer]);
+/** ¿Contesto el controller? 400, status false, "No se recibio archivo XML..." y sin la clave codigo (ni EDICION_NO_INCLUYE). */
+$s9Controller = static fn (array $r): bool => $r['status'] === 400 && is_array($r['json']) && ($r['json']['status'] ?? null) === false
+    && str_starts_with((string) ($r['json']['error'] ?? ''), 'No se recibio archivo XML') && !array_key_exists('codigo', $r['json']);
+$r = $s9Pedir(null);
+wa_chk('POST /api/ecf/recepcion sin cuerpo ni credenciales: contesta el controller (400, "No se recibio archivo XML...", sin codigo): la guarda no responde a quien no trae una sesion', $s9Controller($r), $s7Ver($r));
+$r = $s9Pedir(bin2hex(random_bytes(16)));
+wa_chk('...y con un Bearer que no es de sesion (lo que manda un caller de la DGII): la misma respuesta del controller, sin codigo', $s9Controller($r), $s7Ver($r));
+$r = $s9Pedir($s9TokenA);
+wa_chk('...pero con la sesion de A (Express) como Bearer contesta la guarda: 403 EDICION_NO_INCLUYE (el gate resuelve la empresa de las rutas dgii con validateRequest y /api/ecf/recepcion no esta en la lista de la edicion)',
+    $s7Niega($r), $s7Ver($r));
+$r = $s9Pedir($s9TokenB);
+wa_chk('...y con la sesion de B (completa) llega al controller: 400, "No se recibio archivo XML...", sin codigo', $s9Controller($r), $s7Ver($r));
+// En este proceso: la resolucion por RNC (la de un e-CF entrante, que trae el RNC del comprador) no filtra por edicion, asi que un e-CF firmado para una empresa Express
+// sigue llegando al paso de guardar del controller. No se arma un XML firmado completo aqui.
+express_usar_master($ctx);
+try {
+    $s9Resuelve = TenantResolver::resolveByRnc(POS_SCRATCH_TENANTS['A']['rnc']);
+    $s9Actual = TenantResolver::current();
+} finally {
+    Database::clearCredentials();
+    (new ReflectionProperty('TenantResolver', 'current'))->setValue(null, null);
+}
+wa_chk('TenantResolver::resolveByRnc(RNC de A) es true mientras A es Express, y la empresa resuelta trae edicion express (la resolucion por RNC no filtra por edicion)',
+    $s9Resuelve === true && is_array($s9Actual) && ($s9Actual['edicion'] ?? null) === 'express' && (int) ($s9Actual['id'] ?? 0) === (int) $ctx['tenantA'],
+    [$s9Resuelve, is_array($s9Actual) ? ['edicion' => $s9Actual['edicion'] ?? null, 'id' => $s9Actual['id'] ?? null] : $s9Actual]);
+
+// ---------------------------------------------------------------------------
+// 10) El gate forzado a lanzar (servidor 8293): la guarda de rutas vive en validateRequest y sigue negando
+// ---------------------------------------------------------------------------
+echo "\n== 10) El gate forzado a lanzar (servidor 8293) ==\n";
+express_edicion($ctx, 'A', 'express', '45', null);
+// El servidor corre sobre una copia donde PermissionGate::enforce lanza como primera sentencia. El Router se traga la excepcion (la anota en el log y sigue), asi que
+// el gate no resuelve la empresa y no hace ningun chequeo de rol: lo que niegue aqui lo niega la guarda de rutas, que va dentro de AuthMiddleware::validateRequest y la
+// llama cada controller por su cuenta. Los dos 200 de abajo (A y B en GET /api/facturas) vienen de la base por defecto: facturaController arma sus models ANTES de su propio
+// validateRequest, y sin la resolucion del gate esos models se conectan a DB_* del entorno de la suite (pos_scratch_env_base_por_defecto: la master scratch, que es la base de
+// B). Por eso prueban solo que la guarda dejo pasar la ruta y NO de que empresa son los datos que salieron. Con el .env de produccion la misma excepcion tragada dejaria el
+// enlace a la base por defecto: es como funciona hoy el Router, fuera de este plan, y queda anotado para el dueño.
+$s10Api = express_api('express_gate', 8293, express_arbol('gate-lanza'));
+$s10TokenA = express_login($s10Api, 'admin_pos_a')['token'];
+$s10TokenU = express_login($s10Api, 'user_pos_a')['token'];
+$s10TokenB = express_login($s10Api, 'admin_pos_b')['token'];
+$r = $s7Pedir($s10Api, 'GET', '/api/gastos', $s10TokenA);
+wa_chk('gate lanzando: A (Express, administrador) GET /api/gastos es 403 EDICION_NO_INCLUYE (lo niega la guarda de validateRequest, no el gate)', $s7Niega($r), $s7Ver($r));
+$r = $s7Pedir($s10Api, 'GET', '/api/facturas?pageSize=1', $s10TokenA);
+wa_chk('gate lanzando: A GET /api/facturas?pageSize=1 es 200 (la guarda dejo pasar la ruta; los datos salen de la base por defecto, no se sabe de que empresa son)',
+    $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+$r = $s7Pedir($s10Api, 'POST', '/api/ncf/rangos', $s10TokenU);
+wa_chk('gate lanzando: user_pos_a (Facturador de A) POST /api/ncf/rangos es 403 con el texto del rol sin permiso y sin codigo (fila de administrador de la guarda)', $s7SinPermiso($r), $s7Ver($r));
+$r = $s7Pedir($s10Api, 'GET', '/api/facturas?pageSize=1', $s10TokenB);
+wa_chk('gate lanzando: B (completa, administrador) GET /api/facturas?pageSize=1 es 200 (tampoco prueba de que empresa son los datos)',
+    $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+// El gate lanzo de verdad: el Router anota el mensaje de la excepcion en el log del servidor, que wa_servidor deja en el temp del sistema (wa_<nombre>_<puerto>.log, con el
+// nombre del servidor anotado en wa_servidor_<puerto>.txt). Sin esta prueba las de arriba pasarian igual con un gate sano. Si falla no se muestra el log (puede traer conexiones).
+$s10Puerto = (int) parse_url($s10Api, PHP_URL_PORT);
+$s10Nombre = trim((string) @file_get_contents(sys_get_temp_dir() . DIRECTORY_SEPARATOR . "wa_servidor_{$s10Puerto}.txt"));
+$s10Log = $s10Nombre === '' ? '' : (string) @file_get_contents(sys_get_temp_dir() . DIRECTORY_SEPARATOR . "wa_{$s10Nombre}_{$s10Puerto}.log");
+wa_chk('gate lanzando: el log del servidor trae el mensaje de la excepcion ("gate forzado por la prueba") en cada peticion de arriba: el gate lanzo de verdad y el Router la trago',
+    $s10Nombre !== '' && substr_count($s10Log, 'gate forzado por la prueba') >= 4, ['servidor_registrado' => $s10Nombre !== '', 'lineas_con_el_mensaje' => substr_count($s10Log, 'gate forzado por la prueba')]);
+
+// ---------------------------------------------------------------------------
+// 11) Inyeccion de fallos: la clase de la edicion no esta o no compila (servidores 8292 y 8291)
+// ---------------------------------------------------------------------------
+echo "\n== 11) Inyeccion de fallos (servidores 8292 y 8291) ==\n";
+express_edicion($ctx, 'A', 'express', '45', null);
+$s11Pdo = $ctx['pdo'];
+// Los tres servidores comparten la master: la sesion de A sale de un login en el servidor sano (8294) y vale en los dos rotos.
+$s11Sano = express_api('express_api', 8294);
+$s11TokenA = express_login($s11Sano, 'admin_pos_a')['token'];
+$s11TokenB = express_login($s11Sano, 'admin_pos_b')['token'];
+$s11Servidores = [
+    'sin src/TenantEntitlements.php (8292)' => express_api('express_sin', 8292, express_arbol('sin-entitlements')),
+    'con src/TenantEntitlements.php roto, un error de sintaxis (8291)' => express_api('express_roto', 8291, express_arbol('entitlements-roto')),
+];
+/** POST /api/auth/login de $usuario en $api, tal cual contesta (estado y json), para ver el 200 y las claves del user; un fallo muestra las claves y nunca el cuerpo (trae el token). */
+$s11Entrar = static fn (string $api, string $usuario): array => wa_http('POST', $api . '/api/auth/login',
+    ['emailOrUsername' => $usuario, 'password' => pos_scratch_secretos($ctx['cred']['pass'])['clave_usuarios']]);
+$s11Ver = static fn (array $r): array => ['estado' => $r['status'], 'claves' => array_keys((array) ($r['json']['data']['user'] ?? [])), 'permisos' => $r['json']['data']['user']['permissions'] ?? null];
+$s11PermisosRol = $s11Pdo->prepare("SELECT rp.permission FROM role_permissions rp JOIN roles r ON r.id = rp.role_id WHERE r.tenant_id = :t AND r.name = 'admin' ORDER BY rp.permission");
+$s11PermisosRol->execute([':t' => $s7IdA]);
+$s11Crudos = array_column($s11PermisosRol->fetchAll(), 'permission');   // los de la base, sin cruzar con la edicion: ['*']
+$s11SanoA = $s11Entrar($s11Sano, 'admin_pos_a');
+$s11SanoB = $s11Entrar($s11Sano, 'admin_pos_b');
+wa_chk('precondicion: en el servidor sano el login de A trae el bloque entitlements y permisos cruzados con la edicion (distintos de los crudos del rol), y el de B no trae bloque',
+    $s11SanoA['status'] === 200 && is_array($s11SanoA['json']['data']['user']['entitlements'] ?? null) && $s11Crudos !== []
+    && ($s11SanoA['json']['data']['user']['permissions'] ?? null) !== $s11Crudos && $s11SanoB['status'] === 200 && !array_key_exists('entitlements', (array) ($s11SanoB['json']['data']['user'] ?? [])),
+    [$s11Ver($s11SanoA), $s11Crudos, $s11Ver($s11SanoB)]);
+foreach ($s11Servidores as $s11Caso => $s11Url) {
+    // La empresa Express no se puede decidir sin su clase: 403 con cuerpo JSON y el codigo de la edicion; nunca un 500 ni una pagina de error.
+    $r = $s7Pedir($s11Url, 'GET', '/api/facturas?pageSize=1', $s11TokenA);
+    wa_chk("{$s11Caso}: A (Express) GET /api/facturas?pageSize=1 es HTTP 403 con un cuerpo JSON (status false, codigo EDICION_NO_INCLUYE), no un 500 ni HTML", $s7Niega($r), $s7Ver($r));
+    // La completa no carga la clase jamas: sigue igual.
+    $r = $s7Pedir($s11Url, 'GET', '/api/facturas?pageSize=1', $s11TokenB);
+    wa_chk("{$s11Caso}: B (completa) GET /api/facturas?pageSize=1 es 200", $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+    // El login de A contesta 200 sin el bloque y con los permisos crudos del rol (decision de la Task 6: el cliente falla cerrado ante la falta del bloque y la guarda niega todo lo demas).
+    $s11LoginA = $s11Entrar($s11Url, 'admin_pos_a');
+    $s11UserA = (array) ($s11LoginA['json']['data']['user'] ?? []);
+    wa_chk("{$s11Caso}: el login de admin_pos_a contesta 200 sin la clave entitlements y con los permisos crudos del rol",
+        $s11LoginA['status'] === 200 && ($s11LoginA['json']['success'] ?? null) === true && array_keys($s11UserA) === ['id', 'email', 'username', 'name', 'role', 'permissions']
+        && ($s11UserA['permissions'] ?? null) === $s11Crudos, $s11Ver($s11LoginA));
+    // El de B (completa) es el del servidor sano, clave por clave.
+    $s11LoginB = $s11Entrar($s11Url, 'admin_pos_b');
+    wa_chk("{$s11Caso}: el login de admin_pos_b contesta 200 y su user es identico, byte a byte, al del servidor sano",
+        $s11LoginB['status'] === 200 && ($s11LoginB['json']['data']['user'] ?? null) !== null
+        && json_encode($s11LoginB['json']['data']['user']) === json_encode($s11SanoB['json']['data']['user'] ?? null), [$s11Ver($s11LoginB), $s11Ver($s11SanoB)]);
+}
+
+// ---------------------------------------------------------------------------
+// 12) A de vuelta a completa: el login y /me pierden el bloque
+// ---------------------------------------------------------------------------
+echo "\n== 12) A de vuelta a completa ==\n";
+$s12Pdo = $ctx['pdo'];
+$s12Api = express_api('express_api', 8294);
+express_edicion($ctx, 'A', 'express', '45', null);
+$s12SesionA = express_login($s12Api, 'admin_pos_a');   // la sesion de A mientras es Express, para ver que la edicion nueva rige tambien para ella
+$s12SesionB = express_login($s12Api, 'admin_pos_b');
+$s12Me = static fn (string $token): array => wa_http('GET', $s12Api . '/api/auth/me', null, express_h($token));
+$s12MeB0 = $s12Me($s12SesionB['token']);
+$s12SeisClaves = ['id', 'email', 'username', 'name', 'role', 'permissions'];
+wa_chk('precondicion: mientras A es Express su login trae el bloque entitlements (como ultima clave del user)',
+    array_keys($s12SesionA['user']) === array_merge($s12SeisClaves, ['entitlements']), array_keys($s12SesionA['user']));
+express_edicion($ctx, 'A', 'completa', null, null);
+$s12LoginA = express_login($s12Api, 'admin_pos_a');
+$s12MeA = $s12Me($s12LoginA['token']);
+wa_chk('A completa: un login nuevo trae el user de siempre (id, email, username, name, role y permissions), sin la clave entitlements, y permissions es el "*" del rol',
+    array_keys($s12LoginA['user']) === $s12SeisClaves && ($s12LoginA['user']['permissions'] ?? null) === ['*'], $s12LoginA['user']);
+wa_chk('A completa: GET /api/auth/me con esa sesion trae las mismas seis claves, sin entitlements',
+    $s12MeA['status'] === 200 && array_keys((array) ($s12MeA['json']['data']['user'] ?? [])) === $s12SeisClaves, $s7Ver($s12MeA));
+$s12MeViejo = $s12Me($s12SesionA['token']);
+wa_chk('A completa: GET /api/auth/me con la sesion de antes (la que se abrio siendo Express) tambien las trae sin el bloque: el cambio rige en la peticion siguiente',
+    $s12MeViejo['status'] === 200 && array_keys((array) ($s12MeViejo['json']['data']['user'] ?? [])) === $s12SeisClaves, $s7Ver($s12MeViejo));
+$s12LoginB = express_login($s12Api, 'admin_pos_b');
+$s12MeB = $s12Me($s12SesionB['token']);
+$s12UserB0 = $s12MeB0['json']['data']['user'] ?? null;
+$s12UserB = $s12MeB['json']['data']['user'] ?? null;
+wa_chk('el payload de B no cambia: su login y su /me son identicos, clave por clave, a los de antes de que A volviera a completa',
+    json_encode($s12LoginB['user']) === json_encode($s12SesionB['user']) && $s12MeB0['status'] === 200 && $s12MeB['status'] === 200
+    && is_array($s12UserB0) && json_encode($s12UserB) === json_encode($s12UserB0), [array_keys($s12LoginB['user']), $s7Ver($s12MeB)]);
+// Las negativas de las secciones 7 a 12 dejaron filas de auditoria (modulo edicion) de A en la master scratch: se quitan, como lo hace la seccion 5 con las suyas.
+$s12Pdo->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s7IdA]);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
