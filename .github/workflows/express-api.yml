@@ -31,3 +31,9 @@ jobs:
           for f in tools/test_express_baseline_puro.php tools/test_express_reservas.php tools/test_express_golden_puro.php tools/test_express_p0_spikes_puro.php tools/test_express_p0_guardas.php; do
             php "$f" || exit 1
           done
+      - name: Entitlements de Express (plan 02), sintaxis 8.3 y suite pura
+        run: |
+          for f in tools/express_edicion_lib.php tools/tenant_edicion.php tools/verificar_express.php config/editions.php src/TenantEntitlements.php; do
+            php -l "$f" || exit 1
+          done
+          php tools/test_express_entitlements.php
