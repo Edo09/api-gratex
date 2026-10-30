@@ -49,10 +49,14 @@ es la rama que está en producción antes de la ola.
 4. Correr el verificador otra vez: la fila **014** dice `APLICADA`.
 5. Aplicar la 014 **una segunda vez**: es idempotente, no toca nada y el verificador sigue
    diciendo `APLICADA`.
-6. Confirmar que **ninguna empresa dice `express`**: la Consulta 4 del verificador (viene
-   comentada: se le quita el `-- ` a sus líneas y se ejecuta sola, con la 014 `APLICADA`)
-   tiene que salir sin filas. `php tools/verificar_express.php` dice lo mismo y además revisa
-   módulos, certificado y rangos; debe imprimir `Sin problemas.`
+6. Confirmar que **ninguna empresa dice `express`** con la Consulta 4 del verificador (viene
+   comentada: se le quita el `-- ` a sus líneas y se ejecuta sola, con la 014 `APLICADA`).
+   Lista toda empresa que no es `completa`, así que aquí tiene que salir **sin filas**.
+   `php tools/verificar_express.php` no prueba eso: revisa lo que está mal puesto en esas
+   empresas (tipos, módulos, certificado, rangos) y dice `Sin problemas.` tanto cuando no hay
+   ninguna Express como cuando hay una bien configurada. Sirve de segunda mirada: aquí tiene
+   que imprimir `Sin problemas.` (salida 0); con salida 2, la master no tiene las columnas de
+   la 014.
 
 ## 3. Subir el API
 
@@ -75,8 +79,9 @@ Estas dos no se negocian:
 2. **Nunca restaurar un respaldo de la master que no tenga las columnas de la 014.** El código
    lee una columna que falta como `completa`, así que las empresas Express perderían todas sus
    restricciones sin avisar. Antes de restaurar, comprobar que el respaldo trae las cuatro
-   columnas; después de cualquier restauración, correr `php tools/verificar_express.php` y la
-   Consulta 4 del verificador.
+   columnas; después de cualquier restauración, correr la Consulta 4 del verificador (dice qué
+   empresas siguen siendo Express) y `php tools/verificar_express.php` (dice cuáles están mal
+   puestas; sale con 2 si la master no tiene las columnas de la 014).
 
 Y estas, del mismo apartado del anexo (14.5):
 
