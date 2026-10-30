@@ -365,8 +365,8 @@ function express_preflight_rango_vigente(array $rangos, string $tipo, string $ho
 
 /**
  * Evalua los hechos item por item. Es pura. Todos los items se evaluan siempre, sin cortar en el primer rechazo, y salen en este orden:
- * tenant, columnas, m036, tipos, modulos, clientes_modulo, cert, emisor, almacen, pos, inventario, rangos, ilimitados, clientes_prueba,
- * integracion, roles. Cada uno es ['estado' => 'ok'|'corregir'|'rechazar', 'detalle' => texto]: ok no pide nada, corregir lo arregla el
+ * tenant, grupo, columnas, m036, tipos, modulos, clientes_modulo, cert, emisor, almacen, pos, inventario, rangos, ilimitados, clientes_prueba,
+ * integracion, roles (grupo se sumo en la revision final: una empresa de un grupo siempre se rechaza). Cada uno es ['estado' => 'ok'|'corregir'|'rechazar', 'detalle' => texto]: ok no pide nada, corregir lo arregla el
  * plan (express_plan) y rechazar frena todo.
  *
  * nuevo es true si la empresa no ha emitido en ecf: ecf_facturas es 0 y ningun rango ecf tiene current_value mayor que 0. Solo una empresa
@@ -401,6 +401,19 @@ function express_preflight_evaluar(array $hechos): array
         ? $ok('La empresa es de tipo app y esta activa.')
         : $rechazar('La empresa tiene que ser de tipo app y estar activa (tipo ' . express_preflight_nombrar([$tenant['tipo'] ?? 'app'])
             . ', activo ' . (int) ($tenant['activo'] ?? 0) . ').');
+
+    // El grupo (revision final). TenantResolver::switchToSibling deja que la credencial de integracion de CUALQUIER empresa de un grupo (el mismo grupo_id) actue por las demas, y esa
+    // ruta (/api/integracion/*) no pasa por la lista de rutas, los modulos ni los tipos de Express: una empresa Express en un grupo la usa, con cualquier tipo y cualquier cuerpo, quien
+    // tenga la credencial de una hermana completa. Ademas el plan deja en blanco api_secret_hash, que en la cabeza de un grupo (grupo_id = su propio id, create_tenant.php --grupo=self)
+    // es la credencial que el cliente usa para todo el grupo. Por eso una empresa de un grupo no se convierte, nueva o no: sacarla del grupo es decision del dueño y no se corrige sola.
+    // "Esta en un grupo" es lo que dice TenantResolver::grupoId(): solo NULL y el vacio son sin grupo (una columna ausente, un master sin la migracion 008, es sin grupo). La cabeza
+    // de un grupo siempre trae su propio id en grupo_id, asi que esta misma prueba la cubre.
+    $grupoId = $tenant['grupo_id'] ?? null;
+    $items['grupo'] = $grupoId === null || $grupoId === ''
+        ? $ok('La empresa no esta en ningun grupo (grupo_id vacio).')
+        : $rechazar('La empresa esta en el grupo #' . (int) $grupoId . ' (grupo_id ' . (int) $grupoId . '). La credencial de integracion de cualquier empresa de un grupo actua por las demas '
+            . 'sin pasar por las rutas, los modulos ni los tipos de Express, y al convertir se desactiva la credencial de esta (que puede ser la que el cliente usa para todo el grupo). '
+            . 'Una empresa Express no puede estar en un grupo: no se convierte; sacala del grupo antes (grupo_id en NULL) si el cliente esta de acuerdo.');
 
     $items['columnas'] = ($hechos['columnas_014'] ?? false) === true
         ? $ok('Las cuatro columnas de la migracion master 014 existen en tenants.')

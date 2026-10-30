@@ -8,7 +8,7 @@
  * No lleva opciones. Se corre despues de convertir una empresa, de restaurar un respaldo de la master o de tocar a mano la tabla tenants: la columna
  * edicion es permisiva (cualquier valor que no sea express rige como completa) y una fila Express mal puesta no falla a la vista, asi que este informe
  * es la alarma. Su contraparte en SQL es la Consulta 4 de tools/verificar_migraciones_master.sql, que se corre en phpMyAdmin y mira menos (no revisa
- * el certificado ni los rangos).
+ * el certificado, los rangos, el grupo ni la credencial de integracion).
  *
  * Que lista: toda empresa de master.tenants cuya edicion no sea completa, una linea por problema,
  *   tenant #<id> (<nombre>): <CODIGO> <detalle>
@@ -20,6 +20,10 @@
  *   TIPOS_SIN_VENTA      la lista trae el 33 pero ningun tipo de venta.
  *   MODULOS_INVALIDOS    un token de modulos_habilitados que no esta en el preset de config/editions.php: no suma nada.
  *   POS_ACTIVO           pos_enabled en 1.
+ *   EN_GRUPO             grupo_id no es NULL: la empresa esta en un grupo, y la credencial de integracion de cualquier empresa del grupo actua por ella (TenantResolver::
+ *                        switchToSibling) sin pasar por las rutas, los modulos ni los tipos de Express.
+ *   INTEGRACION_ACTIVA   api_secret_hash no esta en blanco: la credencial de integracion de la empresa sigue sirviendo en /api/integracion/*, que no pasa por los limites de Express.
+ *                        Estos dos solo se juzgan en una Express de tipo app (una de integracion no esta restringida y su hash es lo que la autentica).
  *   SIN_CERTIFICADO      cert_path vacio.
  *   CERT_SIN_FECHA       hay cert_path pero cert_vence esta vacia o no es una fecha.
  *   CERT_POR_VENCER      cert_vence a 30 dias o menos, o ya pasada.
@@ -63,8 +67,9 @@ function express_verificar_ambiente_ecf(array $tenant): bool
 /**
  * Lo que esta mal en la fila de una empresa, o [] si no hay nada que decir. Es PURA: no toca una base, un archivo, el log ni la salida, y no cambia lo que
  * recibe. Cada problema es ['codigo' => ..., 'detalle' => ...], uno por codigo (el detalle nombra todo lo que lo causa), en este orden: EDICION_DESCONOCIDA,
- * TIPOS_VACIOS, TIPOS_INVALIDOS, TIPOS_SIN_VENTA, MODULOS_INVALIDOS, POS_ACTIVO, SIN_CERTIFICADO, CERT_SIN_FECHA, CERT_POR_VENCER, RANGO_FALTANTE y
- * RANGO_ILIMITADO. El detalle es una sola linea en ASCII: dice que pasa y que hacer, y nunca lleva la ruta del certificado ni nada secreto de la fila.
+ * TIPOS_VACIOS, TIPOS_INVALIDOS, TIPOS_SIN_VENTA, MODULOS_INVALIDOS, POS_ACTIVO, EN_GRUPO, INTEGRACION_ACTIVA, SIN_CERTIFICADO, CERT_SIN_FECHA, CERT_POR_VENCER,
+ * RANGO_FALTANTE y RANGO_ILIMITADO. El detalle es una sola linea en ASCII: dice que pasa y que hacer, y nunca lleva la ruta del certificado ni nada secreto de la fila
+ * (de api_secret_hash solo se dice que no esta en blanco, nunca su valor).
  *
  * Solo se revisa lo que no es completa. La edicion se lee como la lee la API (TenantEntitlements::normalizarEdicion: sin espacios y en minusculas): una fila
  * sin la columna o con edicion NULL (una master sin la 014) o completa da []; una que no es ni completa ni express da solo EDICION_DESCONOCIDA, porque la API la
@@ -144,8 +149,31 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
         ];
     }
 
-    $certificado = TenantEntitlements::estadoCertificado($tenant, $hoy);
+    // Lo que deja pasar por encima de los limites de Express (la lista de rutas, los modulos y los tipos). /api/integracion/* corre antes de la guarda de AuthMiddleware, y una empresa
+    // de un grupo se alcanza con la credencial de cualquiera de sus hermanas (TenantResolver::switchToSibling): una fila Express con su hash vivo, o en un grupo, es una puerta abierta
+    // para quien tenga esa credencial. Solo se juzga una Express de tipo app: una de integracion (aunque diga express) no esta restringida y su hash es lo que la autentica.
     $id = (int) ($tenant['id'] ?? 0);
+    if (($tenant['tipo'] ?? 'app') === 'app') {
+        $grupo = $tenant['grupo_id'] ?? null;   // como TenantResolver::grupoId(): solo NULL y el vacio son sin grupo (y una columna ausente, un master sin la 008, tambien)
+        if ($grupo !== null && $grupo !== '') {
+            $problemas[] = [
+                'codigo' => 'EN_GRUPO',
+                'detalle' => 'grupo_id vale ' . (int) $grupo . ': la empresa esta en el grupo #' . (int) $grupo . ' y la credencial de integracion de cualquier empresa de ese grupo actua por ella '
+                    . '(TenantResolver::switchToSibling) sin pasar por las rutas, los modulos ni los tipos de Express. Una empresa Express no puede estar en un grupo: sacala del grupo '
+                    . "(grupo_id en NULL, con el cliente de acuerdo) o devuelvela a completa con tools/tenant_edicion.php --tenant={$id} --edicion=completa.",
+            ];
+        }
+        if ((string) ($tenant['api_secret_hash'] ?? '') !== '') {
+            $problemas[] = [
+                'codigo' => 'INTEGRACION_ACTIVA',
+                'detalle' => 'api_secret_hash no esta en blanco: la credencial de integracion de la empresa sigue sirviendo en /api/integracion/*, una ruta que no pasa por la lista de rutas, los modulos '
+                    . 'ni los tipos de Express (convertir la deja en blanco). Corre tools/tenant_edicion.php --tenant=' . $id . ' --edicion=express con los mismos --tipos (y --modulos) de la empresa '
+                    . 'y --apply: la deja en blanco y guarda el hash anterior en la bitacora.',
+            ];
+        }
+    }
+
+    $certificado = TenantEntitlements::estadoCertificado($tenant, $hoy);
     if ($certificado['estado'] === 'no_configurado') {
         $problemas[] = [
             'codigo' => 'SIN_CERTIFICADO',

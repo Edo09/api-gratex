@@ -2611,10 +2611,10 @@ $s8Ev = static fn (array $cambios = []): array => express_preflight_evaluar($s8C
 /** El estado de un item de la evaluacion de la base con los cambios dados. */
 $s8Estado = static fn (string $id, array $cambios = []): ?string => $s8Ev($cambios)['items'][$id]['estado'] ?? null;
 
-$s8Ids = ['tenant', 'columnas', 'm036', 'tipos', 'modulos', 'clientes_modulo', 'cert', 'emisor', 'almacen', 'pos', 'inventario', 'rangos', 'ilimitados',
+$s8Ids = ['tenant', 'grupo', 'columnas', 'm036', 'tipos', 'modulos', 'clientes_modulo', 'cert', 'emisor', 'almacen', 'pos', 'inventario', 'rangos', 'ilimitados',
           'clientes_prueba', 'integracion', 'roles'];
 $s8E0 = express_preflight_evaluar($s8Base);
-wa_chk('evaluar (base): devuelve exactamente items, nuevo, rechazos y acciones, y los 16 items de la tabla del plan en ese orden, cada uno con solo estado y detalle',
+wa_chk('evaluar (base): devuelve exactamente items, nuevo, rechazos y acciones, y los 17 items (los 16 de la tabla del plan y grupo, de la revision final) en ese orden, cada uno con solo estado y detalle',
     array_keys($s8E0) === ['items', 'nuevo', 'rechazos', 'acciones'] && array_keys($s8E0['items']) === $s8Ids
     && array_filter($s8E0['items'], static fn (array $i): bool => array_keys($i) !== ['estado', 'detalle']
         || !in_array($i['estado'], ['ok', 'corregir', 'rechazar'], true) || !is_string($i['detalle']) || $i['detalle'] === '') === [], $s8E0);
@@ -2629,6 +2629,14 @@ $s8Ilimitada = ['type' => 'E31', 'numero_hasta' => null, 'current_value' => 0, '
 $s8Tabla = [
     ["tenant.tipo 'integracion'", ['tenant.tipo' => 'integracion'], 'tenant', 'rechazar'],
     ['tenant.activo 0', ['tenant.activo' => 0], 'tenant', 'rechazar'],
+    // grupo (revision final): la credencial de integracion de cualquier empresa de un grupo actua por las demas (TenantResolver::switchToSibling) sin pasar por la
+    // lista de rutas, los modulos ni los tipos de Express, asi que una empresa de un grupo no se convierte. Ni siquiera una nueva: sacarla del grupo es decision del dueño.
+    ['grupo_id 7 (una empresa de un grupo)', ['tenant.grupo_id' => 7], 'grupo', 'rechazar'],
+    ['grupo_id igual al id de la empresa (la cabeza de un grupo: create_tenant.php --grupo=self)', ['tenant.grupo_id' => 12], 'grupo', 'rechazar'],
+    ["grupo_id '7' (como lo da PDO sin tipos nativos)", ['tenant.grupo_id' => '7'], 'grupo', 'rechazar'],
+    ['grupo_id 0 (TenantResolver::grupoId() lo cuenta como un grupo)', ['tenant.grupo_id' => 0], 'grupo', 'rechazar'],
+    ['grupo_id NULL (sin grupo: lo de siempre)', ['tenant.grupo_id' => null], 'grupo', 'ok'],
+    ["grupo_id '' (sin grupo)", ['tenant.grupo_id' => ''], 'grupo', 'ok'],
     ['columnas_014 false', ['columnas_014' => false], 'columnas', 'rechazar'],
     ['m036 false', ['m036' => false], 'm036', 'rechazar'],
     ["pedido.tipos ['44']", ['pedido.tipos' => ['44']], 'tipos', 'rechazar'],
@@ -2757,6 +2765,29 @@ foreach ([
 }
 $s8Detalle = $s8Ev($s8Ecf([$s8Rango('E45')]))['items']['rangos']['detalle'];
 wa_chk('rangos en ecf: el detalle nombra el tipo que falta (E34) y no el que tiene (E45)', str_contains($s8Detalle, 'E34') && !str_contains($s8Detalle, 'E45'), $s8Detalle);
+
+// --- grupo: lo que el item entiende por "estar en un grupo" es lo que TenantResolver::grupoId() entiende, y el rechazo dice que hacer ---------------
+// Si las dos se separaran, una empresa que el acceso por grupo si alcanza (switchToSibling) pasaria el preflight: solo NULL y el vacio son "sin grupo", y 0 y "0" son un grupo.
+$s8Actual = new ReflectionProperty('TenantResolver', 'current');
+$s8Separadas = [];
+foreach ([null, '', 0, '0', 7, '7', 12, '12'] as $s8Valor) {
+    $s8Actual->setValue(null, ['id' => 12, 'tipo' => 'app', 'grupo_id' => $s8Valor]);
+    $s8ElResolverLoCuenta = TenantResolver::grupoId() !== null;
+    $s8Actual->setValue(null, null);
+    if (($s8Estado('grupo', ['tenant.grupo_id' => $s8Valor]) === 'rechazar') !== $s8ElResolverLoCuenta) {
+        $s8Separadas[] = var_export($s8Valor, true);
+    }
+}
+wa_chk('grupo: el preflight rechaza justo lo que TenantResolver::grupoId() cuenta como grupo (NULL y el vacio son sin grupo; 0, "0", 7 y 12 son un grupo)', $s8Separadas === [], $s8Separadas);
+$s8Grupo = $s8Ev(['tenant.grupo_id' => 7]);
+wa_chk('grupo: una empresa de un grupo se rechaza (nunca se ofrece corregirla: sacarla del grupo es del dueño), el detalle nombra el grupo #7 y dice que una empresa Express no puede estar en uno, y el informe trae [RECH] grupo:',
+    $s8Grupo['items']['grupo']['estado'] === 'rechazar' && in_array('grupo', $s8Grupo['rechazos'], true) && !in_array('grupo', $s8Grupo['acciones'], true)
+    && str_contains($s8Grupo['items']['grupo']['detalle'], '#7') && str_contains($s8Grupo['items']['grupo']['detalle'], 'Express') && str_contains($s8Grupo['items']['grupo']['detalle'], 'grupo')
+    && preg_match('/^[\x20-\x7E]+$/D', $s8Grupo['items']['grupo']['detalle']) === 1
+    && count(array_filter(express_lineas_evaluacion($s8Grupo), static fn (string $l): bool => str_starts_with($l, '[RECH] grupo: '))) === 1, $s8Grupo['items']['grupo']);
+$s8DosRechazos = $s8Ev(['tenant.tipo' => 'integracion', 'tenant.grupo_id' => 7])['rechazos'];
+wa_chk('grupo: sin grupo el detalle lo dice (ok), y una empresa de un grupo que ademas falla otra cosa suma sus dos rechazos, en el orden de los items (tenant y despues grupo)',
+    str_contains($s8Ev()['items']['grupo']['detalle'], 'ningun grupo') && $s8DosRechazos === ['tenant', 'grupo'], $s8DosRechazos);
 
 // --- rechazos y acciones: los ids, en el orden de los items --------------------------------------------------------------------------
 $s8Varias = $s8Ev(['tenant.tipo' => 'integracion', 'm036' => false, 'cert' => ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null],
@@ -3476,8 +3507,8 @@ wa_chk('express_lineas_evaluacion: una linea por item, con [OK  ], [CORR] o [REC
     express_lineas_evaluacion($s9EvLineas) === ['[OK  ] tenant: La empresa es de tipo app.', '[CORR] pos: Se apaga. En dos lineas y con tabulador.', '[RECH] cert: CERT_FALTA: no hay certificado.']
     && express_lineas_evaluacion(['items' => []]) === [] && express_lineas_evaluacion([]) === [], express_lineas_evaluacion($s9EvLineas));
 $s9LineasBase = express_lineas_evaluacion($s8E0);
-wa_chk('express_lineas_evaluacion: la evaluacion de la empresa nueva de la base da 16 lineas, solo integracion con [CORR] y el resto [OK  ], cada una con el detalle del item',
-    count($s9LineasBase) === 16 && $s9LineasBase[0] === '[OK  ] tenant: ' . $s8E0['items']['tenant']['detalle']
+wa_chk('express_lineas_evaluacion: la evaluacion de la empresa nueva de la base da 17 lineas (con la de grupo), solo integracion con [CORR] y el resto [OK  ], cada una con el detalle del item',
+    count($s9LineasBase) === 17 && $s9LineasBase[0] === '[OK  ] tenant: ' . $s8E0['items']['tenant']['detalle'] && $s9LineasBase[1] === '[OK  ] grupo: ' . $s8E0['items']['grupo']['detalle']
     && count(array_filter($s9LineasBase, static fn (string $l): bool => str_starts_with($l, '[CORR] '))) === 1
     && array_values(array_filter($s9LineasBase, static fn (string $l): bool => str_starts_with($l, '[CORR] '))) === ['[CORR] integracion: ' . $s8E0['items']['integracion']['detalle']], $s9LineasBase);
 $s9LineasPlan = express_lineas_plan($s8Plan);
@@ -3813,6 +3844,10 @@ foreach ([
     '--edicion dos veces' => [array_merge($s10App, ['--edicion=express', '--edicion=express', '--tipos-ecf=45']), ['--edicion', 'repetido'], []],
     '--tipos-ecf dos veces (se da una sola lista, separada por comas)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=45', '--tipos-ecf=31']), ['--tipos-ecf', 'repetido'], []],
     '--telefono dos veces' => [array_merge($s10App, ['--telefono=809-555-1234', '--telefono=809-555-1235']), ['--telefono', 'repetido'], []],
+    // Revision final: la credencial de integracion de cualquier empresa de un grupo actua por las demas (TenantResolver::switchToSibling) sin pasar por los limites de Express.
+    '--edicion=express con --grupo=self (la cabeza de un grupo nuevo)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=45', '--grupo=self']), ['--grupo', '--edicion=express', 'grupo de empresas'], []],
+    '--edicion=express con --grupo=7 (hermana de un grupo)' => [array_merge($s10App, ['--edicion=express', '--tipos-ecf=45', '--grupo=7']), ['--grupo', '--edicion=express', 'grupo de empresas'], []],
+    'el grupo se juzga antes que los argumentos requeridos (un app sin --db-name, --db-user ni --db-pass)' => [['--tipo=app', '--nombre=X', '--rnc=131000001', '--edicion=express', '--tipos-ecf=45', '--grupo=7'], ['--grupo', 'grupo de empresas'], ['Faltan argumentos requeridos']],
     'tipo integracion con --edicion=express (sandbox, que no pide certificado)' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--edicion=express'], ['solo para tenants tipo app'], []],
     'tipo integracion con --tipos-ecf' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--tipos-ecf=45'], ['solo para tenants tipo app'], []],
     'tipo integracion con --telefono' => [['--tipo=integracion', '--nombre=X', '--rnc=131000001', '--ambiente=sandbox', '--telefono=809-555-1234'], ['solo para tenants tipo app'], []],
@@ -3834,6 +3869,9 @@ foreach ([
     'los tipos escritos a mano con espacios y coma al final, el 33 y el telefono' => ['--edicion=express', '--tipos-ecf= 45, 31 ,33,', '--telefono=809-555-1234'],
     '--edicion=completa (lo mismo que no ponerla)' => ['--edicion=completa'],
     '--telefono sin Express' => ['--telefono=809-555-1234'],
+    '--edicion=completa con --grupo=7 (un alta completa si puede unirse a un grupo)' => ['--edicion=completa', '--grupo=7'],
+    '--grupo=7 sin ninguna bandera de Express (el alta de siempre)' => ['--grupo=7'],
+    '--edicion=express con --grupo= (vacio: no pide ningun grupo)' => ['--edicion=express', '--tipos-ecf=45', '--grupo='],
 ] as $s10Desc => $s10Args) {
     $s10R = $s10Hijo(array_merge($s10App, $s10Args));
     wa_chk("create_tenant.php {$s10Desc}: pasa la validacion de las banderas, imprime el titulo del alta y llega a abrir la master (que en el hijo aislado no contesta), sin ningun ERROR de uso ni avisos de PHP",
@@ -4064,6 +4102,22 @@ $s11Casos = [
     'pos_enabled 1' => [$s11Fila(['pos_enabled' => 1]), null, ['POS_ACTIVO']],
     "pos_enabled '1' (como lo da PDO sin tipos nativos)" => [$s11Fila(['pos_enabled' => '1']), null, ['POS_ACTIVO']],
     "pos_enabled '0'" => [$s11Fila(['pos_enabled' => '0']), null, []],
+    // El grupo y la credencial de integracion (revision final). /api/integracion/* no pasa por los limites de Express (la ruta, los modulos y los tipos), y una empresa de
+    // un grupo se alcanza con la credencial de cualquiera de sus hermanas (TenantResolver::switchToSibling): una fila Express con grupo_id o con su hash vivo se salta todo eso.
+    'grupo_id 7 (una Express en un grupo)' => [$s11Fila(['grupo_id' => 7]), null, ['EN_GRUPO']],
+    'grupo_id igual al id (la cabeza de un grupo)' => [$s11Fila(['grupo_id' => 12]), null, ['EN_GRUPO']],
+    "grupo_id '7' (como lo da PDO sin tipos nativos)" => [$s11Fila(['grupo_id' => '7']), null, ['EN_GRUPO']],
+    'grupo_id 0 (para TenantResolver::grupoId() es un grupo)' => [$s11Fila(['grupo_id' => 0]), null, ['EN_GRUPO']],
+    'grupo_id NULL' => [$s11Fila(['grupo_id' => null]), null, []],
+    "grupo_id ''" => [$s11Fila(['grupo_id' => '']), null, []],
+    'api_secret_hash con un hash (la credencial de integracion sigue sirviendo)' => [$s11Fila(['api_secret_hash' => str_repeat('a', 64)]), null, ['INTEGRACION_ACTIVA']],
+    "api_secret_hash '' (convertida: en blanco)" => [$s11Fila(['api_secret_hash' => '']), null, []],
+    'api_secret_hash NULL' => [$s11Fila(['api_secret_hash' => null]), null, []],
+    'grupo_id y api_secret_hash a la vez: los dos codigos, en el orden de la lista' => [$s11Fila(['grupo_id' => 7, 'api_secret_hash' => str_repeat('a', 64)]), null, ['EN_GRUPO', 'INTEGRACION_ACTIVA']],
+    // Solo se juzga una Express de tipo app: una de integracion (aunque diga express) no esta restringida y su hash es lo que la autentica, y una completa o de edicion desconocida no es Express.
+    "tipo 'integracion' (aunque diga express) con grupo y hash: ni EN_GRUPO ni INTEGRACION_ACTIVA" => [$s11Fila(['tipo' => 'integracion', 'grupo_id' => 7, 'api_secret_hash' => str_repeat('a', 64)]), null, []],
+    'una fila completa con grupo y hash (un cliente con varias empresas): nada' => [$s11Fila(['edicion' => 'completa', 'grupo_id' => 7, 'api_secret_hash' => str_repeat('a', 64)]), null, []],
+    'una edicion desconocida con grupo y hash: solo EDICION_DESCONOCIDA' => [$s11Fila(['edicion' => '', 'grupo_id' => 7, 'api_secret_hash' => str_repeat('a', 64)]), null, ['EDICION_DESCONOCIDA']],
     // El certificado: sin ruta, sin fecha y por vencer (a 30 dias o menos, o ya vencido).
     "cert_path ''" => [$s11Fila(['cert_path' => '']), null, ['SIN_CERTIFICADO']],
     'cert_path NULL' => [$s11Fila(['cert_path' => null]), null, ['SIN_CERTIFICADO']],
@@ -4106,19 +4160,19 @@ foreach ($s11Casos as $s11Desc => [$s11Row, $s11Rangos, $s11Esperados]) {
     $s11Vistos = array_merge($s11Vistos, $s11Obtenidos);
     wa_chk("express_problemas_tenant: {$s11Desc}: " . ($s11Esperados === [] ? 'sin problemas' : implode(', ', $s11Esperados)), $s11Obtenidos === $s11Esperados, $s11Obtenidos);
 }
-$s11Codigos = ['EDICION_DESCONOCIDA', 'TIPOS_VACIOS', 'TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'SIN_CERTIFICADO', 'CERT_SIN_FECHA', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'];
-wa_chk('la tabla ejercita los once codigos de la lista y ninguno mas', array_values(array_unique($s11Vistos)) !== [] && array_diff($s11Codigos, $s11Vistos) === [] && array_diff($s11Vistos, $s11Codigos) === [],
+$s11Codigos = ['EDICION_DESCONOCIDA', 'TIPOS_VACIOS', 'TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'EN_GRUPO', 'INTEGRACION_ACTIVA', 'SIN_CERTIFICADO', 'CERT_SIN_FECHA', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'];
+wa_chk('la tabla ejercita los trece codigos de la lista y ninguno mas', array_values(array_unique($s11Vistos)) !== [] && array_diff($s11Codigos, $s11Vistos) === [] && array_diff($s11Vistos, $s11Codigos) === [],
     ['sin ejercitar' => array_values(array_diff($s11Codigos, $s11Vistos)), 'de mas' => array_values(array_diff($s11Vistos, $s11Codigos))]);
 
 // --- la forma de lo que devuelve: dos claves, un texto ASCII de una linea que dice lo que pasa y nada de lo secreto que trae la fila -------------------
 $s11Todo = $s11Fila([
-    'tipos_ecf_habilitados' => '33,e45', 'modulos_habilitados' => 'cliente', 'pos_enabled' => 1, 'cert_vence' => $s11Dia(5), 'ambiente' => 'ecf',
+    'tipos_ecf_habilitados' => '33,e45', 'modulos_habilitados' => 'cliente', 'pos_enabled' => 1, 'grupo_id' => 7, 'cert_vence' => $s11Dia(5), 'ambiente' => 'ecf',
     'cert_path' => 'MARCA-RUTA-DEL-CERTIFICADO.p12', 'cert_pass_encrypted' => 'MARCA-CLAVE-DEL-CERTIFICADO', 'db_pass_encrypted' => 'MARCA-CLAVE-DE-LA-BASE',
     'api_secret_hash' => 'MARCA-HASH-DE-INTEGRACION', 'db_user' => 'MARCA-USUARIO-DE-LA-BASE', 'db_host' => 'MARCA-SERVIDOR-DE-LA-BASE',
 ]);
 $s11Problemas = express_problemas_tenant($s11Todo, [$s11Rango('E31', null)], $s11Hoy);
-wa_chk('una fila con todo mal devuelve los siete codigos que le tocan, en el orden de la lista',
-    array_column($s11Problemas, 'codigo') === ['TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'], array_column($s11Problemas, 'codigo'));
+wa_chk('una fila con todo mal devuelve los nueve codigos que le tocan, en el orden de la lista (con el grupo y con el hash de integracion de la fila vivo)',
+    array_column($s11Problemas, 'codigo') === ['TIPOS_INVALIDOS', 'TIPOS_SIN_VENTA', 'MODULOS_INVALIDOS', 'POS_ACTIVO', 'EN_GRUPO', 'INTEGRACION_ACTIVA', 'CERT_POR_VENCER', 'RANGO_FALTANTE', 'RANGO_ILIMITADO'], array_column($s11Problemas, 'codigo'));
 $s11MalFormados = [];
 foreach (array_merge($s11Problemas, express_problemas_tenant($s11Fila(['edicion' => '']), null, $s11Hoy), express_problemas_tenant($s11Fila(['tipos_ecf_habilitados' => null, 'cert_path' => null]), null, $s11Hoy),
     express_problemas_tenant($s11Fila(['cert_vence' => null]), null, $s11Hoy)) as $s11P) {
@@ -4136,6 +4190,10 @@ wa_chk('los detalles dicen lo que hay que saber: los tokens que sobran, lo que q
     && str_contains($s11Detalle($s11Problemas, 'MODULOS_INVALIDOS'), "'cliente'") && str_contains($s11Detalle($s11Problemas, 'MODULOS_INVALIDOS'), 'ninguno')
     && str_contains($s11Detalle($s11Problemas, 'CERT_POR_VENCER'), $s11Dia(5)) && str_contains($s11Detalle($s11Problemas, 'CERT_POR_VENCER'), '5 dias')
     && str_contains($s11Detalle($s11Problemas, 'RANGO_FALTANTE'), 'E33') && str_contains($s11Detalle($s11Problemas, 'RANGO_ILIMITADO'), "'E31'"), $s11Problemas);
+wa_chk('EN_GRUPO nombra el grupo (#7) y dice que una empresa Express no puede estar en uno; INTEGRACION_ACTIVA dice que /api/integracion/* no pasa por los limites de Express y como dejar el hash en blanco (tools/tenant_edicion.php --tenant=12 --edicion=express); ninguno trae el valor del hash',
+    str_contains($s11Detalle($s11Problemas, 'EN_GRUPO'), '#7') && str_contains($s11Detalle($s11Problemas, 'EN_GRUPO'), 'Express') && str_contains($s11Detalle($s11Problemas, 'EN_GRUPO'), 'grupo')
+    && str_contains($s11Detalle($s11Problemas, 'INTEGRACION_ACTIVA'), '/api/integracion/') && str_contains($s11Detalle($s11Problemas, 'INTEGRACION_ACTIVA'), 'tools/tenant_edicion.php --tenant=12 --edicion=express')
+    && !str_contains($s11Detalle($s11Problemas, 'EN_GRUPO') . $s11Detalle($s11Problemas, 'INTEGRACION_ACTIVA'), 'MARCA-'), [$s11Detalle($s11Problemas, 'EN_GRUPO'), $s11Detalle($s11Problemas, 'INTEGRACION_ACTIVA')]);
 $s11Angosto = express_problemas_tenant($s11Fila(['modulos_habilitados' => 'facturacion,cliente']), null, $s11Hoy);
 wa_chk("MODULOS_INVALIDOS con 'facturacion,cliente' dice que la empresa queda con facturacion (lo que de verdad rige)",
     str_contains($s11Detalle($s11Angosto, 'MODULOS_INVALIDOS'), "'cliente'") && str_contains($s11Detalle($s11Angosto, 'MODULOS_INVALIDOS'), 'queda con facturacion'), $s11Angosto);
@@ -4316,6 +4374,14 @@ foreach (['una empresa Express limpia' => [$s11Limpia], 'ninguna empresa que no 
     [$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
     wa_chk("express_verificar con {$s11Desc}: imprime Sin problemas. y sale con 0", $s11Error === null && $s11Informe === ['codigo' => 0, 'lineas' => ['Sin problemas.']], [$s11Error?->getMessage(), $s11Informe]);
 }
+$s11Agrupada = $s11Fila(['id' => 14, 'nombre' => 'Agrupada', 'grupo_id' => 14, 'api_secret_hash' => str_repeat('b', 64)]);
+$s11M = $s11Maestro([$s11Agrupada, $s11Limpia]);
+[$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
+$s11LineasG = is_array($s11Informe) ? $s11Informe['lineas'] : [];
+wa_chk('el informe nombra a una empresa Express que esta en un grupo y conserva su credencial de integracion: dos lineas (EN_GRUPO e INTEGRACION_ACTIVA), salida 1, sin el valor del hash y sin listar a la limpia',
+    $s11Error === null && ($s11Informe['codigo'] ?? null) === 1 && count($s11LineasG) === 2
+    && str_starts_with($s11LineasG[0] ?? '', 'tenant #14 (Agrupada): EN_GRUPO ') && str_starts_with($s11LineasG[1] ?? '', 'tenant #14 (Agrupada): INTEGRACION_ACTIVA ')
+    && !str_contains(implode("\n", $s11LineasG), str_repeat('b', 64)) && !str_contains(implode("\n", $s11LineasG), 'tenant #9'), [$s11Error?->getMessage(), $s11Informe]);
 $s11M = $s11Maestro([$s11A], ['id', 'nombre', 'edicion', 'tipos_ecf_habilitados']);
 [$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
 wa_chk('sin dos de las columnas de la 014 (modulos_habilitados y cert_vence) sale con 2, nombra db/master_migrations/014_tenants_edicion.sql y las columnas que faltan, y ni siquiera lee tenants',

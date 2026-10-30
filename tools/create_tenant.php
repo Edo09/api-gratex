@@ -67,6 +67,9 @@
  *       php tools/tenant_edicion.php --tenant=ID --edicion=express --tipos=45 [--apply]
  *   - La conversion deja en blanco la credencial de integracion: el resumen no imprime API KEY ni
  *     API SECRET.
+ *   - --grupo no se combina con --edicion=express (sale con 1 antes de crear nada): la credencial de
+ *     integracion de cualquier empresa de un grupo actua por las demas sin pasar por los limites de
+ *     Express. Una empresa de un grupo tampoco se convierte despues (el preflight la rechaza).
  *   - Si el preflight rechaza algo no cambia nada: la empresa queda creada como completa, el resumen
  *     sale como siempre y la herramienta termina con 3.
  *
@@ -157,6 +160,15 @@ if (isset($opts['edicion']) || isset($opts['tipos-ecf']) || isset($opts['telefon
         $expressPedido = $edicionArg === 'express';
     }
     if ($expressPedido) {
+        // Una empresa Express no puede estar en un grupo (revision final): la credencial de integracion de cualquier empresa de un grupo actua por las demas
+        // (TenantResolver::switchToSibling) sin pasar por las rutas, los modulos ni los tipos de Express, y la conversion deja en blanco la de esta, que en la cabeza
+        // de un grupo (--grupo=self) es la que el cliente usa para todas. Se juzga aqui, antes de crear nada: el preflight del final la rechazaria igual (item
+        // grupo), pero para entonces la base y el tenant ya existirian. Un --grupo vacio o sin valor no pide ningun grupo (como mas abajo); repetido, si.
+        $grupoPedido = $opts['grupo'] ?? null;
+        if (is_array($grupoPedido) || trim((string) $grupoPedido) !== '') {
+            fail('--grupo no va con --edicion=express: una empresa Express no puede estar en un grupo de empresas (la credencial de integracion de cualquier empresa del grupo'
+                . ' actua por las demas sin pasar por las rutas, los modulos ni los tipos de Express). Crea la empresa sin --grupo.');
+        }
         if (!isset($opts['tipos-ecf'])) {
             fail('--edicion=express requiere --tipos-ecf=45[,31,32,33]: los tipos de venta que la empresa emite.');
         }

@@ -27,8 +27,8 @@
  *      una transaccion que se deshace), y D4: lo que certificacion dejo en certecf (una factura, un contador) no cambia ningun hecho de
  *      ecf ni suma ningun rechazo.
  *   5) tools/tenant_edicion.php sobre la empresa A, en un hijo (express_cli): el ensayo no escribe nada, los rechazos (un tipo que Express
- *      no vende, un tipo mal escrito, un modulo que no existe, la migracion de tenant 036 ausente, una empresa que no existe) salen con 3 sin
- *      tocar ninguna base, aplicar convierte a A (edicion, tipos, vencimiento del certificado, POS, inventario, credencial de integracion,
+ *      no vende, un tipo mal escrito, un modulo que no existe, la migracion de tenant 036 ausente, una empresa que no existe, una empresa de un grupo
+ *      (la cabeza y una hermana)) salen con 3 sin tocar ninguna base, aplicar convierte a A (edicion, tipos, vencimiento del certificado, POS, inventario, credencial de integracion,
  *      rol user, rangos ecf sin limite y clientes de prueba sin facturas) con UNA fila de auditoria, lo de certecf nunca bloquea (D4), la
  *      credencial de integracion de A funciona antes y no despues (y de nuevo tras revertir), --refrescar-cert deja a cert_vence en la fecha
  *      del certificado y GET /api/emisor la informa, revertir deja a A en completa con su hash de integracion y su token ya no recibe
@@ -40,8 +40,8 @@
  *   6) tools/verificar_express.php sobre la empresa A, en un hijo (express_cli), y la Consulta 4 de tools/verificar_migraciones_master.sql: con A
  *      Express, tipos vacios, POS prendido y sin certificado sale con 1 y nombra TIPOS_VACIOS, POS_ACTIVO y SIN_CERTIFICADO para A sin listar a B;
  *      con A corregida imprime Sin problemas. y sale con 0; lee de las columnas un certificado por vencer, sin fecha, los typos de tipos y
- *      modulos y una edicion desconocida (un ENUM sin modo estricto guarda '': la unica linea de A es EDICION_DESCONOCIDA y queda una linea en
- *      el log); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 014 sale con 2; y
+ *      modulos, una edicion desconocida (un ENUM sin modo estricto guarda '': la unica linea de A es EDICION_DESCONOCIDA y queda una linea en
+ *      el log), una Express en un grupo (EN_GRUPO) y una con su credencial de integracion viva (INTEGRACION_ACTIVA, sin imprimir el hash); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 014 sale con 2; y
  *      ninguna corrida escribe nada ni imprime un secreto. La Consulta 4 se saca del archivo (sin el "-- " de sus lineas) y se corre en la master
  *      scratch: con A Express y tipos NULL devuelve a A con tipos_vacios 1 y no a B; con A completa, ninguna fila de A.
  *   7) la lista de rutas de la edicion por HTTP (A Express con el E45, token de administrador): lo que Express no incluye (gastos, inventario, facturacion
@@ -142,7 +142,8 @@ function errorDeSql(PDO $pdo, string $sql): ?array
  * El entorno scratch de las pruebas de Express: el de las suites del POS (pos_scratch_preparar: master
  * wa_scratch_sin_gate, empresa A en wa_scratch, empresa B en wa_scratch_sin_gate, con sus roles y usuarios) mas la
  * migracion master 014 aplicada a esa master. Deja las dos empresas de prueba como completas: edicion = 'completa',
- * las otras tres columnas de la 014 en NULL y sin certificado. Lo mismo se repite al terminar este proceso (lo que
+ * las otras tres columnas de la 014 en NULL, sin certificado y sin grupo (grupo_id NULL: la seccion 5 y la 6 ponen a A en un grupo
+ * mientras prueban que una Express no puede estarlo). Lo mismo se repite al terminar este proceso (lo que
  * una prueba cambie en las empresas se restaura solo, tambien si la prueba falla): primero pos_scratch_preparar()
  * devuelve roles, usuarios y campos del POS, que nunca toca las columnas de la 014, y despues se reponen ellas. Si
  * una corrida anterior murio sin llegar a esa restauracion (kill -9), el reinicio de arriba lo arregla en la
@@ -160,7 +161,7 @@ function express_scratch_preparar(): array
         $rncs = array_column(POS_SCRATCH_TENANTS, 'rnc');
         $pdo->prepare(
             "UPDATE tenants SET edicion = 'completa', modulos_habilitados = NULL, tipos_ecf_habilitados = NULL, cert_vence = NULL,
-                    cert_path = NULL, cert_pass_encrypted = NULL
+                    cert_path = NULL, cert_pass_encrypted = NULL, grupo_id = NULL
              WHERE rnc IN (" . implode(',', array_fill(0, count($rncs), '?')) . ')'
         )->execute($rncs);
     };
@@ -1553,6 +1554,25 @@ try {
             && !str_contains($r['salida'], 'APLICADO') && $s5Difieren($s5Antes, $s5Fila($s5IdA)) === [] && $s5Rol($s5IdA) === $s5Rol0 && $s5Ilimitados() >= 1
             && $s5Existe($s5Libre) && $s5Auditoria() === [], $s5Ver($r));
     }
+    // (2) una empresa de un grupo no se convierte (revision final): la credencial de integracion de cualquier empresa del grupo actua por las demas sin pasar por los limites de Express,
+    // y convertir deja en blanco la de esta. La cabeza de un grupo (grupo_id = su propio id, como la deja create_tenant.php --grupo=self) y una hermana (grupo_id = el id de otra
+    // empresa): el preflight rechaza con el item grupo aunque todo lo demas este bien (A es nueva, tiene certificado y emisor completos). grupo_id vuelve a NULL enseguida.
+    wa_chk('precondicion: A no esta en ningun grupo (grupo_id NULL)', array_key_exists('grupo_id', $s5Antes) && $s5Antes['grupo_id'] === null, $s5Antes['grupo_id'] ?? '(sin la columna)');
+    foreach (['la cabeza de su grupo (grupo_id = su propio id)' => $s5IdA, 'hermana de un grupo (grupo_id = el id de B)' => $s5IdB] as $s5Desc => $s5Grupo) {
+        $s5Master->prepare('UPDATE tenants SET grupo_id = :g WHERE id = :id')->execute([':g' => $s5Grupo, ':id' => $s5IdA]);
+        try {
+            $r = $s5Corre('--edicion=express', '--tipos=45', '--apply');
+        } finally {
+            $s5Master->prepare('UPDATE tenants SET grupo_id = NULL WHERE id = :id')->execute([':id' => $s5IdA]);
+        }
+        wa_chk("(2) A es {$s5Desc}: --tipos=45 --apply sale con 3, [RECH] grupo nombra el grupo #{$s5Grupo} y es el unico rechazo; no cambia nada (la fila de A identica, nada borrado, sin fila de auditoria) y la credencial de integracion de A sigue sirviendo",
+            $r['codigo'] === 3 && $s5Tiene($r, '[RECH] grupo:') && str_contains($r['salida'], "grupo #{$s5Grupo}") && str_contains($r['salida'], 'RECHAZADO: 1 item(s). No se cambio nada.')
+            && !str_contains($r['salida'], 'APLICADO') && $s5Difieren($s5Antes, $s5Fila($s5IdA)) === [] && $s5Rol($s5IdA) === $s5Rol0 && $s5Ilimitados() >= 1
+            && $s5Existe($s5Libre) && $s5Auditoria() === [] && $s5Credencial() === true, $s5Ver($r));
+    }
+    $r = $s5Corre('--edicion=express', '--tipos=45');
+    wa_chk('(2) ...y con A otra vez sin grupo el mismo ensayo vuelve a pasar: sale con 0 y [OK  ] grupo (lo que rechazaba era el grupo)',
+        $r['codigo'] === 0 && $s5Tiene($r, '[OK  ] grupo:') && preg_match('/^\[RECH\]/m', $r['salida']) === 0, $s5Ver($r));
     $r = express_cli(['tools/tenant_edicion.php', '--tenant=2147483000', '--edicion=completa', '--apply']);
     $s5Salidas[] = $r['salida'];
     wa_chk('(2) una empresa que no existe (id 2147483000): sale con 3 con [RECH] tenant y RECHAZADO, sin escribir nada',
@@ -1829,12 +1849,13 @@ try {
         $s5bRestaurar();
     }
 
-    // El control: con las cuatro columnas la misma orden ya no dice nada de la 014 (la comprobacion no se dispara de mas). Se le agrega un --grupo que no
-    // existe para que termine limpio, con un mensaje, justo despues de esa comprobacion y sin tocar la base de la empresa.
-    $r = express_cli(array_merge($s5bArgs, ['--grupo=2147483647']));
+    // El control: con las cuatro columnas la misma orden ya no dice nada de la 014 (la comprobacion no se dispara de mas). Se le agrega un --admin-username que ya existe
+    // (el de admin_pos_a: users.username es unico global) para que termine limpio, con un mensaje, justo despues de esa comprobacion y antes de tocar la base de la empresa.
+    // (Antes esto era un --grupo que no existe; desde la revision final --grupo junto con --edicion=express se rechaza antes, al validar las banderas, y ya no llega aqui.)
+    $r = express_cli(array_merge($s5bArgs, ['--admin-email=zz-control-5b@example.com', '--admin-pass=ZzControl5b-clave', '--admin-name=Control 5b', '--admin-username=admin_pos_a']));
     $s5bSalidas[] = $r['salida'];
-    wa_chk('(control) con las cuatro columnas de la 014 la misma orden ya no menciona la migracion: pasa esa comprobacion y se detiene en el grupo que no existe (sale con 1), sin crear ninguna empresa',
-        $r['codigo'] === 1 && !str_contains($r['salida'], '014_tenants_edicion.sql') && str_contains($r['salida'], 'no existe un tenant activo con ese id') && $s5bConRnc() === 0, $s5bVer($r));
+    wa_chk('(control) con las cuatro columnas de la 014 la misma orden ya no menciona la migracion: pasa esa comprobacion y se detiene en el username que ya existe (sale con 1), sin crear ninguna empresa',
+        $r['codigo'] === 1 && !str_contains($r['salida'], '014_tenants_edicion.sql') && str_contains($r['salida'], "El username 'admin_pos_a' ya esta en uso") && $s5bConRnc() === 0, $s5bVer($r));
 } finally {
     $s5bRestaurar();   // las cuatro columnas, pase lo que pase (express_scratch_preparar() la repone tambien al terminar el proceso)
 }
@@ -1920,12 +1941,16 @@ $s6Lineas = static fn (array $r, int $id): array => array_values(array_filter(
     preg_split('/\R/', $r['salida']) ?: [],
     static fn (string $l): bool => str_starts_with($l, "tenant #{$id} (")
 ));
-/** Deja a A como se pide; lo que no se dice queda como una empresa Express sin nada puesto (tipos y modulos NULL, POS prendido, sin certificado, en testecf). */
+/**
+ * Deja a A como se pide; lo que no se dice queda como una empresa Express sin nada puesto (tipos y modulos NULL, POS prendido, sin certificado, en testecf), y como la deja una
+ * conversion: con la credencial de integracion en blanco (hash '') y sin grupo (grupo_id NULL). Una fila Express que conserva su hash o esta en un grupo es lo que EN_GRUPO e
+ * INTEGRACION_ACTIVA marcan (revision final): sin esto, A seria una Express "con la puerta abierta" en todas las pruebas de abajo.
+ */
 $s6PonerA = static function (array $c = []) use ($ctx, $s6Master, $s6IdA): void {
-    $c += ['edicion' => 'express', 'tipos' => null, 'modulos' => null, 'vence' => null, 'pos' => 1, 'cert' => null, 'ambiente' => 'testecf'];
+    $c += ['edicion' => 'express', 'tipos' => null, 'modulos' => null, 'vence' => null, 'pos' => 1, 'cert' => null, 'ambiente' => 'testecf', 'hash' => '', 'grupo' => null];
     express_edicion($ctx, 'A', $c['edicion'], $c['tipos'], $c['modulos'], $c['vence']);
-    $s6Master->prepare('UPDATE tenants SET pos_enabled = :p, cert_path = :c, ambiente = :a WHERE id = :id')
-        ->execute([':p' => $c['pos'], ':c' => $c['cert'], ':a' => $c['ambiente'], ':id' => $s6IdA]);
+    $s6Master->prepare('UPDATE tenants SET pos_enabled = :p, cert_path = :c, ambiente = :a, api_secret_hash = :h, grupo_id = :g WHERE id = :id')
+        ->execute([':p' => $c['pos'], ':c' => $c['cert'], ':a' => $c['ambiente'], ':h' => $c['hash'], ':g' => $c['grupo'], ':id' => $s6IdA]);
 };
 /** Una empresa Express bien puesta (tipo 45, POS apagado, certificado con fecha a 120 dias): sin problemas hasta que una prueba le estropee algo. */
 $s6BienA = static fn (array $c = []): array => $c + ['tipos' => '45', 'vence' => date('Y-m-d', strtotime('+120 days')), 'pos' => 0, 'cert' => $s6Cert['path']];
@@ -2000,6 +2025,10 @@ try {
         "tipos 'e45' y modulos 'facturacion,cliente' (los typos de un operador)" => [$s6BienA(['tipos' => 'e45', 'modulos' => 'facturacion,cliente']), ['TIPOS_INVALIDOS', 'MODULOS_INVALIDOS']],
         "tipos '33' (solo la nota de debito)" => [$s6BienA(['tipos' => '33']), ['TIPOS_SIN_VENTA']],
         "tipos '' (vacio, no NULL)" => [$s6BienA(['tipos' => '']), ['TIPOS_VACIOS']],
+        // Revision final: lo que deja pasar por encima de los limites de Express. El hash es el de A antes de convertirla, y la herramienta no puede imprimirlo ($s6Prohibidos).
+        'A en su propio grupo (grupo_id = su id: la cabeza de un grupo)' => [$s6BienA(['grupo' => $s6IdA]), ['EN_GRUPO']],
+        'A con su credencial de integracion viva (el hash de antes de convertir)' => [$s6BienA(['hash' => (string) $s6Fila0['api_secret_hash']]), ['INTEGRACION_ACTIVA']],
+        'A hermana de un grupo (grupo_id = el id de B) y con su hash vivo' => [$s6BienA(['grupo' => $s6IdB, 'hash' => (string) $s6Fila0['api_secret_hash']]), ['EN_GRUPO', 'INTEGRACION_ACTIVA']],
     ] as $s6Desc => [$s6Estado, $s6Codigos]) {
         $s6PonerA($s6Estado);
         $r = $s6Corre();
@@ -2111,7 +2140,7 @@ try {
     express_scratch_preparar();
 }
 wa_chk('ninguna corrida del verificador cambio nada: ni una fila de tenants, ni la auditoria, ni los rangos de la base de A (la huella de antes y la de despues de cada corrida es la misma)',
-    count($s6Salidas) === 17 && $s6Cambios === [], ['corridas' => count($s6Salidas), 'cambiaron' => $s6Cambios]);
+    count($s6Salidas) === 20 && $s6Cambios === [], ['corridas' => count($s6Salidas), 'cambiaron' => $s6Cambios]);
 $s6Fugas = [];
 foreach ($s6Salidas as $s6I => $s6Salida) {
     foreach ($s6Prohibidos as $s6Que => $s6Valor) {
@@ -2120,13 +2149,13 @@ foreach ($s6Salidas as $s6I => $s6Salida) {
         }
     }
 }
-wa_chk('ninguna corrida imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base', count($s6Salidas) === 17 && $s6Fugas === [], $s6Fugas);
+wa_chk('ninguna corrida imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base', count($s6Salidas) === 20 && $s6Fugas === [], $s6Fugas);
 $s6Final = $s6Fila($s6IdA);
 $s6FinalB = $s6Fila($s6IdB);
-wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendido y sin certificado ni listas; los rangos de ecf de A como estaban; y las cuatro columnas de la 014 estan',
+wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendido, su hash de integracion y sin certificado, listas ni grupo; los rangos de ecf de A como estaban; y las cuatro columnas de la 014 estan',
     $s6Final['edicion'] === 'completa' && $s6FinalB['edicion'] === 'completa' && $s6Final['ambiente'] === 'testecf' && (int) $s6Final['pos_enabled'] === 1
     && $s6Final['tipos_ecf_habilitados'] === null && $s6Final['modulos_habilitados'] === null && $s6Final['cert_vence'] === null && $s6Final['cert_path'] === null
-    && $s6Final['api_secret_hash'] === $s6Fila0['api_secret_hash']
+    && $s6Final['api_secret_hash'] === $s6Fila0['api_secret_hash'] && $s6Final['grupo_id'] === null && $s6FinalB['grupo_id'] === null
     && $s6Pdo->query("SELECT * FROM ncf_sequences WHERE ambiente = 'ecf' ORDER BY id")->fetchAll() === $s6Rangos0
     && (int) $s6Master->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')")->fetchColumn() === 4,
     array_intersect_key($s6Final, array_flip(['edicion', 'ambiente', 'pos_enabled', 'tipos_ecf_habilitados', 'cert_vence', 'cert_path'])));
