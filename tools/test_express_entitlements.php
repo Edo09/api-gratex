@@ -3715,7 +3715,9 @@ foreach ([
 $s9P = tenant_edicion_parsear(['--tenant=12', '--edicion=completa', "--ra\x00ro\x1b[31m\n=1" . str_repeat('x', 200)]);
 wa_chk('analizador: lo que el operador teclea y no se reconoce sale en el mensaje solo como ASCII imprimible y acotado (sin NUL, escapes ni saltos de linea, y sin los 200 caracteres)',
     array_keys($s9P) === ['error'] && !preg_match('/[^\x20-\x7E]/', (string) ($s9P['error'] ?? '')) && strlen((string) ($s9P['error'] ?? '')) < 300 && !str_contains((string) ($s9P['error'] ?? ''), str_repeat('x', 60)), $s9P);
-$s9Ayuda = tenant_edicion_ayuda();
+// La ayuda es un heredoc de tenant_edicion.php: en un checkout de Windows con core.autocrlf (CRLF en el arbol de trabajo) trae \r\n, que no son parte del texto.
+// Se compara con \n, como hace $s1Leer con los archivos del repo.
+$s9Ayuda = str_replace("\r\n", "\n", tenant_edicion_ayuda());
 wa_chk('tenant_edicion_ayuda: el texto de --help (en espanol) trae los tres usos, las opciones, que el ensayo es lo normal, los cuatro codigos de salida y el aviso de que volver a completa no es una parada segura',
     array_filter(['--tenant=ID', '--edicion=express', '--tipos=', '--modulos=', '--edicion=completa', '--refrescar-cert', '--apply', 'ensayo', 'Salida', 'preflight', 'no es una parada segura'],
         static fn (string $aguja): bool => !str_contains($s9Ayuda, $aguja)) === [] && !preg_match('/[^\x20-\x7E\n]/', $s9Ayuda), $s9Ayuda);
@@ -3735,7 +3737,7 @@ foreach ([
 }
 $s9R = $s9Hijo(['--help']);
 wa_chk('tenant_edicion.php --help: sale con 0 y escribe la ayuda (la de tenant_edicion_ayuda), sin avisos de PHP',
-    $s9R['codigo'] === 0 && trim($s9R['salida']) === trim($s9Ayuda) && !preg_match('/Fatal error|Warning|Notice|Deprecated/i', $s9R['salida']), $s9R);
+    $s9R['codigo'] === 0 && trim(str_replace("\r\n", "\n", $s9R['salida'])) === trim($s9Ayuda) && !preg_match('/Fatal error|Warning|Notice|Deprecated/i', $s9R['salida']), $s9R);
 $s9R = $s9Hijo(['--tenant=12', '--edicion=completa']);
 wa_chk('tenant_edicion.php con argumentos validos y la master inalcanzable (puerto 1 de loopback): sale con 1, dice que no pudo conectar a la base de datos maestra y no nombra el servidor, el usuario ni la clave ni deja la linea que MasterDatabase manda al log',
     $s9R['codigo'] === 1 && str_contains($s9R['salida'], 'base de datos maestra') && !preg_match('/127\.0\.0\.1|aislado_usuario|aislado_clave|MasterDB|Stack trace|Warning/', $s9R['salida']), $s9R);
@@ -3842,7 +3844,8 @@ foreach ([
 // --- la fuente: lo que no se mueve y lo que tiene que estar ------------------------------------------------------------------------------
 // El INSERT del tenant es el de master, letra por letra: el alta nace completa y la conversion es una llamada aparte (una fila Express nunca existe
 // antes de pasar su preflight; contratos 4: create_tenant.php ya no inserta las columnas de la 014).
-$s10Insert = <<<'SQL'
+// Los dos literales son nowdocs de ESTE archivo: en un checkout con CRLF traen \r\n, y $s10Fuente ya viene con \n. Se normalizan los dos lados (la fuente arriba, el literal aqui).
+$s10Insert = str_replace("\r\n", "\n", <<<'SQL'
 'INSERT INTO tenants
         (nombre, rnc, api_key, api_secret_hash, tipo, ' . $colGrupo . 'db_host, db_port, db_name, db_user,
          db_pass_encrypted, cert_path, cert_pass_encrypted, webhook_url, webhook_secret_encrypted,
@@ -3851,15 +3854,15 @@ $s10Insert = <<<'SQL'
         (:nombre, :rnc, :api_key, :api_secret_hash, :tipo, ' . $valGrupo . ':db_host, :db_port, :db_name, :db_user,
          :db_pass_enc, :cert_path, :cert_pass_enc, :webhook_url, :webhook_sec_enc,
          :ambiente, 1)'
-SQL;
+SQL);
 wa_chk('create_tenant.php: el INSERT INTO tenants es el de master letra por letra, y es el unico (sin columnas de la 014: la conversion es una llamada aparte)',
     substr_count($s10Fuente, $s10Insert) === 1 && substr_count($s10Fuente, 'INSERT INTO tenants') === 1);
 // El UPDATE de emisor_config de siempre no cambia: el telefono va en un segundo UPDATE y solo si se dio --telefono.
-$s10UpdateEmisor = <<<'SQL'
+$s10UpdateEmisor = str_replace("\r\n", "\n", <<<'SQL'
 'UPDATE emisor_config
             SET rnc = :rnc, razon_social = :rs, nombre_comercial = :nc, direccion = :dir
           WHERE id = 1'
-SQL;
+SQL);
 wa_chk('create_tenant.php: el UPDATE emisor_config de siempre (rnc, razon social, nombre comercial y direccion) no cambia',
     substr_count($s10Fuente, $s10UpdateEmisor) === 1);
 preg_match("/getopt\\(\\s*'',\\s*\\[(.*?)\\]\\s*\\);/s", $s10Fuente, $s10Lista);
