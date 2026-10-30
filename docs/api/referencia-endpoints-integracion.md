@@ -300,6 +300,7 @@ curl -X POST https://gratex.net/api/integracion/ecf -H "X-API-KEY: $API_KEY" -H 
     "codigo_seguridad": "Ab3+x9",
     "ambiente": "ecf",
     "fecha_emision": "2026-08-04 11:52:22",
+    "qr_url": "https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=131111111&RncComprador=131222444&ENCF=E310000000001&FechaEmision=04-08-2026&MontoTotal=8850.00&FechaFirma=04-08-2026%2011%3A52%3A22&CodigoSeguridad=Ab3%2Bx9",
     "xml_firmado": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>...",
     "dgii_response": { "trackId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" }
   }
@@ -308,6 +309,7 @@ curl -X POST https://gratex.net/api/integracion/ecf -H "X-API-KEY: $API_KEY" -H 
 
 | Campo | Notas |
 |---|---|
+| `qr_url` | El contenido del código QR de la Representación Impresa, ya armado: conviértalo tal cual a QR, sin modificarlo. Va con la regla de DGII de las facturas de consumo < RD$250,000 (`ConsultaTimbreFC`) y sin `RncComprador` donde no corresponde. `null` en `sandbox` (esos comprobantes no existen en la DGII) o si no se pudo armar |
 | `estado` | Lo que respondió la DGII al recibirlo (ver abajo) |
 | `track_id` | Identificador de la DGII. Con él se consulta el estado |
 | `codigo_seguridad` | 6 caracteres. Va en la Representación Impresa y en su QR |

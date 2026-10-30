@@ -266,15 +266,16 @@ retenciones de un E41 (vea la Referencia de endpoints, sección 6.6).
     "codigo_seguridad": "Ab3+x9",
     "ambiente": "ecf",
     "fecha_emision": "2026-08-04 11:52:22",
+    "qr_url": "https://ecf.dgii.gov.do/ecf/ConsultaTimbre?RncEmisor=131111111&RncComprador=131222444&ENCF=E310000000001&FechaEmision=04-08-2026&MontoTotal=8850.00&FechaFirma=04-08-2026%2011%3A52%3A22&CodigoSeguridad=Ab3%2Bx9",
     "xml_firmado": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>...",
     "dgii_response": { "trackId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" }
   }
 }
 ```
 
-**Guarde siempre** `xml_firmado` (es el comprobante con valor legal), `codigo_seguridad` y
-`fecha_emision` (con ellos se arma la Representación Impresa, sección 7) y `track_id` (para
-consultar el estado y para soporte).
+**Guarde siempre** `xml_firmado` (es el comprobante con valor legal), `qr_url`,
+`codigo_seguridad` y `fecha_emision` (con ellos se arma la Representación Impresa, sección 7) y
+`track_id` (para consultar el estado y para soporte).
 
 **`"status": true` significa que firmamos el comprobante y lo enviamos a la DGII; no que la
 DGII lo haya aceptado.** Lo que respondió la DGII está en `estado`:
@@ -526,8 +527,11 @@ de firma** y viene como `AAAA-MM-DD HH:MM:SS`; en la Representación Impresa y e
 `DD-MM-AAAA HH:MM:SS`, con la misma hora exacta. No la confunda con el `fecha_emision` que usted
 envía al emitir: esa es la fecha del comprobante (`DD-MM-AAAA`), que también va impresa.
 
-**El código QR** contiene una URL de consulta de la DGII, armada con los datos del XML firmado
-(cada valor codificado para URL):
+**El código QR** contiene una URL de consulta de la DGII. **La respuesta de emisión ya la trae
+armada en `qr_url`: conviértala tal cual a QR** (con cualquier librería de códigos QR) y guárdela
+con el resto de la emisión. `qr_url` es `null` en `sandbox` o si no se pudo armar; en ese caso
+puede armarla con las reglas de abajo. Estas son las reglas con las que se construye (cada valor
+codificado para URL, tomados del XML firmado):
 
 ```
 https://ecf.dgii.gov.do/{ambiente}/ConsultaTimbre?RncEmisor={RNCEmisor}&RncComprador={RNCComprador}&ENCF={eNCF}&FechaEmision={DD-MM-AAAA}&MontoTotal={MontoTotal}&FechaFirma={DD-MM-AAAA HH:MM:SS}&CodigoSeguridad={codigo_seguridad}
