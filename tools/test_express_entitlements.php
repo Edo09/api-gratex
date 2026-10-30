@@ -4597,6 +4597,35 @@ foreach ([
 }
 
 // ---------------------------------------------------------------------------
+// 12) El checklist de despliegue (docs/integrations/express-release-checklist.md): lo que la revision final le pidio
+// ---------------------------------------------------------------------------
+echo "\n== 12) El checklist de despliegue ==\n";
+$s12Lista = $s1Leer('docs/integrations/express-release-checklist.md');
+$s12Plano = trim((string) preg_replace('/\s+/', ' ', $s12Lista));   // el texto en una linea: la consulta del paso puede ir partida en varias
+$s12Migracion = strpos($s12Lista, '## 2. Migración master 014');
+$s12Consulta = strpos($s12Lista, "TABLE_NAME = 'api_tokens'");
+$s12Subir = strpos($s12Lista, '## 3. Subir el API');
+// validateToken (authModel) lee api_tokens.last_used y api_tokens.created_at para TODA empresa, la completa incluida, y traga el error de una columna que falta (valid false: un 401
+// para cada sesion). updateLastUsed tambien calla sus errores, asi que nada muestra hoy que la master de produccion las tenga: el paso las cuenta ANTES de subir el API.
+wa_chk('el checklist pide, en la seccion 2 y antes de subir el API, contar en la master de produccion las columnas last_used y created_at de api_tokens (information_schema.COLUMNS, TABLE_SCHEMA = DATABASE()) con la consulta exacta, y que den 2',
+    $s12Migracion !== false && $s12Consulta !== false && $s12Subir !== false && $s12Migracion < $s12Consulta && $s12Consulta < $s12Subir
+    && str_contains($s12Plano, "SELECT COUNT(*) AS columnas_ok FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'api_tokens' AND COLUMN_NAME IN ('last_used', 'created_at');")
+    && str_contains($s12Plano, '`columnas_ok = 2`'), [$s12Migracion, $s12Consulta, $s12Subir]);
+wa_chk('...y dice por que: el SELECT de validateToken las lee para toda empresa (la completa incluida), una columna que falta da 401 a todas las sesiones, y con menos de 2 no se sube el API',
+    str_contains($s12Plano, 'validateToken') && str_contains($s12Plano, 'toda** empresa') && str_contains($s12Plano, '401') && str_contains($s12Plano, 'no se sube el API'), $s12Plano === '' ? 'sin checklist' : null);
+// El paso dice la verdad: la master de un tenant nuevo (db/master_schema.sql) declara las dos columnas en api_tokens, que es de donde sale la columna que el paso manda a agregar.
+$s12Esquema = $s1Leer('db/master_schema.sql');
+$s12Tabla = preg_match('/CREATE TABLE IF NOT EXISTS api_tokens \((.*?)\n\) ENGINE/s', $s12Esquema, $s12M) === 1 ? $s12M[1] : '';
+wa_chk('db/master_schema.sql declara created_at y last_used en api_tokens (lo que el paso del checklist cuenta y manda agregar si faltan)',
+    $s12Tabla !== '' && preg_match('/^\s*created_at\s+DATETIME/m', $s12Tabla) === 1 && preg_match('/^\s*last_used\s+DATETIME/m', $s12Tabla) === 1, $s12Tabla === '' ? 'no se encontro api_tokens' : null);
+wa_chk('el paso nuevo no rompe el orden del checklist: el 6 (la Consulta 4) sigue antes que el 7 y la seccion 3 sigue diciendo que se sube solo despues de la 2',
+    preg_match('/\n6\. Confirmar que \*\*ninguna empresa dice `express`\*\*/u', $s12Lista) === 1 && strpos($s12Lista, "\n7. ") > strpos($s12Lista, "\n6. ")
+    && str_contains($s12Plano, 'Solo después del paso 2'), null);
+// Una empresa de un grupo no se convierte: el preflight la rechaza (item grupo) y el checklist lo dice donde habla de convertir.
+wa_chk('el checklist avisa, donde habla de convertir una empresa, que una empresa de un grupo (tenants.grupo_id no NULL) no se convierte: el preflight la rechaza con el item grupo',
+    str_contains($s12Plano, 'grupo_id') && str_contains($s12Plano, 'item `grupo`'), null);
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

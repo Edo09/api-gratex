@@ -53,10 +53,26 @@ es la rama que está en producción antes de la ola.
    comentada: se le quita el `-- ` a sus líneas y se ejecuta sola, con la 014 `APLICADA`).
    Lista toda empresa que no es `completa`, así que aquí tiene que salir **sin filas**.
    `php tools/verificar_express.php` no prueba eso: revisa lo que está mal puesto en esas
-   empresas (tipos, módulos, certificado, rangos) y dice `Sin problemas.` tanto cuando no hay
-   ninguna Express como cuando hay una bien configurada. Sirve de segunda mirada: aquí tiene
-   que imprimir `Sin problemas.` (salida 0); con salida 2, la master no tiene las columnas de
-   la 014.
+   empresas (tipos, módulos, certificado, rangos, grupo y credencial de integración) y dice
+   `Sin problemas.` tanto cuando no hay ninguna Express como cuando hay una bien configurada.
+   Sirve de segunda mirada: aquí tiene que imprimir `Sin problemas.` (salida 0); con salida 2,
+   la master no tiene las columnas de la 014.
+7. **Antes de subir el API**, confirmar que la master de producción trae `api_tokens.last_used`
+   y `api_tokens.created_at`. El `SELECT` de `validateToken` (`src/Models/authModel.php`) las
+   lee para **toda** empresa, `completa` incluida, y traga el error de una columna que falta:
+   sin ellas cada sesión de cada empresa daría 401 en cuanto se suba el API. `updateLastUsed`
+   también calla sus errores, así que hoy nada muestra que la master las tenga. Con la master
+   seleccionada, en phpMyAdmin:
+
+   ```sql
+   SELECT COUNT(*) AS columnas_ok
+     FROM information_schema.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'api_tokens'
+      AND COLUMN_NAME IN ('last_used', 'created_at');
+   ```
+
+   Tiene que dar `columnas_ok = 2`. Con menos, **no se sube el API**: se agrega la columna que
+   falte (las dos las declara `db/master_schema.sql`, en `api_tokens`) y se repite la consulta.
 
 ## 3. Subir el API
 
@@ -66,7 +82,13 @@ Tras subir, una prueba de humo de la app completa en una empresa que ya exista.
 
 **No se pone ninguna empresa en `express` en esta ola**: los planes 03 a 05 y 08 van primero.
 Cuando llegue ese momento, el cambio se hace con `tools/tenant_edicion.php` (ensayo primero,
-después `--apply`) y se revisa con `php tools/verificar_express.php`.
+después `--apply`) y se revisa con `php tools/verificar_express.php`. Una empresa que está en un
+grupo (`tenants.grupo_id` no NULL, cabeza o hermana) **no se convierte**: la credencial de
+integración de cualquier empresa del grupo actúa por las demás sin pasar por los límites de
+Express, y convertir deja en blanco la credencial de esa empresa. El preflight la rechaza (item
+`grupo`), `tools/create_tenant.php` no acepta `--grupo` junto con `--edicion=express`, y el
+verificador marca `EN_GRUPO` (y `INTEGRACION_ACTIVA` si la fila conserva su hash) en una fila
+Express que se tocó a mano.
 
 ---
 
