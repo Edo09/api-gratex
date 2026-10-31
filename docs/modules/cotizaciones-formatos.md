@@ -14,7 +14,7 @@ Formatos de hoy:
 
 | Clave | Tenant | Qué es |
 |-------|--------|--------|
-| `gratex` | Gratex y todo tenant sin otro ajuste (default) | El comportamiento de siempre, sin cambios |
+| `gratex` | Gratex y todo tenant sin otro ajuste (default) | El comportamiento de siempre. Las condiciones de cobro y la cuenta bancaria de Gratex ("+ 60% al ordenar…", "Condiciones de pago", "Forma y constancias de pago") salen **solo en las de Gratex** (tenant con su RNC, o sin tenant resuelto; misma regla que `TenantMail::esGratex`). Otro tenant con este formato las imprime sin esos textos |
 | `ferreteria` | Ferretería | Hoja "COTIZACION MERCANCIAS": líneas del catálogo, ITBIS por línea, cargos, retención 5%, abono, `COT-000001` |
 
 Referencia de la API (cuerpos, respuestas, errores): [../api/cotizaciones.md](../api/cotizaciones.md).
@@ -490,9 +490,9 @@ Volver atrás: ver la sección siguiente (volver a `gratex` y bajar el código).
   No hay pantalla para elegirlo: un formato es código hecho para un cliente.
 - Las cotizaciones ya guardadas conservan su formato. Las pestañas abiertas reciben
   el `409` hasta que recarguen.
-- **Volver a `gratex`** hace que las cotizaciones nuevas salgan con el PDF de Gratex
-  (con su cuenta bancaria). Si hace falta, quita también el módulo `cotizaciones` de
-  los roles de ese tenant hasta arreglar su formato.
+- **Volver a `gratex`** hace que las cotizaciones nuevas salgan con el PDF del formato
+  `gratex`: el de otro tenant ya no lleva la cuenta bancaria ni las condiciones de
+  Gratex (solo encabezado, detalle, totales y firmas).
 - **Bajar el código de `api-gratex`** a una versión sin formatos no está soportado
   una vez que existe alguna fila con `formato = 'ferreteria'`: el código viejo las
   imprimiría con el PDF de Gratex y les quitaría los productos al editarlas.
@@ -506,6 +506,9 @@ Volver atrás: ver la sección siguiente (volver a `gratex` y bajar el código).
 - La vista previa de cotización en `/api/branding/preview` y `plantillas.php`.
 - `custom:ferreventura` falla los chequeos `custom:tenant<id>` de `PUT /api/branding`.
 - Las consultas N+1 del listado de cotizaciones.
+- Condiciones y forma de pago propias de cada tenant en el formato `gratex` (hoy otro tenant
+  no imprime ninguna; las de Gratex son solo suyas). Necesita dónde guardarlas (master o
+  `emisor_config`) y una pantalla.
 - Conduces: lo entregado contra lo pendiente, varios conduces en una factura, un conduce desde
   cero o hacia una cotización, marcarlo "facturado", un permiso propio, restaurar uno
   eliminado desde la pantalla y conduces para otros formatos.

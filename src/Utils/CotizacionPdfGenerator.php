@@ -17,6 +17,7 @@ if (file_exists($composerPath)) {
 }
 
 require_once __DIR__ . '/../Models/EmisorConfigModel.php';
+require_once __DIR__ . '/TenantMail.php';
 require_once __DIR__ . '/Pdf/FacturaTemplateFactory.php';
 require_once __DIR__ . '/Pdf/EcfDocumento.php';
 
@@ -65,6 +66,16 @@ class CotizacionPdfGenerator extends FPDF
      * hasta y=277 mientras el cierre se dibuja desde y=205).
      */
     private const CIERRE_RESERVADO = 95;
+
+    /**
+     * Condiciones y forma de pago de GRATEX. Son su politica de cobro y su
+     * cuenta bancaria: solo se imprimen en las cotizaciones de Gratex (ver
+     * esGratex). Antes salian en las de todo tenant con el formato 'gratex', y
+     * el cliente de otra empresa leia que debia pagarle a Gratex EIRL.
+     */
+    private const GRATEX_CONDICIONES_BANDA = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
+    private const GRATEX_CONDICIONES_PAGO = 'Persona Jurídica (empresa) 60% avance del total de la Cotización/Factura Proforma y/o envío de una orden de compra/carta constancia firmada y sellada. Restante 40% será pagado al momento de la entrega del pedido. Personas Físicas deben hacer pago por adelantado.';
+    private const GRATEX_FORMA_PAGO = 'Pagos vía transferencia electrónica o con depósito a la cuenta corriente #790371603 a nombre de Gratex EIRL en el Banco Popular Dominicano. Constancia del pago debe ser enviada al e-mail pagoenlinea@gratex.net o whatsapp 849-401-1017.';
 
     /**
      * Datos ya resueltos de la banda de cliente (cliente, telefono, correo,
@@ -455,7 +466,8 @@ class CotizacionPdfGenerator extends FPDF
         }
 
         $fulltelandcel = trim('Tel.: ' . $telefono);
-        $condiciones = "+ 60% al ordenar\n+ orden de compra\n+ 40% a la entrega";
+        // Las condiciones de cobro son las de Gratex: otro tenant deja la columna vacia.
+        $condiciones = $this->esGratex() ? self::GRATEX_CONDICIONES_BANDA : '';
 
         // Client info section styled as a table row (like products).
         // Bandas en el acento del tenant (negro si no hay) + texto de contraste.
@@ -514,29 +526,11 @@ class CotizacionPdfGenerator extends FPDF
         // banda reservada, que queda por debajo del PageBreakTrigger: sin
         // apagar el auto page break cada Cell/MultiCell abriria una pagina.
         $this->SetAutoPageBreak(false);
-        // Subtotal, Descuento, ITBIS, Total
-        $this->SetFont('Arial', 'B', 9);
-        $this->SetY(-90);
-           $this->SetX(7);
-        $this->Cell(31, 4, 'Condiciones de pago', 0, 1, 'L', 0);
-        $this->SetFont('Arial', '', 9);
-           $this->SetX(7);
-        $this->MultiCell(144, 4, $this->convertEncoding('Persona Jurídica (empresa) 60% avance del total de la Cotización/Factura Proforma y/o envío de una orden de compra/carta constancia firmada y sellada. Restante 40% será pagado al momento de la entrega del pedido. Personas Físicas deben hacer pago por adelantado.'), 0, 'L');
-        $this->Ln(7);
-        
-        $this->SetFont('Arial', 'B', 9);
-           $this->SetX(7);
-        $this->Cell(31, 4, 'Forma y constancias de pago', 0, 1, 'L', 0);
-        $this->SetFont('Arial', '', 9);
-           $this->SetX(7);
-        $this->MultiCell(144, 4, $this->convertEncoding('Pagos vía transferencia electrónica o con depósito a la cuenta corriente #790371603 a nombre de Gratex EIRL en el Banco Popular Dominicano. Constancia del pago debe ser enviada al e-mail pagoenlinea@gratex.net o whatsapp 849-401-1017.'), 0, 'L');
-
-        $this->SetY(-92);
-
-        $this->Cell(147, 20, '', 1);
-        $this->SetY(-69);
-        // $this->SetX(7);
-        $this->Cell(147, 20, '', 1);
+        // Condiciones y forma de pago (recuadros a la izquierda de los totales):
+        // solo Gratex. Otro tenant no tiene estos textos y la zona queda libre.
+        if ($this->esGratex()) {
+            $this->drawCondicionesGratex();
+        }
 
         // Subtotal
         $this->SetY(-92);
@@ -575,6 +569,41 @@ class CotizacionPdfGenerator extends FPDF
         $this->Cell(20, 7, number_format(($subtotal + $itbistotal), 2), 1, 1, 'R', 1);
 
         return $this->Output('S');
+    }
+
+    /**
+     * true si la cotizacion es de Gratex: tenant con su RNC o ningun tenant
+     * resuelto (single-tenant / preview sin BD). Misma regla que los correos
+     * (TenantMail::esGratex).
+     */
+    private function esGratex(): bool
+    {
+        return TenantMail::esGratex(TenantResolver::current());
+    }
+
+    /** Los dos recuadros de cobro de Gratex, a la izquierda de los totales. */
+    private function drawCondicionesGratex(): void
+    {
+        $this->SetFont('Arial', 'B', 9);
+        $this->SetY(-90);
+        $this->SetX(7);
+        $this->Cell(31, 4, 'Condiciones de pago', 0, 1, 'L', 0);
+        $this->SetFont('Arial', '', 9);
+        $this->SetX(7);
+        $this->MultiCell(144, 4, $this->convertEncoding(self::GRATEX_CONDICIONES_PAGO), 0, 'L');
+        $this->Ln(7);
+
+        $this->SetFont('Arial', 'B', 9);
+        $this->SetX(7);
+        $this->Cell(31, 4, 'Forma y constancias de pago', 0, 1, 'L', 0);
+        $this->SetFont('Arial', '', 9);
+        $this->SetX(7);
+        $this->MultiCell(144, 4, $this->convertEncoding(self::GRATEX_FORMA_PAGO), 0, 'L');
+
+        $this->SetY(-92);
+        $this->Cell(147, 20, '', 1);
+        $this->SetY(-69);
+        $this->Cell(147, 20, '', 1);
     }
 
     /**
