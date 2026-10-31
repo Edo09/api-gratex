@@ -111,6 +111,14 @@ Cuando un cliente pide su propio formato de factura:
 Si el archivo custom falta o la clase no extiende `FacturaTemplate`, el motor
 cae a `clasico` — una factura siempre se puede imprimir.
 
+Diseños a la medida que existen hoy:
+
+| Valor | Tenant | Qué calca |
+|---|---|---|
+| `custom:tenant1` | Gratex | `clasico` + aviso de fecha límite de pago en el pie |
+| `custom:tenant9` | Nuevas Ideas Noticias R.D. | Su factura de Excel: logo + nombre grande, columna de etiquetas en negrita (con su cuenta Banreservas), tabla y totales en blanco, "Entregado por / Recibido por". Disposición de la norma |
+| `custom:ferreventura` | Ferretería Ventura | Su factura de Excel (serif, bandas azules). No sigue la convención `tenant<id>`: solo se activa por SQL |
+
 ## Replicar el formato existente de un cliente (PDF/escaneo)
 
 Caso típico: el cliente ya tiene su factura impresa y quiere que su
