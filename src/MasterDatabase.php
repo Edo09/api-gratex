@@ -253,6 +253,75 @@ class MasterDatabase
             ':track_id'      => $data['track_id'] ?? null,
             ':xml_firmado'   => $data['xml_firmado'],
         ]);
-        return (int) $this->conexion->lastInsertId();
+        $id = (int) $this->conexion->lastInsertId();
+
+        // Veredicto de la DGII al emitir. UPDATE aparte y best-effort: sin la
+        // master_migrations/014 las columnas no existen, y el respaldo (el XML)
+        // no se puede perder por eso.
+        if ($id > 0) {
+            $this->updateIntegrationEcfEstado($id, [
+                'ambiente'         => $data['ambiente'] ?? null,
+                'codigo_seguridad' => $data['codigo_seguridad'] ?? null,
+                'estado_dgii'      => $data['estado_dgii'] ?? null,
+                'dgii_mensajes'    => $data['dgii_mensajes'] ?? null,
+                'dgii_respuesta'   => $data['dgii_respuesta'] ?? null,
+            ]);
+        }
+        return $id;
+    }
+
+    /**
+     * Guarda en una fila de ecf_integracion_backup lo que la DGII dijo del e-CF
+     * (master_migrations/014). Los campos null no pisan lo guardado, salvo
+     * estado_consultado_at, que siempre se pone. Arrays se guardan como JSON.
+     * Best-effort: devuelve false (y lo deja en el log) si falla, sin lanzar.
+     *
+     * @param array $data ambiente?, codigo_seguridad?, estado_dgii?, dgii_mensajes?, dgii_respuesta?
+     */
+    public function updateIntegrationEcfEstado(int $id, array $data): bool
+    {
+        return self::updateIntegrationEcfEstadoEn($this->conexion, $id, $data);
+    }
+
+    /** Igual que updateIntegrationEcfEstado, sobre la conexion dada (IntegracionStoreModel, pruebas). */
+    public static function updateIntegrationEcfEstadoEn(PDO $conexion, int $id, array $data): bool
+    {
+        $json = static function ($v): ?string {
+            if ($v === null) {
+                return null;
+            }
+            if (is_string($v)) {
+                return $v;
+            }
+            $j = json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+            return $j === false ? null : $j;
+        };
+        try {
+            $stmt = $conexion->prepare(
+                'UPDATE ecf_integracion_backup SET
+                    ambiente             = COALESCE(:ambiente, ambiente),
+                    codigo_seguridad     = COALESCE(:codigo, codigo_seguridad),
+                    estado_dgii          = COALESCE(:estado, estado_dgii),
+                    dgii_mensajes        = COALESCE(:mensajes, dgii_mensajes),
+                    dgii_respuesta       = COALESCE(:respuesta, dgii_respuesta),
+                    estado_consultado_at = :ahora
+                  WHERE id = :id'
+            );
+            $estado = $data['estado_dgii'] ?? null;
+            $stmt->execute([
+                ':ambiente'  => ($data['ambiente'] ?? null) !== null ? substr((string) $data['ambiente'], 0, 20) : null,
+                ':codigo'    => ($data['codigo_seguridad'] ?? null) !== null ? substr((string) $data['codigo_seguridad'], 0, 10) : null,
+                ':estado'    => $estado !== null ? substr((string) $estado, 0, 40) : null,
+                ':mensajes'  => $json($data['dgii_mensajes'] ?? null),
+                ':respuesta' => $json($data['dgii_respuesta'] ?? null),
+                ':ahora'     => date('Y-m-d H:i:s'),
+                ':id'        => $id,
+            ]);
+            return true;
+        } catch (\Throwable $e) {
+            error_log('[MasterDatabase] no se pudo guardar el estado DGII del respaldo ' . $id
+                . ' (falta master_migrations/014?): ' . $e->getMessage());
+            return false;
+        }
     }
 }

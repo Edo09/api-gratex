@@ -171,11 +171,19 @@ CREATE TABLE IF NOT EXISTS ecf_integracion_backup (
   rnc_comprador VARCHAR(11)  NULL,
   monto_total   DECIMAL(18,2) NULL,
   track_id      VARCHAR(64)  NULL,
+  -- Veredicto de la DGII (master_migrations/014): al emitir y en cada GET /integracion/estado.
+  ambiente             VARCHAR(20)  NULL,
+  codigo_seguridad     VARCHAR(10)  NULL,
+  estado_dgii          VARCHAR(40)  NULL,
+  dgii_mensajes        TEXT         NULL COMMENT 'JSON: mensajes de la DGII (motivo del rechazo)',
+  dgii_respuesta       MEDIUMTEXT   NULL COMMENT 'JSON: ultima respuesta de la DGII tal cual',
+  estado_consultado_at DATETIME     NULL,
   xml_firmado   MEDIUMTEXT   NOT NULL,
   created_at    DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   KEY idx_bk_tenant (tenant_id),
   KEY idx_bk_encf (rnc_emisor, e_ncf),
+  KEY idx_bk_estado (tenant_id, estado_dgii),
   CONSTRAINT fk_bk_tenant FOREIGN KEY (tenant_id) REFERENCES tenants (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

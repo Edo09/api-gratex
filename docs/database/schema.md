@@ -32,7 +32,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `api_tokens` | Tokens de sesión (+ `tenant_id`); FK a `users` |
 | `landing_carousel` / `landing_services` | Contenido de marketing (global) |
 | `auth_seeds` / `auth_tokens_emitidos` | Flujo semilla/token DGII entrante (global, antes de resolver tenant) |
-| `ecf_integracion_backup` | Respaldo de e-CF emitidos por tenants `integracion` (sin DB propia) |
+| `ecf_integracion_backup` | Respaldo de e-CF emitidos por tenants `integracion` (sin DB propia), con el último estado de la DGII y el motivo de un rechazo (master_migrations/014) |
 | `ecf_recibidos` (+ `tenant_id`) | Espejo: e-CF recibidos de tenants `integracion` |
 | `aprobaciones_comerciales` (+ `tenant_id`) | Espejo: aprobaciones de tenants `integracion` |
 | `unidades_medida` | Catálogo DGII de unidades de medida (compartido por todos los tenants) |

@@ -412,6 +412,8 @@ certificación si el mismo número se usó en las pruebas.
 | `consulta` | La respuesta de la DGII tal cual. El motivo de un rechazo está en `consulta.mensajes` |
 | `fecha_emision` | Hora en que guardamos nuestra copia, solo cuando buscamos el `track_id` por usted. No es la fecha de firma |
 
+Cada consulta deja guardado lo que respondió la DGII (estado y `mensajes`) junto a nuestra copia del comprobante, para poder revisar después el motivo de un rechazo.
+
 **Úselo con moderación.** Cada llamada consulta a la DGII en ese momento:
 
 - consulte solo los comprobantes que sigan en `ENVIADO`, `EN_PROCESO` o `ERROR`;

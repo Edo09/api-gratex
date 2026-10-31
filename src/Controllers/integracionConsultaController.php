@@ -211,6 +211,21 @@ function handleIntegracionEstado(array $tenant): void
         $estado = 'RFCE_' . $estado;
     }
 
+    // Se guarda lo que dijo la DGII (master_migrations/014): sin base propia, el
+    // respaldo del master es el unico lugar donde queda el motivo de un rechazo.
+    // Sandbox no: ese comprobante nunca llego a la DGII.
+    if (!$sandbox) {
+        (new IntegracionStoreModel())->guardarEstadoConsultado(
+            $tenantId,
+            $rncEmisor,
+            $eNcf,
+            $trackId !== '' ? $trackId : null,
+            $estado,
+            $ambiente,
+            $consulta['data'] ?? null
+        );
+    }
+
     $respuesta = [
         'status' => true,
         'recurso' => 'estado',
