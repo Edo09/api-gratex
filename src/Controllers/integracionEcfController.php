@@ -122,6 +122,13 @@ function handleEmitirIntegracion(): void
             'monto_total'   => $input['totales']['monto_total'] ?? null,
             'track_id'      => $result['track_id'] ?? null,
             'xml_firmado'   => $result['signed_xml'],
+            // Lo que la DGII dijo al recibirlo (master_migrations/014). GET /estado lo
+            // actualiza con el veredicto final y el motivo de un rechazo.
+            'ambiente'         => $result['ambiente'] ?? null,
+            'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
+            'estado_dgii'      => $result['estado'] ?? null,
+            'dgii_mensajes'    => is_array($result['dgii_response'] ?? null) ? ($result['dgii_response']['mensajes'] ?? null) : null,
+            'dgii_respuesta'   => $result['dgii_response'] ?? null,
         ]);
     } catch (Throwable $e) {
         error_log('[integracionEcf] no se pudo guardar respaldo: ' . $e->getMessage());
