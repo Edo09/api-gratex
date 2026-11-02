@@ -37,3 +37,9 @@ jobs:
             php -l "$f" || exit 1
           done
           php tools/test_express_entitlements.php
+      - name: Version web de tenant_edicion (src/Admin/TenantEdicionWeb.php), sintaxis 8.3 y suite pura
+        run: |
+          for f in src/Admin/TenantEdicionWeb.php public/tenant_edicion.php; do
+            php -l "$f" || exit 1
+          done
+          php tools/test_tenant_edicion_web.php

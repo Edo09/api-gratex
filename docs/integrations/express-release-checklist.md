@@ -158,6 +158,10 @@ Pasos (producción, los hace el dueño):
    pantalla de facturas. Volver la empresa a `completa` (`--edicion=completa`) le quita Express y no cambia la
    app completa.
 
+Los pasos 5 a 7 también se pueden hacer desde el navegador, sin consola: `public/tenant_edicion.html` es la versión web de
+`tools/tenant_edicion.php` (la misma biblioteca y las mismas reglas, con ensayo, confirmación y aplicar). Nace apagada: se
+activa poniendo `TENANT_EDICION_TOKEN` en el `.env` del server. Guía: `docs/integrations/tenant-edicion-web.md`.
+
 Reversa: bajar el API a una ola anterior deja a una empresa `ambas` leída como `completa` (la app completa
 sigue igual y Express dice «cuenta no habilitada»): es seguro. No restaurar un respaldo de la master anterior
 a la 017 con empresas `ambas`: MySQL guardaría la edición vacía, que la API trata como `completa`.
