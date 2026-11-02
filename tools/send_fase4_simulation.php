@@ -26,7 +26,7 @@
  *
  * --fecha-vencimiento-secuencia=31-12-2026 (integracion y app): la del rango
  * autorizado. Sin ella el server usa la del rango en ncf_sequences (app) o el
- * 31-12 del ano siguiente a la emision (integracion), y la DGII rechaza la que
+ * 31-12-2028 por defecto (integracion), y la DGII rechaza la que
  * no es la del rango ("Fecha de vencimiento de secuencia invalida").
  * Opcionales de integracion: --comprador-rnc /
  * --comprador-razon-social (default: el comprador de prueba de DGII 131880681). El comprador se inyecta en los casos que el plan
@@ -140,7 +140,7 @@ function main(array $argv): int
     }
     echo 'Vencimiento de secuencia: ' . ($fechaVencSecuencia
         ?? ($integracion
-            ? '31-12-' . ((int) date('Y') + 1) . ' (default del server: 31-12 del ano siguiente)'
+            ? '31-12-2028 (default del server)'
             : 'el del rango autorizado (ncf_sequences)')) . "\n";
 
     $secuencias = [];

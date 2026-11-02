@@ -191,8 +191,8 @@ Un RNC que no sea de su grupo devuelve `422`; no hay forma de emitir por una emp
    cuenta de un tercero.
 4. **Envíe `fecha_vencimiento_secuencia`** (`DD-MM-AAAA`) en todos los tipos excepto E32 y
    E34. Es la fecha de vencimiento que figura en la autorización de la DGII para el rango de
-   e-NCF de esa empresa y ese tipo, y debe coincidir. Si no la envía, usamos el 31 de diciembre
-   del año siguiente a la emisión (ej. `31-12-2027` para una factura de 2026); si su rango
+   e-NCF de esa empresa y ese tipo, y debe coincidir. Si no la envía, usamos el `31-12-2028`;
+   si su rango
    vence otro día, la DGII rechaza con *"Fecha de vencimiento de secuencia inválida"*. El rango de certificación y el
    de producción son autorizaciones distintas y pueden vencer en fechas distintas: al pasar a
    producción, actualícela.
@@ -399,7 +399,8 @@ E31 exige RNC del comprador. E32 de menos de RD$250,000 y E43 pueden emitirse si
 identificado.
 
 Las notas (E33/E34) requieren además un objeto `informacion_referencia` con los datos del
-comprobante que modifican. Los campos van **dentro de ese objeto**, no en la raíz del JSON:
+comprobante que modifican (guía rápida con ejemplos: [Notas de crédito y de débito](integracion-notas-credito-debito.md)).
+Los campos van **dentro de ese objeto**, no en la raíz del JSON:
 
 ```json
 "informacion_referencia": {

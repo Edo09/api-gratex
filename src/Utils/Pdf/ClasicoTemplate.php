@@ -2,10 +2,12 @@
 require_once __DIR__ . '/FacturaTemplate.php';
 
 /**
- * Plantilla "clasico": el diseno historico de Gratex, movido tal cual desde
- * FacturaPdfGenerator (Header/Footer/banda de tabla/totales). Es el default
- * de todos los tenants: sin acento configurado el resultado es identico al
- * anterior (banda negra, totales gris claro, sello + dos firmas).
+ * Plantilla "clasico": el default de todos los tenants. En una factura dibuja la
+ * disposicion del modelo de RI de la DGII (usaDisposicionNorma()). El diseno
+ * historico de Gratex, movido tal cual desde FacturaPdfGenerator (Header/Footer/
+ * banda de tabla/totales; sin acento: banda negra, totales gris claro, sello +
+ * dos firmas), sigue aqui para la cotizacion y para la subclase que apague
+ * usaDisposicionNorma() (Tenant1Template).
  */
 class ClasicoTemplate extends FacturaTemplate
 {
@@ -37,10 +39,11 @@ class ClasicoTemplate extends FacturaTemplate
             return;
         }
         // Con comprobante en curso (toda factura / e-CF) el emisor se dibuja
-        // como en el modelo de RI de la DGII. Sin el (vista de diseno), el
-        // encabezado historico de abajo.
+        // como en el modelo de RI de la DGII. Sin el (vista de diseno), o en una
+        // subclase que apaga usaDisposicionNorma() (Gratex), el encabezado
+        // historico de abajo.
         $doc = $this->documento();
-        if ($doc !== null) {
+        if ($doc !== null && $this->usaDisposicionNorma()) {
             $this->drawEmisorNorma($pdf, $emisor, $logoPath, $doc);
             return;
         }
@@ -188,7 +191,7 @@ class ClasicoTemplate extends FacturaTemplate
 
     public function drawItemsTableHeader($pdf, array $widths, array $labels): void
     {
-        if ($this->documento() !== null) {
+        if ($this->documento() !== null && $this->usaDisposicionNorma()) {
             $this->drawItemsTableHeaderNorma($pdf, $widths, $labels);
             return;
         }
@@ -236,7 +239,7 @@ class ClasicoTemplate extends FacturaTemplate
 
     public function drawTotals($pdf, array $filas): void
     {
-        if ($this->documento() !== null) {
+        if ($this->documento() !== null && $this->usaDisposicionNorma()) {
             $this->drawTotalsNorma($pdf, $filas);
             return;
         }

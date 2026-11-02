@@ -170,7 +170,8 @@ class ECFEmissionService
      * emisor_config.fecha_vencimiento_secuencia, o null si no esta configurada.
      * '2030-12-31' es el DEFAULT del esquema (db/tenant_schema.sql), no una
      * autorizacion de la DGII: cuenta como sin configurar y cae al default
-     * (31-12 del ano siguiente a la emision). Un valor real se respeta.
+     * (ECFXmlBuilder::VENCIMIENTO_SECUENCIA_POR_DEFECTO, 31-12-2028). Un valor
+     * real se respeta.
      */
     private static function vencimientoConfigurado($valor): ?string
     {
@@ -439,7 +440,7 @@ class ECFEmissionService
             'fecha_emision' => $payload['fecha_emision'] ?? date('d-m-Y'),
             // Prioridad: override del payload > vencimiento del RANGO autorizado
             // que dispenso este e-NCF > emisor_config (legacy) > default
-            // (31-12 del ano siguiente al de la emision). Vacio cuenta como no enviado.
+            // (31-12-2028). Vacio cuenta como no enviado.
             'fecha_vencimiento_secuencia' => (trim((string) ($payload['fecha_vencimiento_secuencia'] ?? '')) !== ''
                     ? $payload['fecha_vencimiento_secuencia'] : null)
                 ?? $rangoVencimiento

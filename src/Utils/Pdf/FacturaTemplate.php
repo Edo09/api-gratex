@@ -106,8 +106,9 @@ abstract class FacturaTemplate
      * el comprobante (titulo, e-NCF, NCF Modificado, vencimiento) a la derecha,
      * el cliente en su propia franja bajo una linea de color, la tabla con
      * bordes y el pie con QR a la izquierda y totales a la derecha. Las demas
-     * plantillas (y los disenos a la medida de un cliente) conservan su
-     * disposicion.
+     * plantillas conservan su disposicion. Un diseno a la medida que EXTIENDE
+     * ClasicoTemplate hereda la de la norma: para conservar la suya tiene que
+     * sobreescribir esto a false (Tenant1Template).
      */
     public function usaDisposicionNorma(): bool
     {

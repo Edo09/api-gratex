@@ -83,6 +83,11 @@ Cuando un cliente pide su propio formato de factura:
    - `mostrarVencimientoPago()` — `true` por defecto: en ventas a crédito el
      motor imprime bajo las fechas "Crédito · Pago vence: dd/mm/aaaa" (gris,
      8 pt). Una plantilla que ya lo dice a su manera la apaga (Gratex).
+   - `usaDisposicionNorma()` — `false` por defecto; `clasico` lo activa (la
+     disposición del modelo de RI de la DGII) y toda `Tenant<id>` generada, que
+     lo extiende, lo hereda. Para conservar un diseño propio sobre
+     `ClasicoTemplate`, sobreescribirlo a `false`: así el clásico dibuja su
+     emisor, banda de tabla y totales históricos (Gratex lo hace).
    - `drawItemsTableHeader($pdf, $widths, $labels)` — banda de la tabla
      (anchos y etiquetas los fija el motor: no se puede quitar una columna).
    - `drawTotals($pdf, $filas)` — cuadro de totales (filas DGII del motor).

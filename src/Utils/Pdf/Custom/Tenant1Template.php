@@ -4,9 +4,11 @@ require_once __DIR__ . '/../ClasicoTemplate.php';
 /**
  * Plantilla de GRATEX (tenant 1, 'custom:tenant1').
  *
- * Es la clasica tal cual mas el aviso de la fecha limite de pago a la derecha
- * de las firmas. El aviso es politica de cobro de Gratex, no de la norma DGII:
- * por eso vive aqui y no en ClasicoTemplate, que es la de todos los tenants.
+ * Es la clasica con el diseno historico de Gratex (usaDisposicionNorma() false:
+ * cliente a la derecha, banda de tabla negra, totales grises, sello y dos
+ * firmas) mas el aviso de la fecha limite de pago a la derecha de las firmas.
+ * Ni el diseno ni el aviso son de la norma DGII, son de Gratex: por eso viven
+ * aqui y no en ClasicoTemplate, que es la de todos los tenants.
  *
  * Activar:  UPDATE tenants SET pdf_template = 'custom:tenant1' WHERE id = 1;
  *           (o PUT /api/branding {"template":"custom:tenant1"}).
@@ -32,6 +34,15 @@ class Tenant1Template extends ClasicoTemplate
 
     /** El vencimiento ya lo dice el aviso del pie: sin la linea del encabezado. */
     public function mostrarVencimientoPago(): bool
+    {
+        return false;
+    }
+
+    /**
+     * Gratex conserva su diseno historico: ClasicoTemplate dibuja el modelo de RI
+     * de la DGII y esta clase, que lo extiende, lo heredaba sin querer.
+     */
+    public function usaDisposicionNorma(): bool
     {
         return false;
     }

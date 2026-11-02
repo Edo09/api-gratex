@@ -763,18 +763,20 @@ class ECFXmlBuilder
     }
 
     /**
-     * Vencimiento de secuencia cuando nadie lo da (integracion sin el campo):
-     * 31-12 del ano siguiente al de la emision, como la DGII suele autorizar
-     * los rangos. Si la autorizacion real vence otro dia la DGII rechaza con
-     * "Fecha de vencimiento de secuencia invalida": ahi hay que mandar la real.
+     * Vencimiento de secuencia por defecto (dd-mm-aaaa): 31-12-2028, el que la
+     * DGII puso a los rangos autorizados. Antes era el 31-12 del ano siguiente
+     * al de la emision (2027 para una de 2026) y la DGII rechazaba con "Fecha de
+     * vencimiento de secuencia invalida" (145) porque no coincidia con su
+     * autorizacion. Una fecha real (payload, rango dispensado, emisor_config)
+     * manda sobre este; si el rango vence otro dia hay que mandar la real.
+     * Cambiarlo cuando la DGII autorice rangos con otra fecha.
      */
-    public static function vencimientoSecuenciaPorDefecto(?string $fechaEmision): string
+    public const VENCIMIENTO_SECUENCIA_POR_DEFECTO = '31-12-2028';
+
+    /** @param string|null $fechaEmision Sin uso: se conserva por compatibilidad de firma. */
+    public static function vencimientoSecuenciaPorDefecto(?string $fechaEmision = null): string
     {
-        $anio = (int) date('Y');
-        if ($fechaEmision !== null && preg_match('/\b(\d{4})\b/', $fechaEmision, $m)) {
-            $anio = (int) $m[1];
-        }
-        return '31-12-' . ($anio + 1);
+        return self::VENCIMIENTO_SECUENCIA_POR_DEFECTO;
     }
 
     /**
