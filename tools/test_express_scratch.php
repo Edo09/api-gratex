@@ -61,6 +61,13 @@
  *      Express recibe 403 con cuerpo JSON y nunca un 500 ni HTML, la completa sigue igual, y el login sale sin el bloque entitlements y con los permisos crudos del rol.
  *      Con la config rota, ademas, el log del servidor trae la linea del gancho (AuthMiddleware) y la de authModel: el 403 viene de ella y no de otra cosa.
  *  12) A de vuelta a completa: el login y /me pierden el bloque y el payload de B no cambia.
+ *  13) la edicion 'ambas' (la app completa Y Express en una empresa; migracion master 017): la 017 sobre la master scratch (aplica, es idempotente y sin la 015 se
+ *      detiene antes de tocar nada); tools/tenant_edicion.php --edicion=ambas sobre A, en un hijo (ensayo, aplicar con UNA fila de auditoria, SIN CAMBIOS, y solo cambian
+ *      la edicion, los tipos y el vencimiento del certificado: el POS, la credencial de integracion, el rol user, los rangos y los clientes quedan como estaban; verificar_express
+ *      no le dice a una ambas lo del POS ni la integracion; revertir a completa); y por HTTP, con el mismo token de A: SIN la cabecera X-Fiscalpoint-Edicion la API contesta
+ *      como a una completa (login sin bloque, rutas fuera de Express y token ocioso de 31 dias validos) y CON ella como a una Express (login y /me con el bloque y los permisos
+ *      cruzados, 403 EDICION_NO_INCLUYE fuera de la lista, el Facturador sin las rutas de administrador, el certificado en GET /api/emisor y el token ocioso vencido y revocado).
+ *      B (completa) ignora la cabecera y una empresa express sigue siendo Express en toda peticion.
  *
  * Las ayudas de las secciones (una sola familia, que los planes 03 y 04 reutilizan): express_scratch_preparar,
  * express_edicion (deja a A o B con la edicion y las listas dadas), express_api (levanta la API de la rama o de otra
@@ -73,7 +80,7 @@
  * pos_scratch_exigir() una que no se llame wa_scratch o wa_scratch_sin_gate. Las credenciales salen de
  * tools/.env (o del entorno) y no se imprimen.
  *
- * Las secciones 1, 5b y 6 quitan y vuelven a crear columnas de tenants en la master scratch (y al terminar el
+ * Las secciones 1, 5b, 6 y 13 quitan y vuelven a crear columnas de tenants en la master scratch (y al terminar el
  * proceso A y B quedan como completas): no corras a la vez otra suite que use esas bases. La 6 ademas quita de la
  * base de A sus rangos de ecf mientras corre y los repone en un finally.
  *
@@ -101,6 +108,8 @@ require_once __DIR__ . '/test_pos_scratch.php';
 
 /** La migracion master 015, tal como se pega en phpMyAdmin. */
 const EXPRESS_MIGRACION_EDICION = __DIR__ . '/../db/master_migrations/015_tenants_edicion.sql';
+/** La migracion master 017 (el valor 'ambas' en el ENUM de tenants.edicion): va despues de la 015, que es la que crea la columna. */
+const EXPRESS_MIGRACION_AMBAS = __DIR__ . '/../db/master_migrations/017_tenants_edicion_ambas.sql';
 
 /** Puerto de loopback donde no escucha nadie: las APIs de esta suite no tienen DGII, y lo que intente llamarla falla al instante. */
 const EXPRESS_DGII_SIN_SERVICIO = 'http://127.0.0.1:1';
@@ -159,6 +168,7 @@ function express_scratch_preparar(): array
     // prueba, por RNC porque los id cambian si alguien limpia y vuelve a preparar.
     $reiniciar = static function (PDO $pdo): void {
         correrSql($pdo, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));
+        correrSql($pdo, (string) file_get_contents(EXPRESS_MIGRACION_AMBAS));   // una 015 que repone la columna la deja sin 'ambas': la 017 (idempotente) se lo vuelve a poner
         $rncs = array_column(POS_SCRATCH_TENANTS, 'rnc');
         $pdo->prepare(
             "UPDATE tenants SET edicion = 'completa', modulos_habilitados = NULL, tipos_ecf_habilitados = NULL, cert_vence = NULL,
@@ -2497,6 +2507,220 @@ wa_chk('el payload de B no cambia: su login y su /me son identicos, clave por cl
     && is_array($s12UserB0) && json_encode($s12UserB) === json_encode($s12UserB0), [array_keys($s12LoginB['user']), $s7Ver($s12MeB)]);
 // Las negativas de las secciones 7 a 12 dejaron filas de auditoria (modulo edicion) de A en la master scratch: se quitan, como lo hace la seccion 5 con las suyas.
 $s12Pdo->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s7IdA]);
+
+// ---------------------------------------------------------------------------
+// 13) La edicion 'ambas': la app completa Y Express en la misma empresa (cabecera X-Fiscalpoint-Edicion, migracion master 017)
+// ---------------------------------------------------------------------------
+echo "\n== 13) La edicion 'ambas' ==\n";
+$s13Pdo = $ctx['pdo'];
+$s13IdA = (int) $ctx['tenantA'];
+express_usar_master($ctx);   // la master de prueba y su clave maestra por el entorno: express_cli las necesita
+$s13PdoA = wa_pdo(POS_SCRATCH_BASE_A);   // la base de A, con la guarda de la marca de las bases de prueba
+$s13CabExpress = ['X-Fiscalpoint-Edicion: express'];
+$s13Seis = ['id', 'email', 'username', 'name', 'role', 'permissions'];
+
+// --- la migracion 017 sobre la master scratch ---------------------------------------------------------------------------------
+$s13Tipo = static fn (): string => (string) $s13Pdo->query("SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'edicion'")->fetchColumn();
+$s13Sql017 = (string) file_get_contents(EXPRESS_MIGRACION_AMBAS);
+$s13Filas = correrSql($s13Pdo, $s13Sql017);   // idempotente: express_scratch_preparar() ya la puso
+wa_chk("017 sobre la master scratch: el SELECT final dice ambas_ok = 1 y tenants.edicion es enum('completa','express','ambas')",
+    (int) ($s13Filas[0]['ambas_ok'] ?? 0) === 1 && $s13Tipo() === "enum('completa','express','ambas')", [$s13Filas, $s13Tipo()]);
+$s13Filas0 = (string) json_encode($s13Pdo->query('SELECT id, edicion FROM tenants ORDER BY id')->fetchAll());
+$s13Tipo0 = $s13Tipo();
+correrSql($s13Pdo, $s13Sql017);
+wa_chk('017 una segunda vez: no cambia el tipo de la columna ni ninguna fila de tenants (es un no-op)',
+    $s13Tipo() === $s13Tipo0 && (string) json_encode($s13Pdo->query('SELECT id, edicion FROM tenants ORDER BY id')->fetchAll()) === $s13Filas0, $s13Tipo());
+// Sin la 015 (sin tenants.edicion) se detiene en su guardia, con un error que nombra la 015, y no crea la columna. Lo que se quita se repone en el finally (015 y 017).
+$s13Error = null;
+$s13Existe = null;
+try {
+    $s13Pdo->exec('ALTER TABLE tenants DROP COLUMN edicion');
+    $s13Error = errorDeSql($s13Pdo, $s13Sql017);
+    $s13Existe = (int) $s13Pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'edicion'")->fetchColumn();
+} finally {
+    correrSql($s13Pdo, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));
+    correrSql($s13Pdo, $s13Sql017);
+}
+// El error de la guardia es el 1049 (Unknown database 'ALTO_aplica_primero_la_015_tenants_edicion') o, con un usuario sin permisos sobre esa base, el 1142 (SELECT command
+// denied ... for table 'x'): lo documenta el encabezado de la 017, igual que el de la 015. La base elegida es la buena, asi que la unica guardia que puede saltar es la de la 015.
+wa_chk('017 sin tenants.edicion (sin la 015): se detiene en la guardia (error 1049, o 1142 segun los permisos del usuario) y no crea la columna',
+    $s13Error !== null && in_array($s13Error[0], [1049, 1142], true) && $s13Existe === 0, [$s13Error, $s13Existe]);
+wa_chk("...y repuestas la 015 y la 017, la columna vuelve con 'ambas'", $s13Tipo() === "enum('completa','express','ambas')", $s13Tipo());
+
+// --- tools/tenant_edicion.php --edicion=ambas sobre A, en un hijo ---------------------------------------------------------------
+$s13Fila = static function (int $id) use ($s13Pdo): array {
+    $st = $s13Pdo->prepare('SELECT * FROM tenants WHERE id = :id');
+    $st->execute([':id' => $id]);
+    return (array) $st->fetch();
+};
+$s13Difieren = static function (array $a, array $b): array {
+    $nombres = [];
+    foreach (array_unique(array_merge(array_keys($a), array_keys($b))) as $columna) {
+        if (($a[$columna] ?? null) !== ($b[$columna] ?? null)) {
+            $nombres[] = $columna;
+        }
+    }
+    sort($nombres);
+    return $nombres;
+};
+$s13Rol = static function (int $id) use ($s13Pdo): array {
+    $st = $s13Pdo->prepare("SELECT rp.permission FROM role_permissions rp JOIN roles r ON r.id = rp.role_id WHERE r.tenant_id = :t AND r.name = 'user' ORDER BY rp.permission");
+    $st->execute([':t' => $id]);
+    return array_column($st->fetchAll(), 'permission');
+};
+$s13Cuenta = static fn (string $tabla): int => (int) $s13PdoA->query("SELECT COUNT(*) FROM {$tabla}")->fetchColumn();
+$s13Auditoria = static function () use ($s13Pdo, $s13IdA): array {
+    $st = $s13Pdo->prepare("SELECT * FROM audit_logs WHERE tenant_id = :t AND module = 'edicion' ORDER BY id");
+    $st->execute([':t' => $s13IdA]);
+    return $st->fetchAll();
+};
+$s13Corre = static fn (string ...$args): array => express_cli(array_merge(['tools/tenant_edicion.php', "--tenant={$s13IdA}"], $args));
+$s13Ver = static fn (array $r): array => ['codigo' => $r['codigo'], 'salida' => pos_scratch_enmascarar(substr($r['salida'], 0, 1500), [])];
+
+express_edicion($ctx, 'A', null, null, null);   // A completa, como la deja la preparacion
+$s13Antes = $s13Fila($s13IdA);
+$s13RolAntes = $s13Rol($s13IdA);
+$s13RangosAntes = $s13Cuenta('ncf_sequences');
+$s13ClientesAntes = $s13Cuenta('clients');
+$s13AudAntes = count($s13Auditoria());
+
+$r = $s13Corre('--edicion=ambas', '--tipos=31,45');
+wa_chk('tenant_edicion.php --edicion=ambas en ensayo: sale con 0, dice [CORR] edicion y DRY-RUN, y no cambia la fila de A ni escribe una fila de auditoria',
+    $r['codigo'] === 0 && preg_match('/^\[CORR\] edicion:/m', $r['salida']) === 1 && !str_contains($r['salida'], '[RECH]') && str_contains($r['salida'], 'DRY-RUN')
+    && $s13Fila($s13IdA) === $s13Antes && count($s13Auditoria()) === $s13AudAntes, $s13Ver($r));
+$r = $s13Corre('--edicion=ambas', '--tipos=31,45', '--apply');
+$s13Despues = $s13Fila($s13IdA);
+$s13Cambiaron = $s13Difieren($s13Antes, $s13Despues);
+wa_chk('--apply: sale con 0 y APLICADO; A queda ambas con los tipos 31,45, y en su fila solo cambian edicion, tipos_ecf_habilitados y, si se pudo leer el certificado, cert_vence (el POS, las existencias, la credencial de integracion, el grupo y el certificado quedan como estaban)',
+    $r['codigo'] === 0 && str_contains($r['salida'], "APLICADO: el tenant #{$s13IdA} ahora es ambas.") && $s13Despues['edicion'] === 'ambas' && $s13Despues['tipos_ecf_habilitados'] === '31,45'
+    && in_array('edicion', $s13Cambiaron, true) && in_array('tipos_ecf_habilitados', $s13Cambiaron, true) && array_diff($s13Cambiaron, ['edicion', 'tipos_ecf_habilitados', 'cert_vence']) === [],
+    [$s13Ver($r), $s13Cambiaron]);
+wa_chk('...y nada mas cambia: el rol user de A conserva sus permisos y su base conserva sus rangos de ncf_sequences y sus clientes',
+    $s13Rol($s13IdA) === $s13RolAntes && $s13Cuenta('ncf_sequences') === $s13RangosAntes && $s13Cuenta('clients') === $s13ClientesAntes,
+    [$s13Rol($s13IdA) === $s13RolAntes, $s13Cuenta('ncf_sequences'), $s13RangosAntes, $s13Cuenta('clients'), $s13ClientesAntes]);
+$s13Aud = $s13Auditoria();
+$s13Ultima = $s13Aud === [] ? [] : $s13Aud[count($s13Aud) - 1];
+wa_chk('...con UNA fila de auditoria nueva (modulo edicion, accion EDICION_CAMBIO): old_values dice completa y new_values dice ambas',
+    count($s13Aud) === $s13AudAntes + 1 && ($s13Ultima['action'] ?? null) === 'EDICION_CAMBIO'
+    && (json_decode((string) ($s13Ultima['old_values'] ?? ''), true)['edicion'] ?? null) === 'completa' && (json_decode((string) ($s13Ultima['new_values'] ?? ''), true)['edicion'] ?? null) === 'ambas',
+    $s13Ultima['action'] ?? null);
+$r = $s13Corre('--edicion=ambas', '--tipos=31,45', '--apply');
+wa_chk('--apply otra vez con lo mismo: sale con 0, dice SIN CAMBIOS y no escribe otra fila de auditoria',
+    $r['codigo'] === 0 && str_contains($r['salida'], 'SIN CAMBIOS:') && count($s13Auditoria()) === $s13AudAntes + 1, $s13Ver($r));
+
+// verificar_express.php: a una ambas no le dice lo que es de la app completa (POS prendido, la credencial de integracion), a una express si.
+$s13Vr = express_cli(['tools/verificar_express.php']);
+wa_chk('verificar_express.php con A ambas (con el POS prendido y sin certificado): no dice POS_ACTIVO, INTEGRACION_ACTIVA ni EN_GRUPO y no es un [FALLO]',
+    in_array($s13Vr['codigo'], [0, 1], true) && !preg_match('/POS_ACTIVO|INTEGRACION_ACTIVA|EN_GRUPO|\[FALLO\]/', $s13Vr['salida']), $s13Ver($s13Vr));
+express_edicion($ctx, 'A', 'express', '31,45', null);
+$s13Vr = express_cli(['tools/verificar_express.php']);
+wa_chk('...y la misma A como express SI dice POS_ACTIVO: lo que se le calla a una ambas es de una empresa solo Express',
+    $s13Vr['codigo'] === 1 && str_contains($s13Vr['salida'], 'POS_ACTIVO'), $s13Ver($s13Vr));
+express_edicion($ctx, 'A', 'ambas', '31,45', null);
+$r = $s13Corre('--edicion=completa', '--apply');
+wa_chk('--edicion=completa sobre una ambas: sale con 0, APLICADO "ahora es completa", la advertencia dice que la app completa no cambia, y A queda completa',
+    $r['codigo'] === 0 && str_contains($r['salida'], "APLICADO: el tenant #{$s13IdA} ahora es completa.") && str_contains($r['salida'], 'la app completa no cambia')
+    && $s13Fila($s13IdA)['edicion'] === 'completa', $s13Ver($r));
+
+// --- por HTTP: el mismo token de A con y sin la cabecera -----------------------------------------------------------------------
+express_edicion($ctx, 'A', 'ambas', '45', null);
+express_edicion($ctx, 'B', null, null, null);
+$s13Api = express_api('express_api', 8294);
+/** Una peticion con (o sin) la sesion de $token y con (o sin) la cabecera con la que Express se anuncia. */
+$s13Pedir = static fn (string $metodo, string $uri, ?string $token, bool $express) => wa_http(
+    $metodo, $s13Api . $uri, in_array($metodo, ['POST', 'PUT'], true) ? [] : null, array_merge($token === null ? [] : express_h($token), $express ? $s13CabExpress : [])
+);
+/** El login de $usuario como lo haria la app completa (sin la cabecera) o Express (con ella): la respuesta entera. */
+$s13Entrar = static function (string $usuario, bool $express) use ($s13Api, $s13CabExpress): array {
+    $cred = wa_credenciales();
+    return wa_http('POST', $s13Api . '/api/auth/login', ['emailOrUsername' => $usuario, 'password' => pos_scratch_secretos($cred['pass'])['clave_usuarios']], $express ? $s13CabExpress : []);
+};
+$s13Usuario = static fn (array $login): array => (array) ($login['json']['data']['user'] ?? []);
+$s13Token = static fn (array $login): string => (string) ($login['json']['data']['token'] ?? '');
+
+$s13LoginSin = $s13Entrar('admin_pos_a', false);
+$s13LoginCon = $s13Entrar('admin_pos_a', true);
+$s13UserSin = $s13Usuario($s13LoginSin);
+$s13UserCon = $s13Usuario($s13LoginCon);
+wa_chk('A ambas, login SIN la cabecera: 200 y el user de siempre (las seis claves, permissions "*"), sin la clave entitlements',
+    $s13LoginSin['status'] === 200 && array_keys($s13UserSin) === $s13Seis && ($s13UserSin['permissions'] ?? null) === ['*'], $s7Ver($s13LoginSin));
+$s13Bloque = (array) ($s13UserCon['entitlements'] ?? []);
+$s13PermisosCon = (array) ($s13UserCon['permissions'] ?? []);
+sort($s13PermisosCon);
+wa_chk("A ambas, login CON la cabecera: entitlements como ultima clave del user (edicion 'express', el tipo 45 y el 34 derivado, los cinco modulos) y permissions cruzados con la edicion",
+    $s13LoginCon['status'] === 200 && array_keys($s13UserCon) === array_merge($s13Seis, ['entitlements']) && ($s13Bloque['edicion'] ?? null) === 'express'
+    && in_array('45', (array) ($s13Bloque['tipos_ecf'] ?? []), true) && in_array('34', (array) ($s13Bloque['tipos_ecf'] ?? []), true) && count((array) ($s13Bloque['modulos'] ?? [])) === 5
+    && $s13PermisosCon === ['clients', 'facturas', 'ncf', 'products', 'unidades', 'users'], [$s7Ver($s13LoginCon), $s13PermisosCon]);
+
+$s13TokenA = $s13Token($s13LoginSin);   // la sesion de la app completa: la misma se usa con y sin la cabecera
+foreach (['/api/gastos', '/api/inventario/movimientos'] as $s13Uri) {
+    $r = $s13Pedir('GET', $s13Uri, $s13TokenA, false);
+    $s13Cod = is_array($r['json']) ? ($r['json']['codigo'] ?? null) : null;
+    wa_chk("A ambas, sesion de la app completa SIN la cabecera, GET {$s13Uri} (fuera de la lista de Express): contesta su controller y no es la negativa de la edicion",
+        $r['status'] >= 200 && $r['status'] < 500 && !$s7Niega($r) && $s13Cod !== 'EDICION_NO_INCLUYE', $s7Ver($r));
+    $r = $s13Pedir('GET', $s13Uri, $s13TokenA, true);
+    wa_chk("...el MISMO token CON la cabecera, GET {$s13Uri}: 403 EDICION_NO_INCLUYE con el texto de la edicion", $s7Niega($r), $s7Ver($r));
+}
+$r = $s13Pedir('GET', '/api/facturas?pageSize=1', $s13TokenA, true);
+wa_chk('...CON la cabecera, GET /api/facturas?pageSize=1 (en la lista de Express): 200 y sin codigo', $r['status'] === 200 && is_array($r['json']) && !array_key_exists('codigo', $r['json']), $s7Ver($r));
+$r = $s13Pedir('GET', '/api/auth/me', $s13TokenA, false);
+$r2 = $s13Pedir('GET', '/api/auth/me', $s13TokenA, true);
+wa_chk('GET /api/auth/me del mismo token: SIN la cabecera trae las seis claves y CON ella el bloque entitlements',
+    $r['status'] === 200 && array_keys((array) ($r['json']['data']['user'] ?? [])) === $s13Seis
+    && $r2['status'] === 200 && array_keys((array) ($r2['json']['data']['user'] ?? [])) === array_merge($s13Seis, ['entitlements']), [$s7Ver($r), $s7Ver($r2)]);
+$r = $s13Pedir('GET', '/api/emisor', $s13TokenA, false);
+$r2 = $s13Pedir('GET', '/api/emisor', $s13TokenA, true);
+wa_chk('GET /api/emisor del mismo token: SIN la cabecera no trae el bloque certificado (los datos del emisor de siempre) y CON ella lo trae, con su estado',
+    $r['status'] === 200 && !array_key_exists('certificado', (array) ($r['json']['data'] ?? []))
+    && $r2['status'] === 200 && is_string(($r2['json']['data']['certificado']['estado'] ?? null)), [$s7Ver($r), $s7Ver($r2)]);
+
+// El Facturador de A: CON la cabecera las rutas de administrador son el 403 sin codigo de siempre; SIN ella la edicion no interviene.
+$s13TokenU = $s13Token($s13Entrar('user_pos_a', false));
+foreach ([['POST', '/api/ncf/rangos'], ['GET', '/api/users']] as [$s13Metodo, $s13Uri]) {
+    $r = $s13Pedir($s13Metodo, $s13Uri, $s13TokenU, true);
+    wa_chk("user_pos_a (Facturador de A ambas) CON la cabecera, {$s13Metodo} {$s13Uri}: 403 con el texto de administrador y sin la clave codigo", $s7SinPermiso($r), $s7Ver($r));
+}
+$r = $s13Pedir('GET', '/api/users', $s13TokenU, false);
+wa_chk('user_pos_a SIN la cabecera, GET /api/users: la edicion no interviene (no es EDICION_NO_INCLUYE; en sombra la app completa deja pasar y con --enforce decide el rol)',
+    $r['status'] >= 200 && $r['status'] < 500 && !$s7Niega($r), $s7Ver($r));
+
+// El vencimiento por inactividad es solo de las peticiones de Express: un token de la app completa ocioso hace 31 dias sigue valido sin la cabecera y vence con ella.
+$s13Poner = static function (string $token, string $fecha) use ($s13Pdo): void {
+    $s13Pdo->prepare('UPDATE api_tokens SET last_used = :v WHERE token_hash = :h')->execute([':v' => $fecha, ':h' => hash('sha256', $token)]);
+};
+$s13Activo = static function (string $token) use ($s13Pdo): int {
+    $st = $s13Pdo->prepare('SELECT is_active FROM api_tokens WHERE token_hash = :h');
+    $st->execute([':h' => hash('sha256', $token)]);
+    return (int) $st->fetchColumn();
+};
+$s13Hace31 = date('Y-m-d H:i:s', time() - 31 * 86400);
+$s13TokenSin = $s13Token($s13Entrar('admin_pos_a', false));
+$s13Poner($s13TokenSin, $s13Hace31);
+$r = $s13Pedir('GET', '/api/auth/me', $s13TokenSin, false);
+wa_chk('token ocioso de hace 31 dias SIN la cabecera: GET /api/auth/me es 200 y el token sigue activo (el vencimiento es de Express)',
+    $r['status'] === 200 && $s13Activo($s13TokenSin) === 1, [$s7Ver($r), $s13Activo($s13TokenSin)]);
+$s13TokenCon = $s13Token($s13Entrar('admin_pos_a', false));
+$s13Poner($s13TokenCon, $s13Hace31);
+$r = $s13Pedir('GET', '/api/auth/me', $s13TokenCon, true);
+wa_chk('otro token ocioso de hace 31 dias CON la cabecera: 401 con "Tu sesión venció por inactividad" y el token queda revocado (is_active = 0)',
+    $r['status'] === 401 && is_array($r['json']) && ($r['json']['error'] ?? null) === 'Tu sesión venció por inactividad' && $s13Activo($s13TokenCon) === 0, [$s7Ver($r), $s13Activo($s13TokenCon)]);
+
+// Los controles: una empresa completa ignora la cabecera, y una express sigue siendo Express en toda peticion (con o sin ella).
+$s13LoginB = $s13Entrar('admin_pos_b', true);
+$s13TokenB = $s13Token($s13LoginB);
+$r = $s13Pedir('GET', '/api/gastos', $s13TokenB, true);
+wa_chk('B (completa) con la cabecera: el login sale con el user de siempre (sin entitlements) y GET /api/gastos no es la negativa de la edicion',
+    $s13LoginB['status'] === 200 && array_keys($s13Usuario($s13LoginB)) === $s13Seis && !$s7Niega($r) && $r['status'] >= 200 && $r['status'] < 500, [$s7Ver($s13LoginB), $s7Ver($r)]);
+express_edicion($ctx, 'A', 'express', '45', null);
+$s13LoginEx = $s13Entrar('admin_pos_a', false);
+$r = $s13Pedir('GET', '/api/gastos', $s13Token($s13LoginEx), false);
+wa_chk('A express SIN la cabecera: el login trae el bloque entitlements y GET /api/gastos es 403 EDICION_NO_INCLUYE (solo Express: la cabecera no cambia nada)',
+    $s13LoginEx['status'] === 200 && isset($s13Usuario($s13LoginEx)['entitlements']) && $s7Niega($r), [$s7Ver($s13LoginEx), $s7Ver($r)]);
+
+// A y B de vuelta a completa y fuera las filas de auditoria de la edicion que esta seccion dejo en la master scratch (como lo hacen las secciones 5 y 12).
+express_edicion($ctx, 'A', null, null, null);
+express_edicion($ctx, 'B', null, null, null);
+$s13Pdo->prepare("DELETE FROM audit_logs WHERE tenant_id = :t AND module = 'edicion'")->execute([':t' => $s13IdA]);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

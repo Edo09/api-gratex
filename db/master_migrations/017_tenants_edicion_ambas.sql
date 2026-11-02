@@ -19,7 +19,8 @@
 -- base correcta en el panel IZQUIERDO, abre la pestaña SQL de nuevo, pega todo y
 -- ejecuta.
 --
--- SI SALE "#1049 Unknown database 'ALTO_aplica_primero_la_015_tenants_edicion'": la
+-- SI SALE "#1049 Unknown database 'ALTO_aplica_primero_la_015_tenants_edicion'" (o
+-- "#1142 SELECT command denied ... for table 'x'", segun los permisos del usuario): la
 -- master no tiene la 015 (no existe tenants.edicion). NO se cambio nada. Aplica
 -- db/master_migrations/015_tenants_edicion.sql y vuelve a correr esta.
 --
