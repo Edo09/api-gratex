@@ -25,6 +25,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [api/facturas.md](api/facturas.md) | Emisión e-CF: payloads por tipo (E31–E47), estado DGII, stats, rangos NCF, unidades |
 | [api/integracion.md](api/integracion.md) | Modo integración (JSON→XML): contrato de emisión, ACECF, bandejas, webhook — referencia **interna** |
 | [api/guia-cliente-integracion.md](api/guia-cliente-integracion.md) | **Entregable al cliente**: guía autocontenida para que su equipo técnico integre (alta, endpoints, tablas DGII, checklist de go-live) |
+| [api/integracion-notas-credito-debito.md](api/integracion-notas-credito-debito.md) | **Entregable al cliente** (modo integración): guía rápida para emitir notas de crédito (E34) y de débito (E33) — `informacion_referencia`, `indicador_nota_credito`, ejemplos, errores 502/614 |
 | [api/facturas-simples.md](api/facturas-simples.md) | Facturas NO electrónicas (sin e-CF) |
 | [api/cotizaciones.md](api/cotizaciones.md) | Cotizaciones: endpoints y los dos formatos (Gratex, Ferretería): cuerpos, totales, numeración y errores 200/404/409/422 |
 | [api/conduces.md](api/conduces.md) | Conduces de mercancía (solo Ferretería): endpoints, la fila, número `CON-` que nunca se reusa, eliminar sin borrar, PDF sin precios y errores 401/403/404/422/500 |

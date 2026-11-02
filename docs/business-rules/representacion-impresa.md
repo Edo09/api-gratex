@@ -8,8 +8,8 @@ elementos debe contener todo documento impreso/PDF. El motor que las implementa 
 ## 0. Disposición del modelo DGII (hoja carta, plantilla `clasico`)
 
 La plantilla `clasico` (la de todo tenant sin otra configurada y la de `ri_desde_xml.php`) sigue el
-modelo de RI de la DGII; moderno, compacto y los diseños a la medida conservan el suyo
-(`FacturaTemplate::usaDisposicionNorma()`):
+modelo de RI de la DGII; moderno, compacto y los diseños a la medida que no extienden `clasico`
+conservan el suyo (`FacturaTemplate::usaDisposicionNorma()`):
 
 *   **Izquierda:** nombre del emisor (azul), RNC, Dirección, Teléfono/Correo y **Fecha Emisión** (DD-MM-AAAA).
 *   **Derecha:** título del comprobante, **e-NCF**, **NCF Modificado** (E33/E34, justo bajo el e-NCF) y
@@ -20,6 +20,12 @@ modelo de RI de la DGII; moderno, compacto y los diseños a la medida conservan 
     **"Unidad"**, nunca el código.
 *   **Pie:** QR a la izquierda con *Código de Seguridad* y *Fecha Firma* debajo; a la derecha el cuadro de
     totales (Subtotal Gravado, Total ITBIS, Total), con borde.
+
+Un diseño a la medida que extiende `clasico` (toda `Tenant<id>` generada con
+`tools/new_custom_template.php`) hereda este modelo; para conservar el suyo sobreescribe
+`usaDisposicionNorma()` a `false`. Gratex (`custom:tenant1`, `Tenant1Template`) lo hace: su factura
+sigue con el diseño histórico (cliente a la derecha, "Tel.:" y "E-mail:" en una línea, banda de tabla
+negra, fecha de emisión en fecha larga), no con este modelo.
 
 ## 1. Encabezado de la Identidad Legal (Emisor)
 
