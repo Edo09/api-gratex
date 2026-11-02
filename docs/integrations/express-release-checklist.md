@@ -5,7 +5,7 @@ que ejecutarlo. Esta ola (plan 02, «entitlements») sale **apagada**: la API ap
 leer `tenants.edicion`, pero mientras ninguna empresa esté en `express` nada cambia para
 nadie. Para el «por qué» de cada pieza ver el diseño y el anexo de Express (repo `fiscalo`,
 `docs/superpowers/specs/2026-10-27-fiscalpoint-express-*.md`, secciones 13.7 y 14); para
-la migración, el encabezado de `db/master_migrations/014_tenants_edicion.sql`.
+la migración, el encabezado de `db/master_migrations/015_tenants_edicion.sql`.
 
 > **Las pruebas de la sección 1 corren contra las bases scratch o sin base, nunca contra
 > producción.** Los pasos de la sección 2 son sobre producción y los hace el dueño del
@@ -37,26 +37,29 @@ es la rama que está en producción antes de la ola.
 
 ---
 
-## 2. Migración master 014 (producción, la hace el dueño)
+## 2. Migración master 015 (producción, la hace el dueño)
+
+> La 014 del master es otra migración, `014_integracion_backup_estado_dgii.sql` (integración, ya en
+> master): que su fila diga `APLICADA` o `FALTA` no dice nada de Express. La de Express es la fila **015**.
 
 1. **Respaldo** de la base master, completa, desde phpMyAdmin.
 2. Correr `tools/verificar_migraciones_master.sql` con la master seleccionada: la fila
    **013** tiene que decir `APLICADA` (si dice `FALTA`, esa primero).
-3. Aplicar `db/master_migrations/014_tenants_edicion.sql` en phpMyAdmin **con la master
+3. Aplicar `db/master_migrations/015_tenants_edicion.sql` en phpMyAdmin **con la master
    seleccionada** (pestaña SQL, pegar todo, ejecutar). La última fila dice `columnas_ok = 4`.
    Si sale `#1049 Unknown database 'ALTO_elige_la_base_...'` (o `#1142`) no se cambió nada:
    phpMyAdmin estaba parado en otra base; ver el aviso del encabezado de la migración.
-4. Correr el verificador otra vez: la fila **014** dice `APLICADA`.
-5. Aplicar la 014 **una segunda vez**: es idempotente, no toca nada y el verificador sigue
+4. Correr el verificador otra vez: la fila **015** dice `APLICADA`.
+5. Aplicar la 015 **una segunda vez**: es idempotente, no toca nada y el verificador sigue
    diciendo `APLICADA`.
 6. Confirmar que **ninguna empresa dice `express`** con la Consulta 4 del verificador (viene
-   comentada: se le quita el `-- ` a sus líneas y se ejecuta sola, con la 014 `APLICADA`).
+   comentada: se le quita el `-- ` a sus líneas y se ejecuta sola, con la 015 `APLICADA`).
    Lista toda empresa que no es `completa`, así que aquí tiene que salir **sin filas**.
    `php tools/verificar_express.php` no prueba eso: revisa lo que está mal puesto en esas
    empresas (tipos, módulos, certificado, rangos, grupo y credencial de integración) y dice
    `Sin problemas.` tanto cuando no hay ninguna Express como cuando hay una bien configurada.
    Sirve de segunda mirada: aquí tiene que imprimir `Sin problemas.` (salida 0); con salida 2,
-   la master no tiene las columnas de la 014.
+   la master no tiene las columnas de la 015.
 7. **Antes de subir el API**, confirmar que la master de producción trae `api_tokens.last_used`
    y `api_tokens.created_at`. El `SELECT` de `validateToken` (`src/Models/authModel.php`) las
    lee para **toda** empresa, `completa` incluida, y traga el error de una columna que falta:
@@ -76,7 +79,7 @@ es la rama que está en producción antes de la ola.
 
 ## 3. Subir el API
 
-Solo después del paso 2. El código tolera que las columnas de la 014 falten (sin ellas toda
+Solo después del paso 2. El código tolera que las columnas de la 015 falten (sin ellas toda
 empresa se lee como `completa`), pero ninguna empresa puede pasar a `express` hasta que existan.
 Tras subir, una prueba de humo de la app completa en una empresa que ya exista.
 
@@ -98,12 +101,12 @@ Estas dos no se negocian:
 
 1. **Nunca bajar el API por debajo de esta ola mientras exista una empresa Express.** El
    código anterior ignora `edicion` y le serviría todas las rutas a esa empresa.
-2. **Nunca restaurar un respaldo de la master que no tenga las columnas de la 014.** El código
+2. **Nunca restaurar un respaldo de la master que no tenga las columnas de la 015.** El código
    lee una columna que falta como `completa`, así que las empresas Express perderían todas sus
    restricciones sin avisar. Antes de restaurar, comprobar que el respaldo trae las cuatro
    columnas; después de cualquier restauración, correr la Consulta 4 del verificador (dice qué
    empresas siguen siendo Express) y `php tools/verificar_express.php` (dice cuáles están mal
-   puestas; sale con 2 si la master no tiene las columnas de la 014).
+   puestas; sale con 2 si la master no tiene las columnas de la 015).
 
 Y estas, del mismo apartado del anexo (14.5):
 

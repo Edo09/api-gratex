@@ -13,7 +13,7 @@
 -- fallan, o duplican filas, si se repiten. Las nuevas (007 en adelante) se
 -- pueden repetir sin dano.
 --
--- La 014 (edicion Express) agrega cuatro columnas a tenants (edicion,
+-- La 015 (edicion Express) agrega cuatro columnas a tenants (edicion,
 -- modulos_habilitados, tipos_ecf_habilitados y cert_vence): su fila dice APLICADA
 -- solo con las cuatro. Si dice FALTA porque quedo a medias, correrla de nuevo
 -- completa las que faltan.
@@ -102,7 +102,7 @@ FROM (
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
                    AND COLUMN_NAME = 'inventario_estricto')
   UNION ALL
-  SELECT '014', '014_tenants_edicion.sql',
+  SELECT '015', '015_tenants_edicion.sql',
          'columnas tenants.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',
          (SELECT COUNT(*) FROM information_schema.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
@@ -134,9 +134,9 @@ SELECT id, nombre, rnc, tipo, db_name FROM tenants ORDER BY id;
 
 -- -----------------------------------------------------------------------------
 -- Consulta 4 (edicion Express): las empresas que no son completa, para revisarlas
--- despues de aplicar la 014, de convertir una empresa o de restaurar un respaldo
--- de la master. Correrla SOLO si la fila 014 de arriba dice APLICADA: nombra
--- columnas de la 014 y en una master que no las tiene daria error (por eso va
+-- despues de aplicar la 015, de convertir una empresa o de restaurar un respaldo
+-- de la master. Correrla SOLO si la fila 015 de arriba dice APLICADA: nombra
+-- columnas de la 015 y en una master que no las tiene daria error (por eso va
 -- comentada: para correrla quita el "-- " del principio de sus lineas y ejecutala
 -- sola; la ultima consulta que se ejecuta de este archivo sigue siendo la 3).
 -- Que mirar en cada fila (tools/verificar_express.php dice lo mismo y ademas

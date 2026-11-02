@@ -1,5 +1,5 @@
 -- =============================================================================
--- Master Migration 014: edicion del plan por empresa (completa o Express).
+-- Master Migration 015: edicion del plan por empresa (completa o Express).
 --
 -- Ejecutar contra la base MASTER, UNA vez. Idempotente: se puede correr dos
 -- veces sin error, y la segunda no toca nada. Si una corrida anterior quedo a
@@ -88,7 +88,7 @@ SET @has_prev := (
   WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'inventario_estricto'
 );
 SET @sql_col := IF(@has_col = 0,
-  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN edicion ENUM(''completa'',''express'') NOT NULL DEFAULT ''completa'' COMMENT ''Edicion del plan. completa = el sistema entero, como siempre. express = solo los modulos del plan Express (modulos_habilitados puede quitar alguno) y los tipos de e-CF de tipos_ecf_habilitados. Un valor distinto se trata como completa. Se cambia con tools/tenant_edicion.php, que revisa antes de cambiar. Ver master_migrations/014''',
+  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN edicion ENUM(''completa'',''express'') NOT NULL DEFAULT ''completa'' COMMENT ''Edicion del plan. completa = el sistema entero, como siempre. express = solo los modulos del plan Express (modulos_habilitados puede quitar alguno) y los tipos de e-CF de tipos_ecf_habilitados. Un valor distinto se trata como completa. Se cambia con tools/tenant_edicion.php, que revisa antes de cambiar. Ver master_migrations/015''',
     IF(@has_prev > 0, ' AFTER inventario_estricto', '')),
   'DO 0');
 PREPARE s_edicion FROM @sql_col;
@@ -105,7 +105,7 @@ SET @has_prev := (
   WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'edicion'
 );
 SET @sql_col := IF(@has_col = 0,
-  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN modulos_habilitados TEXT NULL COMMENT ''Solo express: modulos permitidos, separados por coma (facturacion, clientes, productos, usuarios, configuracion). Solo puede quitar modulos del plan, nunca agregar. NULL o vacio = los cinco. Ver master_migrations/014''',
+  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN modulos_habilitados TEXT NULL COMMENT ''Solo express: modulos permitidos, separados por coma (facturacion, clientes, productos, usuarios, configuracion). Solo puede quitar modulos del plan, nunca agregar. NULL o vacio = los cinco. Ver master_migrations/015''',
     IF(@has_prev > 0, ' AFTER edicion', '')),
   'DO 0');
 PREPARE s_modulos FROM @sql_col;
@@ -122,7 +122,7 @@ SET @has_prev := (
   WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'modulos_habilitados'
 );
 SET @sql_col := IF(@has_col = 0,
-  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN tipos_ecf_habilitados VARCHAR(64) NULL COMMENT ''Solo express: tipos de e-CF que la empresa puede vender, separados por coma. Validos 31, 32, 45 y 33 (el 33 solo si se lista), ejemplo 45 o 31,32,45. El 34 (nota de credito) se deriva de la venta. NULL o vacio = no puede emitir. Ver master_migrations/014''',
+  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN tipos_ecf_habilitados VARCHAR(64) NULL COMMENT ''Solo express: tipos de e-CF que la empresa puede vender, separados por coma. Validos 31, 32, 45 y 33 (el 33 solo si se lista), ejemplo 45 o 31,32,45. El 34 (nota de credito) se deriva de la venta. NULL o vacio = no puede emitir. Ver master_migrations/015''',
     IF(@has_prev > 0, ' AFTER modulos_habilitados', '')),
   'DO 0');
 PREPARE s_tipos FROM @sql_col;
@@ -139,7 +139,7 @@ SET @has_prev := (
   WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'tipos_ecf_habilitados'
 );
 SET @sql_col := IF(@has_col = 0,
-  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN cert_vence DATE NULL COMMENT ''Fecha en que vence el certificado digital de la empresa. Es solo informativa: GET /api/emisor devuelve con ella el estado del certificado y la opcion refrescar-cert de tools/tenant_edicion.php la actualiza al renovarlo. Una fecha vieja no bloquea nada. NULL = no se sabe. Ver master_migrations/014''',
+  CONCAT('ALTER TABLE `', @db, '`.tenants ADD COLUMN cert_vence DATE NULL COMMENT ''Fecha en que vence el certificado digital de la empresa. Es solo informativa: GET /api/emisor devuelve con ella el estado del certificado y la opcion refrescar-cert de tools/tenant_edicion.php la actualiza al renovarlo. Una fecha vieja no bloquea nada. NULL = no se sabe. Ver master_migrations/015''',
     IF(@has_prev > 0, ' AFTER tipos_ecf_habilitados', '')),
   'DO 0');
 PREPARE s_cert_vence FROM @sql_col;

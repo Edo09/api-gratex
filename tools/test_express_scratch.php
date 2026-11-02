@@ -9,7 +9,7 @@
  * secciones comparten.
  *
  * Que dice cada seccion:
- *   1) la migracion master 014 sobre la master scratch: aplica de cero, es idempotente, completa un estado a
+ *   1) la migracion master 015 sobre la master scratch: aplica de cero, es idempotente, completa un estado a
  *      medias, su guardia corta antes de tocar nada, el ENUM rechaza una edicion desconocida, el verificador de
  *      migraciones la ve, y express_scratch_preparar() deja las dos empresas de prueba como completas.
  *   2) user.entitlements en POST /api/auth/login y GET /api/auth/me, por HTTP: la empresa A Express recibe el bloque
@@ -33,15 +33,15 @@
  *      credencial de integracion de A funciona antes y no despues (y de nuevo tras revertir), --refrescar-cert deja a cert_vence en la fecha
  *      del certificado y GET /api/emisor la informa, revertir deja a A en completa con su hash de integracion y su token ya no recibe
  *      entitlements, y express_aplicar hace rollback de verdad (InnoDB) cuando falla un paso de la master.
- *   5b) tools/create_tenant.php --edicion=express --tipos-ecf=45 sobre la master scratch, en un hijo (express_cli): sin una columna de la 014
- *      (edicion, y por separado cert_vence) sale con 1 antes de crear nada y nombra db/master_migrations/014_tenants_edicion.sql y la columna
- *      que falta; con las cuatro puestas la misma orden ya no dice nada de la 014. La base de la empresa de la prueba no existe, asi que ni una
+ *   5b) tools/create_tenant.php --edicion=express --tipos-ecf=45 sobre la master scratch, en un hijo (express_cli): sin una columna de la 015
+ *      (edicion, y por separado cert_vence) sale con 1 antes de crear nada y nombra db/master_migrations/015_tenants_edicion.sql y la columna
+ *      que falta; con las cuatro puestas la misma orden ya no dice nada de la 015. La base de la empresa de la prueba no existe, asi que ni una
  *      corrida sin la comprobacion puede dejar una empresa.
  *   6) tools/verificar_express.php sobre la empresa A, en un hijo (express_cli), y la Consulta 4 de tools/verificar_migraciones_master.sql: con A
  *      Express, tipos vacios, POS prendido y sin certificado sale con 1 y nombra TIPOS_VACIOS, POS_ACTIVO y SIN_CERTIFICADO para A sin listar a B;
  *      con A corregida imprime Sin problemas. y sale con 0; lee de las columnas un certificado por vencer, sin fecha, los typos de tipos y
  *      modulos, una edicion desconocida (un ENUM sin modo estricto guarda '': la unica linea de A es EDICION_DESCONOCIDA y queda una linea en
- *      el log), una Express en un grupo (EN_GRUPO) y una con su credencial de integracion viva (INTEGRACION_ACTIVA, sin imprimir el hash); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 014 sale con 2; y
+ *      el log), una Express en un grupo (EN_GRUPO) y una con su credencial de integracion viva (INTEGRACION_ACTIVA, sin imprimir el hash); en ecf abre la base de A y revisa sus rangos (faltante, sin limite, agotado, vencido); sin una columna de la 015 sale con 2; y
  *      ninguna corrida escribe nada ni imprime un secreto. La Consulta 4 se saca del archivo (sin el "-- " de sus lineas) y se corre en la master
  *      scratch: con A Express y tipos NULL devuelve a A con tipos_vacios 1 y no a B; con A completa, ninguna fila de A.
  *   7) la lista de rutas de la edicion por HTTP (A Express con el E45, token de administrador): lo que Express no incluye (gastos, inventario, facturacion
@@ -99,8 +99,8 @@ require_once __DIR__ . '/pos_scratch_prepare.php';
 // define funciones; su programa principal corre unicamente cuando es ese archivo el que se ejecuta.
 require_once __DIR__ . '/test_pos_scratch.php';
 
-/** La migracion master 014, tal como se pega en phpMyAdmin. */
-const EXPRESS_MIGRACION_014 = __DIR__ . '/../db/master_migrations/014_tenants_edicion.sql';
+/** La migracion master 015, tal como se pega en phpMyAdmin. */
+const EXPRESS_MIGRACION_EDICION = __DIR__ . '/../db/master_migrations/015_tenants_edicion.sql';
 
 /** Puerto de loopback donde no escucha nadie: las APIs de esta suite no tienen DGII, y lo que intente llamarla falla al instante. */
 const EXPRESS_DGII_SIN_SERVICIO = 'http://127.0.0.1:1';
@@ -142,11 +142,11 @@ function errorDeSql(PDO $pdo, string $sql): ?array
 /**
  * El entorno scratch de las pruebas de Express: el de las suites del POS (pos_scratch_preparar: master
  * wa_scratch_sin_gate, empresa A en wa_scratch, empresa B en wa_scratch_sin_gate, con sus roles y usuarios) mas la
- * migracion master 014 aplicada a esa master. Deja las dos empresas de prueba como completas: edicion = 'completa',
- * las otras tres columnas de la 014 en NULL, sin certificado y sin grupo (grupo_id NULL: la seccion 5 y la 6 ponen a A en un grupo
+ * migracion master 015 aplicada a esa master. Deja las dos empresas de prueba como completas: edicion = 'completa',
+ * las otras tres columnas de la 015 en NULL, sin certificado y sin grupo (grupo_id NULL: la seccion 5 y la 6 ponen a A en un grupo
  * mientras prueban que una Express no puede estarlo). Lo mismo se repite al terminar este proceso (lo que
  * una prueba cambie en las empresas se restaura solo, tambien si la prueba falla): primero pos_scratch_preparar()
- * devuelve roles, usuarios y campos del POS, que nunca toca las columnas de la 014, y despues se reponen ellas. Si
+ * devuelve roles, usuarios y campos del POS, que nunca toca las columnas de la 015, y despues se reponen ellas. Si
  * una corrida anterior murio sin llegar a esa restauracion (kill -9), el reinicio de arriba lo arregla en la
  * siguiente: no se filtra a la comparacion dorada del plan 01 ni a las suites del POS.
  * @return array{master:string, dbA:string, dbB:string, tenantA:int, tenantB:int, cred:array, pdo:PDO}
@@ -155,10 +155,10 @@ function errorDeSql(PDO $pdo, string $sql): ?array
 function express_scratch_preparar(): array
 {
     static $restauracionPuesta = false;
-    // La 014 (idempotente: tambien repone lo que una prueba haya quitado) y el reinicio de las dos empresas de
+    // La 015 (idempotente: tambien repone lo que una prueba haya quitado) y el reinicio de las dos empresas de
     // prueba, por RNC porque los id cambian si alguien limpia y vuelve a preparar.
     $reiniciar = static function (PDO $pdo): void {
-        correrSql($pdo, (string) file_get_contents(EXPRESS_MIGRACION_014));
+        correrSql($pdo, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));
         $rncs = array_column(POS_SCRATCH_TENANTS, 'rnc');
         $pdo->prepare(
             "UPDATE tenants SET edicion = 'completa', modulos_habilitados = NULL, tipos_ecf_habilitados = NULL, cert_vence = NULL,
@@ -437,7 +437,7 @@ function express_arbol(string $modo): string
 }
 
 // Modo hijo: lo lanza la seccion 1 para ver la restauracion de al terminar. Ensucia las dos empresas (columnas
-// de la 014, campo del POS, un usuario y los permisos de un rol) y sale sin limpiar nada. No se corre a mano.
+// de la 015, campo del POS, un usuario y los permisos de un rol) y sale sin limpiar nada. No se corre a mano.
 //   php <flags> tools/test_express_scratch.php --hijo=restauracion
 if (wa_arg('hijo') === 'restauracion') {
     $hijo = express_scratch_preparar();
@@ -453,11 +453,11 @@ if (wa_arg('hijo') === 'restauracion') {
 $ctx = express_scratch_preparar();
 
 // ---------------------------------------------------------------------------
-// 1) Migracion master 014 sobre la master scratch
+// 1) Migracion master 015 sobre la master scratch
 // ---------------------------------------------------------------------------
-echo "\n== 1) Migracion master 014 sobre la master scratch ==\n";
+echo "\n== 1) Migracion master 015 sobre la master scratch ==\n";
 $s1Pdo = $ctx['pdo'];
-$s1Sql = (string) file_get_contents(EXPRESS_MIGRACION_014);
+$s1Sql = (string) file_get_contents(EXPRESS_MIGRACION_EDICION);
 $s1Cols = ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'];
 $s1Ids = [(int) $ctx['tenantA'], (int) $ctx['tenantB']];
 
@@ -466,28 +466,28 @@ $s1Posiciones = static function () use ($s1Pdo): array {
     $st = $s1Pdo->query("SELECT COLUMN_NAME, ORDINAL_POSITION FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'");
     return array_map('intval', array_column($st->fetchAll(), 'ORDINAL_POSITION', 'COLUMN_NAME'));
 };
-/** Quita de tenants las columnas de la 014 que se pidan (solo en la master scratch: wa_exigir_marca corta si la conexion no lo es). */
+/** Quita de tenants las columnas de la 015 que se pidan (solo en la master scratch: wa_exigir_marca corta si la conexion no lo es). */
 $s1Soltar = static function (array $columnas) use ($s1Pdo, $s1Cols, $s1Posiciones): void {
     wa_exigir_marca($s1Pdo);
     $hay = $s1Posiciones();
     foreach ($columnas as $columna) {
         if (!in_array($columna, $s1Cols, true)) {
-            throw new InvalidArgumentException("no es una columna de la 014: {$columna}");
+            throw new InvalidArgumentException("no es una columna de la 015: {$columna}");
         }
         if (isset($hay[$columna])) {
             $s1Pdo->exec("ALTER TABLE tenants DROP COLUMN {$columna}");
         }
     }
 };
-/** Cuantas de las cuatro columnas de la 014 tiene tenants ahora. */
+/** Cuantas de las cuatro columnas de la 015 tiene tenants ahora. */
 $s1Cuantas = static fn (): int => count(array_intersect($s1Cols, array_keys($s1Posiciones())));
-/** La fila de una empresa de prueba (sus columnas de la 014, su certificado y pos_enabled), con cada valor en texto o NULL. */
+/** La fila de una empresa de prueba (sus columnas de la 015, su certificado y pos_enabled), con cada valor en texto o NULL. */
 $s1Fila = static function (int $id) use ($s1Pdo): array {
     $st = $s1Pdo->prepare('SELECT edicion, modulos_habilitados, tipos_ecf_habilitados, cert_vence, cert_path, cert_pass_encrypted, pos_enabled FROM tenants WHERE id = :id');
     $st->execute([':id' => $id]);
     return array_map(static fn ($valor): ?string => $valor === null ? null : (string) $valor, (array) $st->fetch());
 };
-/** Conexion al mismo servidor sin base seleccionada (null) o parada en una base de sistema: lo que ve la 014 si phpMyAdmin no tiene la master elegida. */
+/** Conexion al mismo servidor sin base seleccionada (null) o parada en una base de sistema: lo que ve la 015 si phpMyAdmin no tiene la master elegida. */
 $s1SinBase = static function (?string $sistema): PDO {
     $c = wa_credenciales();
     set_error_handler(static fn (): bool => true); // mysqlnd avisa con el host: se calla mientras conecta
@@ -507,7 +507,7 @@ $s1SinBase = static function (?string $sistema): PDO {
     return $otra;
 };
 /**
- * ¿Es el error de la guardia de la 014? Con la base equivocada la guardia consulta `ALTO_elige_la_base_master_en_el_panel`.`x`:
+ * ¿Es el error de la guardia de la 015? Con la base equivocada la guardia consulta `ALTO_elige_la_base_master_en_el_panel`.`x`:
  * MySQL contesta #1049 (la base no existe, o #1146 si existiera sin esa tabla) a quien tiene permisos globales, como el
  * usuario de phpMyAdmin, y #1142 (SELECT denegado en la tabla 'x') al usuario de pruebas, que solo llega a sus bases
  * scratch: revisa permisos antes que existencia (lo mismo que ve tools/test_conduces_mysql.php con la guardia de la 031).
@@ -521,14 +521,14 @@ wa_chk('express_scratch_preparar(): lo del POS mas un PDO sobre la master scratc
     array_diff(['master', 'dbA', 'dbB', 'tenantA', 'tenantB', 'cred', 'pdo'], array_keys($ctx)) === []
     && $s1Pdo instanceof PDO && $s1Pdo->query('SELECT DATABASE()')->fetchColumn() === $ctx['master']
     && $s1Ids[0] > 0 && $s1Ids[1] > 0 && $s1Ids[0] !== $s1Ids[1], array_keys($ctx));
-wa_chk('precondicion: la master scratch tiene inventario_estricto (la 013), de donde cuelga la 014',
+wa_chk('precondicion: la master scratch tiene inventario_estricto (la 013), de donde cuelga la 015',
     isset($s1Posiciones()['inventario_estricto']));
 
-// Sin las cuatro columnas: la 014 las crea.
+// Sin las cuatro columnas: la 015 las crea.
 $s1Soltar($s1Cols);
 wa_chk('sin las cuatro columnas, tenants no tiene ninguna', $s1Cuantas() === 0);
 $s1Resultado = correrSql($s1Pdo, $s1Sql);
-wa_chk('014 sobre una master sin las cuatro columnas: el resultado dice columnas_ok = 4 en la master scratch',
+wa_chk('015 sobre una master sin las cuatro columnas: el resultado dice columnas_ok = 4 en la master scratch',
     count($s1Resultado) === 1 && (int) ($s1Resultado[0]['columnas_ok'] ?? 0) === 4 && ($s1Resultado[0]['base'] ?? null) === $ctx['master'],
     ['filas' => count($s1Resultado), 'columnas_ok' => $s1Resultado[0]['columnas_ok'] ?? null]);
 $s1Definiciones = [];
@@ -539,7 +539,7 @@ foreach ($s1Pdo->query(
     $s1Definiciones[$s1F['COLUMN_NAME']] = [$s1F['COLUMN_TYPE'], $s1F['IS_NULLABLE'], $s1F['COLUMN_DEFAULT']];
 }
 ksort($s1Definiciones);
-wa_chk('014: edicion ENUM NOT NULL DEFAULT completa, modulos TEXT NULL, tipos VARCHAR(64) NULL y cert_vence DATE NULL, como queda en MySQL',
+wa_chk('015: edicion ENUM NOT NULL DEFAULT completa, modulos TEXT NULL, tipos VARCHAR(64) NULL y cert_vence DATE NULL, como queda en MySQL',
     $s1Definiciones === [
         'cert_vence' => ['date', 'YES', null],
         'edicion' => ["enum('completa','express')", 'NO', 'completa'],
@@ -547,13 +547,13 @@ wa_chk('014: edicion ENUM NOT NULL DEFAULT completa, modulos TEXT NULL, tipos VA
         'tipos_ecf_habilitados' => ['varchar(64)', 'YES', null],
     ], $s1Definiciones);
 $s1P = $s1Posiciones();
-wa_chk('014: las cuatro quedan en orden detras de inventario_estricto y antes de ambiente',
+wa_chk('015: las cuatro quedan en orden detras de inventario_estricto y antes de ambiente',
     isset($s1P['inventario_estricto'], $s1P['edicion'], $s1P['modulos_habilitados'], $s1P['tipos_ecf_habilitados'], $s1P['cert_vence'], $s1P['ambiente'])
     && $s1P['inventario_estricto'] < $s1P['edicion'] && $s1P['edicion'] < $s1P['modulos_habilitados']
     && $s1P['modulos_habilitados'] < $s1P['tipos_ecf_habilitados'] && $s1P['tipos_ecf_habilitados'] < $s1P['cert_vence']
     && $s1P['cert_vence'] < $s1P['ambiente'], $s1P);
 $s1Filas = $s1Pdo->query('SELECT edicion, modulos_habilitados, tipos_ecf_habilitados, cert_vence FROM tenants')->fetchAll();
-wa_chk('014 no enciende a nadie: toda empresa que ya existia queda completa y con las otras tres columnas en NULL',
+wa_chk('015 no enciende a nadie: toda empresa que ya existia queda completa y con las otras tres columnas en NULL',
     count($s1Filas) >= 2 && $s1Filas === array_fill(0, count($s1Filas),
         ['edicion' => 'completa', 'modulos_habilitados' => null, 'tipos_ecf_habilitados' => null, 'cert_vence' => null]), $s1Filas);
 
@@ -561,7 +561,7 @@ wa_chk('014 no enciende a nadie: toda empresa que ya existia queda completa y co
 $s1Datos = static fn (): array => $s1Pdo->query('SELECT id, edicion, modulos_habilitados, tipos_ecf_habilitados, cert_vence FROM tenants ORDER BY id')->fetchAll();
 $s1Antes = [$s1Posiciones(), $s1Datos()];
 $s1Resultado = correrSql($s1Pdo, $s1Sql);
-wa_chk('014 otra vez: no cambia nada (mismas posiciones y mismos datos) y columnas_ok sigue en 4',
+wa_chk('015 otra vez: no cambia nada (mismas posiciones y mismos datos) y columnas_ok sigue en 4',
     [$s1Posiciones(), $s1Datos()] === $s1Antes && (int) ($s1Resultado[0]['columnas_ok'] ?? 0) === 4, ['columnas_ok' => $s1Resultado[0]['columnas_ok'] ?? null]);
 
 // La guardia: sin base seleccionada y parada en information_schema corta ANTES de la primera sonda, y no cambia nada.
@@ -577,14 +577,14 @@ foreach ([null, 'information_schema'] as $s1Sistema) {
         'error' => $s1Error,
     ];
 }
-wa_chk('014 sin base de empresa seleccionada: falla en la guardia (no en un ALTER) antes de la primera sonda',
+wa_chk('015 sin base de empresa seleccionada: falla en la guardia (no en un ALTER) antes de la primera sonda',
     $s1Guardias['(sin base)']['guardia'] && $s1Guardias['(sin base)']['sin_sondas'], $s1Guardias['(sin base)']);
-wa_chk('014 parada en information_schema: falla en la guardia (no en un ALTER) antes de la primera sonda',
+wa_chk('015 parada en information_schema: falla en la guardia (no en un ALTER) antes de la primera sonda',
     $s1Guardias['information_schema']['guardia'] && $s1Guardias['information_schema']['sin_sondas'], $s1Guardias['information_schema']);
-wa_chk('014 con la base equivocada no cambia nada: la master scratch sigue sin las cuatro columnas', $s1Cuantas() === 0);
+wa_chk('015 con la base equivocada no cambia nada: la master scratch sigue sin las cuatro columnas', $s1Cuantas() === 0);
 unset($s1Otra);
 correrSql($s1Pdo, $s1Sql);
-wa_chk('014 en la base correcta, justo despues, vuelve a dejar las cuatro', $s1Cuantas() === 4);
+wa_chk('015 en la base correcta, justo despues, vuelve a dejar las cuatro', $s1Cuantas() === 4);
 
 // Un estado a medias: sin modulos_habilitados ni cert_vence. Completa las cuatro en orden y no toca lo que habia.
 $s1Pdo->prepare("UPDATE tenants SET edicion = 'express', tipos_ecf_habilitados = '45' WHERE id = :id")->execute([':id' => $s1Ids[0]]);
@@ -593,7 +593,7 @@ wa_chk('estado a medias: solo quedan edicion y tipos_ecf_habilitados', $s1Cuanta
 $s1Resultado = correrSql($s1Pdo, $s1Sql);
 $s1P = $s1Posiciones();
 $s1A = $s1Fila($s1Ids[0]);
-wa_chk('014 a medias: completa las cuatro en orden edicion < modulos_habilitados < tipos_ecf_habilitados < cert_vence y respeta lo que ya habia',
+wa_chk('015 a medias: completa las cuatro en orden edicion < modulos_habilitados < tipos_ecf_habilitados < cert_vence y respeta lo que ya habia',
     (int) ($s1Resultado[0]['columnas_ok'] ?? 0) === 4
     && isset($s1P['edicion'], $s1P['modulos_habilitados'], $s1P['tipos_ecf_habilitados'], $s1P['cert_vence'])
     && $s1P['edicion'] < $s1P['modulos_habilitados'] && $s1P['modulos_habilitados'] < $s1P['tipos_ecf_habilitados'] && $s1P['tipos_ecf_habilitados'] < $s1P['cert_vence']
@@ -618,10 +618,10 @@ $s1Verificador = implode("\n", array_filter(
     static fn (string $l): bool => !str_starts_with(ltrim($l), '--')
 ));
 $s1Consulta = substr($s1Verificador, 0, (int) strpos($s1Verificador, ';'));
-/** Lo que dice la fila 014 del verificador (APLICADA, FALTA...), o null si no hay fila. */
+/** Lo que dice la fila 015 del verificador (APLICADA, FALTA...), o null si no hay fila. */
 $s1Estado = static function () use ($s1Pdo, $s1Consulta): ?string {
     foreach ($s1Pdo->query($s1Consulta)->fetchAll() as $s1F) {
-        if ((string) $s1F['migracion'] === '014') {
+        if ((string) $s1F['migracion'] === '015') {
             return (string) $s1F['estado'];
         }
     }
@@ -632,7 +632,7 @@ $s1Soltar(['cert_vence']);
 $s1Dice[] = $s1Estado();
 correrSql($s1Pdo, $s1Sql);
 $s1Dice[] = $s1Estado();
-wa_chk('verificador del master: la 014 dice APLICADA con las cuatro, FALTA sin cert_vence y APLICADA al aplicarla de nuevo',
+wa_chk('verificador del master: la 015 dice APLICADA con las cuatro, FALTA sin cert_vence y APLICADA al aplicarla de nuevo',
     $s1Dice === ['APLICADA', 'FALTA', 'APLICADA'], $s1Dice);
 
 // express_scratch_preparar() deja a las dos empresas limpias aunque una corrida anterior las haya dejado sucias.
@@ -654,7 +654,7 @@ $s1Esperado = [];
 foreach ($s1Ids as $s1Id) {
     $s1Esperado[$s1Id] = array_intersect_key($s1Fila($s1Id), $s1Limpia);
 }
-wa_chk('express_scratch_preparar() otra vez: A y B quedan edicion = completa, las otras tres de la 014 en NULL y sin cert_path ni cert_pass_encrypted',
+wa_chk('express_scratch_preparar() otra vez: A y B quedan edicion = completa, las otras tres de la 015 en NULL y sin cert_path ni cert_pass_encrypted',
     $s1Esperado === [$s1Ids[0] => $s1Limpia, $s1Ids[1] => $s1Limpia]
     && $s1Otra['tenantA'] === $ctx['tenantA'] && $s1Otra['tenantB'] === $ctx['tenantB'], $s1Esperado);
 unset($s1Otra);
@@ -670,7 +670,7 @@ $s1LimpiaConPos = $s1Limpia + ['pos_enabled' => '1'];
 foreach ($s1Ids as $s1Id) {
     $s1Despues[$s1Id] = array_intersect_key($s1Fila($s1Id), $s1LimpiaConPos);
 }
-wa_chk('al terminar un proceso se restaura todo: las dos empresas completas (columnas de la 014) y con el POS, admin_pos_a admin y los permisos del rol user',
+wa_chk('al terminar un proceso se restaura todo: las dos empresas completas (columnas de la 015) y con el POS, admin_pos_a admin y los permisos del rol user',
     $s1Hijo['codigo'] === 0 && $s1Hijo['salida'] === ''
     && $s1Despues[$s1Ids[0]] === $s1LimpiaConPos && $s1Despues[$s1Ids[1]] === $s1LimpiaConPos
     && $s1Rol === 'admin' && (int) $s1Permisos->fetchColumn() === count($s1Defaults['user']), [$s1Despues, $s1Rol]);
@@ -1073,13 +1073,13 @@ $s4Ordenada = static function (?array $lista): ?array {
     return $lista;
 };
 wa_chk('express_preflight_hechos(A): las claves del contrato en su orden; tenant y pedido son los recibidos; hoy es la fecha de hoy',
-    array_keys($s4Hechos) === ['tenant', 'columnas_014', 'm036', 'cert', 'emisor', 'almacen', 'pedido', 'rangos_ecf', 'ecf_facturas', 'clientes_prueba', 'rol_user', 'hoy']
+    array_keys($s4Hechos) === ['tenant', 'columnas_edicion', 'm036', 'cert', 'emisor', 'almacen', 'pedido', 'rangos_ecf', 'ecf_facturas', 'clientes_prueba', 'rol_user', 'hoy']
     && $s4Hechos['tenant'] === $s4Fila && $s4Hechos['pedido'] === $s4Pedido && in_array($s4Hechos['hoy'], [date('Y-m-d'), date('Y-m-d', time() - 5)], true), array_keys($s4Hechos));
-wa_chk('express_preflight_hechos(A): columnas_014 es true (la master scratch trae las cuatro columnas de la 014)',
-    $s4Hechos['columnas_014'] === true && (int) $s4Master->query(
+wa_chk('express_preflight_hechos(A): columnas_edicion es true (la master scratch trae las cuatro columnas de la 015)',
+    $s4Hechos['columnas_edicion'] === true && (int) $s4Master->query(
         "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
          AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')"
-    )->fetchColumn() === 4, $s4Hechos['columnas_014']);
+    )->fetchColumn() === 4, $s4Hechos['columnas_edicion']);
 wa_chk('express_preflight_hechos(A): m036 es lo que dice information_schema de facturas.idempotency_key (el plan 04 la agrega a la base scratch mas adelante: no se supone que falte)',
     $s4Hechos['m036'] === $s4Columna('facturas', 'idempotency_key'), [$s4Hechos['m036'], $s4Columna('facturas', 'idempotency_key')]);
 wa_chk('express_preflight_hechos(A): rol_user son los permisos del rol user de A en la master (sin importar el orden)',
@@ -1797,9 +1797,9 @@ wa_chk('al terminar A vuelve a ser completa, sin certificado ni listas, con el P
     + ['emisor_cfg_columnas_distintas' => ['tras_restaurar' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgRestaurado), 'al_final' => $s5Difieren($s5EmisorCfg0, $s5EmisorCfgFinal)]]);
 
 // ---------------------------------------------------------------------------
-// 5b) tools/create_tenant.php --edicion=express sin las columnas de la migracion master 014: se detiene antes de crear nada
+// 5b) tools/create_tenant.php --edicion=express sin las columnas de la migracion master 015: se detiene antes de crear nada
 // ---------------------------------------------------------------------------
-echo "\n== 5b) create_tenant.php --edicion=express sin la migracion master 014 ==\n";
+echo "\n== 5b) create_tenant.php --edicion=express sin la migracion master 015 ==\n";
 $s5bMaster = $ctx['pdo'];
 $s5bCred = $ctx['cred'];
 $s5bSecretos = pos_scratch_secretos($s5bCred['pass']);
@@ -1830,9 +1830,9 @@ $s5bConRnc = static function () use ($s5bMaster, $s5bRnc): int {
     $st->execute([':r' => $s5bRnc]);
     return (int) $st->fetchColumn();
 };
-/** Repone lo que se quito: la 014 es idempotente y solo agrega las columnas que faltan (en su sitio y con su definicion). */
+/** Repone lo que se quito: la 015 es idempotente y solo agrega las columnas que faltan (en su sitio y con su definicion). */
 $s5bRestaurar = static function () use ($s5bMaster): void {
-    correrSql($s5bMaster, (string) file_get_contents(EXPRESS_MIGRACION_014));
+    correrSql($s5bMaster, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));
 };
 // El alta de la tarea con una base de empresa que no existe (y --skip-create-db): ni siquiera una corrida que no hiciera la comprobacion podria dejar una
 // empresa, se detendria al abrir esa base. --db-host=127.0.0.1 --db-port=1 (un puerto de loopback sin nadie) le quita ademas a esa corrida la posibilidad
@@ -1844,28 +1844,28 @@ $s5bSalidas = [];
 try {
     wa_exigir_marca($s5bMaster);   // solo la master scratch
     $s5bRestaurar();               // las cuatro columnas puestas, como las deja express_scratch_preparar()
-    wa_chk('precondicion: tenants tiene las cuatro columnas de la 014 y no hay ninguna empresa con el RNC de la prueba',
+    wa_chk('precondicion: tenants tiene las cuatro columnas de la 015 y no hay ninguna empresa con el RNC de la prueba',
         array_filter($s5bColumnas, static fn (string $columna): bool => !$s5bTiene($columna)) === [] && $s5bConRnc() === 0, $s5bConRnc());
 
-    // edicion es la de la tarea; cert_vence, la ultima de la 014, es un estado a medias (una migracion que quedo a la mitad): la comprobacion mira las cuatro.
+    // edicion es la de la tarea; cert_vence, la ultima de la 015, es un estado a medias (una migracion que quedo a la mitad): la comprobacion mira las cuatro.
     foreach (['edicion', 'cert_vence'] as $s5bFalta) {
         $s5bMaster->exec("ALTER TABLE tenants DROP COLUMN {$s5bFalta}");
         $r = express_cli($s5bArgs);
         $s5bSalidas[] = $r['salida'];
-        wa_chk("(sin tenants.{$s5bFalta}) --edicion=express --tipos-ecf=45 sale con 1, nombra db/master_migrations/014_tenants_edicion.sql y la columna que falta ({$s5bFalta}), no crea ninguna empresa y no deja avisos de PHP",
-            !$s5bTiene($s5bFalta) && $r['codigo'] === 1 && str_contains($r['salida'], 'db/master_migrations/014_tenants_edicion.sql')
+        wa_chk("(sin tenants.{$s5bFalta}) --edicion=express --tipos-ecf=45 sale con 1, nombra db/master_migrations/015_tenants_edicion.sql y la columna que falta ({$s5bFalta}), no crea ninguna empresa y no deja avisos de PHP",
+            !$s5bTiene($s5bFalta) && $r['codigo'] === 1 && str_contains($r['salida'], 'db/master_migrations/015_tenants_edicion.sql')
             && str_contains($r['salida'], "Faltan en tenants: {$s5bFalta}.") && $s5bConRnc() === 0 && !str_contains($r['salida'], 'Tenant creado OK')
             && preg_match('/Fatal error|Stack trace|Warning|Notice|Deprecated/', $r['salida']) !== 1, $s5bVer($r));
         $s5bRestaurar();
     }
 
-    // El control: con las cuatro columnas la misma orden ya no dice nada de la 014 (la comprobacion no se dispara de mas). Se le agrega un --admin-username que ya existe
+    // El control: con las cuatro columnas la misma orden ya no dice nada de la 015 (la comprobacion no se dispara de mas). Se le agrega un --admin-username que ya existe
     // (el de admin_pos_a: users.username es unico global) para que termine limpio, con un mensaje, justo despues de esa comprobacion y antes de tocar la base de la empresa.
     // (Antes esto era un --grupo que no existe; desde la revision final --grupo junto con --edicion=express se rechaza antes, al validar las banderas, y ya no llega aqui.)
     $r = express_cli(array_merge($s5bArgs, ['--admin-email=zz-control-5b@example.com', '--admin-pass=ZzControl5b-clave', '--admin-name=Control 5b', '--admin-username=admin_pos_a']));
     $s5bSalidas[] = $r['salida'];
-    wa_chk('(control) con las cuatro columnas de la 014 la misma orden ya no menciona la migracion: pasa esa comprobacion y se detiene en el username que ya existe (sale con 1), sin crear ninguna empresa',
-        $r['codigo'] === 1 && !str_contains($r['salida'], '014_tenants_edicion.sql') && str_contains($r['salida'], "El username 'admin_pos_a' ya esta en uso") && $s5bConRnc() === 0, $s5bVer($r));
+    wa_chk('(control) con las cuatro columnas de la 015 la misma orden ya no menciona la migracion: pasa esa comprobacion y se detiene en el username que ya existe (sale con 1), sin crear ninguna empresa',
+        $r['codigo'] === 1 && !str_contains($r['salida'], '015_tenants_edicion.sql') && str_contains($r['salida'], "El username 'admin_pos_a' ya esta en uso") && $s5bConRnc() === 0, $s5bVer($r));
 } finally {
     $s5bRestaurar();   // las cuatro columnas, pase lo que pase (express_scratch_preparar() la repone tambien al terminar el proceso)
 }
@@ -1878,7 +1878,7 @@ foreach ($s5bMaster->query(
 }
 ksort($s5bDefiniciones);
 $s5bEstado = $s5bMaster->query('SELECT id, edicion FROM tenants WHERE id IN (' . (int) $ctx['tenantA'] . ', ' . (int) $ctx['tenantB'] . ') ORDER BY id')->fetchAll();
-wa_chk('al terminar tenants tiene otra vez las cuatro columnas de la 014 con su definicion (edicion ENUM NOT NULL DEFAULT completa, cert_vence DATE NULL), A y B siguen completas y no hay ninguna empresa con el RNC de la prueba',
+wa_chk('al terminar tenants tiene otra vez las cuatro columnas de la 015 con su definicion (edicion ENUM NOT NULL DEFAULT completa, cert_vence DATE NULL), A y B siguen completas y no hay ninguna empresa con el RNC de la prueba',
     $s5bDefiniciones === [
         'cert_vence' => ['date', 'YES', null],
         'edicion' => ["enum('completa','express')", 'NO', 'completa'],
@@ -2096,18 +2096,18 @@ try {
             $r['codigo'] === 1 && count($s6Lineas($r, $s6IdA)) === 1 && $s6Tiene($r, $s6IdA, 'RANGO_FALTANTE') && str_contains($r['salida'], 'E45'), $s6Ver($r));
     }
 
-    // --- (6) sin una columna de la 014 sale con 2 y no lista nada (como create_tenant.php: nombra la migracion y la columna que falta) --------------------------
+    // --- (6) sin una columna de la 015 sale con 2 y no lista nada (como create_tenant.php: nombra la migracion y la columna que falta) --------------------------
     $s6PonerA($s6BienA());   // con A bien puesta: si la herramienta siguiera adelante diria Sin problemas.
     $s6Master->exec('ALTER TABLE tenants DROP COLUMN cert_vence');
     try {
         $r = $s6Corre();
     } finally {
-        correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_014));   // la 014 es idempotente: vuelve a poner la columna que falta
+        correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));   // la 015 es idempotente: vuelve a poner la columna que falta
     }
-    wa_chk('(6) sin tenants.cert_vence sale con 2, nombra db/master_migrations/014_tenants_edicion.sql y la columna que falta, y no lista ni dice Sin problemas.',
-        $r['codigo'] === 2 && str_contains($r['salida'], 'db/master_migrations/014_tenants_edicion.sql') && str_contains($r['salida'], 'Faltan en tenants: cert_vence.')
+    wa_chk('(6) sin tenants.cert_vence sale con 2, nombra db/master_migrations/015_tenants_edicion.sql y la columna que falta, y no lista ni dice Sin problemas.',
+        $r['codigo'] === 2 && str_contains($r['salida'], 'db/master_migrations/015_tenants_edicion.sql') && str_contains($r['salida'], 'Faltan en tenants: cert_vence.')
         && !str_contains($r['salida'], 'tenant #') && !str_contains($r['salida'], 'Sin problemas.'), $s6Ver($r));
-    wa_chk('(6) ...y la 014 repuso la columna (las cuatro estan otra vez)',
+    wa_chk('(6) ...y la 015 repuso la columna (las cuatro estan otra vez)',
         (int) $s6Master->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants' AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')")->fetchColumn() === 4);
 
     // --- (7) la consulta 4 del verificador de la master, tal como se corre en phpMyAdmin (sin el "-- " de sus lineas) sobre la master scratch ----------------------
@@ -2135,9 +2135,9 @@ try {
         wa_chk("(7) con la edicion de A en '' (desconocida) la consulta tambien devuelve a A: '' es distinto de completa", ($s6Filas()[$s6IdA]['edicion'] ?? null) === '', array_keys($s6Filas()));
     }
 } finally {
-    // Todo vuelve a su sitio: la columna cert_vence (la 014 es idempotente), los rangos de ecf de A como estaban, y A y B como completas, en testecf, con el POS prendido y sin certificado
-    // (express_scratch_preparar() llama a pos_scratch_preparar() y repone las columnas de la 014).
-    correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_014));
+    // Todo vuelve a su sitio: la columna cert_vence (la 015 es idempotente), los rangos de ecf de A como estaban, y A y B como completas, en testecf, con el POS prendido y sin certificado
+    // (express_scratch_preparar() llama a pos_scratch_preparar() y repone las columnas de la 015).
+    correrSql($s6Master, (string) file_get_contents(EXPRESS_MIGRACION_EDICION));
     $s6Pdo->exec("DELETE FROM ncf_sequences WHERE ambiente = 'ecf'");
     if ($s6Rangos0 !== []) {
         $s6Columnas = array_keys($s6Rangos0[0]);
@@ -2162,7 +2162,7 @@ foreach ($s6Salidas as $s6I => $s6Salida) {
 wa_chk('ninguna corrida imprimio una credencial (de la base, de integracion ni derivada), la ruta o la clave del certificado, el servidor ni el usuario de la base', count($s6Salidas) === 20 && $s6Fugas === [], $s6Fugas);
 $s6Final = $s6Fila($s6IdA);
 $s6FinalB = $s6Fila($s6IdB);
-wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendido, su hash de integracion y sin certificado, listas ni grupo; los rangos de ecf de A como estaban; y las cuatro columnas de la 014 estan',
+wa_chk('al terminar A y B vuelven a ser completas, en testecf, con el POS prendido, su hash de integracion y sin certificado, listas ni grupo; los rangos de ecf de A como estaban; y las cuatro columnas de la 015 estan',
     $s6Final['edicion'] === 'completa' && $s6FinalB['edicion'] === 'completa' && $s6Final['ambiente'] === 'testecf' && (int) $s6Final['pos_enabled'] === 1
     && $s6Final['tipos_ecf_habilitados'] === null && $s6Final['modulos_habilitados'] === null && $s6Final['cert_vence'] === null && $s6Final['cert_path'] === null
     && $s6Final['api_secret_hash'] === $s6Fila0['api_secret_hash'] && $s6Final['grupo_id'] === null && $s6FinalB['grupo_id'] === null

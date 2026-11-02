@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013 y 014).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013, 014 y 015).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -47,13 +47,16 @@ que ningún otro plan los tome:
   `facturas` las columnas `idempotency_key CHAR(36) NULL` e
   `idempotency_hash CHAR(64) NULL`, y el índice
   `UNIQUE KEY uk_facturas_idem (idempotency_key)`.
-- **Master 014**: `db/master_migrations/014_tenants_edicion.sql`. Agrega a
+- **Master 015**: `db/master_migrations/015_tenants_edicion.sql`. Agrega a
   `tenants` las columnas `edicion ENUM('completa','express') NOT NULL DEFAULT 'completa'`,
   `modulos_habilitados TEXT NULL`, `tipos_ecf_habilitados VARCHAR(64) NULL` y
   `cert_vence DATE NULL`.
+- La master 014 es `014_integracion_backup_estado_dgii.sql`: la tomó integración en
+  master el 2026-10-31, antes de que esta reserva llegara a master, y por eso la de
+  Express es la 015. Una migración ya aplicada nunca se renumera.
 - El plan ITBIS de facturas simples (todavía sin mergear) pidió master 013 (ya
   ocupada por `013_tenants_inventario_estricto.sql`) y tenant 036, así que al
-  aterrizar toma master 015 y tenant 037.
+  aterrizar toma master 016 y tenant 037.
 - Antes de crear una migración: `git fetch` y las dos listas, una por serie (con
   la barra final, que lista los archivos y no el directorio):
   `git ls-tree --name-only origin/master db/migrations/ | tail -4` (tenant) y
@@ -66,7 +69,7 @@ que ningún otro plan los tome:
 - Los encabezados que dicen "hasta la 035" (este README, `db/tenant_schema.sql`,
   `tools/verificar_migraciones_tenant.sql`) no se tocan todavía: un snapshot o un
   verificador no debe nombrar una migración cuyo archivo no existe. Los planes de
-  Express que crean la master 014 y la tenant 036 los suben junto con el SQL;
+  Express que crean la master 015 y la tenant 036 los suben junto con el SQL;
   mientras tanto, este bloque y `tools/test_express_reservas.php` llevan la
   reserva.
 

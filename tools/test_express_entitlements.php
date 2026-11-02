@@ -222,33 +222,33 @@ if (wa_arg('hijo') === 'emisor') {
 }
 
 // ---------------------------------------------------------------------------
-// 1) Migracion master 014 y sus espejos (esquema, verificador, README, schema.md)
+// 1) Migracion master 015 y sus espejos (esquema, verificador, README, schema.md)
 // ---------------------------------------------------------------------------
-echo "\n== 1) Migracion master 014 y sus espejos ==\n";
+echo "\n== 1) Migracion master 015 y sus espejos ==\n";
 $s1Raiz = dirname(__DIR__);
 /** Texto de un archivo del repo con \r\n normalizado a \n ('' si no existe: las pruebas fallan, no avisan). */
 $s1Leer = static fn (string $ruta): string => is_file("{$s1Raiz}/{$ruta}")
     ? str_replace("\r\n", "\n", (string) file_get_contents("{$s1Raiz}/{$ruta}")) : '';
 $s1Columnas = ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'];
 
-$s1M = $s1Leer('db/master_migrations/014_tenants_edicion.sql');
+$s1M = $s1Leer('db/master_migrations/015_tenants_edicion.sql');
 // El codigo de la migracion: sin las lineas "--", para que un comentario no cuente como sentencia.
 $s1Codigo = (string) preg_replace('/^\s*--.*$/m', '', $s1M);
-// Sus sentencias, cortadas en cada ";" (por eso ningun literal de la 014 lleva ";").
+// Sus sentencias, cortadas en cada ";" (por eso ningun literal de la 015 lleva ";").
 $s1Sent = array_values(array_filter(array_map('trim', explode(';', $s1Codigo)), static fn (string $s): bool => $s !== ''));
 
-wa_chk('014: primera SET @db, segunda la guardia',
+wa_chk('015: primera SET @db, segunda la guardia',
     ($s1Sent[0] ?? '') === 'SET @db := DATABASE()' && str_starts_with($s1Sent[1] ?? '', 'SET @guardia :='), array_slice($s1Sent, 0, 2));
-wa_chk('014: la guardia cubre NULL y las bases de sistema y prueba tenants',
+wa_chk('015: la guardia cubre NULL y las bases de sistema y prueba tenants',
     str_contains($s1Codigo, "IN ('information_schema', 'mysql', 'performance_schema', 'sys')") && str_contains($s1Codigo, '.tenants LIMIT 1'));
-wa_chk('014: el unico SELECT de nivel superior es el ultimo',
+wa_chk('015: el unico SELECT de nivel superior es el ultimo',
     array_keys(array_filter($s1Sent, static fn (string $s): bool => stripos($s, 'SELECT') === 0)) === [count($s1Sent) - 1]);
-wa_chk('014: una sonda por columna y un PREPARE por columna mas el de la guardia',
+wa_chk('015: una sonda por columna y un PREPARE por columna mas el de la guardia',
     count(array_filter($s1Columnas, static fn (string $c): bool => str_contains($s1Codigo, "COLUMN_NAME = '{$c}'"))) === 4
     && preg_match_all('/^PREPARE /m', $s1Codigo) === 5);
 // Sobre el texto entero, cabecera incluida: ni siquiera un comentario puede prometer un UPDATE.
-wa_chk('014: no enciende a nadie', $s1M !== '' && stripos($s1M, 'UPDATE tenants') === false);
-wa_chk('014: ENUM, TEXT, VARCHAR(64) y DATE como en el contrato',
+wa_chk('015: no enciende a nadie', $s1M !== '' && stripos($s1M, 'UPDATE tenants') === false);
+wa_chk('015: ENUM, TEXT, VARCHAR(64) y DATE como en el contrato',
     str_contains($s1Codigo, "ENUM(''completa'',''express'') NOT NULL DEFAULT ''completa''")
     && str_contains($s1Codigo, 'modulos_habilitados TEXT NULL')
     && str_contains($s1Codigo, 'tipos_ecf_habilitados VARCHAR(64) NULL')
@@ -257,12 +257,12 @@ wa_chk('014: ENUM, TEXT, VARCHAR(64) y DATE como en el contrato',
 // la nombra con ella, porque despues de un SELECT sobre information_schema phpMyAdmin cambia la base actual.
 $s1Usos = preg_match_all('/\binformation_schema\./i', $s1Codigo);
 $s1Filtros = preg_match_all('/\bTABLE_SCHEMA = @db\b/', $s1Codigo);
-wa_chk('014: DATABASE() solo en la primera sentencia y cada consulta a information_schema filtra por @db',
+wa_chk('015: DATABASE() solo en la primera sentencia y cada consulta a information_schema filtra por @db',
     substr_count($s1Codigo, 'DATABASE()') === 1 && $s1Usos > 0 && $s1Usos === $s1Filtros, [substr_count($s1Codigo, 'DATABASE()'), $s1Usos, $s1Filtros]);
 preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $s1Codigo, $s1Prep);
 preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $s1Codigo, $s1Exec);
 preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $s1Codigo, $s1Deal);
-wa_chk('014: cada PREPARE tiene su EXECUTE y su DEALLOCATE, y ningun nombre se repite',
+wa_chk('015: cada PREPARE tiene su EXECUTE y su DEALLOCATE, y ningun nombre se repite',
     $s1Prep[1] !== [] && $s1Prep[1] === $s1Exec[1] && $s1Prep[1] === $s1Deal[1] && count($s1Prep[1]) === count(array_unique($s1Prep[1])), $s1Prep[1]);
 
 // master_schema.sql: las cuatro columnas, en ese orden, entre inventario_estricto y ambiente (como
@@ -285,7 +285,7 @@ for ($s1I = 1; $s1Ordenado && $s1I < count($s1Orden); $s1I++) {
 }
 wa_chk('master_schema.sql: edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence, en ese orden, entre inventario_estricto y ambiente',
     $s1Ordenado, $s1Orden);
-// Un tenant nuevo (master_schema.sql) y uno migrado (014) tienen que quedar iguales: misma definicion y mismo COMMENT.
+// Un tenant nuevo (master_schema.sql) y uno migrado (015) tienen que quedar iguales: misma definicion y mismo COMMENT.
 $s1Distintas = [];
 foreach ($s1Columnas as $s1Col) {
     $s1EnMigracion = preg_match("/ADD COLUMN {$s1Col} (.+?) COMMENT ''(.*?)'''\s*,/s", $s1Codigo, $s1Hallado) === 1
@@ -293,33 +293,33 @@ foreach ($s1Columnas as $s1Col) {
     $s1EnEsquema = preg_match("/^\s*{$s1Col}\s+(.+?)\s+COMMENT\s+'([^']*)'/ms", $s1Esquema, $s1Hallado) === 1
         ? [trim((string) preg_replace('/\s+/', ' ', $s1Hallado[1])), $s1Hallado[2]] : null;
     if ($s1EnMigracion === null || $s1EnMigracion !== $s1EnEsquema) {
-        $s1Distintas[$s1Col] = ['014' => $s1EnMigracion, 'master_schema' => $s1EnEsquema];
+        $s1Distintas[$s1Col] = ['015' => $s1EnMigracion, 'master_schema' => $s1EnEsquema];
     }
 }
-wa_chk('master_schema.sql repite la definicion y el COMMENT de cada columna de la 014', $s1Distintas === [], $s1Distintas);
+wa_chk('master_schema.sql repite la definicion y el COMMENT de cada columna de la 015', $s1Distintas === [], $s1Distintas);
 
-// Verificador de migraciones del master: la fila 014 pide las cuatro columnas, y la cabecera la nombra.
+// Verificador de migraciones del master: la fila 015 pide las cuatro columnas, y la cabecera la nombra.
 $s1Verificador = $s1Leer('tools/verificar_migraciones_master.sql');
-wa_chk('verificador del master: la fila 014 cuenta las cuatro columnas de tenants (= 4)',
-    preg_match("/SELECT '014', '014_tenants_edicion\\.sql',\\s*'[^']*',\\s*"
+wa_chk('verificador del master: la fila 015 cuenta las cuatro columnas de tenants (= 4)',
+    preg_match("/SELECT '015', '015_tenants_edicion\\.sql',\\s*'[^']*',\\s*"
         . "\\(SELECT COUNT\\(\\*\\) FROM information_schema\\.COLUMNS\\s+WHERE TABLE_SCHEMA = DATABASE\\(\\) AND TABLE_NAME = 'tenants'\\s+"
         . "AND COLUMN_NAME IN \\('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'\\)\\) = 4/", $s1Verificador) === 1);
-wa_chk('verificador del master: la cabecera menciona la 014',
-    preg_match('/\A(?:--[^\n]*\n)+/', $s1Verificador, $s1Cabecera) === 1 && str_contains($s1Cabecera[0], '014'));
+wa_chk('verificador del master: la cabecera menciona la 015',
+    preg_match('/\A(?:--[^\n]*\n)+/', $s1Verificador, $s1Cabecera) === 1 && str_contains($s1Cabecera[0], '015'));
 
 // README de db/migrations y docs/database/schema.md (este estaba atrasado).
 // La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
-// lo ejecutan con PREPARE/EXECUTE (007, 008, 010, 011, 012, 013 y 014; la lista del tenant, 018 y 026 a 035, ya
+// lo ejecutan con PREPARE/EXECUTE (007, 008, 010, 011, 012, 013, 014 y 015; la lista del tenant, 018 y 026 a 035, ya
 // era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
-wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013 y 014 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013 y 014'));
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014 y 015 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014 y 015'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
      'audit_logs', 'pos_handoff_codes', 'pos_equipos'],
     static fn (string $t): bool => !str_contains($s1Doc, $t)
 ));
-wa_chk('schema.md: la master lista audit_logs, pos_handoff_codes y pos_equipos, y tenants trae grupo_id, pos_enabled, inventario_estricto y las cuatro de la 014',
+wa_chk('schema.md: la master lista audit_logs, pos_handoff_codes y pos_equipos, y tenants trae grupo_id, pos_enabled, inventario_estricto y las cuatro de la 015',
     $s1Doc !== '' && $s1Faltan === [], $s1Faltan);
 wa_chk('schema.md: el snapshot del tenant llega hasta la 035 (001–035 y 012–035) y no queda 001–031 ni 012–031',
     substr_count($s1Doc, '001–035') >= 2 && str_contains($s1Doc, '012–035')
@@ -2688,7 +2688,7 @@ $s8Base = [
         'cert_path' => 'certificado_dgii/131000001/MARCA-ruta-del-p12.p12', 'cert_pass_encrypted' => 'MARCA-clave-cifrada',
         'db_pass_encrypted' => 'MARCA-clave-de-la-base',
     ],
-    'columnas_014' => true,
+    'columnas_edicion' => true,
     'm036' => true,
     'cert' => ['ok' => true, 'codigo' => null, 'vence' => $s8Vence],
     'emisor' => ['rnc' => '131000001', 'razon_social' => 'CONSTRUCTORA X SRL', 'direccion' => 'Av. Winston Churchill 10', 'telefono' => '809-555-1234'],
@@ -2743,7 +2743,7 @@ $s8Tabla = [
     ['grupo_id 0 (TenantResolver::grupoId() lo cuenta como un grupo)', ['tenant.grupo_id' => 0], 'grupo', 'rechazar'],
     ['grupo_id NULL (sin grupo: lo de siempre)', ['tenant.grupo_id' => null], 'grupo', 'ok'],
     ["grupo_id '' (sin grupo)", ['tenant.grupo_id' => ''], 'grupo', 'ok'],
-    ['columnas_014 false', ['columnas_014' => false], 'columnas', 'rechazar'],
+    ['columnas_edicion false', ['columnas_edicion' => false], 'columnas', 'rechazar'],
     ['m036 false', ['m036' => false], 'm036', 'rechazar'],
     ["pedido.tipos ['44']", ['pedido.tipos' => ['44']], 'tipos', 'rechazar'],
     ['pedido.tipos []', ['pedido.tipos' => []], 'tipos', 'rechazar'],
@@ -2963,7 +2963,7 @@ wa_chk('express_plan: tipos_ecf_habilitados y modulos_habilitados salen del pedi
 wa_chk('express_plan: un token repetido en el pedido se escribe una sola vez y se respeta el orden en que se pidio (45,31,45 queda 45,31)',
     $s8Param($s8PlanDe(['pedido.tipos' => ['45', '31', '45']]), 2, ':t') === '45,31');
 // --- cert_vence: la fecha que escribe el plan es la que lee estadoCertificado (el dia del notAfter, en la zona horaria por defecto de PHP) --------------------
-// La columna es DATE (migracion master 014, solo informativa). El lector (TenantEntitlements::estadoCertificado, el bloque certificado de GET /api/emisor) la toma como
+// La columna es DATE (migracion master 015, solo informativa). El lector (TenantEntitlements::estadoCertificado, el bloque certificado de GET /api/emisor) la toma como
 // "el dia del notAfter en la zona por defecto de PHP" y cuenta los dias contra date('Y-m-d') de esa misma zona; el plan escribe date('Y-m-d', notAfter) en esa zona.
 // Se prueba en zonas lejos de UTC y con un notAfter cuyo dia local NO es el de UTC (un gmdate, o una zona fija, lo delataria): lo que escribe el plan, leido a la hora
 // del notAfter, da 0 dias (el dia del vencimiento todavia vale, como en la emision), 10 dias diez dias antes y vencido un dia despues. La zona de la suite se restaura.
@@ -3099,15 +3099,15 @@ $s8Salida = (string) ob_get_clean();
 [$s8Hechos, $s8CMaster, $s8CBase] = is_array($s8Resultado) ? $s8Resultado : [[], [], []];
 $s8Despues = date('Y-m-d');
 wa_chk('hechos (dobles): no lanza, no imprime ni escribe en el log; las claves son las del contrato y en ese orden',
-    $s8Error === null && $s8Salida === '' && $s8Log === '' && array_keys($s8Hechos) === ['tenant', 'columnas_014', 'm036', 'cert', 'emisor', 'almacen', 'pedido',
+    $s8Error === null && $s8Salida === '' && $s8Log === '' && array_keys($s8Hechos) === ['tenant', 'columnas_edicion', 'm036', 'cert', 'emisor', 'almacen', 'pedido',
         'rangos_ecf', 'ecf_facturas', 'clientes_prueba', 'rol_user', 'hoy'], [$s8Error?->getMessage(), $s8Salida, $s8Log, array_keys($s8Hechos)]);
 $s8Todas = array_merge($s8CMaster, $s8CBase);
 wa_chk('hechos (dobles): todo lo que pide es SELECT (ni una sentencia de escritura), y la master y la base de la empresa reciben cada una las suyas',
     $s8Todas !== [] && array_filter($s8Todas, static fn (array $c): bool => preg_match('/^\s*SELECT\b/i', $c['sql']) !== 1) === []
     && array_filter($s8CMaster, static fn (array $c): bool => preg_match('/FROM (emisor_config|warehouses|ncf_sequences|facturas|clients)\b/', $c['sql']) === 1) === []
     && array_filter($s8CBase, static fn (array $c): bool => preg_match('/FROM (roles|role_permissions)\b|TABLE_NAME = \'tenants\'/', $c['sql']) === 1) === [], array_column($s8Todas, 'sql'));
-wa_chk('hechos (dobles): tenant y pedido son los recibidos, columnas_014 sale de contar cuatro columnas, m036 de que exista la columna, hoy es la fecha de hoy',
-    ($s8Hechos['tenant'] ?? null) === $s8Base['tenant'] && ($s8Hechos['pedido'] ?? null) === $s8Base['pedido'] && ($s8Hechos['columnas_014'] ?? null) === true
+wa_chk('hechos (dobles): tenant y pedido son los recibidos, columnas_edicion sale de contar cuatro columnas, m036 de que exista la columna, hoy es la fecha de hoy',
+    ($s8Hechos['tenant'] ?? null) === $s8Base['tenant'] && ($s8Hechos['pedido'] ?? null) === $s8Base['pedido'] && ($s8Hechos['columnas_edicion'] ?? null) === true
     && ($s8Hechos['m036'] ?? null) === true && in_array($s8Hechos['hoy'] ?? null, [$s8Antes, $s8Despues], true), $s8Hechos);
 wa_chk('hechos (dobles): el emisor sale con sus cuatro campos como texto (NULL es ""), el almacen como bool, y el certificado de la fila (un archivo que no existe) es CERT_FALTA',
     ($s8Hechos['emisor'] ?? null) === ['rnc' => '131000001', 'razon_social' => 'CONSTRUCTORA X SRL', 'direccion' => 'Av. X #1', 'telefono' => '']
@@ -3124,8 +3124,8 @@ wa_chk('hechos (dobles): rol_user es la lista de permisos del rol user de ESA em
     ($s8Hechos['rol_user'] ?? null) === ['clients', 'facturas', 'products', 'unidades']
     && array_filter($s8CMaster, static fn (array $c): bool => str_contains($c['sql'], 'FROM roles') && in_array(12, array_map('intval', array_values($c['params'])), true)) !== [], $s8Hechos['rol_user'] ?? null);
 [$s8H2] = $s8Reunir(['columnas' => 3, 'm036' => 0, 'almacen' => false, 'rol' => false, 'ecf_facturas' => 3, 'refs_ecf' => 1, 'refs_total' => 1, 'clientes' => [31]]);
-wa_chk('hechos (dobles): con tres columnas es columnas_014 false, sin la columna es m036 false, sin almacen false, sin rol user es null, y los conteos salen tal cual',
-    $s8H2['columnas_014'] === false && $s8H2['m036'] === false && $s8H2['almacen'] === false && $s8H2['rol_user'] === null && $s8H2['ecf_facturas'] === 3
+wa_chk('hechos (dobles): con tres columnas es columnas_edicion false, sin la columna es m036 false, sin almacen false, sin rol user es null, y los conteos salen tal cual',
+    $s8H2['columnas_edicion'] === false && $s8H2['m036'] === false && $s8H2['almacen'] === false && $s8H2['rol_user'] === null && $s8H2['ecf_facturas'] === 3
     && $s8H2['clientes_prueba'] === ['ids' => [31], 'refs_ecf' => 1, 'refs_total' => 1], $s8H2);
 [$s8H3, , $s8C3] = $s8Reunir(['clientes' => []]);
 wa_chk('hechos (dobles): sin clientes de prueba sembrados no pregunta por sus facturas y trae ids [] con cero referencias',
@@ -3987,7 +3987,7 @@ foreach ([
 
 // --- la fuente: lo que no se mueve y lo que tiene que estar ------------------------------------------------------------------------------
 // El INSERT del tenant es el de master, letra por letra: el alta nace completa y la conversion es una llamada aparte (una fila Express nunca existe
-// antes de pasar su preflight; contratos 4: create_tenant.php ya no inserta las columnas de la 014).
+// antes de pasar su preflight; contratos 4: create_tenant.php ya no inserta las columnas de la 015).
 // Los dos literales son nowdocs de ESTE archivo: en un checkout con CRLF traen \r\n, y $s10Fuente ya viene con \n. Se normalizan los dos lados (la fuente arriba, el literal aqui).
 $s10Insert = str_replace("\r\n", "\n", <<<'SQL'
 'INSERT INTO tenants
@@ -3999,7 +3999,7 @@ $s10Insert = str_replace("\r\n", "\n", <<<'SQL'
          :db_pass_enc, :cert_path, :cert_pass_enc, :webhook_url, :webhook_sec_enc,
          :ambiente, 1)'
 SQL);
-wa_chk('create_tenant.php: el INSERT INTO tenants es el de master letra por letra, y es el unico (sin columnas de la 014: la conversion es una llamada aparte)',
+wa_chk('create_tenant.php: el INSERT INTO tenants es el de master letra por letra, y es el unico (sin columnas de la 015: la conversion es una llamada aparte)',
     substr_count($s10Fuente, $s10Insert) === 1 && substr_count($s10Fuente, 'INSERT INTO tenants') === 1);
 // El UPDATE de emisor_config de siempre no cambia: el telefono va en un segundo UPDATE y solo si se dio --telefono.
 $s10UpdateEmisor = str_replace("\r\n", "\n", <<<'SQL'
@@ -4181,7 +4181,7 @@ $s11Casos = [
     'una fila completa no se lista: sin tipos, con modulos mal escritos, con POS, sin certificado y sin rangos en ecf' => [
         $s11Fila(['edicion' => 'completa', 'tipos_ecf_habilitados' => null, 'modulos_habilitados' => 'cliente', 'pos_enabled' => 1, 'cert_path' => null, 'cert_vence' => null, 'ambiente' => 'ecf']), [], []],
     "una fila 'Completa' (con mayusculas) tampoco" => [$s11Fila(['edicion' => 'Completa', 'tipos_ecf_habilitados' => null]), null, []],
-    'una fila sin la columna edicion (una master sin la 014) no se revisa' => [array_diff_key($s11Fila(['tipos_ecf_habilitados' => null]), ['edicion' => 1]), null, []],
+    'una fila sin la columna edicion (una master sin la 015) no se revisa' => [array_diff_key($s11Fila(['tipos_ecf_habilitados' => null]), ['edicion' => 1]), null, []],
     'una fila con edicion NULL no se revisa' => [$s11Fila(['edicion' => null, 'tipos_ecf_habilitados' => null]), null, []],
     // Los tipos de e-CF.
     'tipos NULL' => [$s11Fila(['tipos_ecf_habilitados' => null]), null, ['TIPOS_VACIOS']],
@@ -4353,19 +4353,19 @@ $s11Consulta = $s11Cierre === null ? '' : trim((string) preg_replace('/\s+/', ' 
     array_filter(array_slice($s11Bloque, $s11Cierre + 1), static fn (string $l): bool => trim($l) !== '')
 ))));
 wa_chk("el verificador de la master trae una Consulta 4 con la condicion WHERE edicion <> 'completa'", $s11Inicio !== null && str_contains($s11Sql, "WHERE edicion <> 'completa'"), $s11Inicio);
-wa_chk('la Consulta 4 va escrita como la 2: un encabezado de guiones que dice que se corra SOLO cuando la fila 014 dice APLICADA, y despues la consulta, toda comentada',
-    $s11Encabezado !== '' && str_contains($s11Encabezado, 'SOLO') && str_contains($s11Encabezado, '014') && str_contains($s11Encabezado, 'APLICADA')
+wa_chk('la Consulta 4 va escrita como la 2: un encabezado de guiones que dice que se corra SOLO cuando la fila 015 dice APLICADA, y despues la consulta, toda comentada',
+    $s11Encabezado !== '' && str_contains($s11Encabezado, 'SOLO') && str_contains($s11Encabezado, '015') && str_contains($s11Encabezado, 'APLICADA')
     && array_filter($s11Bloque, static fn (string $l): bool => trim($l) !== '' && !str_starts_with(ltrim($l), '--')) === [], array_values(array_filter($s11Bloque, static fn (string $l): bool => trim($l) !== '' && !str_starts_with(ltrim($l), '--'))));
 wa_chk('la consulta de la Consulta 4 es la del contrato, sin cambiar una coma',
     $s11Consulta === "SELECT id, nombre, rnc, edicion, tipos_ecf_habilitados, modulos_habilitados, pos_enabled, cert_vence, (tipos_ecf_habilitados IS NULL OR TRIM(tipos_ecf_habilitados) = '') AS tipos_vacios FROM tenants WHERE edicion <> 'completa' ORDER BY id;",
     $s11Consulta);
-// Ni una linea con codigo del archivo (sin las lineas "--" ni lo que va entre comillas) nombra una columna de la 014: una corrida en una master sin ellas no da error,
-// y la fila 014 de arriba las nombra solo como texto (information_schema). Son tambien las lineas que lee tools/check_tenant_schema_orden.php.
+// Ni una linea con codigo del archivo (sin las lineas "--" ni lo que va entre comillas) nombra una columna de la 015: una corrida en una master sin ellas no da error,
+// y la fila 015 de arriba las nombra solo como texto (information_schema). Son tambien las lineas que lee tools/check_tenant_schema_orden.php.
 $s11Codigo = (string) preg_replace("/'(?:[^']|'')*'/", "''", (string) preg_replace('/^\s*--.*$/m', '', $s11Sql));
-wa_chk('el codigo del verificador (sin comentarios ni textos) no nombra edicion, modulos_habilitados, tipos_ecf_habilitados ni cert_vence: corre igual en una master sin la 014',
+wa_chk('el codigo del verificador (sin comentarios ni textos) no nombra edicion, modulos_habilitados, tipos_ecf_habilitados ni cert_vence: corre igual en una master sin la 015',
     $s11Sql !== '' && preg_match('/\b(edicion|modulos_habilitados|tipos_ecf_habilitados|cert_vence)\b/i', $s11Codigo) !== 1, $s11Codigo);
-wa_chk('la fila 014 y la fila 012 del verificador siguen como estaban (no se tocaron)',
-    preg_match("/SELECT '014', '014_tenants_edicion\\.sql',\\s*'columnas tenants\\.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',\\s*"
+wa_chk('la fila 015 y la fila 012 del verificador siguen como estaban (no se tocaron)',
+    preg_match("/SELECT '015', '015_tenants_edicion\\.sql',\\s*'columnas tenants\\.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',\\s*"
         . "\\(SELECT COUNT\\(\\*\\) FROM information_schema\\.COLUMNS\\s+WHERE TABLE_SCHEMA = DATABASE\\(\\) AND TABLE_NAME = 'tenants'\\s+"
         . "AND COLUMN_NAME IN \\('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence'\\)\\) = 4/", $s11Sql) === 1
     && preg_match("/SELECT '012', '012_pos\\.sql',/", $s11Sql) === 1);
@@ -4490,9 +4490,9 @@ wa_chk('el informe nombra a una empresa Express que esta en un grupo y conserva 
     && !str_contains(implode("\n", $s11LineasG), str_repeat('b', 64)) && !str_contains(implode("\n", $s11LineasG), 'tenant #9'), [$s11Error?->getMessage(), $s11Informe]);
 $s11M = $s11Maestro([$s11A], ['id', 'nombre', 'edicion', 'tipos_ecf_habilitados']);
 [$s11Informe, $s11Error] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
-wa_chk('sin dos de las columnas de la 014 (modulos_habilitados y cert_vence) sale con 2, nombra db/master_migrations/014_tenants_edicion.sql y las columnas que faltan, y ni siquiera lee tenants',
+wa_chk('sin dos de las columnas de la 015 (modulos_habilitados y cert_vence) sale con 2, nombra db/master_migrations/015_tenants_edicion.sql y las columnas que faltan, y ni siquiera lee tenants',
     $s11Error === null && ($s11Informe['codigo'] ?? null) === 2 && count($s11Informe['lineas'] ?? []) === 1
-    && str_contains($s11Informe['lineas'][0] ?? '', 'db/master_migrations/014_tenants_edicion.sql') && str_contains($s11Informe['lineas'][0] ?? '', 'Faltan en tenants: modulos_habilitados, cert_vence.')
+    && str_contains($s11Informe['lineas'][0] ?? '', 'db/master_migrations/015_tenants_edicion.sql') && str_contains($s11Informe['lineas'][0] ?? '', 'Faltan en tenants: modulos_habilitados, cert_vence.')
     && count(array_filter($s11Lee($s11M), static fn (string $sql): bool => str_contains($sql, 'FROM tenants'))) === 0, [$s11Error?->getMessage(), $s11Informe]);
 $s11M = $s11Maestro([$s11Fila(['id' => 5, 'nombre' => "Mala\n\x1b[31mPe\xc3\xb1a " . str_repeat('x', 200), 'tipos_ecf_habilitados' => null])]);
 [$s11Informe] = wa_con_log(static fn (): array => express_verificar($s11M, $s11Hoy));
@@ -4602,7 +4602,7 @@ foreach ([
 echo "\n== 12) El checklist de despliegue ==\n";
 $s12Lista = $s1Leer('docs/integrations/express-release-checklist.md');
 $s12Plano = trim((string) preg_replace('/\s+/', ' ', $s12Lista));   // el texto en una linea: la consulta del paso puede ir partida en varias
-$s12Migracion = strpos($s12Lista, '## 2. Migración master 014');
+$s12Migracion = strpos($s12Lista, '## 2. Migración master 015');
 $s12Consulta = strpos($s12Lista, "TABLE_NAME = 'api_tokens'");
 $s12Subir = strpos($s12Lista, '## 3. Subir el API');
 // validateToken (authModel) lee api_tokens.last_used y api_tokens.created_at para TODA empresa, la completa incluida, y traga el error de una columna que falta (valid false: un 401

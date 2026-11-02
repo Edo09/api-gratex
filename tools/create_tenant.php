@@ -59,7 +59,7 @@
  * se convierte con el mismo preflight de tools/tenant_edicion.php (tools/express_edicion_lib.php).
  * --tipos-ecf son los tipos de venta que la empresa emite (31, 32, 45 y, opcional, el 33; el 34 se
  * deriva solo) y se escriben exactos: un tipo mal escrito se rechaza. --edicion=completa es lo mismo
- * que no poner la bandera. Piden la migracion master 014 (db/master_migrations/014_tenants_edicion.sql):
+ * que no poner la bandera. Piden la migracion master 015 (db/master_migrations/015_tenants_edicion.sql):
  * sin ella la herramienta falla ANTES de crear nada.
  *   - Una sola orden termina bien con un --cert-path y un --cert-pass validos y sin vencer,
  *     --direccion, --telefono y --ambiente=testecf. En ecf una empresa nueva todavia no tiene los
@@ -136,7 +136,7 @@ $expressPedido = false; // --edicion=express: al terminar el alta, el tenant se 
 $tiposEcf = [];         // los tipos de venta de --tipos-ecf (solo con --edicion=express)
 $telefono = null;       // --telefono, ya validado: se escribe en emisor_config.telefono
 if (isset($opts['edicion']) || isset($opts['tipos-ecf']) || isset($opts['telefono'])) {
-    // Los tipos permitidos, las columnas de la migracion 014 y como nombrar lo que el operador tecleo salen de la
+    // Los tipos permitidos, las columnas de la migracion 015 y como nombrar lo que el operador tecleo salen de la
     // biblioteca del preflight. Se carga solo cuando llega una de estas banderas: el alta de siempre y la web no
     // cargan nada nuevo.
     require_once __DIR__ . '/express_edicion_lib.php';
@@ -328,7 +328,7 @@ if (!$tieneColumnaGrupo && ($grupoId !== null || $grupoSelf)) {
         . PHP_EOL . '   La columna tenants.grupo_id todavia no existe en esta base. Aplicala y reintenta.');
 }
 
-// --edicion=express: al terminar el alta, la conversion escribe las cuatro columnas de la migracion master 014.
+// --edicion=express: al terminar el alta, la conversion escribe las cuatro columnas de la migracion master 015.
 // Sin ellas se rechaza aqui, ANTES de crear la base y el tenant (despues quedaria un tenant a medias). Solo se
 // consulta cuando se pidio Express: el alta de siempre no hace ninguna consulta mas.
 if ($expressPedido) {
@@ -337,7 +337,7 @@ if ($expressPedido) {
         array_column($masterPdo->query('SHOW COLUMNS FROM tenants')->fetchAll(PDO::FETCH_ASSOC), 'Field')
     ));
     if ($faltan014 !== []) {
-        fail('--edicion=express requiere la migracion master 014 (db/master_migrations/014_tenants_edicion.sql).'
+        fail('--edicion=express requiere la migracion master 015 (db/master_migrations/015_tenants_edicion.sql).'
             . PHP_EOL . '   Faltan en tenants: ' . implode(', ', $faltan014) . '. Aplicala en la master y reintenta.');
     }
 }

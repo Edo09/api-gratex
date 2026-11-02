@@ -234,11 +234,11 @@ function express_preflight_rol_user(PDO $master, int $tenantId): ?array
  * @param array $tenant  la fila de master.tenants (SELECT *), tal cual
  * @param array $pedido  ['edicion' => 'express', 'tipos' => list<string>, 'modulos' => ?list<string>]
  * @return array{
- *     tenant:array, columnas_014:bool, m036:bool, cert:array{ok:bool,codigo:?string,vence:?int},
+ *     tenant:array, columnas_edicion:bool, m036:bool, cert:array{ok:bool,codigo:?string,vence:?int},
  *     emisor:?array{rnc:string,razon_social:string,direccion:string,telefono:string}, almacen:bool, pedido:array,
  *     rangos_ecf:list<array{type:string,numero_hasta:?int,current_value:int,fecha_vencimiento:?string}>, ecf_facturas:?int,
  *     clientes_prueba:array{ids:list<int>,refs_ecf:int,refs_total:int}, rol_user:?list<string>, hoy:string
- * } columnas_014: las cuatro columnas de la migracion master 014 existen; m036: facturas.idempotency_key existe en la base de la empresa;
+ * } columnas_edicion: las cuatro columnas de la migracion master 015 existen; m036: facturas.idempotency_key existe en la base de la empresa;
  *   cert: express_leer_certificado de la fila; emisor: la fila 1 de emisor_config (NULL como ''), o null si no hay; almacen: existe
  *   "Almacén Principal"; rangos_ecf: los rangos de ncf_sequences con ambiente ecf; ecf_facturas: cuantas facturas tienen ambiente_dgii ecf;
  *   clientes_prueba: los ids de los clientes de la DGII (RNC 131880681 y 533445861) y CUANTOS de ellos tienen una factura ecf (refs_ecf) o una
@@ -249,7 +249,7 @@ function express_preflight_hechos(PDO $master, ?PDO $tenantDb, array $tenant, ar
 {
     $hechos = [
         'tenant' => $tenant,
-        'columnas_014' => express_preflight_contar(
+        'columnas_edicion' => express_preflight_contar(
             $master,
             "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
              AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')"
@@ -415,9 +415,9 @@ function express_preflight_evaluar(array $hechos): array
             . 'sin pasar por las rutas, los modulos ni los tipos de Express, y al convertir se desactiva la credencial de esta (que puede ser la que el cliente usa para todo el grupo). '
             . 'Una empresa Express no puede estar en un grupo: no se convierte; sacala del grupo antes (grupo_id en NULL) si el cliente esta de acuerdo.');
 
-    $items['columnas'] = ($hechos['columnas_014'] ?? false) === true
-        ? $ok('Las cuatro columnas de la migracion master 014 existen en tenants.')
-        : $rechazar('Faltan columnas de la migracion master 014: aplica db/master_migrations/014_tenants_edicion.sql en la master.');
+    $items['columnas'] = ($hechos['columnas_edicion'] ?? false) === true
+        ? $ok('Las cuatro columnas de la migracion master 015 existen en tenants.')
+        : $rechazar('Faltan columnas de la migracion master 015: aplica db/master_migrations/015_tenants_edicion.sql en la master.');
 
     $items['m036'] = ($hechos['m036'] ?? false) === true
         ? $ok('facturas.idempotency_key existe en la base de la empresa (migracion de tenant 036).')
@@ -581,7 +581,7 @@ function express_preflight_evaluar(array $hechos): array
  * integracion en blanco) y el reseteo del rol user a los permisos del Facturador (config()['rol_user']; siempre, aunque el rol ya los tenga:
  * es idempotente y lo deja como dice la config de hoy).
  *
- * cert_vence (:v) es una columna DATE (migracion master 014, solo informativa): se escribe date('Y-m-d', notAfter) en la zona horaria por defecto
+ * cert_vence (:v) es una columna DATE (migracion master 015, solo informativa): se escribe date('Y-m-d', notAfter) en la zona horaria por defecto
  * de PHP, que es como la lee TenantEntitlements::estadoCertificado (el bloque certificado de GET /api/emisor), que cuenta los dias contra
  * date('Y-m-d') de esa misma zona. NULL si no se sabe el notAfter. Una fecha vieja no bloquea nada: la emision abre el certificado de verdad.
  *
@@ -1121,7 +1121,7 @@ function express_revertir(PDO $master, int $tenantId, bool $apply): array
         return $rechazo('tenant', "La empresa tiene que ser de tipo app (es tipo " . express_preflight_nombrar([(string) ($tenant['tipo'] ?? '')]) . '): una empresa de integracion no tiene edicion que revertir.');
     }
     if (!array_key_exists('edicion', $tenant)) {
-        return $rechazo('columnas', 'Faltan columnas de la migracion master 014: aplica db/master_migrations/014_tenants_edicion.sql en la master.');
+        return $rechazo('columnas', 'Faltan columnas de la migracion master 015: aplica db/master_migrations/015_tenants_edicion.sql en la master.');
     }
     TenantEntitlements::normalizarEdicion($tenant);   // una edicion guardada que no es ni completa ni express se trata como completa y se avisa en el log
     $guardada = (string) $tenant['edicion'];

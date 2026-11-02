@@ -37,7 +37,7 @@
  * Ninguna linea lleva claves, hashes ni rutas de certificado: el nombre de la empresa sale solo como ASCII imprimible y acotado, y los errores salen
  * con la clase, el archivo y el codigo del driver, nunca con el mensaje de una PDOException (trae usuario y servidor).
  *
- * Salida: 0 sin problemas, 1 hay problemas (o un error inesperado: [FALLO] en stderr), 2 la master no tiene las columnas de la migracion 014.
+ * Salida: 0 sin problemas, 1 hay problemas (o un error inesperado: [FALLO] en stderr), 2 la master no tiene las columnas de la migracion 015.
  *
  * La configuracion (MASTER_DB_*, MASTER_ENCRYPTION_KEY) la carga MasterDatabase desde el .env de la raiz; con variables de entorno hay que correrla
  * con -d variables_order=EGPCS (MasterDatabase lee $_ENV).
@@ -72,7 +72,7 @@ function express_verificar_ambiente_ecf(array $tenant): bool
  * (de api_secret_hash solo se dice que no esta en blanco, nunca su valor).
  *
  * Solo se revisa lo que no es completa. La edicion se lee como la lee la API (TenantEntitlements::normalizarEdicion: sin espacios y en minusculas): una fila
- * sin la columna o con edicion NULL (una master sin la 014) o completa da []; una que no es ni completa ni express da solo EDICION_DESCONOCIDA, porque la API la
+ * sin la columna o con edicion NULL (una master sin la 015) o completa da []; una que no es ni completa ni express da solo EDICION_DESCONOCIDA, porque la API la
  * trata como completa y los demas codigos juzgan una configuracion Express que esa fila no tiene (el aviso del log lo da quien arma el informe, no esta funcion).
  *
  * El certificado se juzga como GET /api/emisor (TenantEntitlements::estadoCertificado): por la fila, sin abrir el archivo. TIPOS_SIN_VENTA es el 33 sin ningun
@@ -255,14 +255,14 @@ function express_verificar_linea(array $tenant, array $problema): string
 
 /**
  * El informe: lee de la master las empresas cuya edicion no es completa (un SELECT) y arma una linea por problema. Solo lee. Sin las cuatro columnas de la
- * migracion master 014 no hay edicion que revisar: sale con 2 y una sola linea que nombra la migracion y lo que falta, sin leer tenants. Una empresa Express de
+ * migracion master 015 no hay edicion que revisar: sale con 2 y una sola linea que nombra la migracion y lo que falta, sin leer tenants. Una empresa Express de
  * tipo app en ecf abre ademas su base (express_conectar_tenant) para leer sus rangos; una de las demas no. Si esa base no se alcanza lanza, y quien llama
  * imprime el [FALLO]: cuando no hay rangos que juzgar, decir "Sin problemas." seria peor que decir que no se pudo.
  *
  * Una edicion que no es ni completa ni express se pasa por TenantEntitlements::normalizarEdicion, que la trata como completa y avisa en el log una vez por valor.
  *
  * @param int $hoy marca de tiempo unix de "ahora" (la de express_problemas_tenant)
- * @return array{codigo:int,lineas:list<string>} codigo 0 (lineas es Sin problemas.), 1 (una linea por problema) o 2 (faltan columnas de la 014)
+ * @return array{codigo:int,lineas:list<string>} codigo 0 (lineas es Sin problemas.), 1 (una linea por problema) o 2 (faltan columnas de la 015)
  */
 function express_verificar(PDO $master, int $hoy): array
 {
@@ -273,7 +273,7 @@ function express_verificar(PDO $master, int $hoy): array
     $faltan = array_values(array_diff(EXPRESS_COLUMNAS_VERIFICADAS, $columnas));
     if ($faltan !== []) {
         return ['codigo' => 2, 'lineas' => [
-            'La master no tiene las columnas de la migracion 014 (db/master_migrations/014_tenants_edicion.sql). Faltan en tenants: ' . implode(', ', $faltan)
+            'La master no tiene las columnas de la migracion 015 (db/master_migrations/015_tenants_edicion.sql). Faltan en tenants: ' . implode(', ', $faltan)
             . '. Aplicala en la master (tools/verificar_migraciones_master.sql dice si ya esta) y vuelve a correr esto.',
         ]];
     }

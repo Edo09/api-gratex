@@ -61,10 +61,10 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `cotizacion_formato` | varchar(40) | `gratex` (default) \| `ferreteria`: formato de cotización (master_migration 011). Solo por SQL; lo devuelve `GET /api/branding` |
 | `pos_enabled` | tinyint(1) | Default 0. `1` = el tenant tiene el POS. Se activa solo por SQL (master_migration 012) |
 | `inventario_estricto` | tinyint(1) | Default 0. `1` = la empresa bloquea facturas (e-CF y simples) que piden más de la existencia del sistema; `0` = vende sin existencia como siempre. Lo cambia un admin en Configuración (master_migration 013) |
-| `edicion` | enum | `completa` (default, el sistema entero) \| `express` (solo el plan Express). Un valor distinto se trata como `completa` (master_migration 014) |
-| `modulos_habilitados` | text NULL | Solo `express`: módulos permitidos, separados por coma. Solo puede quitar módulos del plan, nunca agregar. `NULL` o vacío = los cinco (master_migration 014) |
-| `tipos_ecf_habilitados` | varchar(64) NULL | Solo `express`: tipos de e-CF que puede vender, separados por coma (`31`, `32`, `45` y `33` solo si se lista; ej. `31,32,45`). `NULL` o vacío = no puede emitir (master_migration 014) |
-| `cert_vence` | date NULL | Vencimiento del certificado de la empresa. Informativa: nunca bloquea nada; la actualiza `tools/tenant_edicion.php` (master_migration 014) |
+| `edicion` | enum | `completa` (default, el sistema entero) \| `express` (solo el plan Express). Un valor distinto se trata como `completa` (master_migration 015) |
+| `modulos_habilitados` | text NULL | Solo `express`: módulos permitidos, separados por coma. Solo puede quitar módulos del plan, nunca agregar. `NULL` o vacío = los cinco (master_migration 015) |
+| `tipos_ecf_habilitados` | varchar(64) NULL | Solo `express`: tipos de e-CF que puede vender, separados por coma (`31`, `32`, `45` y `33` solo si se lista; ej. `31,32,45`). `NULL` o vacío = no puede emitir (master_migration 015) |
+| `cert_vence` | date NULL | Vencimiento del certificado de la empresa. Informativa: nunca bloquea nada; la actualiza `tools/tenant_edicion.php` (master_migration 015) |
 | `logo_path` | varchar | `logos/<tenant_id>.<ext>` |
 | `webhook_url`/`webhook_secret_encrypted` | varchar/varbinary | Push de documentos entrantes (integración) |
 | `activo` | tinyint(1) | |

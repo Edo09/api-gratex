@@ -4,7 +4,7 @@
  *
  * Una empresa (master.tenants) tiene una edicion: 'completa' (la app de siempre, sin restriccion alguna) o 'express'
  * (la app movil de facturacion: un subconjunto cerrado de modulos, tipos de comprobante y rutas). La columna es
- * master.tenants.edicion (migracion 014); este archivo dice QUE incluye Express y src/TenantEntitlements.php lo aplica.
+ * master.tenants.edicion (migracion 015); este archivo dice QUE incluye Express y src/TenantEntitlements.php lo aplica.
  *
  * Lo carga TenantEntitlements::config(), una sola vez por proceso. En las peticiones la clase solo se incluye despues
  * de comprobar que la empresa es Express, asi que una empresa completa nunca llega aqui. Un cambio en este archivo

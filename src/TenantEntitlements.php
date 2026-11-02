@@ -4,7 +4,7 @@ require_once(__DIR__ . '/TenantResolver.php');
 /**
  * TenantEntitlements — que incluye la edicion de una empresa (Fiscalpoint Express).
  *
- * master.tenants.edicion (migracion 014) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
+ * master.tenants.edicion (migracion 015) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
  * resuelve, para una empresa Express, lo que su fila le da: los modulos (el preset de config/editions.php angostado por
  * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen, el bloque que se le
  * entrega al cliente al iniciar sesion, que rutas de la API puede llamar (la guarda de rutas), cuando vence por
