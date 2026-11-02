@@ -13,6 +13,14 @@
 -- fallan, o duplican filas, si se repiten. Las nuevas (007 en adelante) se
 -- pueden repetir sin dano.
 --
+-- La 015 (edicion Express) agrega cuatro columnas a tenants (edicion,
+-- modulos_habilitados, tipos_ecf_habilitados y cert_vence): su fila dice APLICADA
+-- solo con las cuatro. Si dice FALTA porque quedo a medias, correrla de nuevo
+-- completa las que faltan.
+-- La 017 (edicion 'ambas') solo amplia el ENUM de tenants.edicion: su fila dice
+-- APLICADA cuando el tipo de la columna ya trae el valor 'ambas'. Necesita la 015.
+-- La 016 sigue reservada para el plan ITBIS (no esta escrita): no tiene fila aqui.
+--
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
 
@@ -102,6 +110,18 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ecf_integracion_backup'
                    AND COLUMN_NAME = 'estado_dgii')
+  UNION ALL
+  SELECT '015', '015_tenants_edicion.sql',
+         'columnas tenants.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+            AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')) = 4
+  UNION ALL
+  SELECT '017', '017_tenants_edicion_ambas.sql',
+         'tenants.edicion acepta el valor ambas',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+                   AND COLUMN_NAME = 'edicion' AND LOCATE('''ambas''', COLUMN_TYPE) > 0)
 ) m
 ORDER BY m.migracion;
 
@@ -126,3 +146,22 @@ ORDER BY m.migracion;
 -- los de tipo 'integracion' no tienen base propia).
 -- -----------------------------------------------------------------------------
 SELECT id, nombre, rnc, tipo, db_name FROM tenants ORDER BY id;
+
+-- -----------------------------------------------------------------------------
+-- Consulta 4 (edicion Express): las empresas que no son completa, para revisarlas
+-- despues de aplicar la 015, de convertir una empresa o de restaurar un respaldo
+-- de la master. Correrla SOLO si la fila 015 de arriba dice APLICADA: nombra
+-- columnas de la 015 y en una master que no las tiene daria error (por eso va
+-- comentada: para correrla quita el "-- " del principio de sus lineas y ejecutala
+-- sola; la ultima consulta que se ejecuta de este archivo sigue siendo la 3).
+-- Que mirar en cada fila (tools/verificar_express.php dice lo mismo y ademas
+-- revisa los modulos, el certificado y los rangos de ecf):
+--   edicion vacia ................... valor desconocido: la API la trata como completa, sin restricciones
+--   tipos_vacios = 1 ................ la empresa no puede emitir nada (tipos NULL o vacio)
+--   tipos_ecf_habilitados ........... solo 31, 32, 45 y 33, escritos exactos
+--   pos_enabled = 1 ................. Express no tiene POS
+--   cert_vence ...................... a 30 dias o menos, o ya pasada: renovar el certificado
+-- -----------------------------------------------------------------------------
+-- SELECT id, nombre, rnc, edicion, tipos_ecf_habilitados, modulos_habilitados, pos_enabled, cert_vence,
+--        (tipos_ecf_habilitados IS NULL OR TRIM(tipos_ecf_habilitados) = '') AS tipos_vacios
+-- FROM tenants WHERE edicion <> 'completa' ORDER BY id;

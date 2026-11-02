@@ -87,7 +87,10 @@ final class PosAuth
     /** El tenant tiene que ser tipo app y tener el POS activo (master.tenants.pos_enabled). */
     public static function exigirPosActivo(?array $tenant): void
     {
-        if ($tenant === null || ($tenant['tipo'] ?? 'app') !== 'app' || (int) ($tenant['pos_enabled'] ?? 0) !== 1) {
+        // Una empresa Express no tiene POS (edicion Express, plan 02), tampoco con pos_enabled en 1 en su fila. Solo la 'express'
+        // exacta: una 'ambas' usa la app completa y Express, y conserva su POS (el equipo del POS no es una sesion de Express).
+        if ($tenant === null || ($tenant['tipo'] ?? 'app') !== 'app' || (int) ($tenant['pos_enabled'] ?? 0) !== 1
+            || strtolower(trim((string) ($tenant['edicion'] ?? ''))) === 'express') {
             throw new PosError('El POS no está activo para esta empresa.', 403, 'POS_INACTIVO');
         }
     }

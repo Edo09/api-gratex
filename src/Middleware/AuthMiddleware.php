@@ -7,6 +7,14 @@ class AuthMiddleware
 {
     private $authModel;
 
+    /**
+     * Valores de edicion desconocidos que ya dejaron su linea de log en este proceso (una peticion). validateRequest corre mas
+     * de una vez por peticion (el gate y el controller): la linea sale una sola vez.
+     *
+     * @var array<string,true>
+     */
+    private static array $edicionesAvisadas = [];
+
     public function __construct()
     {
         $this->authModel = new authModel();
@@ -32,6 +40,40 @@ class AuthMiddleware
             getenv('MULTI_TENANT_ENABLED') ?: ($_ENV['MULTI_TENANT_ENABLED'] ?? false),
             FILTER_VALIDATE_BOOLEAN
         );
+    }
+
+    /**
+     * Deja UNA linea en el log por empresa y valor cuando master.tenants.edicion trae algo que no es completa, express ni ambas
+     * (el vacio incluido): la empresa se trata como completa y alguien tiene que corregir la fila. Se escribe aqui y no en
+     * TenantEntitlements porque el camino de una empresa que no es Express no carga esa clase. El valor sale cortado a 32
+     * caracteres y con todo lo que no es ASCII imprimible cambiado por '?': quien edite la columna no puede partir la linea.
+     */
+    private static function avisarEdicionDesconocida(array $tenant): void
+    {
+        $id = (int) ($tenant['id'] ?? 0);
+        $valor = (string) preg_replace('/[^\x20-\x7E]/', '?', substr((string) $tenant['edicion'], 0, 32));
+        $clave = $id . ':' . $valor;
+        if (isset(self::$edicionesAvisadas[$clave])) {
+            return;
+        }
+        self::$edicionesAvisadas[$clave] = true;
+        error_log('[Edicion] valor desconocido en el tenant #' . $id . ': ' . $valor);
+    }
+
+    /**
+     * Niega a una empresa Express con el 403 EDICION_NO_INCLUYE y corta la peticion. Es la respuesta de todo lo que no se puede decidir sobre ella (la clase de la edicion no carga,
+     * su config no se puede leer): es un 403 y no un valid=false, porque los llamadores vuelven ese 401 y el cliente cerraria la sesion. El codigo y el texto salen de
+     * TenantResolver, que esta cargada siempre.
+     */
+    private static function denegarEdicion(): never
+    {
+        http_response_code(403);
+        echo json_encode([
+            'status' => false,
+            'error' => TenantResolver::MSG_EDICION,
+            'codigo' => TenantResolver::CODIGO_EDICION_NO_INCLUYE,
+        ]);
+        exit;
     }
 
     /**
@@ -108,6 +150,52 @@ class AuthMiddleware
                         'tenant_id' => null,
                         'message' => 'Tenant inactivo o no encontrado'
                     ];
+                }
+            }
+
+            // Edicion Express (plan 02). La prueba va en linea y es falsa para una empresa completa, una de integracion o
+            // ninguna: ese camino sigue igual y TenantEntitlements ni se carga. Una empresa Express pasa por el vencimiento
+            // por inactividad y por la guarda de rutas ANTES de tocar last_used, asi que una peticion negada no mantiene
+            // viva una sesion. Una empresa 'ambas' (la app completa y Express) entra aqui solo con las peticiones que se anuncian
+            // como Express (cabecera X-Fiscalpoint-Edicion: express, ver TenantResolver::esFilaExpress); el resto de sus peticiones
+            // sigue por el camino de una completa, sin cargar la clase.
+            $tenantActual = TenantResolver::current();
+            if (TenantResolver::esFilaExpress($tenantActual)) {
+                if (!TenantResolver::cargarEntitlements()) {
+                    // Sin la clase no se puede decidir y una empresa Express no pasa sin que se decida (403, ver denegarEdicion).
+                    self::denegarEdicion();
+                }
+                // La identidad primero: la fila de auditoria de una negativa tiene que nombrar al usuario.
+                RequestContext::fromAuth([
+                    'user_id' => $validation['user_id'] ?? null,
+                    'tenant_id' => $validation['tenant_id'] ?? null,
+                    'role' => $validation['role'] ?? null,
+                ], $token);
+                // El vencimiento va antes que la guarda: un token ocioso recibe 401 en cualquier ruta. tokenCaducado lee los dias de inactividad de config/editions.php: un archivo que
+                // no compila, que lanza al cargarse o que falta no se vuelve un 500. Sin su config no se puede decidir y una empresa Express no pasa: el mismo 403 que sin la clase.
+                try {
+                    $caducado = TenantEntitlements::tokenCaducado($validation['last_used'] ?? null, $validation['created_at'] ?? null, time());
+                } catch (Throwable $e) {
+                    error_log('[AuthMiddleware] edicion: no se pudo decidir el vencimiento de la sesion de la empresa Express #' . (int) ($tenantActual['id'] ?? 0)
+                        . ' (config/editions.php no carga o es invalido): ' . get_class($e) . ': ' . substr(trim((string) preg_replace('/\s+/', ' ', $e->getMessage())), 0, 300) . '; se niega con 403');
+                    self::denegarEdicion();
+                }
+                if ($caducado) {
+                    $this->authModel->revokeTokenByHash(hash('sha256', $token));
+                    return [
+                        'valid' => false,
+                        'user_id' => null,
+                        'tenant_id' => null,
+                        'message' => 'Tu sesión venció por inactividad'
+                    ];
+                }
+                // Puede contestar 403 o 400 y cortar con exit: solo si deja pasar se llega a last_used.
+                TenantEntitlements::guardaRuta($validation['role'] ?? null);
+            } elseif (isset($tenantActual['edicion'])) {
+                // Un valor que no es completa, express ni ambas se trata como completa (ver avisarEdicionDesconocida).
+                $edicionFila = strtolower(trim((string) $tenantActual['edicion']));
+                if ($edicionFila !== 'completa' && $edicionFila !== 'express' && $edicionFila !== 'ambas') {
+                    self::avisarEdicionDesconocida($tenantActual);
                 }
             }
 
