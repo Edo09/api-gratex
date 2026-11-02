@@ -320,14 +320,14 @@ class authModel
 
     /**
      * La prueba de Express, en linea y sin cargar la clase de la edicion: false para una fila completa, de integracion o sin la
-     * columna edicion (master sin migrar), y para ninguna fila. Es la de TenantEntitlements::esRestringido (que ademas avisa
-     * una edicion desconocida: de eso se ocupa AuthMiddleware en la peticion siguiente), pero preguntarsela a esa clase la
-     * cargaria para todas las empresas.
+     * columna edicion (master sin migrar), y para ninguna fila; true para una 'express' y, para una 'ambas', solo si esta
+     * peticion se anuncia como Express (cabecera X-Fiscalpoint-Edicion): el login de la app completa de una empresa 'ambas' sale
+     * exactamente como el de una completa. Es TenantResolver::esFilaExpress, que no avisa una edicion desconocida (de eso se ocupa
+     * AuthMiddleware en la peticion siguiente), y preguntarsela a TenantEntitlements la cargaria para todas las empresas.
      */
     private static function esFilaExpress(?array $fila): bool
     {
-        return ($fila['tipo'] ?? 'app') === 'app'
-            && strtolower(trim((string) ($fila['edicion'] ?? ''))) === 'express';
+        return TenantResolver::esFilaExpress($fila);
     }
 
     /**

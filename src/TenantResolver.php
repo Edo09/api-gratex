@@ -27,6 +27,14 @@ class TenantResolver
     public const CODIGO_EDICION_NO_INCLUYE = 'EDICION_NO_INCLUYE';
     public const MSG_EDICION = 'Tu plan Express no incluye esta función';
 
+    /**
+     * Cabecera con la que el cliente de Fiscalpoint Express se anuncia en cada peticion (valor 'express'): en PHP llega como
+     * $_SERVER['HTTP_X_FISCALPOINT_EDICION']. Solo la mira esFilaExpress, para una empresa 'ambas'. Un cliente que la manda llega
+     * a Express por la misma ruta de la misma API: tiene que salir del mismo origen que la pagina (el CSP de Express ya lo exige),
+     * porque ninguno de los controllers la lista en su Access-Control-Allow-Headers.
+     */
+    public const CABECERA_EDICION = 'X-Fiscalpoint-Edicion';
+
     private static ?array $current = null;
 
     /** Resultado de cargarEntitlements() en este proceso; null = aun no se intento. */
@@ -36,6 +44,34 @@ class TenantResolver
     public static function current(): ?array
     {
         return self::$current;
+    }
+
+    /**
+     * ¿La peticion en curso se anuncia como de Fiscalpoint Express (CABECERA_EDICION con el valor express, sin espacios y en
+     * minusculas)? La cabecera solo RESTRINGE: la usa esFilaExpress para que una empresa 'ambas' corra esta peticion con los
+     * limites de Express, y nunca da mas de lo que la empresa ya tiene (quien la omite corre como la app completa, y una empresa
+     * 'completa' la ignora). Por eso no es una credencial: quitarla no abre nada que la misma cuenta no tenga ya en la app completa.
+     */
+    public static function peticionExpress(): bool
+    {
+        return strtolower(trim((string) ($_SERVER['HTTP_X_FISCALPOINT_EDICION'] ?? ''))) === 'express';
+    }
+
+    /**
+     * ¿Corre esta peticion, para la empresa de $fila, con los limites de Express? Es la prueba en linea que las peticiones hacen
+     * ANTES de cargar TenantEntitlements (esa clase no se incluye jamas para quien no la necesita), y la unica copia de la regla:
+     *   - tipo app y edicion 'express' (solo Express): siempre, sea cual sea la cabecera;
+     *   - tipo app y edicion 'ambas' (la app completa Y Express): solo si la peticion se anuncia como Express (peticionExpress);
+     *   - cualquier otra fila (completa, un valor desconocido, integracion, la columna ausente, ninguna fila): nunca.
+     * La edicion se lee sin espacios y en minusculas, como TenantEntitlements::normalizarEdicion. No escribe en el log.
+     */
+    public static function esFilaExpress(?array $fila): bool
+    {
+        if (($fila['tipo'] ?? 'app') !== 'app') {
+            return false;
+        }
+        $edicion = strtolower(trim((string) ($fila['edicion'] ?? '')));
+        return $edicion === 'express' || ($edicion === 'ambas' && self::peticionExpress());
     }
 
     public static function resolveByApiKey(string $apiKey): bool

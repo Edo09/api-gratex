@@ -43,8 +43,8 @@ class AuthMiddleware
     }
 
     /**
-     * Deja UNA linea en el log por empresa y valor cuando master.tenants.edicion trae algo que no es completa ni express (el
-     * vacio incluido): la empresa se trata como completa y alguien tiene que corregir la fila. Se escribe aqui y no en
+     * Deja UNA linea en el log por empresa y valor cuando master.tenants.edicion trae algo que no es completa, express ni ambas
+     * (el vacio incluido): la empresa se trata como completa y alguien tiene que corregir la fila. Se escribe aqui y no en
      * TenantEntitlements porque el camino de una empresa que no es Express no carga esa clase. El valor sale cortado a 32
      * caracteres y con todo lo que no es ASCII imprimible cambiado por '?': quien edite la columna no puede partir la linea.
      */
@@ -156,10 +156,11 @@ class AuthMiddleware
             // Edicion Express (plan 02). La prueba va en linea y es falsa para una empresa completa, una de integracion o
             // ninguna: ese camino sigue igual y TenantEntitlements ni se carga. Una empresa Express pasa por el vencimiento
             // por inactividad y por la guarda de rutas ANTES de tocar last_used, asi que una peticion negada no mantiene
-            // viva una sesion.
+            // viva una sesion. Una empresa 'ambas' (la app completa y Express) entra aqui solo con las peticiones que se anuncian
+            // como Express (cabecera X-Fiscalpoint-Edicion: express, ver TenantResolver::esFilaExpress); el resto de sus peticiones
+            // sigue por el camino de una completa, sin cargar la clase.
             $tenantActual = TenantResolver::current();
-            if (($tenantActual['tipo'] ?? 'app') === 'app'
-                && strtolower(trim((string) ($tenantActual['edicion'] ?? ''))) === 'express') {
+            if (TenantResolver::esFilaExpress($tenantActual)) {
                 if (!TenantResolver::cargarEntitlements()) {
                     // Sin la clase no se puede decidir y una empresa Express no pasa sin que se decida (403, ver denegarEdicion).
                     self::denegarEdicion();
@@ -191,9 +192,9 @@ class AuthMiddleware
                 // Puede contestar 403 o 400 y cortar con exit: solo si deja pasar se llega a last_used.
                 TenantEntitlements::guardaRuta($validation['role'] ?? null);
             } elseif (isset($tenantActual['edicion'])) {
-                // Un valor que no es completa ni express se trata como completa (ver avisarEdicionDesconocida).
+                // Un valor que no es completa, express ni ambas se trata como completa (ver avisarEdicionDesconocida).
                 $edicionFila = strtolower(trim((string) $tenantActual['edicion']));
-                if ($edicionFila !== 'completa' && $edicionFila !== 'express') {
+                if ($edicionFila !== 'completa' && $edicionFila !== 'express' && $edicionFila !== 'ambas') {
                     self::avisarEdicionDesconocida($tenantActual);
                 }
             }

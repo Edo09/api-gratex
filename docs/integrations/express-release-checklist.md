@@ -117,3 +117,47 @@ Y estas, del mismo apartado del anexo (14.5):
 - `tenants.activo = 0` no apaga nada: la recepción de la DGII resuelve la empresa por RNC con
   `activo = 1` y contestaría 404.
 - La edición se cambia con `tools/tenant_edicion.php`, nunca con un `UPDATE` a mano.
+---
+
+## 5. Una empresa que usa las dos versiones (`ambas`, migración master 017)
+
+Pedido del dueño (2026-11-02): una empresa tiene que poder usar **la app completa y Express** con el
+mismo login, la misma base y los mismos datos. `express` no sirve para eso (limita a la empresa
+entera), así que existe una tercera edición:
+
+| Edición | Qué recibe la empresa |
+| --- | --- |
+| `completa` | La app de siempre. Express le dice «cuenta no habilitada». |
+| `express` | Solo Express: **todas** sus peticiones tienen los límites de Express (la app completa deja de servirle). Su conversión apaga el POS y el control de existencias, deja en blanco la credencial de integración y resetea los permisos del rol `user`. |
+| `ambas` | La app completa **sin ningún límite** (igual que una `completa`, `TenantEntitlements` ni se carga) y Express: solo las peticiones que traen la cabecera `X-Fiscalpoint-Edicion: express` corren con los límites de Express (rutas permitidas, módulos, vencimiento de la sesión a los 30 días ociosos, RBAC siempre aplicado, bloque `entitlements` y bloque `certificado` de `GET /api/emisor`). |
+
+La cabecera **solo restringe**: quien la omite corre como la app completa (que esa cuenta ya tiene), y una
+empresa `completa` la ignora. El cliente de Express la manda en cada llamada; tiene que llamar a la API
+por el mismo origen de su página (el CSP de Express ya lo exige), porque ninguno de los controllers la
+lista en `Access-Control-Allow-Headers`. El POS de una empresa `ambas` sigue abierto (solo la `express`
+exacta lo cierra).
+
+Pasos (producción, los hace el dueño):
+
+1. **Respaldo** de la master. Requiere la 015 (la fila **015** del verificador dice `APLICADA`).
+2. Correr `tools/verificar_migraciones_master.sql`: la fila **017** dice `FALTA`.
+3. Aplicar `db/master_migrations/017_tenants_edicion_ambas.sql` con la master seleccionada. La última
+   fila (`base, ambas_ok`) tiene que decir `ambas_ok = 1`. Es idempotente: aplicarla otra vez no toca nada.
+   Solo amplía el ENUM de `tenants.edicion`: ninguna empresa cambia.
+4. El código se puede subir antes o después de la 017: sin ella ninguna empresa puede ser `ambas`.
+   **La 017 va antes de `--edicion=ambas`** (el preflight lo rechaza si falta: item `migracion017`).
+5. Pasar una empresa a `ambas`, ensayo primero y después `--apply`:
+   `php tools/tenant_edicion.php --tenant=ID --edicion=ambas --tipos=31,32,45` (con `--modulos=` si se
+   quiere angostar). Solo cambia la edición, los tipos, los módulos y el vencimiento del certificado (si el
+   archivo se puede leer): **no toca** el POS, el control de existencias, la credencial de integración, los
+   permisos de los roles ni los rangos. Un certificado que no se abre no frena la conversión (la app completa
+   tampoco emitiría con él): el informe lo avisa.
+6. `php tools/verificar_express.php`: para una `ambas` solo revisa lo que Express lee de su fila (tipos,
+   módulos y certificado); el POS, un grupo, la credencial de integración y los rangos son de la app completa.
+7. Probar con una cuenta de esa empresa: la app completa entra como siempre y Express entra con su
+   pantalla de facturas. Volver la empresa a `completa` (`--edicion=completa`) le quita Express y no cambia la
+   app completa.
+
+Reversa: bajar el API a una ola anterior deja a una empresa `ambas` leída como `completa` (la app completa
+sigue igual y Express dice «cuenta no habilitada»): es seguro. No restaurar un respaldo de la master anterior
+a la 017 con empresas `ambas`: MySQL guardaría la edición vacía, que la API trata como `completa`.

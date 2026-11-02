@@ -13,7 +13,7 @@
  * Que lista: toda empresa de master.tenants cuya edicion no sea completa, una linea por problema,
  *   tenant #<id> (<nombre>): <CODIGO> <detalle>
  * y "Sin problemas." cuando no hay nada que decir (tambien si ninguna empresa es Express). Los codigos:
- *   EDICION_DESCONOCIDA  la edicion no es ni completa ni express (el vacio incluido). La API la trata como completa: la empresa NO tiene restricciones.
+ *   EDICION_DESCONOCIDA  la edicion no es ni completa, ni express ni ambas (el vacio incluido). La API la trata como completa: la empresa NO tiene restricciones.
  *                        Es lo unico que se dice de una fila asi: los demas codigos solo juzgan filas Express.
  *   TIPOS_VACIOS         tipos_ecf_habilitados NULL, vacio o solo separadores: la empresa no puede emitir nada.
  *   TIPOS_INVALIDOS      un token fuera de 31, 32, 45 y 33, o que no es un numero (e45): no suma nada.
@@ -71,6 +71,9 @@ function express_verificar_ambiente_ecf(array $tenant): bool
  * RANGO_FALTANTE y RANGO_ILIMITADO. El detalle es una sola linea en ASCII: dice que pasa y que hacer, y nunca lleva la ruta del certificado ni nada secreto de la fila
  * (de api_secret_hash solo se dice que no esta en blanco, nunca su valor).
  *
+ * Una empresa 'ambas' (la app completa y Express) solo recibe los codigos de lo que Express lee de su fila (TIPOS_*, MODULOS_INVALIDOS y los del certificado):
+ * POS_ACTIVO, EN_GRUPO, INTEGRACION_ACTIVA y los de rangos son de una empresa solo Express y no se le dicen.
+ *
  * Solo se revisa lo que no es completa. La edicion se lee como la lee la API (TenantEntitlements::normalizarEdicion: sin espacios y en minusculas): una fila
  * sin la columna o con edicion NULL (una master sin la 015) o completa da []; una que no es ni completa ni express da solo EDICION_DESCONOCIDA, porque la API la
  * trata como completa y los demas codigos juzgan una configuracion Express que esa fila no tiene (el aviso del log lo da quien arma el informe, no esta funcion).
@@ -94,13 +97,16 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
     if ($edicion === 'completa') {
         return [];
     }
-    if ($edicion !== 'express') {
+    if ($edicion !== 'express' && $edicion !== 'ambas') {
         return [[
             'codigo' => 'EDICION_DESCONOCIDA',
-            'detalle' => 'edicion ' . express_valor_visible((string) $tenant['edicion']) . ' no es ni completa ni express: la API la trata como completa y la empresa no '
-                . 'tiene ninguna restriccion de Express. Corrigela con tools/tenant_edicion.php (--edicion=express con sus tipos, o --edicion=completa).',
+            'detalle' => 'edicion ' . express_valor_visible((string) $tenant['edicion']) . ' no es ni completa, ni express ni ambas: la API la trata como completa y la empresa no '
+                . 'tiene ninguna restriccion de Express. Corrigela con tools/tenant_edicion.php (--edicion=express o --edicion=ambas con sus tipos, o --edicion=completa).',
         ]];
     }
+    // Una 'ambas' (la app completa y Express) se juzga solo por lo que Express lee de su fila: tipos, modulos y certificado. El POS, el grupo, la credencial de
+    // integracion y los rangos de ecf son de la app completa, que esa empresa sigue usando: no son un problema suyo.
+    $soloExpress = $edicion === 'express';
 
     $config = TenantEntitlements::config();
     $problemas = [];
@@ -110,7 +116,7 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
         $problemas[] = [
             'codigo' => 'TIPOS_VACIOS',
             'detalle' => 'tipos_ecf_habilitados esta vacio (NULL, vacio o solo comas): la empresa no puede emitir ningun tipo. Es lo esperado solo si se dejo asi a proposito '
-                . 'para frenarla; si no, ponle sus tipos con tools/tenant_edicion.php --edicion=express --tipos=45 (o los que correspondan).',
+                . "para frenarla; si no, ponle sus tipos con tools/tenant_edicion.php --edicion={$edicion} --tipos=45 (o los que correspondan).",
         ];
     } else {
         $permitidos = express_preflight_tipos_permitidos();
@@ -142,7 +148,7 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
     }
 
     $pos = (int) ($tenant['pos_enabled'] ?? 0);
-    if ($pos !== 0) {
+    if ($soloExpress && $pos !== 0) {
         $problemas[] = [
             'codigo' => 'POS_ACTIVO',
             'detalle' => "pos_enabled esta en {$pos}: Express no tiene POS (la API lo trata como inactivo para Express, pero la fila deberia estar en 0).",
@@ -153,7 +159,7 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
     // de un grupo se alcanza con la credencial de cualquiera de sus hermanas (TenantResolver::switchToSibling): una fila Express con su hash vivo, o en un grupo, es una puerta abierta
     // para quien tenga esa credencial. Solo se juzga una Express de tipo app: una de integracion (aunque diga express) no esta restringida y su hash es lo que la autentica.
     $id = (int) ($tenant['id'] ?? 0);
-    if (($tenant['tipo'] ?? 'app') === 'app') {
+    if ($soloExpress && ($tenant['tipo'] ?? 'app') === 'app') {
         $grupo = $tenant['grupo_id'] ?? null;   // como TenantResolver::grupoId(): solo NULL y el vacio son sin grupo (y una columna ausente, un master sin la 008, tambien)
         if ($grupo !== null && $grupo !== '') {
             $problemas[] = [
@@ -197,7 +203,7 @@ function express_problemas_tenant(array $tenant, ?array $rangosEcf, int $hoy): a
         ];
     }
 
-    if ($rangosEcf !== null && express_verificar_ambiente_ecf($tenant)) {
+    if ($soloExpress && $rangosEcf !== null && express_verificar_ambiente_ecf($tenant)) {
         $fecha = date('Y-m-d', $hoy);
         $faltan = [];
         foreach (TenantEntitlements::tiposEfectivos($tenant) as $tipo) {

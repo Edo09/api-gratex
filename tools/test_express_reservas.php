@@ -22,4 +22,8 @@ wa_chk('la de Express ya no es la 014: esa la tomo integracion en master y el RE
 wa_chk('tenant 036 solo puede ser la de Express', array_diff($nombres('/db/migrations', '036'), ['036_facturas_idempotency.sql']) === []);
 wa_chk('el plan ITBIS no aterrizo con sus numeros viejos',
     !is_file($raiz . '/db/migrations/036_facturas_aplica_itbis.sql') && !is_file($raiz . '/db/master_migrations/013_tenants_itbis_simples.sql'));
+wa_chk('master 017 solo puede ser la de la edicion ambas (la 016 sigue reservada para ITBIS) y el README lo dice',
+    array_diff($nombres('/db/master_migrations', '017'), ['017_tenants_edicion_ambas.sql']) === []
+    && is_file($raiz . '/db/master_migrations/017_tenants_edicion_ambas.sql')
+    && preg_match('/Master 017.*ambas.*016 sigue reservada/s', $readme) === 1);
 wa_fin();

@@ -4,8 +4,11 @@ require_once(__DIR__ . '/TenantResolver.php');
 /**
  * TenantEntitlements — que incluye la edicion de una empresa (Fiscalpoint Express).
  *
- * master.tenants.edicion (migracion 015) es 'completa' (la app de siempre, sin restricciones) o 'express'. Esta clase
- * resuelve, para una empresa Express, lo que su fila le da: los modulos (el preset de config/editions.php angostado por
+ * master.tenants.edicion (migracion 015; el valor 'ambas' lo agrega la 017) es 'completa' (la app de siempre, sin restricciones),
+ * 'express' (la empresa solo usa Express: todas sus peticiones tienen los limites de Express) o 'ambas' (la empresa usa la app
+ * completa Y Express: solo las peticiones que se anuncian como Express, con la cabecera X-Fiscalpoint-Edicion, tienen esos
+ * limites; el resto corre como la app completa). Esta clase resuelve, para una peticion que corre como Express, lo que la fila
+ * de su empresa le da: los modulos (el preset de config/editions.php angostado por
  * modulos_habilitados), los tipos de e-CF (tipos_ecf_habilitados), los permisos que de ahi salen, el bloque que se le
  * entrega al cliente al iniciar sesion, que rutas de la API puede llamar (la guarda de rutas), cuando vence por
  * inactividad el token de su sesion (tokenCaducado) y el estado de su certificado, que Configuracion le muestra
@@ -114,12 +117,13 @@ final class TenantEntitlements
     }
 
     /**
-     * 'express' si la edicion de la fila, sin espacios y en minusculas, es exactamente express; 'completa' en
-     * cualquier otro caso.
+     * La edicion de la fila, sin espacios y en minusculas: 'express' (solo Express), 'ambas' (la app completa y Express) o
+     * 'completa' (la app de siempre); cualquier otro caso es 'completa'.
      *
-     * Un valor presente que no es ni completa ni express (el vacio incluido: es lo que MySQL guarda en un ENUM cuando
-     * se le da un valor invalido sin modo estricto) se trata como completa y escribe UNA linea en el log por valor
-     * distinto y por proceso. Una columna ausente (master sin migrar) o sin fila es lo de siempre: no escribe nada.
+     * Un valor presente que no es ni completa, express ni ambas (el vacio incluido: es lo que MySQL guarda en un ENUM cuando
+     * se le da un valor invalido sin modo estricto, o un 'ambas' en una master que no tiene la migracion 017) se trata como
+     * completa y escribe UNA linea en el log por valor distinto y por proceso. Una columna ausente (master sin migrar) o sin
+     * fila es lo de siempre: no escribe nada.
      */
     public static function normalizarEdicion(?array $tenant): string
     {
@@ -128,8 +132,8 @@ final class TenantEntitlements
             return 'completa';
         }
         $edicion = strtolower(trim((string) $valor));
-        if ($edicion === 'express') {
-            return 'express';
+        if ($edicion === 'express' || $edicion === 'ambas') {
+            return $edicion;
         }
         if ($edicion !== 'completa') {
             self::avisarEdicionDesconocida((string) $valor);
@@ -138,14 +142,30 @@ final class TenantEntitlements
     }
 
     /**
-     * ¿Es una empresa Express? Solo una de tipo app cuya edicion normaliza a express: una de integracion (sin base
-     * propia ni pantallas) nunca lo es, y la fila ausente o sin la columna tampoco.
+     * ¿Corre esta empresa la peticion en curso con los limites de Express? Solo una de tipo app: una de integracion (sin base
+     * propia ni pantallas) nunca lo es, y la fila ausente o sin la columna tampoco. Una 'express' (solo Express) siempre; una
+     * 'ambas' solo si la peticion se anuncia como Express (TenantResolver::peticionExpress): el resto de sus peticiones corre
+     * como la app completa, sin limite alguno.
      *
-     * Es la misma prueba que las peticiones hacen en linea antes de cargar esta clase.
+     * Es la misma prueba que las peticiones hacen en linea antes de cargar esta clase (TenantResolver::esFilaExpress), con el
+     * aviso de una edicion desconocida de normalizarEdicion de por medio.
      */
     public static function esRestringido(?array $tenant): bool
     {
-        return ($tenant['tipo'] ?? 'app') === 'app' && self::normalizarEdicion($tenant) === 'express';
+        if (($tenant['tipo'] ?? 'app') !== 'app') {
+            return false;
+        }
+        $edicion = self::normalizarEdicion($tenant);
+        return $edicion === 'express' || ($edicion === 'ambas' && TenantResolver::peticionExpress());
+    }
+
+    /**
+     * ¿Incluye la edicion de esta empresa a Express, sin importar la peticion? Una de tipo app 'express' o 'ambas'. Es lo que
+     * las herramientas de la linea de comandos (que no traen cabecera) preguntan; las peticiones usan esRestringido.
+     */
+    public static function tieneExpress(?array $tenant): bool
+    {
+        return ($tenant['tipo'] ?? 'app') === 'app' && in_array(self::normalizarEdicion($tenant), ['express', 'ambas'], true);
     }
 
     /** ¿Es Express la empresa resuelta en esta peticion? */
@@ -234,12 +254,16 @@ final class TenantEntitlements
      * El bloque user.entitlements que el login y /me entregan a una empresa Express. Se arma campo por campo con una
      * lista blanca: la fila de tenants lleva certificado, claves y secretos y jamas se serializa.
      *
+     * 'edicion' es la de la SESION: el bloque solo se arma para una peticion que corre como Express, y el cliente lo lee asi.
+     * Una empresa 'ambas' lo recibe con edicion 'express', igual que una 'express'.
+     *
      * @return array{edicion:string,tenant:array{id:int,nombre:string,rnc:string,ambiente:string},modulos:string[],tipos_ecf:string[],capacidades:array<string,bool>}
      */
     public static function bloque(array $tenant): array
     {
+        $edicion = self::normalizarEdicion($tenant);
         return [
-            'edicion' => self::normalizarEdicion($tenant),
+            'edicion' => $edicion === 'ambas' ? 'express' : $edicion,
             'tenant' => [
                 'id' => (int) ($tenant['id'] ?? 0),
                 'nombre' => (string) ($tenant['nombre'] ?? ''),

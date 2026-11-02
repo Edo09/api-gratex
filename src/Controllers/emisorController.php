@@ -68,10 +68,10 @@ if ($tenant && isset($tenant['ambiente'])) {
 $emisor['fuente'] = 'emisor_config';
 
 // Fiscalpoint Express: el estado del certificado (vigente, por_vencer, vencido, no_configurado o sin_dato), solo informativo y
-// solo para una empresa de esa edicion. La prueba va en linea para que ninguna otra empresa cargue TenantEntitlements; si la clase
-// no carga, la clave se omite: el aviso es un extra y Configuracion sigue leyendo los datos del emisor.
-if (($tenant['tipo'] ?? 'app') === 'app' && strtolower(trim((string) ($tenant['edicion'] ?? ''))) === 'express'
-    && TenantResolver::cargarEntitlements()) {
+// solo para una empresa de esa edicion (una 'ambas' la recibe unicamente en las peticiones que se anuncian como Express). La prueba va
+// en linea para que ninguna otra empresa cargue TenantEntitlements; si la clase no carga, la clave se omite: el aviso es un extra y
+// Configuracion sigue leyendo los datos del emisor.
+if (TenantResolver::esFilaExpress($tenant) && TenantResolver::cargarEntitlements()) {
     $emisor['certificado'] = TenantEntitlements::estadoCertificado($tenant);
 }
 

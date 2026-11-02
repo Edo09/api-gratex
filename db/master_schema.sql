@@ -57,8 +57,8 @@ CREATE TABLE IF NOT EXISTS tenants (
                         COMMENT '1 = el tenant tiene el POS (pos.fiscalpoint.com.do). Se activa solo por SQL. Ver master_migrations/012',
   inventario_estricto TINYINT(1)     NOT NULL DEFAULT 0
                         COMMENT '1 = la empresa bloquea facturas (e-CF y simples) que piden mas de la existencia del sistema. 0 = vende sin existencia como siempre. Lo cambia un admin en Configuracion. Ver master_migrations/013',
-  edicion             ENUM('completa','express') NOT NULL DEFAULT 'completa'
-                        COMMENT 'Edicion del plan. completa = el sistema entero, como siempre. express = solo los modulos del plan Express (modulos_habilitados puede quitar alguno) y los tipos de e-CF de tipos_ecf_habilitados. Un valor distinto se trata como completa. Se cambia con tools/tenant_edicion.php, que revisa antes de cambiar. Ver master_migrations/015',
+  edicion             ENUM('completa','express','ambas') NOT NULL DEFAULT 'completa'
+                        COMMENT 'Edicion del plan. completa = el sistema entero, como siempre. express = la empresa solo usa Express: todas sus peticiones tienen los limites de Express (modulos_habilitados puede quitar alguno y tipos_ecf_habilitados dice los tipos de e-CF). ambas = la app completa Y Express: solo las peticiones que se anuncian como Express (cabecera X-Fiscalpoint-Edicion) tienen esos limites. Un valor distinto se trata como completa. Se cambia con tools/tenant_edicion.php, que revisa antes de cambiar. Ver master_migrations/015 y 017',
   modulos_habilitados TEXT           NULL
                         COMMENT 'Solo express: modulos permitidos, separados por coma (facturacion, clientes, productos, usuarios, configuracion). Solo puede quitar modulos del plan, nunca agregar. NULL o vacio = los cinco. Ver master_migrations/015',
   tipos_ecf_habilitados VARCHAR(64)  NULL

@@ -1069,6 +1069,246 @@ function express_convertir(PDO $master, int $tenantId, array $pedido, bool $appl
     return ['ok' => true, 'aplicado' => true, 'evaluacion' => $evaluacion, 'plan' => $plan, 'lineas' => $lineas];
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+// La edicion 'ambas' (la app completa Y Express): una conversion corta, aparte de la de Express.
+// ---------------------------------------------------------------------------------------------------------------------------------------------------
+//
+// Una empresa 'express' queda limitada a Express en TODAS sus peticiones, y por eso su conversion apaga el POS y el control de existencias, deja en
+// blanco la credencial de integracion, resetea los permisos del rol user, borra rangos y clientes de prueba: todo eso es para que una empresa que
+// solo vende por Express no tenga lo demas. Una 'ambas' sigue usando la app completa, y esas bajas le romperian la app que ya usa: su conversion NO
+// las hace. Solo cambia la edicion, los tipos, los modulos y (si se puede leer el certificado) el vencimiento del certificado.
+
+/**
+ * Los hechos de una empresa que la evaluacion de 'ambas' necesita: la fila, las dos pruebas de esquema de la master (las cuatro columnas de la
+ * 015 y el valor 'ambas' en el ENUM, de la 017), el certificado leido como lo hace la emision (solo para saber cert_vence) y el pedido. Solo SELECT,
+ * y solo en la master: la base de la empresa no se abre.
+ *
+ * @param array $tenant la fila de master.tenants (SELECT *), tal cual
+ * @param array $pedido ['edicion' => 'ambas', 'tipos' => list<string>, 'modulos' => ?list<string>]
+ * @return array{tenant:array,columnas_edicion:bool,edicion_ambas:bool,cert:array{ok:bool,codigo:?string,vence:?int},pedido:array}
+ */
+function express_preflight_hechos_ambas(PDO $master, array $tenant, array $pedido): array
+{
+    return [
+        'tenant' => $tenant,
+        'columnas_edicion' => express_preflight_contar(
+            $master,
+            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+             AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')"
+        ) === 4,
+        'edicion_ambas' => express_preflight_contar(
+            $master,
+            "SELECT COUNT(*) AS n FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+             AND COLUMN_NAME = 'edicion' AND LOCATE('''ambas''', COLUMN_TYPE) > 0"
+        ) === 1,
+        'cert' => express_leer_certificado($tenant),
+        'pedido' => $pedido,
+    ];
+}
+
+/**
+ * Evalua los hechos de una conversion a 'ambas' item por item. Es pura (no toca una base, ni el log, ni lo que recibe). Los items, en este orden:
+ * tenant, columnas, migracion017, tipos, modulos, clientes_modulo, cert, edicion. Cada uno es ['estado' => 'ok'|'corregir'|'rechazar', 'detalle' => texto]
+ * como los de express_preflight_evaluar, y las reglas de tipos, modulos y clientes_modulo son las mismas. A diferencia de Express, un certificado que
+ * no se puede abrir NO rechaza (la app completa tampoco emitiria con el: es un aviso en el detalle) y ninguna condicion de la empresa (POS, existencias,
+ * rangos, grupo, credencial de integracion, roles) rechaza ni se corrige: la conversion no las toca.
+ *
+ * sin_cambios es true si la empresa ya es ambas con esos mismos tipos y modulos y la fecha del certificado ya es la del archivo (o no se pudo leer):
+ * no hay nada que escribir. Los rechazos y las acciones salen como en la evaluacion de Express.
+ *
+ * @param array $hechos lo que devuelve express_preflight_hechos_ambas (una clave que falte cuenta como el peor caso)
+ * @return array{items:array<string,array{estado:string,detalle:string}>,nuevo:bool,rechazos:list<string>,acciones:list<string>,sin_cambios:bool}
+ */
+function express_preflight_evaluar_ambas(array $hechos): array
+{
+    $config = TenantEntitlements::config();
+    $tenant = (array) ($hechos['tenant'] ?? []);
+    $pedido = (array) ($hechos['pedido'] ?? []);
+    $tipos = array_map('strval', array_values((array) ($pedido['tipos'] ?? [])));
+    $modulos = ($pedido['modulos'] ?? null) === null ? null : array_map('strval', array_values((array) $pedido['modulos']));
+    $cert = (array) ($hechos['cert'] ?? []);
+
+    $ok = static fn (string $detalle): array => ['estado' => 'ok', 'detalle' => $detalle];
+    $corregir = static fn (string $detalle): array => ['estado' => 'corregir', 'detalle' => $detalle];
+    $rechazar = static fn (string $detalle): array => ['estado' => 'rechazar', 'detalle' => $detalle];
+    $items = [];
+
+    $items['tenant'] = ($tenant['tipo'] ?? 'app') === 'app' && (int) ($tenant['activo'] ?? 0) === 1
+        ? $ok('La empresa es de tipo app y esta activa.')
+        : $rechazar('La empresa tiene que ser de tipo app y estar activa (tipo ' . express_preflight_nombrar([$tenant['tipo'] ?? 'app'])
+            . ', activo ' . (int) ($tenant['activo'] ?? 0) . ').');
+
+    $items['columnas'] = ($hechos['columnas_edicion'] ?? false) === true
+        ? $ok('Las cuatro columnas de la migracion master 015 existen en tenants.')
+        : $rechazar('Faltan columnas de la migracion master 015: aplica db/master_migrations/015_tenants_edicion.sql en la master.');
+
+    $items['migracion017'] = ($hechos['edicion_ambas'] ?? false) === true
+        ? $ok("tenants.edicion acepta el valor 'ambas' (migracion master 017).")
+        : $rechazar("Falta la migracion master 017: tenants.edicion no acepta el valor 'ambas'. Aplica db/master_migrations/017_tenants_edicion_ambas.sql en la master.");
+
+    $permitidos = express_preflight_tipos_permitidos();
+    $fueraDeTipos = array_values(array_diff($tipos, $permitidos));
+    if ($tipos === []) {
+        $items['tipos'] = $rechazar('No se pidio ningun tipo de venta: indica al menos uno (' . implode(', ', $permitidos) . ').');
+    } elseif ($fueraDeTipos !== []) {
+        $items['tipos'] = $rechazar('Tipos que Express no vende: ' . express_preflight_nombrar($fueraDeTipos) . '. Se piden solo ' . implode(', ', $permitidos)
+            . ' (el 34, la nota de credito, se deriva solo; el 33 es opcional).');
+    } else {
+        $items['tipos'] = $ok('Tipos pedidos: ' . implode(', ', $tipos) . '.');
+    }
+
+    $preset = $config['modulos'];
+    $fueraDeModulos = $modulos === null ? [] : array_values(array_diff($modulos, $preset));
+    $items['modulos'] = $fueraDeModulos === []
+        ? $ok($modulos === null || $modulos === [] ? 'Sin lista de modulos: la empresa recibe todo el preset.' : 'Modulos pedidos: ' . implode(', ', $modulos) . '.')
+        : $rechazar('Modulos que no estan en el preset: ' . express_preflight_nombrar($fueraDeModulos) . '. El preset es ' . implode(', ', $preset)
+            . ' y se escriben exactos, sin mayusculas ni sinonimos.');
+
+    $efectivos = TenantEntitlements::modulosEfectivos(['modulos_habilitados' => $modulos === null ? null : implode(',', $modulos)]);
+    if (array_intersect(['31', '45'], $tipos) === []) {
+        $items['clientes_modulo'] = $ok('No se piden los tipos 31 ni 45: no hace falta el modulo clientes.');
+    } elseif (in_array('clientes', $efectivos, true)) {
+        $items['clientes_modulo'] = $ok('Los tipos 31 y 45 piden el modulo clientes y la empresa lo tiene.');
+    } else {
+        $items['clientes_modulo'] = $rechazar('Los tipos 31 y 45 piden el modulo clientes y no esta entre los modulos de la empresa ('
+            . ($efectivos === [] ? 'ninguno' : implode(', ', $efectivos)) . ').');
+    }
+
+    $vence = is_int($cert['vence'] ?? null) ? date('Y-m-d', $cert['vence']) : null;
+    if (($cert['ok'] ?? false) === true && ($cert['codigo'] ?? null) === null) {
+        $items['cert'] = $ok("Certificado propio legible, con su clave y vigente hasta {$vence}: cert_vence se escribe con esa fecha.");
+    } elseif (($cert['codigo'] ?? null) === 'CERT_VENCIDO' && $vence !== null) {
+        $items['cert'] = $ok("Aviso: CERT_VENCIDO, el certificado de la empresa ya vencio el {$vence}. No frena la conversion (la app completa tampoco emitiria con el); "
+            . 'cert_vence se escribe con esa fecha. Renuevalo con tools/set_tenant_cert.php.');
+    } else {
+        $items['cert'] = $ok('Aviso: CERT_FALTA, la empresa no tiene un certificado propio que se pueda abrir desde aqui (cert_path vacio, archivo que no se lee, o clave que '
+            . 'falta o no lo abre). No frena la conversion; cert_vence queda como esta. Cargalo con tools/set_tenant_cert.php.');
+    }
+    $vence = ($cert['ok'] ?? false) === true || ($cert['codigo'] ?? null) === 'CERT_VENCIDO' ? $vence : null;
+
+    $actual = TenantEntitlements::normalizarEdicion($tenant);
+    $mismosTipos = TenantEntitlements::csv(isset($tenant['tipos_ecf_habilitados']) ? (string) $tenant['tipos_ecf_habilitados'] : null) === $tipos;
+    $mismosModulos = TenantEntitlements::csv(isset($tenant['modulos_habilitados']) ? (string) $tenant['modulos_habilitados'] : null) === ($modulos ?? []);
+    $mismaFecha = $vence === null || (isset($tenant['cert_vence']) && substr((string) $tenant['cert_vence'], 0, 10) === $vence);
+    $sinCambios = $actual === 'ambas' && (string) ($tenant['edicion'] ?? '') === 'ambas' && $mismosTipos && $mismosModulos && $mismaFecha;
+    if ($sinCambios) {
+        $items['edicion'] = $ok('La empresa ya es ambas con esos tipos y esos modulos.');
+    } elseif ($actual === 'ambas') {
+        $items['edicion'] = $corregir('La empresa ya es ambas: se actualizan sus tipos, modulos o la fecha del certificado.');
+    } else {
+        $items['edicion'] = $corregir("La edicion pasa de {$actual} a ambas. El POS, el control de existencias, la credencial de integracion y los permisos de los roles se quedan como estan.");
+    }
+
+    return [
+        'items' => $items,
+        'nuevo' => false,
+        'rechazos' => array_keys(array_filter($items, static fn (array $item): bool => $item['estado'] === 'rechazar')),
+        'acciones' => array_keys(array_filter($items, static fn (array $item): bool => $item['estado'] === 'corregir')),
+        'sin_cambios' => $sinCambios,
+    ];
+}
+
+/**
+ * El plan de una conversion a 'ambas': UN paso en la master, o [] si la evaluacion rechaza algo o no hay nada que cambiar. Es pura. El UPDATE pone
+ * edicion = 'ambas', los tipos y los modulos (NULL si no se pidio lista) y, solo si el certificado se pudo leer, cert_vence; no toca ninguna otra
+ * columna ni ninguna otra tabla. Todo valor va en parametros.
+ *
+ * @return list<array{donde:string,que:string,sql:string,params:array<string,mixed>}>
+ */
+function express_plan_ambas(array $hechos, array $evaluacion): array
+{
+    $hayRechazo = ($evaluacion['rechazos'] ?? []) !== []
+        || array_filter((array) ($evaluacion['items'] ?? []), static fn ($item): bool => ($item['estado'] ?? null) === 'rechazar') !== [];
+    if ($hayRechazo || ($evaluacion['sin_cambios'] ?? false) === true) {
+        return [];
+    }
+    $pedido = (array) ($hechos['pedido'] ?? []);
+    $cert = (array) ($hechos['cert'] ?? []);
+    $vence = is_int($cert['vence'] ?? null) && (($cert['ok'] ?? false) === true || ($cert['codigo'] ?? null) === 'CERT_VENCIDO') ? date('Y-m-d', $cert['vence']) : null;
+    $modulos = array_values(array_unique(array_map('strval', (array) ($pedido['modulos'] ?? []))));
+    $params = [
+        ':t' => implode(',', array_values(array_unique(array_map('strval', (array) ($pedido['tipos'] ?? []))))),
+        ':m' => $modulos === [] ? null : implode(',', $modulos),
+        ':id' => (int) (((array) ($hechos['tenant'] ?? []))['id'] ?? 0),
+    ];
+    if ($vence !== null) {
+        $params[':v'] = $vence;   // DATE: el dia del notAfter en la zona de PHP, como lo lee estadoCertificado
+    }
+    return [[
+        'donde' => 'master',
+        'que' => 'Pasar la empresa a ambas (la app completa y Express) con sus tipos' . ($vence !== null ? ', modulos y el vencimiento de su certificado' : ' y modulos')
+            . '; no se toca nada mas',
+        'sql' => "UPDATE tenants SET edicion = 'ambas', tipos_ecf_habilitados = :t, modulos_habilitados = :m" . ($vence !== null ? ', cert_vence = :v' : '') . " WHERE id = :id AND tipo = 'app'",
+        'params' => $params,
+    ]];
+}
+
+/**
+ * Pasa una empresa a 'ambas', o dice por que no: hechos, evaluacion y plan cortos (express_preflight_hechos_ambas, express_preflight_evaluar_ambas y
+ * express_plan_ambas) y, con $apply y sin rechazos, express_aplicar con su fila de auditoria (la misma EDICION_CAMBIO de las demas ordenes; la
+ * base de la empresa no se abre). Sin $apply solo lee, y solo en la master.
+ *
+ * El informe: el encabezado, un renglon por item ([OK  ], [CORR] o [RECH]) y, segun el caso, "RECHAZADO: <n> item(s). No se cambio nada.", "SIN CAMBIOS: ...",
+ * los pasos del plan y "DRY-RUN: no se escribio nada. Agrega --apply para aplicar." o "APLICADO: el tenant #<id> ahora es ambas.".
+ *
+ * @param array $pedido ['edicion' => 'ambas', 'tipos' => list<string>, 'modulos' => ?list<string>] (otra edicion lanza InvalidArgumentException)
+ * @return array{ok:bool,aplicado:bool,evaluacion:array,plan:list<array>,lineas:list<string>}
+ */
+function express_convertir_ambas(PDO $master, int $tenantId, array $pedido, bool $apply): array
+{
+    $edicionPedida = $pedido['edicion'] ?? 'ambas';
+    if ($edicionPedida !== 'ambas') {
+        throw new InvalidArgumentException('express_convertir_ambas solo convierte a ambas (el pedido trae la edicion ' . express_preflight_nombrar([(string) $edicionPedida])
+            . '): para Express esta express_convertir y para volver a completa express_revertir.');
+    }
+    $tenant = express_tenant_fila($master, $tenantId);
+    if ($tenant === null) {
+        $items = express_item_sin_empresa($tenantId);
+        return [
+            'ok' => false, 'aplicado' => false,
+            'evaluacion' => ['items' => $items, 'nuevo' => false, 'rechazos' => ['tenant'], 'acciones' => [], 'sin_cambios' => false],
+            'plan' => [], 'lineas' => express_lineas_rechazo($items),
+        ];
+    }
+    $actual = TenantEntitlements::normalizarEdicion($tenant);   // una edicion guardada que no es ni completa, express ni ambas se trata como completa y se avisa en el log
+    $hechos = express_preflight_hechos_ambas($master, $tenant, $pedido);
+    $evaluacion = express_preflight_evaluar_ambas($hechos);
+    $plan = express_plan_ambas($hechos, $evaluacion);
+
+    $modulos = ($pedido['modulos'] ?? null) === null ? [] : array_values((array) $pedido['modulos']);
+    $lineas = [express_encabezado(
+        $tenant,
+        $tenantId,
+        "edicion {$actual} -> ambas, tipos " . ((array) ($pedido['tipos'] ?? []) === [] ? '(ninguno)' : express_preflight_nombrar((array) $pedido['tipos']))
+        . ($modulos === [] ? ', todos los modulos del preset.' : ', modulos ' . express_preflight_nombrar($modulos) . '.')
+    )];
+    $lineas = array_merge($lineas, express_lineas_evaluacion($evaluacion));
+    $rechazos = count($evaluacion['rechazos']);
+    if ($rechazos > 0) {
+        $lineas[] = "RECHAZADO: {$rechazos} item(s). No se cambio nada.";
+        return ['ok' => false, 'aplicado' => false, 'evaluacion' => $evaluacion, 'plan' => [], 'lineas' => $lineas];
+    }
+    if ($evaluacion['sin_cambios']) {
+        $lineas[] = "SIN CAMBIOS: el tenant #{$tenantId} ya es ambas con esos tipos y modulos. No se escribio nada.";
+        return ['ok' => true, 'aplicado' => false, 'evaluacion' => $evaluacion, 'plan' => [], 'lineas' => $lineas];
+    }
+    $lineas = array_merge($lineas, express_lineas_plan($plan));
+    if (!$apply) {
+        $lineas[] = 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.';
+        return ['ok' => true, 'aplicado' => false, 'evaluacion' => $evaluacion, 'plan' => $plan, 'lineas' => $lineas];
+    }
+
+    // Lo que el plan va a dejar sale de los parametros de su UPDATE. cert_vence solo cambia si el plan lo escribe: si no, queda lo que la fila tiene.
+    $params = $plan[0]['params'];
+    $cambios = ['edicion' => 'ambas', 'tipos_ecf_habilitados' => $params[':t'], 'modulos_habilitados' => $params[':m']];
+    if (array_key_exists(':v', $params)) {
+        $cambios['cert_vence'] = $params[':v'];
+    }
+    express_aplicar($master, null, $plan, express_auditoria($tenant, $cambios, "Conversion de la empresa #{$tenantId} a ambas (tipos {$params[':t']})"));
+    $lineas[] = "APLICADO: el tenant #{$tenantId} ahora es ambas.";
+    return ['ok' => true, 'aplicado' => true, 'evaluacion' => $evaluacion, 'plan' => $plan, 'lineas' => $lineas];
+}
+
 /**
  * El hash de integracion que una conversion dejo en blanco y la bitacora guardo: el integracion_hash_anterior de old_values de la fila de
  * auditoria EDICION_CAMBIO mas nueva de la empresa que trae uno, o null si ninguna lo trae. Solo cuenta un sha256 en hexadecimal (el que guarda
@@ -1132,7 +1372,7 @@ function express_revertir(PDO $master, int $tenantId, bool $apply): array
     $items = ['tenant' => ['estado' => 'ok', 'detalle' => 'La empresa es de tipo app.']];
     if ($yaCompleta) {
         $items['edicion'] = ['estado' => 'ok', 'detalle' => 'La edicion ya es completa.'];
-    } elseif (in_array($guardada, ['express', 'completa'], true)) {
+    } elseif (in_array($guardada, ['express', 'ambas', 'completa'], true)) {
         $items['edicion'] = ['estado' => 'corregir', 'detalle' => "La edicion pasa de {$guardada} a completa."];
     } else {
         $items['edicion'] = ['estado' => 'corregir', 'detalle' => 'La edicion guardada (' . express_valor_visible($guardada) . ') no es valida y se trata como completa: se reescribe como completa.'];
@@ -1167,8 +1407,11 @@ function express_revertir(PDO $master, int $tenantId, bool $apply): array
         return ['ok' => true, 'aplicado' => false, 'plan' => [], 'lineas' => $lineas];
     }
     $lineas = array_merge($lineas, express_lineas_plan($plan), [
-        'ADVERTENCIA: volver a completa levanta TODAS las restricciones de Express (modulos, tipos, rutas y vencimiento de las sesiones por inactividad) y no es una parada segura. '
-            . 'Para frenar a una empresa Express hay otras palancas: dejar vacio tipos_ecf_habilitados (se niega toda emision) o revocar los tokens de la empresa.',
+        $guardada === 'ambas'
+            ? 'ADVERTENCIA: volver a completa le quita a la empresa el acceso a Express (sus sesiones de Express dejan de traer el bloque de la edicion y la pantalla dice que la cuenta no esta habilitada); '
+                . 'la app completa no cambia. No es una parada segura de Express: para frenar sus facturas deja vacio tipos_ecf_habilitados (se niega toda emision) o revoca los tokens de la empresa.'
+            : 'ADVERTENCIA: volver a completa levanta TODAS las restricciones de Express (modulos, tipos, rutas y vencimiento de las sesiones por inactividad) y no es una parada segura. '
+                . 'Para frenar a una empresa Express hay otras palancas: dejar vacio tipos_ecf_habilitados (se niega toda emision) o revocar los tokens de la empresa.',
         'Esta orden solo cambia la edicion (y devuelve api_secret_hash si esta en blanco): tipos, modulos, vencimiento del certificado, POS, control de existencias y permisos del rol user se quedan como estan.',
     ]);
     if (!$apply) {
@@ -1190,7 +1433,7 @@ function express_revertir(PDO $master, int $tenantId, bool $apply): array
  * la muestra en Configuracion) y no bloquea nada, pero tiene que seguir al archivo. La fecha es el dia del notAfter en la zona horaria por
  * defecto de PHP, como la escribe express_plan y la lee TenantEntitlements::estadoCertificado.
  *
- * Una empresa que no existe, o que no es Express (tipo app y edicion express), sale rechazada; tambien una cuyo certificado no se puede abrir
+ * Una empresa que no existe, o que no es Express (tipo app y edicion express o ambas), sale rechazada; tambien una cuyo certificado no se puede abrir
  * (CERT_FALTA: sin fecha que escribir, y borrar la que hay seria peor). Uno que abre pero ya vencio (CERT_VENCIDO) SI se escribe: su notAfter es
  * la verdad y el aviso de Configuracion debe decir que vencio. Con la fecha ya al dia da ok sin escribir ("SIN CAMBIOS").
  *
@@ -1206,8 +1449,8 @@ function express_refrescar_cert(PDO $master, int $tenantId, bool $apply): array
         return ['ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo(express_item_sin_empresa($tenantId))];
     }
     $rechazo = static fn (array $items): array => ['ok' => false, 'aplicado' => false, 'plan' => [], 'lineas' => express_lineas_rechazo($items)];
-    if (!TenantEntitlements::esRestringido($tenant)) {
-        return $rechazo(['edicion' => ['estado' => 'rechazar', 'detalle' => '--refrescar-cert es solo para empresas Express (tipo app y edicion express): esta empresa es de tipo '
+    if (!TenantEntitlements::tieneExpress($tenant)) {   // express o ambas: la linea de comandos no trae la cabecera de Express, asi que no sirve esRestringido
+        return $rechazo(['edicion' => ['estado' => 'rechazar', 'detalle' => '--refrescar-cert es solo para empresas Express (tipo app y edicion express o ambas): esta empresa es de tipo '
             . express_preflight_nombrar([(string) ($tenant['tipo'] ?? '')]) . ' y su edicion ' . express_valor_visible(isset($tenant['edicion']) ? (string) $tenant['edicion'] : null) . '.']]);
     }
     $cert = express_leer_certificado($tenant);
@@ -1233,7 +1476,7 @@ function express_refrescar_cert(PDO $master, int $tenantId, bool $apply): array
     }
     $plan = [[
         'donde' => 'master', 'que' => 'Escribir cert_vence con el dia del notAfter del certificado',
-        'sql' => "UPDATE tenants SET cert_vence = :v WHERE id = :id AND tipo = 'app' AND edicion = 'express'", 'params' => [':v' => $nueva, ':id' => $tenantId],
+        'sql' => "UPDATE tenants SET cert_vence = :v WHERE id = :id AND tipo = 'app' AND edicion IN ('express', 'ambas')", 'params' => [':v' => $nueva, ':id' => $tenantId],
     ]];
     $lineas = array_merge($lineas, express_lineas_plan($plan, false));   // esta orden no escribe fila de auditoria
     if (!$apply) {

@@ -1,10 +1,12 @@
 <?php
 /**
- * tenant_edicion.php — Cambia la edicion de una empresa (Fiscalpoint Express): la pasa a Express, la devuelve a completa o refresca el
- * vencimiento de su certificado. Es la unica forma de cambiar master.tenants.edicion: nunca con un UPDATE a mano.
+ * tenant_edicion.php — Cambia la edicion de una empresa (Fiscalpoint Express): la pasa a Express (solo Express) o a ambas (la app completa
+ * y Express), la devuelve a completa o refresca el vencimiento de su certificado. Es la unica forma de cambiar master.tenants.edicion:
+ * nunca con un UPDATE a mano.
  *
  * Uso (desde la raiz del API; `php tools/tenant_edicion.php --help` lo muestra en pantalla):
  *   php tools/tenant_edicion.php --tenant=ID --edicion=express --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
+ *   php tools/tenant_edicion.php --tenant=ID --edicion=ambas --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
  *   php tools/tenant_edicion.php --tenant=ID --edicion=completa [--apply]
  *   php tools/tenant_edicion.php --tenant=ID --refrescar-cert [--apply]
  *
@@ -16,12 +18,15 @@
  *                        nada, [CORR] lo arregla la conversion, [RECH] la frena) y, solo si ninguno es [RECH], el plan: baja de los rangos ecf sin limite y
  *                        de los clientes de prueba sin facturas (solo una empresa nueva), el UPDATE de tenants y el rol user. Un tipo o un modulo mal
  *                        escrito se rechaza: nunca se angosta en silencio.
+ *   --edicion=ambas      express_convertir_ambas: la empresa usa la app completa Y Express. Un preflight corto (la empresa, la migracion 017, los tipos y los
+ *                        modulos) y un plan de UN solo UPDATE: edicion, tipos, modulos y vencimiento del certificado. NO toca el POS, el control de
+ *                        existencias, la credencial de integracion, los permisos de los roles ni los rangos: la app completa sigue como estaba.
  *   --edicion=completa   express_revertir: cambia solo la edicion y restaura el hash de integracion si esta en blanco. Levanta TODA restriccion y no es
  *                        una parada segura (anexo 14.5): las palancas son tipos_ecf_habilitados vacio y revocar los tokens.
- *   --refrescar-cert     express_refrescar_cert: cert_vence otra vez igual al notAfter del archivo, para una empresa Express.
+ *   --refrescar-cert     express_refrescar_cert: cert_vence otra vez igual al notAfter del archivo, para una empresa Express o ambas.
  *
  * Informe (stdout; cada linea nueva termina en "\n"): las lineas del paso anterior mas una final: "DRY-RUN: no se escribio nada. Agrega --apply para
- * aplicar.", "RECHAZADO: <n> item(s). No se cambio nada.", "APLICADO: el tenant #<id> ahora es express." (o "... es completa."), o "SIN CAMBIOS: ...".
+ * aplicar.", "RECHAZADO: <n> item(s). No se cambio nada.", "APLICADO: el tenant #<id> ahora es express." (o "... es ambas." o "... es completa."), o "SIN CAMBIOS: ...".
  * Ninguna linea lleva claves, hashes ni rutas de certificado: los errores salen con la clase, el archivo y el codigo del driver, nunca con el mensaje de
  * una PDOException (trae usuario y servidor).
  *
@@ -50,6 +55,7 @@ tenant_edicion.php - cambia la edicion de una empresa (Fiscalpoint Express).
 
 Uso:
   php tools/tenant_edicion.php --tenant=ID --edicion=express --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
+  php tools/tenant_edicion.php --tenant=ID --edicion=ambas --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
   php tools/tenant_edicion.php --tenant=ID --edicion=completa [--apply]
   php tools/tenant_edicion.php --tenant=ID --refrescar-cert [--apply]
 
@@ -57,13 +63,18 @@ Sin --apply es un ensayo: lee todo, imprime lo que haria y no escribe nada. Con 
 
 Opciones:
   --tenant=ID          el id de la empresa en master.tenants (obligatorio).
-  --edicion=express    pasa la empresa a Express. Antes pasa el preflight: si algun item sale [RECH] no se cambia nada.
+  --edicion=express    pasa la empresa a Express, y SOLO Express: todas sus peticiones tienen los limites de Express (la app completa deja
+                       de servirle) y se apaga su POS. Antes pasa el preflight: si algun item sale [RECH] no se cambia nada.
                        --tipos= son los tipos de venta (31, 32, 45 y, opcional, el 33), separados por coma; el 34 se deriva solo.
                        --modulos= (opcional) angosta los modulos del preset: facturacion, clientes, productos, usuarios, configuracion.
+  --edicion=ambas      la empresa usa la app completa Y Express: la app completa sigue como estaba y solo las peticiones de Express
+                       (cabecera X-Fiscalpoint-Edicion) tienen los limites de Express. Pide la migracion master 017. Acepta --tipos= y
+                       --modulos= como express y solo cambia la edicion, los tipos, los modulos y el vencimiento del certificado: no toca el
+                       POS, el control de existencias, la credencial de integracion ni los permisos de los roles.
   --edicion=completa   devuelve la empresa a completa y restaura su credencial de integracion si esta en blanco. Levanta TODA restriccion
                        de Express y no es una parada segura: para frenar a una empresa Express deja vacio tipos_ecf_habilitados o
                        revoca los tokens de la empresa.
-  --refrescar-cert     recalcula cert_vence desde el certificado de una empresa Express (despues de renovarlo).
+  --refrescar-cert     recalcula cert_vence desde el certificado de una empresa Express o ambas (despues de renovarlo).
   --apply              escribe de verdad. Cada cambio de edicion deja una fila de auditoria (modulo edicion).
   --help               este texto.
 
@@ -82,7 +93,7 @@ TXT;
  *
  * @param string[] $args
  * @return array{ayuda:true}|array{error:string}|array{modo:string,tenant:int,tipos:list<string>,modulos:?list<string>,apply:bool}
- *         modo es express, completa o refrescar-cert. tipos y modulos son las listas de --tipos y --modulos, con los espacios, vacios y repetidos
+ *         modo es express, ambas, completa o refrescar-cert. tipos y modulos son las listas de --tipos y --modulos, con los espacios, vacios y repetidos
  *         fuera (TenantEntitlements::csv) pero sin juzgar los tokens: los rechaza el preflight (RF2). modulos es null si no se dio --modulos.
  */
 function tenant_edicion_parsear(array $args): array
@@ -134,18 +145,18 @@ function tenant_edicion_parsear(array $args): array
         return ['error' => '--refrescar-cert no se combina con --edicion: son dos ordenes distintas.'];
     }
     if ($edicion === null && !$refrescar) {
-        return ['error' => 'Falta decir que hacer: --edicion=express, --edicion=completa o --refrescar-cert.'];
+        return ['error' => 'Falta decir que hacer: --edicion=express, --edicion=ambas, --edicion=completa o --refrescar-cert.'];
     }
-    if ($edicion !== null && !in_array($edicion, ['express', 'completa'], true)) {
-        return ['error' => '--edicion invalida: ' . express_preflight_nombrar([$edicion]) . '. Usa express o completa (en minusculas).'];
+    if ($edicion !== null && !in_array($edicion, ['express', 'ambas', 'completa'], true)) {
+        return ['error' => '--edicion invalida: ' . express_preflight_nombrar([$edicion]) . '. Usa express, ambas o completa (en minusculas).'];
     }
 
     $modo = $refrescar ? 'refrescar-cert' : (string) $edicion;
     $tipos = [];
     $modulos = null;
-    if ($modo === 'express') {
+    if ($modo === 'express' || $modo === 'ambas') {
         if (!isset($valores['tipos'])) {
-            return ['error' => '--tipos es obligatorio con --edicion=express (por ejemplo --tipos=45 o --tipos=45,31).'];
+            return ['error' => "--tipos es obligatorio con --edicion={$modo} (por ejemplo --tipos=45 o --tipos=45,31)."];
         }
         $tipos = TenantEntitlements::csv($valores['tipos']);
         if ($tipos === []) {
@@ -155,7 +166,7 @@ function tenant_edicion_parsear(array $args): array
     } else {
         foreach (['tipos', 'modulos'] as $opcion) {
             if (isset($valores[$opcion])) {
-                return ['error' => "--{$opcion} solo vale con --edicion=express."];
+                return ['error' => "--{$opcion} solo vale con --edicion=express o --edicion=ambas."];
             }
         }
     }
@@ -178,6 +189,7 @@ function tenant_edicion_main(array $argv): int
         $master = express_conectar_master('tenant_edicion_');   // la de la biblioteca: lo que MasterDatabase deja en el log al fallar (usuario y servidor) no sale
         $resultado = match ($peticion['modo']) {
             'express' => express_convertir($master, $peticion['tenant'], ['edicion' => 'express', 'tipos' => $peticion['tipos'], 'modulos' => $peticion['modulos']], $peticion['apply']),
+            'ambas' => express_convertir_ambas($master, $peticion['tenant'], ['edicion' => 'ambas', 'tipos' => $peticion['tipos'], 'modulos' => $peticion['modulos']], $peticion['apply']),
             'completa' => express_revertir($master, $peticion['tenant'], $peticion['apply']),
             default => express_refrescar_cert($master, $peticion['tenant'], $peticion['apply']),
         };

@@ -17,6 +17,9 @@
 -- modulos_habilitados, tipos_ecf_habilitados y cert_vence): su fila dice APLICADA
 -- solo con las cuatro. Si dice FALTA porque quedo a medias, correrla de nuevo
 -- completa las que faltan.
+-- La 017 (edicion 'ambas') solo amplia el ENUM de tenants.edicion: su fila dice
+-- APLICADA cuando el tipo de la columna ya trae el valor 'ambas'. Necesita la 015.
+-- La 016 sigue reservada para el plan ITBIS (no esta escrita): no tiene fila aqui.
 --
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
@@ -113,6 +116,12 @@ FROM (
          (SELECT COUNT(*) FROM information_schema.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
             AND COLUMN_NAME IN ('edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence')) = 4
+  UNION ALL
+  SELECT '017', '017_tenants_edicion_ambas.sql',
+         'tenants.edicion acepta el valor ambas',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
+                   AND COLUMN_NAME = 'edicion' AND LOCATE('''ambas''', COLUMN_TYPE) > 0)
 ) m
 ORDER BY m.migracion;
 

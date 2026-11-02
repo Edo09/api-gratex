@@ -177,11 +177,10 @@ class PermissionGate
         // Edicion Express (plan 02): el RBAC de una empresa Express se aplica SIEMPRE, con el interruptor global apagado
         // tambien, para que su Facturador (rol user) no llegue a /api/users ni a POST /api/ncf/rangos mientras la sombra
         // sigue encendida para las demas. La prueba va en linea y es falsa para una empresa completa, una de integracion o
-        // ninguna: para ellas esto sigue como siempre y TenantEntitlements no se carga.
+        // ninguna: para ellas esto sigue como siempre y TenantEntitlements no se carga. Una empresa 'ambas' (la app completa y
+        // Express) lo aplica solo en las peticiones que se anuncian como Express: la app completa conserva su interruptor global.
         // Sin la clase (cargarEntitlements() false) no se puede decidir y una empresa Express no pasa: true.
-        $tenant = TenantResolver::current();
-        if (($tenant['tipo'] ?? 'app') === 'app'
-            && strtolower(trim((string) ($tenant['edicion'] ?? ''))) === 'express') {
+        if (TenantResolver::esFilaExpress(TenantResolver::current())) {
             return !TenantResolver::cargarEntitlements() || TenantEntitlements::restringido();
         }
         return false;

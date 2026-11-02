@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013, 014 y 015).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013, 014, 015 y 017).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -57,6 +57,12 @@ que ningún otro plan los tome:
 - El plan ITBIS de facturas simples (todavía sin mergear) pidió master 013 (ya
   ocupada por `013_tenants_inventario_estricto.sql`) y tenant 036, así que al
   aterrizar toma master 016 y tenant 037.
+- **Master 017**: `db/master_migrations/017_tenants_edicion_ambas.sql` (2026-11-02).
+  Amplía `tenants.edicion` a `ENUM('completa','express','ambas')`: una empresa
+  `ambas` usa la app completa Y Express (el dueño pidió que una empresa pueda
+  usar las dos versiones; `express` limita a la empresa entera). Toma la 017 y
+  no la 016 a propósito: la 016 sigue reservada para el plan ITBIS, que todavía
+  no tiene archivo, y así ninguna reserva se renumera. Necesita la 015.
 - Antes de crear una migración: `git fetch` y las dos listas, una por serie (con
   la barra final, que lista los archivos y no el directorio):
   `git ls-tree --name-only origin/master db/migrations/ | tail -4` (tenant) y

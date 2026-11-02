@@ -91,6 +91,9 @@ function ent_hijo_validar(array $escenario): never
     $_SERVER['REQUEST_METHOD'] = (string) ($escenario['metodo'] ?? 'GET');
     $_SERVER['REQUEST_URI'] = (string) ($escenario['uri'] ?? '/api/facturas');
     $_SERVER['HTTP_X_API_KEY'] = (string) ($escenario['token'] ?? '');
+    if (isset($escenario['cabecera_edicion'])) {   // lo que manda el cliente de Express en X-Fiscalpoint-Edicion (tools/test_express_ambas.php)
+        $_SERVER['HTTP_X_FISCALPOINT_EDICION'] = (string) $escenario['cabecera_edicion'];
+    }
 
     $estado = ['pasos' => 0, 'retorno' => null];
     ob_start();
@@ -151,6 +154,9 @@ function ent_hijo_emisor(array $escenario): never
     require_once $raiz . '/src/TenantResolver.php';
     (new ReflectionProperty('TenantResolver', 'current'))->setValue(null, $escenario['tenant'] ?? null);
     $_SERVER['REQUEST_METHOD'] = 'GET';
+    if (isset($escenario['cabecera_edicion'])) {   // lo que manda el cliente de Express en X-Fiscalpoint-Edicion (tools/test_express_ambas.php)
+        $_SERVER['HTTP_X_FISCALPOINT_EDICION'] = (string) $escenario['cabecera_edicion'];
+    }
 
     ob_start();
     register_shutdown_function(static function () use ($logArchivo): void {
@@ -285,10 +291,13 @@ for ($s1I = 1; $s1Ordenado && $s1I < count($s1Orden); $s1I++) {
 }
 wa_chk('master_schema.sql: edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence, en ese orden, entre inventario_estricto y ambiente',
     $s1Ordenado, $s1Orden);
-// Un tenant nuevo (master_schema.sql) y uno migrado (015) tienen que quedar iguales: misma definicion y mismo COMMENT.
+// Un tenant nuevo (master_schema.sql) y uno migrado (015, y 017 para edicion) tienen que quedar iguales: misma definicion y mismo COMMENT.
+// La 017 amplio el ENUM de edicion (le sumo 'ambas') con un MODIFY COLUMN: el esquema nuevo trae esa definicion, no la que la 015 creo.
+$s1Codigo17 = (string) preg_replace('/^\s*--.*$/m', '', $s1Leer('db/master_migrations/017_tenants_edicion_ambas.sql'));
 $s1Distintas = [];
 foreach ($s1Columnas as $s1Col) {
-    $s1EnMigracion = preg_match("/ADD COLUMN {$s1Col} (.+?) COMMENT ''(.*?)'''\s*,/s", $s1Codigo, $s1Hallado) === 1
+    [$s1Fuente, $s1Verbo] = $s1Col === 'edicion' ? [$s1Codigo17, 'MODIFY COLUMN'] : [$s1Codigo, 'ADD COLUMN'];
+    $s1EnMigracion = preg_match("/{$s1Verbo} {$s1Col} (.+?) COMMENT ''(.*?)'''\s*[,)]/s", $s1Fuente, $s1Hallado) === 1
         ? [trim(str_replace("''", "'", $s1Hallado[1])), $s1Hallado[2]] : null;
     $s1EnEsquema = preg_match("/^\s*{$s1Col}\s+(.+?)\s+COMMENT\s+'([^']*)'/ms", $s1Esquema, $s1Hallado) === 1
         ? [trim((string) preg_replace('/\s+/', ' ', $s1Hallado[1])), $s1Hallado[2]] : null;
@@ -311,8 +320,8 @@ wa_chk('verificador del master: la cabecera menciona la 015',
 // La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
 // lo ejecutan con PREPARE/EXECUTE (007, 008, 010, 011, 012, 013, 014 y 015; la lista del tenant, 018 y 026 a 035, ya
 // era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
-wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014 y 015 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014 y 015'));
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015 y 017 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015 y 017'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
@@ -2392,8 +2401,9 @@ try {
      * GET /api/emisor contra el controller de la copia con la empresa $empresa ya resuelta (o ninguna). Devuelve la linea JSON del
      * hijo, decodificada, con 'cuerpo' (la salida decodificada), o ['hijo_sin_linea_json' => lo que imprimio] si no hubo linea.
      */
-    $s7Emisor = static function (?array $empresa) use ($s7Arbol): array {
-        $r = wa_correr([PHP_BINARY, __FILE__, '--hijo=emisor', '--escenario=' . base64_encode((string) json_encode(['tenant' => $empresa, 'raiz' => $s7Arbol]))]);
+    $s7Emisor = static function (?array $empresa, ?string $cabecera = null) use ($s7Arbol): array {
+        $escenario = ['tenant' => $empresa, 'raiz' => $s7Arbol] + ($cabecera === null ? [] : ['cabecera_edicion' => $cabecera]);   // la cabecera X-Fiscalpoint-Edicion (seccion 13)
+        $r = wa_correr([PHP_BINARY, __FILE__, '--hijo=emisor', '--escenario=' . base64_encode((string) json_encode($escenario))]);
         $lineas = array_values(array_filter(array_map('trim', explode("\n", $r['salida'])), static fn (string $linea): bool => $linea !== ''));
         $dejo = json_decode((string) end($lineas), true);
         if (!is_array($dejo) || !array_key_exists('salida', $dejo)) {
@@ -2455,6 +2465,19 @@ try {
             ($s7R['http'] ?? null) === 200 && $s7SinBloque !== null && $s7Datos($s7R) === $s7SinBloque
             && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
     }
+    // Una empresa 'ambas' (la app completa y Express): el bloque certificado solo sale en las peticiones que se anuncian como Express.
+    $s7R = $s7Emisor($s7Fila(['edicion' => 'ambas', 'cert_vence' => '2099-12-31']));
+    wa_chk("emisorController, empresa ambas SIN la cabecera, con la clase disponible: la respuesta de siempre sin certificado, y TenantEntitlements ni se carga",
+        ($s7R['http'] ?? null) === 200 && $s7SinBloque !== null && $s7Datos($s7R) === $s7SinBloque
+        && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
+    $s7R = $s7Emisor($s7Fila(['edicion' => 'ambas', 'cert_vence' => '2099-12-31']), 'express');
+    $s7CertAmbas = is_array($s7Datos($s7R)) ? ($s7Datos($s7R)['certificado'] ?? null) : null;
+    wa_chk("emisorController, empresa ambas CON la cabecera 'express': 200 y data.certificado al final, igual que una Express (vigente, con la fecha de la fila), la clase se carga y sin log",
+        ($s7R['http'] ?? null) === 200 && is_array($s7Datos($s7R)) && array_slice(array_keys($s7Datos($s7R)), -2) === ['fuente', 'certificado'] && is_array($s7CertAmbas)
+        && $s7CertAmbas['estado'] === 'vigente' && $s7CertAmbas['vence'] === '2099-12-31' && ($s7R['clase_cargada'] ?? null) === true && ($s7R['log'] ?? null) === '', $s7R);
+    $s7R = $s7Emisor($s7Fila(['edicion' => 'completa', 'cert_vence' => '2099-12-31']), 'express');
+    wa_chk("emisorController, empresa completa con la cabecera 'express': sin certificado y sin cargar la clase (la cabecera no vuelve Express a una empresa completa)",
+        ($s7R['http'] ?? null) === 200 && $s7Datos($s7R) === $s7SinBloque && ($s7R['clase_cargada'] ?? null) === false && ($s7R['log'] ?? null) === '', $s7R);
     $s7R = $s7Emisor($s7Fila(['tipo' => 'integracion']));   // la fila dice express, pero una empresa de integracion no tiene emisor_config
     wa_chk("emisorController, tipo 'integracion' (aunque la fila diga express): los datos del registro de la empresa, sin certificado y sin cargar la clase",
         ($s7R['http'] ?? null) === 200 && $s7Datos($s7R) === ['rnc' => '131000001', 'razon_social' => 'Constructora X', 'ambiente' => 'ecf', 'fuente' => 'tenant']
@@ -4624,6 +4647,363 @@ wa_chk('el paso nuevo no rompe el orden del checklist: el 6 (la Consulta 4) sigu
 // Una empresa de un grupo no se convierte: el preflight la rechaza (item grupo) y el checklist lo dice donde habla de convertir.
 wa_chk('el checklist avisa, donde habla de convertir una empresa, que una empresa de un grupo (tenants.grupo_id no NULL) no se convierte: el preflight la rechaza con el item grupo',
     str_contains($s12Plano, 'grupo_id') && str_contains($s12Plano, 'item `grupo`'), null);
+
+// ---------------------------------------------------------------------------
+// 13) La edicion 'ambas': la app completa Y Express (migracion master 017, cabecera X-Fiscalpoint-Edicion)
+// ---------------------------------------------------------------------------
+// Una empresa 'express' queda limitada a Express en TODAS sus peticiones. Una 'ambas' sigue usando la app completa sin ningun limite, y solo las
+// peticiones que se anuncian como Express (cabecera X-Fiscalpoint-Edicion: express) corren con los limites. La cabecera solo restringe: no abre nada.
+echo "\n== 13) La edicion 'ambas' ==\n";
+$s13Clave = 'HTTP_X_FISCALPOINT_EDICION';
+/** Corre $fn con la cabecera X-Fiscalpoint-Edicion puesta a $valor (null = sin cabecera) y la deja como estaba. */
+$s13ConCabecera = static function (?string $valor, callable $fn) use ($s13Clave): mixed {
+    $previa = $_SERVER[$s13Clave] ?? null;
+    if ($valor === null) {
+        unset($_SERVER[$s13Clave]);
+    } else {
+        $_SERVER[$s13Clave] = $valor;
+    }
+    try {
+        return $fn();
+    } finally {
+        if ($previa === null) {
+            unset($_SERVER[$s13Clave]);
+        } else {
+            $_SERVER[$s13Clave] = $previa;
+        }
+    }
+};
+$s13Fila = static fn (array $o = []): array => $o + ['id' => 12, 'tipo' => 'app', 'edicion' => 'ambas'];
+
+// --- la regla: TenantResolver::esFilaExpress (la prueba en linea), TenantEntitlements::esRestringido y tieneExpress ---------------------
+$s13SinTipo = ['id' => 12, 'edicion' => 'ambas'];
+$s13SinEdicion = ['id' => 12, 'tipo' => 'app'];
+$s13Casos = [   // descripcion => [fila, cabecera (null = sin ella), ¿corre como Express?]
+    'ambas sin la cabecera' => [$s13Fila(), null, false],
+    "ambas con la cabecera 'express'" => [$s13Fila(), 'express', true],
+    "ambas con la cabecera ' EXPRESS ' (las mayusculas y los espacios no la cambian)" => [$s13Fila(), ' EXPRESS ', true],
+    "ambas con la cabecera 'Express'" => [$s13Fila(), 'Express', true],
+    'ambas con la cabecera vacia' => [$s13Fila(), '', false],
+    "ambas con la cabecera 'completa'" => [$s13Fila(), 'completa', false],
+    "ambas con la cabecera 'expres' (mal escrita)" => [$s13Fila(), 'expres', false],
+    "' AMBAS ' (las mayusculas y los espacios no la cambian) con la cabecera 'express'" => [$s13Fila(['edicion' => ' AMBAS ']), 'express', true],
+    'una fila ambas sin la clave tipo (cuenta como app) con la cabecera' => [$s13SinTipo, 'express', true],
+    'express sin la cabecera (solo Express: siempre)' => [$s13Fila(['edicion' => 'express']), null, true],
+    "express con la cabecera 'completa' (la cabecera no la afloja)" => [$s13Fila(['edicion' => 'express']), 'completa', true],
+    "completa con la cabecera 'express' (la ignora)" => [$s13Fila(['edicion' => 'completa']), 'express', false],
+    "edicion '' con la cabecera 'express'" => [$s13Fila(['edicion' => '']), 'express', false],
+    "edicion 'basico' (desconocida) con la cabecera 'express'" => [$s13Fila(['edicion' => 'basico']), 'express', false],
+    'edicion NULL con la cabecera' => [$s13Fila(['edicion' => null]), 'express', false],
+    'una fila sin la clave edicion (master sin migrar) con la cabecera' => [$s13SinEdicion, 'express', false],
+    "tipo 'integracion' y ambas, con la cabecera" => [$s13Fila(['tipo' => 'integracion']), 'express', false],
+    "tipo 'integracion' y express" => [$s13Fila(['tipo' => 'integracion', 'edicion' => 'express']), null, false],
+    'ninguna empresa, con la cabecera' => [null, 'express', false],
+];
+foreach ($s13Casos as $s13Desc => [$s13Empresa, $s13Cab, $s13Esperado]) {
+    $s13Prueba = $s13ConCabecera($s13Cab, static fn (): bool => TenantResolver::esFilaExpress($s13Empresa));
+    [$s13Clase, $s13Error] = wa_con_log(static fn (): bool => $s13ConCabecera($s13Cab, static fn (): bool => TenantEntitlements::esRestringido($s13Empresa)));
+    wa_chk("esFilaExpress y esRestringido, {$s13Desc}: " . ($s13Esperado ? 'corre como Express' : 'corre como la app completa'),
+        $s13Prueba === $s13Esperado && $s13Clase === $s13Esperado && $s13Error === null, [$s13Prueba, $s13Clase, $s13Error?->getMessage()]);
+}
+wa_chk("peticionExpress: solo el valor express (sin espacios y en minusculas) en la cabecera X-Fiscalpoint-Edicion; el nombre de la cabecera es el de la constante",
+    $s13ConCabecera('express', static fn (): bool => TenantResolver::peticionExpress()) === true
+    && $s13ConCabecera('EXPRESS ', static fn (): bool => TenantResolver::peticionExpress()) === true
+    && $s13ConCabecera(null, static fn (): bool => TenantResolver::peticionExpress()) === false
+    && $s13ConCabecera('1', static fn (): bool => TenantResolver::peticionExpress()) === false
+    && TenantResolver::CABECERA_EDICION === 'X-Fiscalpoint-Edicion'
+    && 'HTTP_' . strtoupper(str_replace('-', '_', TenantResolver::CABECERA_EDICION)) === $s13Clave);
+foreach ([
+    "express" => [$s13Fila(['edicion' => 'express']), true],
+    'ambas' => [$s13Fila(), true],
+    "' AMBAS '" => [$s13Fila(['edicion' => ' AMBAS ']), true],
+    'completa' => [$s13Fila(['edicion' => 'completa']), false],
+    "'' (vacia)" => [$s13Fila(['edicion' => '']), false],
+    "tipo 'integracion' y ambas" => [$s13Fila(['tipo' => 'integracion']), false],
+    'una fila sin la clave edicion' => [$s13SinEdicion, false],
+    'ninguna empresa' => [null, false],
+] as $s13Desc => [$s13Empresa, $s13Esperado]) {
+    [$s13Tiene] = wa_con_log(static fn (): array => [
+        $s13ConCabecera(null, static fn (): bool => TenantEntitlements::tieneExpress($s13Empresa)),
+        $s13ConCabecera('express', static fn (): bool => TenantEntitlements::tieneExpress($s13Empresa)),
+    ]);
+    wa_chk("tieneExpress, {$s13Desc}: " . ($s13Esperado ? 'la edicion incluye Express' : 'no la incluye') . ', con o sin la cabecera (la usan las herramientas de consola, que no la traen)',
+        $s13Tiene === [$s13Esperado, $s13Esperado], $s13Tiene);
+}
+[$s13Norm, $s13Err, $s13Log] = wa_con_log(static fn (): array => [
+    TenantEntitlements::normalizarEdicion($s13Fila()), TenantEntitlements::normalizarEdicion($s13Fila(['edicion' => ' AMBAS '])),
+    TenantEntitlements::normalizarEdicion($s13Fila(['edicion' => 'express'])), TenantEntitlements::normalizarEdicion($s13Fila(['edicion' => 'completa'])),
+]);
+wa_chk("normalizarEdicion: 'ambas' (con o sin espacios y mayusculas) es ambas, sin escribir nada en el log (ya es un valor conocido)",
+    $s13Err === null && $s13Norm === ['ambas', 'ambas', 'express', 'completa'] && $s13Log === '', [$s13Norm, $s13Log]);
+$s13Express = $s7Fila(['edicion' => 'express', 'tipos_ecf_habilitados' => '31,45']);
+$s13Ambas = $s7Fila(['edicion' => 'ambas', 'tipos_ecf_habilitados' => '31,45']);
+wa_chk("bloque: una empresa ambas recibe el mismo bloque que una express y su edicion es 'express' (la de la sesion: el cliente de Express solo lee esa)",
+    TenantEntitlements::bloque($s13Ambas) === TenantEntitlements::bloque($s13Express) && TenantEntitlements::bloque($s13Ambas)['edicion'] === 'express'
+    && TenantEntitlements::bloque($s7Fila(['edicion' => 'completa']))['edicion'] === 'completa', TenantEntitlements::bloque($s13Ambas));
+
+// --- el login y /me (authModel::conEntitlements) -------------------------------------------------------------------------------
+$s13Modelo = $s4Modelo(new ExpConexionFalsa(false));
+$s13Conuser = static fn (?array $fila, ?string $cab): array => $s13ConCabecera($cab, static fn (): array => $s6Llamar($s13Modelo, 'conEntitlements', [$s6Usuario, $fila]));
+wa_chk('login/me de una empresa ambas SIN la cabecera: el user sale exactamente como el de una completa, sin la clave entitlements (ni como null)',
+    $s13Conuser($s13Ambas, null) === $s6Usuario && $s13Conuser($s13Ambas, null) === $s13Conuser($s7Fila(['edicion' => 'completa']), null), $s13Conuser($s13Ambas, null));
+$s13R = $s13Conuser($s13Ambas, 'express');
+wa_chk("login/me de una empresa ambas CON la cabecera: entitlements al final (despues de permissions), el mismo bloque que el de una express y edicion 'express'",
+    array_keys($s13R) === ['id', 'email', 'username', 'name', 'role', 'permissions', 'entitlements'] && $s13R['entitlements'] === TenantEntitlements::bloque($s13Ambas)
+    && $s13R['entitlements'] === $s13Conuser($s13Express, null)['entitlements'] && $s13R['entitlements']['edicion'] === 'express', $s13R);
+wa_chk("login/me de una empresa completa con la cabecera 'express': sin bloque (el cliente de Express dice que la cuenta no esta habilitada); express sin la cabecera: con bloque",
+    $s13Conuser($s7Fila(['edicion' => 'completa']), 'express') === $s6Usuario && isset($s13Conuser($s13Express, null)['entitlements']), null);
+
+// --- PermissionGate::enforcing en un proceso nuevo: la clase solo se carga detras de la prueba en linea ------------------------------
+$s13Hijo = (string) tempnam(sys_get_temp_dir(), 'ent_ambas_gate_');
+$s13HijoLog = (string) tempnam(sys_get_temp_dir(), 'ent_ambas_gatelog_');
+file_put_contents($s13Hijo, <<<'PHP'
+<?php
+// argv[1] = raiz del arbol, argv[2] = archivo de error_log, argv[3] = la empresa resuelta (JSON en base64), argv[4] = la cabecera ('-' = sin ella).
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+ini_set('error_log', $argv[2]);
+putenv('PERMISSIONS_ENFORCE');
+unset($_ENV['PERMISSIONS_ENFORCE']);
+if ($argv[4] !== '-') {
+    $_SERVER['HTTP_X_FISCALPOINT_EDICION'] = $argv[4];
+}
+require $argv[1] . '/src/PermissionGate.php';
+(new ReflectionProperty('TenantResolver', 'current'))->setValue(null, json_decode((string) base64_decode($argv[3]), true));
+$metodo = new ReflectionMethod('PermissionGate', 'enforcing');
+echo json_encode([$metodo->invoke(null), $metodo->invoke(null), class_exists('TenantEntitlements', false), (string) file_get_contents($argv[2])]);
+PHP);
+/** enforcing() dos veces en un proceso nuevo: [decision, decision, clase_cargada, log] o ['hijo_sin_json' => lo que imprimio]. */
+$s13Gate = static function (?array $empresa, ?string $cab) use ($s13Hijo, $s13HijoLog): array {
+    file_put_contents($s13HijoLog, '');
+    $r = wa_correr([PHP_BINARY, $s13Hijo, dirname(__DIR__), $s13HijoLog, base64_encode((string) json_encode($empresa)), $cab ?? '-']);
+    $dejo = json_decode(trim($r['salida']), true);
+    return is_array($dejo) ? $dejo : ['hijo_sin_json' => $r];
+};
+foreach ([
+    'ambas sin la cabecera: el interruptor global de siempre (false), la clase no se carga y sin log' => [$s13Fila(), null, [false, false, false, '']],
+    'ambas con la cabecera: el RBAC se aplica siempre (true), la clase se carga y sin log' => [$s13Fila(), 'express', [true, true, true, '']],
+    "completa con la cabecera 'express': false, la clase no se carga y sin log" => [$s13Fila(['edicion' => 'completa']), 'express', [false, false, false, '']],
+    'express sin la cabecera: true (solo Express), la clase se carga y sin log' => [$s13Fila(['edicion' => 'express']), null, [true, true, true, '']],
+    "tipo 'integracion' y ambas, con la cabecera: false, la clase no se carga y sin log" => [$s13Fila(['tipo' => 'integracion']), 'express', [false, false, false, '']],
+] as $s13Desc => [$s13Empresa, $s13Cab, $s13Esperado]) {
+    $s13R = $s13Gate($s13Empresa, $s13Cab);
+    wa_chk("enforcing() en un proceso nuevo, {$s13Desc}", $s13R === $s13Esperado, $s13R);
+}
+@unlink($s13Hijo);
+@unlink($s13HijoLog);
+
+// --- AuthMiddleware::validateRequest en un hijo: el vencimiento por inactividad y la guarda de rutas solo para las peticiones de Express -----
+$s13Fila12 = $s4Empresa(['edicion' => 'ambas']);
+$s13Cab = ['cabecera_edicion' => 'express'];
+$s13R = $s4Validar($s13Fila12, 'GET', '/api/gastos');
+wa_chk('ambas SIN la cabecera, GET /api/gastos (fuera de la lista de Express): valida con el resultado de siempre, last_used una vez, TenantEntitlements no se carga y sin log',
+    $s13R['retorno'] === $s4Valido && $s13R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s13R['clase_cargada'] === false
+    && $s13R['salida'] === '' && $s13R['http'] === false && $s13R['log'] === '', $s13R);
+$s13R = $s4Validar($s13Fila12, 'GET', '/api/gastos', ['last_used' => $s4Hace(400)]);
+wa_chk('ambas SIN la cabecera, token ocioso de hace 400 dias: sigue valido (el vencimiento por inactividad es solo de las peticiones de Express) y la clase no se carga',
+    $s13R['retorno'] === $s4Valido && $s13R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s13R['clase_cargada'] === false, $s13R);
+$s13R = $s4Validar($s13Fila12, 'POST', '/api/ncf/rangos', ['role' => 'user']);
+wa_chk('ambas SIN la cabecera, el rol user en POST /api/ncf/rangos: valida (la guarda de administrador es solo de Express: la app completa se rige por su PermissionGate)',
+    $s13R['retorno'] === array_replace($s4Valido, ['role' => 'user']) && $s13R['http'] === false && $s13R['clase_cargada'] === false, $s13R);
+$s13R = $s4Validar($s13Fila12, 'GET', '/api/facturas?lean=1', [], $s13Cab);
+wa_chk('ambas CON la cabecera, GET /api/facturas (permitida): valida con el mismo resultado, last_used una vez, la clase se carga y sin log',
+    $s13R['retorno'] === $s4Valido && $s13R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s13R['clase_cargada'] === true
+    && $s13R['salida'] === '' && $s13R['http'] === false && $s13R['log'] === '', $s13R);
+$s13R = $s4Validar($s13Fila12, 'GET', '/api/gastos', [], $s13Cab);
+wa_chk('ambas CON la cabecera, GET /api/gastos: 403 EDICION_NO_INCLUYE con el texto de la constante, validateRequest no vuelve y last_used no se toca',
+    $s13R['http'] === 403 && json_decode($s13R['salida'], true) === ['status' => false, 'error' => TenantEntitlements::MSG_EDICION, 'codigo' => 'EDICION_NO_INCLUYE']
+    && $s13R['pasos'] === 0 && $s13R['llamadas'] === $s4SinCambios, $s13R);
+$s13R = $s4Validar($s13Fila12, 'GET', '/api/facturas', ['last_used' => $s4Hace(31)], $s13Cab);
+wa_chk('ambas CON la cabecera, token ocioso de hace 31 dias: valid false con el texto de inactividad y el token revocado con su hash',
+    $s13R['retorno'] === ['valid' => false, 'user_id' => null, 'tenant_id' => null, 'message' => 'Tu sesión venció por inactividad']
+    && $s13R['llamadas'] === ['actualizar' => 0, 'revocar' => 1] && $s13R['hashes']['revocar'] === [hash('sha256', $s4Token)], $s13R);
+$s13R = $s4Validar($s13Fila12, 'POST', '/api/ncf/rangos', ['role' => 'user'], $s13Cab);
+wa_chk('ambas CON la cabecera, el rol user (Facturador) en POST /api/ncf/rangos: 403 con el texto de administrador y SIN codigo, last_used sin tocar',
+    $s13R['http'] === 403 && json_decode($s13R['salida'], true) === ['status' => false, 'error' => TenantEntitlements::MSG_SOLO_ADMIN]
+    && $s13R['llamadas'] === $s4SinCambios, $s13R);
+$s13R = $s4Validar($s4Empresa(['edicion' => 'completa']), 'GET', '/api/gastos', ['last_used' => $s4Hace(400)], $s13Cab);
+wa_chk("completa con la cabecera 'express', token ocioso y ruta fuera de la lista: valida (la cabecera no vuelve Express a una empresa completa) y la clase no se carga",
+    $s13R['retorno'] === $s4Valido && $s13R['llamadas'] === ['actualizar' => 1, 'revocar' => 0] && $s13R['clase_cargada'] === false, $s13R);
+$s13R = $s4Validar($s4Empresa(), 'GET', '/api/gastos', [], ['cabecera_edicion' => 'completa']);
+wa_chk("express con la cabecera 'completa': sigue negada (403 EDICION_NO_INCLUYE): la cabecera no afloja a una empresa solo Express",
+    $s13R['http'] === 403 && ($s13R['pasos'] ?? null) === 0 && $s13R['llamadas'] === $s4SinCambios, $s13R);
+
+// --- GET /api/emisor (emisorController) en un hijo ------------------------------------------------------------------------------
+// Las dos pruebas de la cabecera estan en la seccion 7 (cada una necesita la copia del arbol con sus dobles): ahi se prueba el bloque certificado.
+
+// --- tools/tenant_edicion.php: el analizador, la ayuda y express_convertir_ambas ----------------------------------------------------
+foreach ([
+    "ambas con tipos y sin modulos" => [['--tenant=12', '--edicion=ambas', '--tipos=45'], $s9Valida('ambas', 12, ['45'])],
+    'ambas con tipos y modulos a mano y --apply' => [
+        ['--tenant=12', '--edicion=ambas', '--tipos=45, 31,', '--modulos=facturacion, clientes', '--apply'], $s9Valida('ambas', 12, ['45', '31'], ['facturacion', 'clientes'], true)],
+] as $s13Desc => [$s13Args, $s13Esperada]) {
+    wa_chk("analizador, {$s13Desc}", tenant_edicion_parsear($s13Args) === $s13Esperada, tenant_edicion_parsear($s13Args));
+}
+foreach ([
+    ['ambas sin --tipos', ['--tenant=12', '--edicion=ambas'], '--tipos'],
+    ['ambas con --tipos vacio', ['--tenant=12', '--edicion=ambas', '--tipos='], '--tipos'],
+    ['una edicion mal escrita (amba)', ['--tenant=12', '--edicion=amba', '--tipos=45'], 'ambas'],
+    ['completa con --tipos', ['--tenant=12', '--edicion=completa', '--tipos=45'], '--tipos'],
+    ['completa con --modulos', ['--tenant=12', '--edicion=completa', '--modulos=clientes'], '--modulos'],
+] as [$s13Desc, $s13Args, $s13Aguja]) {
+    $s13P = tenant_edicion_parsear($s13Args);
+    wa_chk("analizador, {$s13Desc}: un error que nombra {$s13Aguja}", array_keys($s13P) === ['error'] && str_contains((string) ($s13P['error'] ?? ''), $s13Aguja), $s13P);
+}
+wa_chk('tenant_edicion_ayuda: describe --edicion=ambas, la cabecera X-Fiscalpoint-Edicion y la migracion 017, y sigue siendo ASCII',
+    str_contains($s9Ayuda, '--edicion=ambas') && str_contains($s9Ayuda, 'X-Fiscalpoint-Edicion') && str_contains($s9Ayuda, '017') && !preg_match('/[^\x20-\x7E\n]/', $s9Ayuda), $s9Ayuda);
+
+/** Los hechos de una empresa que quiere pasar a ambas: todo bien (las dos migraciones puestas, tipo app y activa); $o pisa lo que cada caso cambia. */
+$s13Hechos = static fn (array $o = []): array => array_replace([
+    'tenant' => $s9Fila, 'columnas_edicion' => true, 'edicion_ambas' => true, 'cert' => ['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null],
+    'pedido' => ['edicion' => 'ambas', 'tipos' => ['45', '31'], 'modulos' => null],
+], $o);
+$s13Ev = express_preflight_evaluar_ambas($s13Hechos());
+wa_chk('express_preflight_evaluar_ambas: una empresa completa en orden no se rechaza; los items salen en su orden, edicion es [CORR] y sin_cambios es false',
+    array_keys($s13Ev) === ['items', 'nuevo', 'rechazos', 'acciones', 'sin_cambios'] && $s13Ev['rechazos'] === [] && $s13Ev['acciones'] === ['edicion'] && $s13Ev['sin_cambios'] === false
+    && array_keys($s13Ev['items']) === ['tenant', 'columnas', 'migracion017', 'tipos', 'modulos', 'clientes_modulo', 'cert', 'edicion'], $s13Ev);
+$s13Cargada = array_replace($s9Fila, ['pos_enabled' => '1', 'inventario_estricto' => '1', 'grupo_id' => '5', 'api_secret_hash' => str_repeat('ab', 32), 'ambiente' => 'ecf']);
+$s13Ev = express_preflight_evaluar_ambas($s13Hechos(['tenant' => $s13Cargada]));
+wa_chk('express_preflight_evaluar_ambas: el POS, el control de existencias, el grupo, la credencial de integracion y el ambiente ecf (sin rangos leidos) NO rechazan ni se corrigen: la conversion no los toca',
+    $s13Ev['rechazos'] === [] && $s13Ev['acciones'] === ['edicion'] && array_keys($s13Ev['items']) === ['tenant', 'columnas', 'migracion017', 'tipos', 'modulos', 'clientes_modulo', 'cert', 'edicion'], $s13Ev);
+foreach ([
+    'sin la migracion 017' => [['edicion_ambas' => false], 'migracion017', '017_tenants_edicion_ambas.sql'],
+    'sin las columnas de la 015' => [['columnas_edicion' => false], 'columnas', '015_tenants_edicion.sql'],
+    'de tipo integracion' => [['tenant' => array_replace($s9Fila, ['tipo' => 'integracion'])], 'tenant', 'tipo'],
+    'inactiva' => [['tenant' => array_replace($s9Fila, ['activo' => 0])], 'tenant', 'activo 0'],
+    'sin ningun tipo' => [['pedido' => ['edicion' => 'ambas', 'tipos' => [], 'modulos' => null]], 'tipos', 'ningun tipo'],
+    'con un tipo mal escrito (e45)' => [['pedido' => ['edicion' => 'ambas', 'tipos' => ['e45'], 'modulos' => null]], 'tipos', 'e45'],
+    'con un modulo mal escrito (y un tipo, el 32, que no pide clientes)' => [['pedido' => ['edicion' => 'ambas', 'tipos' => ['32'], 'modulos' => ['Clientes']]], 'modulos', 'Clientes'],
+    'con el tipo 45 y sin el modulo clientes' => [['pedido' => ['edicion' => 'ambas', 'tipos' => ['45'], 'modulos' => ['facturacion']]], 'clientes_modulo', 'clientes'],
+] as $s13Desc => [$s13Cambio, $s13Item, $s13Aguja]) {
+    $s13Ev = express_preflight_evaluar_ambas($s13Hechos($s13Cambio));
+    wa_chk("express_preflight_evaluar_ambas, una empresa {$s13Desc}: [RECH] {$s13Item} que lo explica, y es el unico rechazo",
+        $s13Ev['rechazos'] === [$s13Item] && str_contains($s13Ev['items'][$s13Item]['detalle'], $s13Aguja), $s13Ev['rechazos']);
+}
+$s13Vence = (int) strtotime('2099-12-31 12:00:00');
+foreach ([
+    'sin poder abrir el certificado' => [['ok' => false, 'codigo' => 'CERT_FALTA', 'vence' => null], 'CERT_FALTA'],
+    'con el certificado vencido' => [['ok' => false, 'codigo' => 'CERT_VENCIDO', 'vence' => (int) strtotime('2020-01-01 12:00:00')], 'CERT_VENCIDO'],
+    'con el certificado vigente' => [['ok' => true, 'codigo' => null, 'vence' => $s13Vence], '2099-12-31'],
+] as $s13Desc => [$s13Cert, $s13Aguja]) {
+    $s13Ev = express_preflight_evaluar_ambas($s13Hechos(['cert' => $s13Cert]));
+    wa_chk("express_preflight_evaluar_ambas {$s13Desc}: el certificado no frena la conversion ([OK  ] cert con su aviso o su fecha)",
+        $s13Ev['rechazos'] === [] && $s13Ev['items']['cert']['estado'] === 'ok' && str_contains($s13Ev['items']['cert']['detalle'], $s13Aguja), $s13Ev['items']['cert']);
+}
+$s13YaAmbas = array_replace($s9Fila, ['edicion' => 'ambas', 'tipos_ecf_habilitados' => '45,31', 'modulos_habilitados' => null, 'cert_vence' => null]);
+$s13Ev = express_preflight_evaluar_ambas($s13Hechos(['tenant' => $s13YaAmbas]));
+wa_chk('express_preflight_evaluar_ambas: una empresa que ya es ambas con esos tipos y modulos (y sin fecha nueva del certificado) da sin_cambios y ninguna accion',
+    $s13Ev['sin_cambios'] === true && $s13Ev['acciones'] === [] && $s13Ev['rechazos'] === [] && $s13Ev['items']['edicion']['estado'] === 'ok', $s13Ev);
+$s13Ev = express_preflight_evaluar_ambas($s13Hechos(['tenant' => $s13YaAmbas, 'pedido' => ['edicion' => 'ambas', 'tipos' => ['45'], 'modulos' => null]]));
+wa_chk('express_preflight_evaluar_ambas: una ambas a la que se le piden otros tipos NO es sin_cambios: la edicion es [CORR] (se actualizan sus tipos)',
+    $s13Ev['sin_cambios'] === false && $s13Ev['acciones'] === ['edicion'], $s13Ev);
+
+$s13Plan = express_plan_ambas($s13Hechos(), express_preflight_evaluar_ambas($s13Hechos()));
+wa_chk('express_plan_ambas: UN solo paso, en la master, el UPDATE de tenants con edicion, tipos y modulos (NULL sin lista) y SIN cert_vence cuando no se pudo leer el certificado',
+    count($s13Plan) === 1 && $s13Plan[0]['donde'] === 'master' && $s13Plan[0]['params'] === [':t' => '45,31', ':m' => null, ':id' => 12]
+    && $s13Plan[0]['sql'] === "UPDATE tenants SET edicion = 'ambas', tipos_ecf_habilitados = :t, modulos_habilitados = :m WHERE id = :id AND tipo = 'app'", $s13Plan);
+$s13HechosCert = $s13Hechos(['cert' => ['ok' => true, 'codigo' => null, 'vence' => $s13Vence], 'pedido' => ['edicion' => 'ambas', 'tipos' => ['45'], 'modulos' => ['facturacion', 'clientes']]]);
+$s13PlanCert = express_plan_ambas($s13HechosCert, express_preflight_evaluar_ambas($s13HechosCert));
+wa_chk('express_plan_ambas con el certificado legible: el UPDATE suma cert_vence con el dia del notAfter y los modulos pedidos',
+    count($s13PlanCert) === 1 && $s13PlanCert[0]['params'] === [':t' => '45', ':m' => 'facturacion,clientes', ':id' => 12, ':v' => '2099-12-31']
+    && str_contains($s13PlanCert[0]['sql'], 'cert_vence = :v WHERE id = :id'), $s13PlanCert);
+$s13Texto = strtolower(json_encode($s13Plan) . json_encode($s13PlanCert));
+wa_chk('express_plan_ambas: no toca el POS, el control de existencias, la credencial de integracion, los permisos de los roles, los rangos ni los clientes (ninguna de esas palabras en el plan)',
+    !preg_match('/pos_enabled|inventario_estricto|api_secret_hash|role_permissions|ncf_sequences|delete|insert|clients/', $s13Texto), $s13Texto);
+wa_chk('express_plan_ambas: un rechazo o un sin_cambios dan el plan vacio',
+    express_plan_ambas($s13Hechos(['edicion_ambas' => false]), express_preflight_evaluar_ambas($s13Hechos(['edicion_ambas' => false]))) === []
+    && express_plan_ambas($s13Hechos(['tenant' => $s13YaAmbas]), express_preflight_evaluar_ambas($s13Hechos(['tenant' => $s13YaAmbas]))) === [], null);
+
+/** Un master de mentira (el de la seccion 9) que ademas contesta la sonda del valor 'ambas' del ENUM (sin ella el de la seccion 9 contesta 4, que no es 1). */
+$s13Maestro = static function (?array $fila, ?array $despues = null, bool $conAmbas = true) use ($s9Maestro): ExpPdoGuion {
+    $master = $s9Maestro($fila, [], $despues);
+    $previa = $master->respuesta;
+    $master->respuesta = static fn (string $sql, array $params, ExpPdoGuion $yo): array => str_contains($sql, "LOCATE('''ambas'''")
+        ? [['n' => $conAmbas ? '1' : '0']] : $previa($sql, $params, $yo);
+    return $master;
+};
+$s13Pedido = ['edicion' => 'ambas', 'tipos' => ['45', '31'], 'modulos' => null];
+$s13M = $s13Maestro($s9Fila);
+[$s13R, $s13Error, $s13LogErr, $s13Salida] = $s9Lib(static fn (): array => express_convertir_ambas($s13M, 12, $s13Pedido, false));
+wa_chk('express_convertir_ambas en ensayo: ok true, nada aplicado ni escrito, [CORR] edicion, los pasos y DRY-RUN; sin ruido en la salida ni en el log',
+    $s13Error === null && $s13R['ok'] === true && $s13R['aplicado'] === false && count($s13R['plan']) === 1 && $s9SoloLee($s13M)
+    && $s9Linea($s13R, '[CORR] edicion:') !== null && str_contains($s9Linea($s13R, '[CORR] edicion:'), 'de completa a ambas')
+    && ($s13R['lineas'][count($s13R['lineas']) - 1] ?? null) === 'DRY-RUN: no se escribio nada. Agrega --apply para aplicar.'
+    && $s13Salida === '' && $s13LogErr === '', [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+$s13Despues = ['edicion' => 'ambas', 'tipos_ecf_habilitados' => '45,31', 'modulos_habilitados' => null, 'cert_vence' => null];
+$s13M = $s13Maestro($s9Fila, $s13Despues);
+[$s13R, $s13Error, $s13LogErr, $s13Salida] = $s9Lib(static fn (): array => express_convertir_ambas($s13M, 12, $s13Pedido, true));
+$s13Sqls = array_column($s13M->escritas, 'sql');
+wa_chk('express_convertir_ambas con --apply: aplicado, y en la master escribe SOLO el UPDATE de la edicion y la fila de auditoria (dos sentencias): ni el POS, ni la integracion, ni los roles',
+    $s13Error === null && $s13R['ok'] === true && $s13R['aplicado'] === true && count($s13Sqls) === 2
+    && str_starts_with($s13Sqls[0], "UPDATE tenants SET edicion = 'ambas'") && str_starts_with($s13Sqls[1], 'INSERT INTO audit_logs')
+    && !preg_match('/pos_enabled|inventario_estricto|api_secret_hash|role_permissions|DELETE/i', implode("\n", $s13Sqls))
+    && ($s13R['lineas'][count($s13R['lineas']) - 1] ?? null) === 'APLICADO: el tenant #12 ahora es ambas.' && $s13Salida === '' && $s13LogErr === '',
+    [$s13Error?->getMessage(), $s13Sqls, $s13R['lineas'] ?? null]);
+$s13M = $s13Maestro($s9Fila, null, false);
+[$s13R, $s13Error] = $s9Lib(static fn (): array => express_convertir_ambas($s13M, 12, $s13Pedido, true));
+wa_chk('express_convertir_ambas sin la migracion 017 y con --apply: ok false, [RECH] migracion017, RECHAZADO: 1 item(s) y nada escrito',
+    $s13Error === null && $s13R['ok'] === false && $s13R['aplicado'] === false && $s13R['plan'] === [] && $s9SoloLee($s13M)
+    && $s9Linea($s13R, '[RECH] migracion017:') !== null && ($s13R['lineas'][count($s13R['lineas']) - 1] ?? null) === 'RECHAZADO: 1 item(s). No se cambio nada.', [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+$s13M = $s13Maestro($s13YaAmbas);
+[$s13R, $s13Error] = $s9Lib(static fn (): array => express_convertir_ambas($s13M, 12, $s13Pedido, true));
+wa_chk('express_convertir_ambas de una empresa que ya es ambas con esos tipos: ok true, SIN CAMBIOS, nada escrito (ni con --apply) y sin fila de auditoria',
+    $s13Error === null && $s13R['ok'] === true && $s13R['aplicado'] === false && $s13R['plan'] === [] && $s9SoloLee($s13M)
+    && str_starts_with((string) ($s13R['lineas'][count($s13R['lineas']) - 1] ?? ''), 'SIN CAMBIOS: '), [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+[$s13R, $s13Error] = $s9Lib(static fn (): array => express_convertir_ambas($s13Maestro(null), 999, $s13Pedido, false));
+wa_chk('express_convertir_ambas de una empresa que no existe: ok false y [RECH] tenant que dice que no existe',
+    $s13Error === null && $s13R['ok'] === false && str_contains($s9Linea($s13R, '[RECH] tenant:') ?? '', 'No existe'), [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+[, $s13Error] = $s9Lib(static fn (): array => express_convertir_ambas($s13Maestro($s9Fila), 12, ['edicion' => 'express'] + $s13Pedido, false));
+wa_chk('express_convertir_ambas solo convierte a ambas: un pedido de otra edicion lanza InvalidArgumentException antes de leer nada', $s13Error instanceof InvalidArgumentException, $s13Error?->getMessage());
+wa_chk('express_convertir_ambas(PDO $master, int $tenantId, array $pedido, bool $apply): array es la firma de la orden',
+    $s8Firma('express_convertir_ambas') === 'express_convertir_ambas(PDO $master, int $tenantId, array $pedido, bool $apply): array', $s8Firma('express_convertir_ambas'));
+
+// volver a completa y refrescar el certificado reconocen a una empresa ambas
+$s13M = $s13Maestro($s13YaAmbas);
+[$s13R, $s13Error] = $s9Lib(static fn (): array => express_revertir($s13M, 12, false));
+wa_chk("express_revertir de una empresa ambas: [CORR] edicion 'de ambas a completa' (no la trata como un valor invalido) y la advertencia dice que la app completa no cambia",
+    $s13Error === null && str_contains($s9Linea($s13R, '[CORR] edicion:') ?? '', 'de ambas a completa') && !str_contains($s9Texto($s13R), 'no es valida')
+    && str_contains($s9Texto($s13R), 'la app completa no cambia'), [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+[$s13R, $s13Error] = $s9Lib(static fn (): array => express_refrescar_cert($s13Maestro(array_replace($s13YaAmbas, ['cert_path' => '/ruta/que/no/existe/MARCA.p12', 'cert_pass_encrypted' => 'MARCA'])), 12, false));
+wa_chk('express_refrescar_cert de una empresa ambas: la reconoce (edicion [OK  ]) y solo se detiene por el certificado (CERT_FALTA), no por la edicion',
+    $s13Error === null && str_contains($s9Linea($s13R, '[OK  ] edicion:') ?? '', 'Express') && str_contains($s9Linea($s13R, '[RECH] cert:') ?? '', 'CERT_FALTA'), [$s13Error?->getMessage(), $s13R['lineas'] ?? null]);
+
+// verificar_express.php: una empresa ambas solo se juzga por lo que Express lee de su fila
+$s13Hoy = (int) strtotime('2026-11-02 12:00:00');
+$s13FilaVerif = array_replace($s9Fila, ['edicion' => 'ambas', 'tipos_ecf_habilitados' => '45', 'modulos_habilitados' => null, 'cert_vence' => '2030-01-01', 'ambiente' => 'ecf',
+    'pos_enabled' => '1', 'grupo_id' => '5', 'api_secret_hash' => str_repeat('ab', 32)]);
+wa_chk('express_problemas_tenant de una empresa ambas con el POS, un grupo, la credencial de integracion y rangos sin limite: no dice nada (son de la app completa)',
+    express_problemas_tenant($s13FilaVerif, [['type' => 'E45', 'numero_hasta' => null, 'current_value' => 0, 'fecha_vencimiento' => null]], $s13Hoy) === [], express_problemas_tenant($s13FilaVerif, null, $s13Hoy));
+$s13Codigos = static fn (array $fila): array => array_column(express_problemas_tenant($fila, null, $s13Hoy), 'codigo');
+wa_chk('express_problemas_tenant: la misma fila como express SI dice POS_ACTIVO, EN_GRUPO e INTEGRACION_ACTIVA',
+    $s13Codigos(array_replace($s13FilaVerif, ['edicion' => 'express'])) === ['POS_ACTIVO', 'EN_GRUPO', 'INTEGRACION_ACTIVA'], $s13Codigos(array_replace($s13FilaVerif, ['edicion' => 'express'])));
+wa_chk('express_problemas_tenant de una ambas: TIPOS_VACIOS (con el comando --edicion=ambas), MODULOS_INVALIDOS y CERT_SIN_FECHA siguen saliendo; una edicion desconocida sigue siendo EDICION_DESCONOCIDA',
+    $s13Codigos(array_replace($s13FilaVerif, ['tipos_ecf_habilitados' => null, 'modulos_habilitados' => 'Clientes'])) === ['TIPOS_VACIOS', 'MODULOS_INVALIDOS']
+    && str_contains(express_problemas_tenant(array_replace($s13FilaVerif, ['tipos_ecf_habilitados' => '']), null, $s13Hoy)[0]['detalle'], '--edicion=ambas')
+    && $s13Codigos(array_replace($s13FilaVerif, ['cert_vence' => null, 'cert_path' => 'x/y.p12'])) === ['CERT_SIN_FECHA']
+    && $s13Codigos(array_replace($s13FilaVerif, ['edicion' => 'basico'])) === ['EDICION_DESCONOCIDA'], null);
+
+// --- la migracion 017 y sus espejos ----------------------------------------------------------------------------------------------
+$s13M17 = $s1Leer('db/master_migrations/017_tenants_edicion_ambas.sql');
+$s13Cod = (string) preg_replace('/^\s*--.*$/m', '', $s13M17);
+$s13Sent = array_values(array_filter(array_map('trim', explode(';', $s13Cod)), static fn (string $s): bool => $s !== ''));
+wa_chk('017: primera SET @db, segunda la guardia, y 16 sentencias al cortar en cada ";" (ningun literal lleva ";": una herramienta que corta ingenuamente no la parte)',
+    ($s13Sent[0] ?? '') === 'SET @db := DATABASE()' && str_starts_with($s13Sent[1] ?? '', 'SET @guardia :=') && count($s13Sent) === 16, [array_slice($s13Sent, 0, 2), count($s13Sent)]);
+wa_chk('017: el unico SELECT de nivel superior es el ultimo, y cada PREPARE tiene su EXECUTE y su DEALLOCATE',
+    array_keys(array_filter($s13Sent, static fn (string $s): bool => stripos($s, 'SELECT') === 0)) === [count($s13Sent) - 1]
+    && preg_match_all('/^PREPARE (\w+)/m', $s13Cod, $s13P) === 3 && preg_match_all('/^EXECUTE (\w+)/m', $s13Cod, $s13E) === 3 && preg_match_all('/^DEALLOCATE PREPARE (\w+)/m', $s13Cod, $s13D) === 3
+    && $s13P[1] === $s13E[1] && $s13P[1] === $s13D[1], $s13P[1] ?? null);
+wa_chk('017: DATABASE() solo en la primera sentencia y cada consulta a information_schema filtra por @db (la regla de phpMyAdmin)',
+    substr_count($s13Cod, 'DATABASE()') === 1 && preg_match_all('/\binformation_schema\./i', $s13Cod) === preg_match_all('/\bTABLE_SCHEMA = @db\b/', $s13Cod)
+    && preg_match_all('/\binformation_schema\./i', $s13Cod) > 0, [substr_count($s13Cod, 'DATABASE()')]);
+wa_chk("017: amplia el ENUM a ('completa','express','ambas') con el mismo NOT NULL y DEFAULT 'completa', solo si falta el valor; no enciende a nadie (ni un UPDATE) y se detiene si falta la 015",
+    str_contains($s13Cod, "ENUM(''completa'',''express'',''ambas'') NOT NULL DEFAULT ''completa''") && str_contains($s13Cod, "LOCATE('''ambas''', @tipo_edicion) = 0")
+    && str_contains($s13Cod, 'ALTO_aplica_primero_la_015_tenants_edicion') && $s13M17 !== '' && stripos($s13M17, 'UPDATE tenants') === false && !str_contains($s13Cod, 'ADD COLUMN'), null);
+wa_chk("master_schema.sql: tenants.edicion es ENUM('completa','express','ambas') y su COMMENT dice la 017",
+    preg_match("/^\s*edicion\s+ENUM\('completa','express','ambas'\) NOT NULL DEFAULT 'completa'\s+COMMENT '[^']*ambas[^']*017'/m", $s1Esquema) === 1, null);
+wa_chk('verificador del master: la fila 017 revisa que el tipo de tenants.edicion traiga el valor ambas, y la cabecera explica la 016 reservada',
+    preg_match("/SELECT '017', '017_tenants_edicion_ambas\\.sql',\\s*'[^']*',\\s*EXISTS \\(SELECT 1 FROM information_schema\\.COLUMNS\\s+WHERE TABLE_SCHEMA = DATABASE\\(\\) AND TABLE_NAME = 'tenants'\\s+"
+        . "AND COLUMN_NAME = 'edicion' AND LOCATE\\('''ambas''', COLUMN_TYPE\\) > 0\\)/", $s1Verificador) === 1
+    && str_contains($s1Verificador, '016 sigue reservada'), null);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
