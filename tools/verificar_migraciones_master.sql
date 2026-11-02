@@ -102,6 +102,12 @@ FROM (
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
                    AND COLUMN_NAME = 'inventario_estricto')
   UNION ALL
+  SELECT '014', '014_integracion_backup_estado_dgii.sql',
+         'columna ecf_integracion_backup.estado_dgii',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ecf_integracion_backup'
+                   AND COLUMN_NAME = 'estado_dgii')
+  UNION ALL
   SELECT '015', '015_tenants_edicion.sql',
          'columnas tenants.edicion, modulos_habilitados, tipos_ecf_habilitados y cert_vence',
          (SELECT COUNT(*) FROM information_schema.COLUMNS

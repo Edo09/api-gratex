@@ -294,6 +294,55 @@ class IntegracionStoreModel
     }
 
     /**
+     * Guarda lo que respondio la DGII al consultar el estado (GET /integracion/estado)
+     * en la fila del respaldo de ese envio: la del track_id si se consulto por el,
+     * si no (RFCE) el ultimo envio de ese e-NCF. Best-effort: false si no hay fila
+     * o si falta master_migrations/014; nunca lanza.
+     *
+     * @param array $consultaData la respuesta de la DGII (consulta['data'])
+     */
+    public function guardarEstadoConsultado(
+        int $tenantId,
+        string $rncEmisor,
+        string $eNcf,
+        ?string $trackId,
+        ?string $estado,
+        ?string $ambiente,
+        $consultaData
+    ): bool {
+        try {
+            if ($trackId !== null && $trackId !== '') {
+                $stmt = $this->conexion->prepare(
+                    'SELECT id FROM ecf_integracion_backup
+                      WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e AND track_id = :k
+                      ORDER BY id DESC LIMIT 1'
+                );
+                $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf, ':k' => $trackId]);
+            } else {
+                $stmt = $this->conexion->prepare(
+                    'SELECT id FROM ecf_integracion_backup
+                      WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e
+                      ORDER BY id DESC LIMIT 1'
+                );
+                $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf]);
+            }
+            $id = (int) ($stmt->fetchColumn() ?: 0);
+        } catch (\Throwable $e) {
+            error_log('[IntegracionStore] no se pudo ubicar el respaldo de ' . $eNcf . ': ' . $e->getMessage());
+            return false;
+        }
+        if ($id <= 0) {
+            return false;
+        }
+        return MasterDatabase::updateIntegrationEcfEstadoEn($this->conexion, $id, [
+            'ambiente'       => $ambiente,
+            'estado_dgii'    => $estado,
+            'dgii_mensajes'  => is_array($consultaData) ? ($consultaData['mensajes'] ?? null) : null,
+            'dgii_respuesta' => $consultaData,
+        ]);
+    }
+
+    /**
      * Igual que getEmitidoByENCF pero CON el xml_firmado: el ultimo envio de ese
      * e-NCF, para volver a bajar el comprobante (GET /integracion/xml). Lo usa
      * la certificacion: el XML integro de cada E32 <250k se sube a mano al portal.

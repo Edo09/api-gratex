@@ -292,6 +292,38 @@ Decisión 7 de Release 1, redefinida el 2026-10-12: la app **nunca** reenvía un
 
 ---
 
+### Rechazos de la DGII: qué significa cada uno y qué hacer
+
+Un QR (`ConsultaTimbre`) de un e-CF **rechazado nunca resuelve**: la URL puede estar bien
+armada y aun así la DGII no encuentra el comprobante. Primero hay que ver el estado.
+
+**Dónde queda guardado.** Empresas `app`: `facturas.estado_dgii` y `respuesta_dgii` en su base.
+Empresas `integracion` (sin base propia): `master.ecf_integracion_backup` (master_migrations/014).
+Ahí se guarda el estado al emitir y se actualiza en cada `GET /api/integracion/estado`
+(`estado_dgii`, `dgii_mensajes` con el motivo, `dgii_respuesta` con la respuesta completa y
+`estado_consultado_at`). Rechazos de una empresa:
+
+```sql
+SELECT e_ncf, ambiente, track_id, estado_dgii, dgii_mensajes, estado_consultado_at
+  FROM ecf_integracion_backup
+ WHERE tenant_id = 6 AND estado_dgii = 'RECHAZADO'
+ ORDER BY id DESC;
+```
+
+En `certecf` la DGII **no** tiene `ConsultaTrackIds` ni `ConsultaEstado` (404 en
+`tools/consultar_ecf_dgii.php`); por `trackId` (`ConsultaResultado`, lo que usa
+`GET /api/integracion/estado`) sí responde.
+
+| Código | Mensaje de la DGII | Causa | Qué hacer |
+|---|---|---|---|
+| 145 | "No se encuentra en una fase válida dentro del proceso de certificación." | La empresa (RNC emisor) no está en un paso de la certificación en que CerteCF acepte e-CF: no la empezó, no pasó los pasos previos en la Oficina Virtual, está en un paso que no recibe envíos libres, o **ya terminó** (CerteCF deja de recibir). No es un error del XML ni de nuestro código | El contribuyente revisa en la OFV de la DGII en qué paso está. Si ya está autorizado en producción: `master.tenants.ambiente = 'ecf'` y reemitir. Si sigue certificando: completar el paso pendiente y reemitir. Con `secuenciaUtilizada: false` el e-NCF no se gastó y se puede reusar |
+
+Caso de referencia: PUBLIC SOUND SRL (tenant 6, RNC 133389843), `E310000000027`, `certecf`,
+trackId `774f1e7b-25eb-4b53-9f09-1640feb0398a`, rechazado 30-10-2026 con el 145. El QR salía
+con `CerteCF/ConsultaTimbre` (correcto para esa empresa) y "no funcionaba" por el rechazo.
+
+Al encontrar un rechazo nuevo, agréguelo a esta tabla.
+
 ## Bugs críticos resueltos en certificación
 
 ### Router — doble `/api/` en las URLs de callback DGII

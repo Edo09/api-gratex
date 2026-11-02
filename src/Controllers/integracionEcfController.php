@@ -25,6 +25,7 @@ require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/TimbreEcf.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -121,6 +122,13 @@ function handleEmitirIntegracion(): void
             'monto_total'   => $input['totales']['monto_total'] ?? null,
             'track_id'      => $result['track_id'] ?? null,
             'xml_firmado'   => $result['signed_xml'],
+            // Lo que la DGII dijo al recibirlo (master_migrations/014). GET /estado lo
+            // actualiza con el veredicto final y el motivo de un rechazo.
+            'ambiente'         => $result['ambiente'] ?? null,
+            'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
+            'estado_dgii'      => $result['estado'] ?? null,
+            'dgii_mensajes'    => is_array($result['dgii_response'] ?? null) ? ($result['dgii_response']['mensajes'] ?? null) : null,
+            'dgii_respuesta'   => $result['dgii_response'] ?? null,
         ]);
     } catch (Throwable $e) {
         error_log('[integracionEcf] no se pudo guardar respaldo: ' . $e->getMessage());
@@ -146,6 +154,8 @@ function handleEmitirIntegracion(): void
         'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
         'ambiente'         => $result['ambiente'] ?? null,
         'fecha_emision'    => $result['fecha_emision_dgii'] ?? null,
+        // Contenido del QR de la Representacion Impresa: el cliente solo lo convierte a QR.
+        'qr_url'           => null,
         'xml_firmado'      => $result['signed_xml'] ?? null,
         'dgii_response'    => $result['dgii_response'] ?? null,
     ];
@@ -153,6 +163,14 @@ function handleEmitirIntegracion(): void
     if (SandboxEcf::activo($tenant['ambiente'] ?? null)) {
         $data['sandbox'] = true;
         $data['aviso'] = SandboxEcf::aviso();
+    } else {
+        // Un QR sandbox apuntaria a la DGII, que no conoce ese comprobante.
+        try {
+            $data['qr_url'] = TimbreEcf::urlDesdeXml((string) ($result['signed_xml'] ?? ''), (string) ($result['ambiente'] ?? ''));
+        } catch (Throwable $e) {
+            // La URL es un extra: el comprobante ya se emitio y no se pierde la respuesta por ella.
+            error_log('[integracionEcf] no se pudo armar qr_url: ' . $e->getMessage());
+        }
     }
 
     echo json_encode(['status' => true, 'data' => $data]);
