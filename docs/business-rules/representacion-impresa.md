@@ -23,9 +23,11 @@ conservan el suyo (`FacturaTemplate::usaDisposicionNorma()`):
 
 Un diseño a la medida que extiende `clasico` (toda `Tenant<id>` generada con
 `tools/new_custom_template.php`) hereda este modelo; para conservar el suyo sobreescribe
-`usaDisposicionNorma()` a `false`. Gratex (`custom:tenant1`, `Tenant1Template`) lo hace: su factura
-sigue con el diseño histórico (cliente a la derecha, "Tel.:" y "E-mail:" en una línea, banda de tabla
-negra, fecha de emisión en fecha larga), no con este modelo.
+`usaDisposicionNorma()` a `false`. Gratex (`custom:tenant1`, `Tenant1Template`) lo hereda: usa este
+modelo, con ajustes propios (logo y sello más grandes, sin el nombre en texto bajo el logo, sin las
+etiquetas de dirección/teléfono/correo, totales más grandes y en negrita: `Tenant1Template::ajustes()`).
+Su diseño anterior (cliente a la derecha, "Tel.:" y "E-mail:" en una línea, banda de tabla negra, fecha
+de emisión en fecha larga) vuelve con `usaDisposicionNorma()` en `false` en esa clase.
 
 ## 1. Encabezado de la Identidad Legal (Emisor)
 

@@ -87,7 +87,14 @@ Cuando un cliente pide su propio formato de factura:
      disposición del modelo de RI de la DGII) y toda `Tenant<id>` generada, que
      lo extiende, lo hereda. Para conservar un diseño propio sobre
      `ClasicoTemplate`, sobreescribirlo a `false`: así el clásico dibuja su
-     emisor, banda de tabla y totales históricos (Gratex lo hace).
+     emisor, banda de tabla y totales históricos (el diseño que tenía Gratex
+     antes del modelo).
+   - `ajustes()` — solo en subclases de `ClasicoTemplate`: medidas y etiquetas
+     del clásico que una `Tenant<id>` retoca sin redibujar (caja del logo, nombre
+     del emisor con logo, etiquetas de dirección/teléfono/correo, caja del sello,
+     Y de las firmas, y letra/anchos/negrita de los totales). Se sobreescribe con
+     `array_merge(parent::ajustes(), [...])`; lo que trae por defecto es lo que
+     el clásico imprime hoy. Ejemplo: `Custom/Tenant1Template.php` (Gratex).
    - `drawItemsTableHeader($pdf, $widths, $labels)` — banda de la tabla
      (anchos y etiquetas los fija el motor: no se puede quitar una columna).
    - `drawTotals($pdf, $filas)` — cuadro de totales (filas DGII del motor).
@@ -120,7 +127,7 @@ Diseños a la medida que existen hoy:
 
 | Valor | Tenant | Qué calca |
 |---|---|---|
-| `custom:tenant1` | Gratex | `clasico` + aviso de fecha límite de pago en el pie |
+| `custom:tenant1` | Gratex | `clasico` (modelo DGII) con ajustes: logo y sello más grandes, sin nombre en texto bajo el logo ni etiquetas de dirección/teléfono/correo, totales más grandes y en negrita, y aviso de fecha límite de pago en el pie |
 | `custom:tenant9` | Nuevas Ideas Noticias R.D. | Su factura de Excel: logo + nombre grande, columna de etiquetas en negrita (con su cuenta Banreservas), tabla y totales en blanco, "Entregado por / Recibido por". Disposición de la norma |
 | `custom:ferreventura` | Ferretería Ventura | Su factura de Excel (serif, bandas azules). No sigue la convención `tenant<id>`: solo se activa por SQL |
 
@@ -235,6 +242,7 @@ limita por altura. Nunca se desborda sobre el bloque del emisor ni la tabla.
 | `clasico` | 65 × 18 | ~3.5 : 1 | 1300 × 360 |
 | `moderno` | 50 × 16 (sobre recuadro blanco en la banda) | ~3 : 1 | 1200 × 400 |
 | `compacto` | 45 × 14 | ~3 : 1 | 1100 × 350 |
+| `custom:tenant1` (Gratex) | 70 × 20 | ~3.9 : 1 | 1886 × 486 (el de hoy) |
 
 Un solo archivo ~3:1 funciona bien en las tres.
 

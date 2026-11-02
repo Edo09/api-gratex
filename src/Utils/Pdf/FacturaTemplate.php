@@ -108,7 +108,7 @@ abstract class FacturaTemplate
      * bordes y el pie con QR a la izquierda y totales a la derecha. Las demas
      * plantillas conservan su disposicion. Un diseno a la medida que EXTIENDE
      * ClasicoTemplate hereda la de la norma: para conservar la suya tiene que
-     * sobreescribir esto a false (Tenant1Template).
+     * sobreescribir esto a false.
      */
     public function usaDisposicionNorma(): bool
     {

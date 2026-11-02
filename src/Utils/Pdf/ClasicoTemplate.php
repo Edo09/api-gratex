@@ -7,7 +7,8 @@ require_once __DIR__ . '/FacturaTemplate.php';
  * historico de Gratex, movido tal cual desde FacturaPdfGenerator (Header/Footer/
  * banda de tabla/totales; sin acento: banda negra, totales gris claro, sello +
  * dos firmas), sigue aqui para la cotizacion y para la subclase que apague
- * usaDisposicionNorma() (Tenant1Template).
+ * usaDisposicionNorma(). Lo que una Tenant<id> suele retocar del modelo (tamanos,
+ * etiquetas) esta en ajustes().
  */
 class ClasicoTemplate extends FacturaTemplate
 {
@@ -32,6 +33,42 @@ class ClasicoTemplate extends FacturaTemplate
         ];
     }
 
+    /**
+     * Medidas y etiquetas del clasico que una subclase (una Tenant<id>) puede
+     * cambiar sin redibujar nada: array_merge(parent::ajustes(), [...]). Lo que
+     * trae es lo que el clasico imprime hoy; cada clave se usa en un solo lugar.
+     *
+     *  - logo_caja:             caja maxima del logo del encabezado [ancho, alto]
+     *                           mm (modelo DGII). El nombre del emisor va debajo.
+     *  - nombre_con_logo:       false = con logo no se escribe el nombre del emisor
+     *                           (ya va en la imagen); sin logo siempre se escribe.
+     *  - etiquetas_contacto:    false = direccion, telefono y correo del emisor
+     *                           sin "Direccion:", "Telefono:", "Correo:" (modelo DGII).
+     *  - sello_caja:            caja maxima del sello del pie [ancho, alto] mm.
+     *  - firma_y:               Y de las lineas de firma del pie (mm). El sello
+     *                           tiene que terminar sobre ellas.
+     *  - totales_fuente:        letra del cuadro de totales, pt (modelo DGII).
+     *  - totales_negrita_valor: true = el valor de cada fila tambien en negrita.
+     *  - totales_ancho:         [etiqueta, valor] mm; el cuadro crece hacia la
+     *                           izquierda y su borde derecho no se mueve.
+     *
+     * El alto de las filas de totales (5 mm) no es un ajuste: el motor lo supone
+     * para reservar la zona de totales de la ultima hoja.
+     */
+    protected function ajustes(): array
+    {
+        return [
+            'logo_caja'             => [50, 16],
+            'nombre_con_logo'       => true,
+            'etiquetas_contacto'    => true,
+            'sello_caja'            => [40, 40],
+            'firma_y'               => 259,
+            'totales_fuente'        => 9,
+            'totales_negrita_valor' => false,
+            'totales_ancho'         => [34, 26],
+        ];
+    }
+
     public function drawCompanyHeader($pdf, array $emisor, ?string $logoPath, string $variant = 'factura'): void
     {
         if ($variant === 'cotizacion') {
@@ -40,8 +77,8 @@ class ClasicoTemplate extends FacturaTemplate
         }
         // Con comprobante en curso (toda factura / e-CF) el emisor se dibuja
         // como en el modelo de RI de la DGII. Sin el (vista de diseno), o en una
-        // subclase que apaga usaDisposicionNorma() (Gratex), el encabezado
-        // historico de abajo.
+        // subclase que apaga usaDisposicionNorma(), el encabezado historico de
+        // abajo.
         $doc = $this->documento();
         if ($doc !== null && $this->usaDisposicionNorma()) {
             $this->drawEmisorNorma($pdf, $emisor, $logoPath, $doc);
@@ -77,33 +114,42 @@ class ClasicoTemplate extends FacturaTemplate
      * Bloque izquierdo del modelo DGII: logo (si hay), nombre del emisor en
      * azul, RNC, direccion, telefono/correo y la fecha de emision. El cursor
      * queda en el renglon siguiente: el motor dibuja a la derecha el
-     * comprobante y debajo las franjas del cliente y de la tabla.
+     * comprobante y debajo las franjas del cliente y de la tabla. Con logo, el
+     * nombre solo sale si ajustes() lo deja (nombre_con_logo).
      */
     private function drawEmisorNorma($pdf, array $emisor, ?string $logoPath, EcfDocumento $doc): void
     {
+        $aj = $this->ajustes();
         $ancho = 98;
         $y = 10;
         if ($logoPath !== null) {
-            // Caja maxima 50x16 mm; el nombre va debajo.
-            $this->drawLogo($pdf, $logoPath, 8, $y, 50, 16);
-            $y += 18;
+            // Caja del logo (50x16 mm por defecto); el nombre va debajo.
+            [$logoAncho, $logoAlto] = $aj['logo_caja'];
+            $this->drawLogo($pdf, $logoPath, 8, $y, $logoAncho, $logoAlto);
+            $y += $logoAlto + 2;
         }
-        $color = $this->coloresNorma()['titulo'];
         $pdf->SetXY(8, $y);
-        $pdf->SetFont('Arial', 'B', 13);
-        $pdf->SetTextColor($color[0], $color[1], $color[2]);
-        $pdf->MultiCell($ancho, 5.5, $this->enc($emisor['razon_social']), 0, 'L');
-        $pdf->SetTextColor(0, 0, 0);
+        // Sin logo el nombre es lo unico que identifica al emisor: siempre se
+        // escribe. Con logo, salvo que la plantilla diga que la imagen ya lo trae.
+        if ($logoPath === null || $aj['nombre_con_logo']) {
+            $color = $this->coloresNorma()['titulo'];
+            $pdf->SetFont('Arial', 'B', 13);
+            $pdf->SetTextColor($color[0], $color[1], $color[2]);
+            $pdf->MultiCell($ancho, 5.5, $this->enc($emisor['razon_social']), 0, 'L');
+            $pdf->SetTextColor(0, 0, 0);
+        }
 
         $this->lineaEtiquetada($pdf, 'RNC:', $emisor['rnc'], $ancho);
+        // Sin etiqueta (etiquetas_contacto false) el dato sale igual.
+        $etiquetas = $aj['etiquetas_contacto'];
         if (trim($emisor['direccion']) !== '') {
-            $this->lineaEtiquetada($pdf, 'Dirección:', $emisor['direccion'], $ancho);
+            $this->lineaEtiquetada($pdf, $etiquetas ? 'Dirección:' : '', $emisor['direccion'], $ancho);
         }
         if (trim($emisor['telefono']) !== '') {
-            $this->lineaEtiquetada($pdf, 'Teléfono:', $emisor['telefono'], $ancho);
+            $this->lineaEtiquetada($pdf, $etiquetas ? 'Teléfono:' : '', $emisor['telefono'], $ancho);
         }
         if (trim($emisor['correo']) !== '') {
-            $this->lineaEtiquetada($pdf, 'Correo:', $emisor['correo'], $ancho);
+            $this->lineaEtiquetada($pdf, $etiquetas ? 'Correo:' : '', $emisor['correo'], $ancho);
         }
         $this->lineaEtiquetada(
             $pdf,
@@ -114,14 +160,20 @@ class ClasicoTemplate extends FacturaTemplate
         $pdf->SetY($pdf->GetY() + 1);
     }
 
-    /** "Etiqueta: valor" con la etiqueta en negrita; un valor largo sangra bajo si mismo. */
+    /**
+     * "Etiqueta: valor" con la etiqueta en negrita; un valor largo sangra bajo si
+     * mismo. Sin etiqueta, el valor solo, con todo el ancho.
+     */
     private function lineaEtiquetada($pdf, string $etiqueta, string $valor, float $ancho): void
     {
         $pdf->SetX(8);
-        $pdf->SetFont('Arial', 'B', 9);
-        $e = $this->enc($etiqueta) . ' ';
-        $we = $pdf->GetStringWidth($e);
-        $pdf->Cell($we, 4, $e, 0, 0, 'L');
+        $we = 0.0;
+        if ($etiqueta !== '') {
+            $pdf->SetFont('Arial', 'B', 9);
+            $e = $this->enc($etiqueta) . ' ';
+            $we = $pdf->GetStringWidth($e);
+            $pdf->Cell($we, 4, $e, 0, 0, 'L');
+        }
         $pdf->SetFont('Arial', '', 9);
         $pdf->MultiCell($ancho - $we, 4, $this->enc($valor), 0, 'L');
     }
@@ -151,20 +203,24 @@ class ClasicoTemplate extends FacturaTemplate
     {
         // Sello del tenant (sellos/<id>.png). El sello.png global es el de Gratex:
         // solo aplica sin tenant resuelto, nunca en la factura de otro emisor.
+        $aj = $this->ajustes();
         $selloPath = BrandingResolver::selloPath();
         if ($selloPath !== null) {
-            $pdf->Image($selloPath, 8, 246, 40);
+            // Dentro de su caja y con la proporcion de la imagen.
+            [$selloAncho, $selloAlto] = $aj['sello_caja'];
+            $this->drawLogo($pdf, $selloPath, 8, 246, $selloAncho, $selloAlto);
         }
+        $yFirma = $aj['firma_y'];
         // Firma empresa
-        $pdf->Line(8, 259, 50, 259);
-        $pdf->SetY(-20);
+        $pdf->Line(8, $yFirma, 50, $yFirma);
+        $pdf->SetY($yFirma + 0.4);
         $pdf->SetX(9);
         $pdf->SetFont('Arial', '', 10);
         $pdf->Cell(38, 6, 'Firma y sello empresa', 0, 0, 'R');
 
         // Firma cliente
-        $pdf->Line(80, 259, 125, 259);
-        $pdf->SetY(-20);
+        $pdf->Line(80, $yFirma, 125, $yFirma);
+        $pdf->SetY($yFirma + 0.4);
         $pdf->SetX(81);
         $pdf->SetFont('Arial', '', 10);
         $pdf->Cell(38, 6, 'Firma y sello cliente', 0, 0, 'R');
@@ -263,9 +319,14 @@ class ClasicoTemplate extends FacturaTemplate
      * Totales del modelo DGII: etiqueta en negrita con dos puntos (celda
      * blanca con borde) y el valor en celda gris, alineados a la derecha. Mismo
      * anclaje de siempre: la fila Total en Y=-40 y las demas 5 mm mas arriba.
+     * Letra, anchos y negrita del valor: ajustes().
      */
     private function drawTotalsNorma($pdf, array $filas): void
     {
+        $aj = $this->ajustes();
+        [$anchoEtiqueta, $anchoValor] = $aj['totales_ancho'];
+        $fuente = $aj['totales_fuente'];
+        $estiloValor = $aj['totales_negrita_valor'] ? 'B' : '';
         $pdf->SetTextColor(0, 0, 0);
         $pdf->SetDrawColor(self::GRIS_BORDE[0], self::GRIS_BORDE[1], self::GRIS_BORDE[2]);
         $pdf->SetLineWidth(0.2);
@@ -273,11 +334,12 @@ class ClasicoTemplate extends FacturaTemplate
         $y = -40 - 5 * (count($filas) - 1);
         foreach ($filas as [$label, $valor]) {
             $pdf->SetY($y);
-            $pdf->SetX(-68);
-            $pdf->SetFont('Arial', 'B', 9);
-            $pdf->Cell(34, 5, $this->enc($label . ':'), 1, 0, 'R');
-            $pdf->SetFont('Arial', '', 9);
-            $pdf->Cell(26, 5, number_format($valor, 2), 1, 1, 'R', true);
+            // El borde derecho queda en x = ancho de hoja - 8, como la tabla.
+            $pdf->SetX(-($anchoEtiqueta + $anchoValor + 8));
+            $pdf->SetFont('Arial', 'B', $fuente);
+            $pdf->Cell($anchoEtiqueta, 5, $this->enc($label . ':'), 1, 0, 'R');
+            $pdf->SetFont('Arial', $estiloValor, $fuente);
+            $pdf->Cell($anchoValor, 5, number_format($valor, 2), 1, 1, 'R', true);
             $y += 5;
         }
         $pdf->SetDrawColor(0, 0, 0);
