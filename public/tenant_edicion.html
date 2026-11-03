@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<!-- Nada de afuera: sin recursos externos, sin marcos, y las peticiones solo al mismo origen. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; base-uri 'none'; form-action 'none'">
+<title>Gratex — Edición de empresas</title>
+<style>
+  :root { --bg:#0f172a; --card:#1e293b; --line:#334155; --txt:#e2e8f0; --mut:#94a3b8;
+          --accent:#38bdf8; --ok:#22c55e; --warn:#f59e0b; --err:#ef4444; --field:#0b1220; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--txt); font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
+  main { max-width:1100px; margin:0 auto; padding:20px 16px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:17px; margin:0; } h3 { font-size:15px; margin:18px 0 8px; }
+  p.sub { color:var(--mut); margin:0 0 18px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .fila { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .botones { display:flex; flex-wrap:wrap; gap:8px; }
+  label { display:block; font-weight:600; margin-bottom:6px; }
+  input[type=password] { width:100%; max-width:420px; padding:10px 12px; background:var(--field); color:var(--txt); border:1px solid var(--line); border-radius:8px; font:inherit; }
+  button { padding:9px 14px; border-radius:8px; border:1px solid var(--line); background:var(--field); color:var(--txt); font:inherit; cursor:pointer; min-height:40px; }
+  button.primario { background:var(--accent); color:#04202e; border-color:var(--accent); font-weight:700; }
+  button.peligro { background:var(--err); color:#fff; border-color:var(--err); font-weight:700; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button:focus-visible, input:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  .nota { color:var(--mut); font-size:13px; margin:6px 0 0; }
+  .aviso { border-radius:8px; padding:10px 12px; margin-bottom:12px; border:1px solid; }
+  .aviso.err { background:#450a0a; border-color:var(--err); } .aviso.warn { background:#422006; border-color:var(--warn); }
+  .tabla-envoltura { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:760px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--mut); font-weight:600; font-size:13px; }
+  td small { display:block; color:var(--mut); }
+  .badge { display:inline-block; padding:2px 9px; border-radius:99px; font-size:13px; font-weight:700; border:1px solid var(--line); }
+  .badge.completa { background:#1f2937; color:var(--mut); } .badge.express { background:#082f49; color:var(--accent); border-color:var(--accent); }
+  .badge.ambas { background:#052e16; color:var(--ok); border-color:var(--ok); } .badge.rara { background:#450a0a; color:#fca5a5; border-color:var(--err); }
+  fieldset { border:1px solid var(--line); border-radius:8px; margin:0 0 12px; padding:10px 12px; }
+  legend { padding:0 6px; color:var(--mut); font-size:13px; }
+  .opcion { display:flex; gap:10px; align-items:flex-start; padding:6px 0; }
+  .opcion input { margin-top:4px; } .opcion label { font-weight:600; margin:0; } .opcion .nota { margin:2px 0 0; }
+  .rejilla { display:flex; flex-wrap:wrap; gap:6px 22px; }
+  .rejilla label { font-weight:400; margin:0; display:flex; gap:8px; align-items:center; }
+  pre.informe { background:var(--field); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:10px 0 0; overflow-x:auto; white-space:pre-wrap; word-break:break-word; font:13px/1.5 ui-monospace,Menlo,Consolas,monospace; }
+  pre.informe.viejo { opacity:.45; }
+  .l-ok { color:var(--ok); } .l-corr { color:var(--warn); } .l-rech { color:#fca5a5; font-weight:700; } .l-fin { color:var(--accent); font-weight:700; }
+  .confirmar { margin-top:14px; padding:12px; border:1px dashed var(--warn); border-radius:8px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Edición de empresas</h1>
+  <p class="sub">La versión web de <code>tools/tenant_edicion.php</code>: pasa una empresa a <strong>Express</strong>, a <strong>ambas</strong> (la app completa y Express) o de vuelta a <strong>completa</strong>. Siempre se ensaya primero.</p>
+
+  <section id="entrada" class="card">
+    <label for="token">Token de operaciones</label>
+    <input type="password" id="token" autocomplete="off" spellcheck="false">
+    <p class="nota">Es el <code>TENANT_EDICION_TOKEN</code> del <code>.env</code> del server. Solo vive en esta pestaña: al recargar hay que escribirlo otra vez.</p>
+    <div class="botones" style="margin-top:12px"><button type="button" id="conectar" class="primario">Conectar</button></div>
+    <div id="error-entrada" class="aviso err" role="alert" hidden></div>
+  </section>
+
+  <section id="app" hidden>
+    <div id="avisos"></div>
+
+    <div class="card">
+      <div class="fila">
+        <h2>Empresas</h2>
+        <div class="botones">
+          <button type="button" id="verificar">Verificar todas</button>
+          <button type="button" id="recargar">Actualizar</button>
+          <button type="button" id="salir">Salir</button>
+        </div>
+      </div>
+      <div class="tabla-envoltura">
+        <table>
+          <thead><tr><th>#</th><th>Empresa</th><th>Tipo</th><th>Edición</th><th>Tipos de venta</th><th>Módulos</th><th>Certificado vence</th><th>POS</th><th></th></tr></thead>
+          <tbody id="cuerpo"></tbody>
+        </table>
+      </div>
+      <pre id="informe-verificar" class="informe" aria-live="polite" hidden></pre>
+    </div>
+
+    <div id="panel" class="card" hidden>
+      <div class="fila"><h2 id="panel-titulo"></h2><button type="button" id="cerrar-panel">Cerrar</button></div>
+
+      <fieldset>
+        <legend>¿Qué hacer con esta empresa?</legend>
+        <div class="opcion"><input type="radio" name="modo" id="modo-ambas" value="ambas"><div><label for="modo-ambas">Ambas: la app completa y Express</label>
+          <p class="nota">Usa las dos versiones con el mismo usuario y los mismos datos. La app completa queda como estaba; solo las peticiones de Express llevan los límites de Express. No toca el POS, las existencias, la integración ni los roles.</p></div></div>
+        <div class="opcion"><input type="radio" name="modo" id="modo-express" value="express"><div><label for="modo-express">Solo Express</label>
+          <p class="nota">La app completa deja de servirle a esta empresa. Apaga el POS y el control de existencias, deja en blanco la credencial de integración y resetea los permisos del rol user. Para empresas nuevas que solo venden por Express.</p></div></div>
+        <div class="opcion"><input type="radio" name="modo" id="modo-completa" value="completa"><div><label for="modo-completa">Volver a completa</label>
+          <p class="nota">Le quita Express y deja la app de siempre. No cambia la app completa. No es una parada segura de Express: para frenar sus facturas deja los tipos vacíos o revoca sus tokens.</p></div></div>
+        <div class="opcion"><input type="radio" name="modo" id="modo-refrescar-cert" value="refrescar-cert"><div><label for="modo-refrescar-cert">Refrescar el vencimiento del certificado</label>
+          <p class="nota">Vuelve a leer el certificado de la empresa y actualiza su fecha (después de renovarlo). Solo para empresas Express o ambas.</p></div></div>
+      </fieldset>
+
+      <div id="grupo-listas">
+        <fieldset>
+          <legend>Tipos de venta que puede emitir</legend>
+          <div class="rejilla" id="tipos"></div>
+          <p class="nota">El 34 (nota de crédito, para anular) se deriva de cualquier tipo de venta. Los tipos 31 y 45 piden el módulo Clientes.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Módulos</legend>
+          <div class="rejilla" id="modulos"></div>
+          <p class="nota">Con todos marcados la empresa recibe todo el preset (y los módulos que se sumen después). Quitar uno la limita a los marcados.</p>
+        </fieldset>
+      </div>
+
+      <div class="botones"><button type="button" id="ensayo" class="primario">Ensayo (no escribe nada)</button></div>
+      <pre id="informe" class="informe" aria-live="polite" hidden></pre>
+
+      <div id="confirmar" class="confirmar" hidden>
+        <div class="opcion"><input type="checkbox" id="entiendo"><label for="entiendo" style="font-weight:400">Revisé el ensayo y entiendo que esto cambia lo que la empresa puede hacer.</label></div>
+        <div class="botones" style="margin-top:10px"><button type="button" id="aplicar" class="peligro" disabled>Aplicar</button></div>
+        <p class="nota">Se aplica exactamente lo que muestra el ensayo. Si algo cambia (los datos o la empresa) o pasan 10 minutos, hay que ensayar otra vez.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+'use strict';
+// Un marco no puede mostrar esta página (clickjacking): se vacía.
+if (window.top !== window.self) { document.body.textContent = ''; throw new Error('no se muestra dentro de un marco'); }
+
+const $ = (id) => document.getElementById(id);
+const crear = (tag, props, ...hijos) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) { if (k === 'class') e.className = v; else if (k === 'text') e.textContent = v; else e.setAttribute(k, v); }
+  for (const h of hijos) e.append(h);
+  return e;
+};
+const NOMBRES_TIPO = { '31': 'Factura de crédito fiscal (31)', '32': 'Factura de consumo (32)', '45': 'Comprobante gubernamental (45)', '33': 'Nota de débito (33, opcional)' };
+const NOMBRES_MODULO = { facturacion: 'Facturación', clientes: 'Clientes', productos: 'Productos', usuarios: 'Usuarios', configuracion: 'Configuración' };
+
+let TOKEN = '';     // solo en memoria
+let META = null;    // la última respuesta de "meta"
+let SEL = null;     // la empresa elegida
+let CONF = null;    // la confirmación del último ensayo que se puede aplicar
+let ENSAYADO = '';  // los parámetros de ese ensayo
+
+async function llamar(accion, campos) {
+  const fd = new FormData();
+  fd.append('token', TOKEN);
+  fd.append('action', accion);
+  for (const [k, v] of Object.entries(campos || {})) fd.append(k, v);
+  let r;
+  try { r = await fetch('tenant_edicion.php', { method: 'POST', body: fd, credentials: 'omit', cache: 'no-store' }); }
+  catch (e) { return { http: 0, json: { status: false, error: 'No se pudo conectar con el servidor.' } }; }
+  let j;
+  try { j = await r.json(); } catch (e) { j = { status: false, error: 'Respuesta inesperada del servidor (HTTP ' + r.status + ').' }; }
+  return { http: r.status, json: j };
+}
+
+function pintarInforme(pre, lineas) {
+  pre.replaceChildren();
+  pre.classList.remove('viejo');
+  for (const linea of lineas) {
+    let clase = '';
+    if (linea.startsWith('[OK  ]')) clase = 'l-ok';
+    else if (linea.startsWith('[CORR]')) clase = 'l-corr';
+    else if (/^(\[RECH\]|RECHAZADO|\[FALLO\])/.test(linea)) clase = 'l-rech';
+    else if (/^(APLICADO|DRY-RUN|SIN CAMBIOS|Sin problemas)/.test(linea)) clase = 'l-fin';
+    pre.append(crear('div', { class: clase, text: linea }));
+  }
+  pre.hidden = false;
+}
+function mensaje(pre, texto) { pintarInforme(pre, [texto]); pre.firstChild.className = 'l-rech'; }
+
+async function conectar() {
+  TOKEN = $('token').value;
+  $('error-entrada').hidden = true;
+  if (TOKEN === '') { $('error-entrada').textContent = 'Escribe el token.'; $('error-entrada').hidden = false; return; }
+  $('conectar').disabled = true;
+  const r = await llamar('meta');
+  $('conectar').disabled = false;
+  if (r.json.status !== true) { TOKEN = ''; $('error-entrada').textContent = r.json.error || 'No se pudo conectar.'; $('error-entrada').hidden = false; return; }
+  $('token').value = '';
+  META = r.json.data;
+  $('entrada').hidden = true;
+  $('app').hidden = false;
+  pintarTodo();
+}
+function salir() { TOKEN = ''; META = null; SEL = null; CONF = null; $('app').hidden = true; $('panel').hidden = true; $('entrada').hidden = false; $('cuerpo').replaceChildren(); $('token').focus(); }
+async function recargar() {
+  const r = await llamar('meta');
+  if (r.json.status !== true) { mensaje($('informe-verificar'), r.json.error || 'No se pudo actualizar.'); return; }
+  META = r.json.data;
+  pintarTodo();
+}
+
+function pintarTodo() {
+  const av = $('avisos');
+  av.replaceChildren();
+  if (!META.migraciones.m015) av.append(crear('div', { class: 'aviso err', text: 'Falta la migración master 015 (db/master_migrations/015_tenants_edicion.sql): sin ella no se puede cambiar ninguna edición.' }));
+  else if (!META.migraciones.m017) av.append(crear('div', { class: 'aviso warn', text: 'Falta la migración master 017 (db/master_migrations/017_tenants_edicion_ambas.sql): hasta aplicarla no se puede usar "Ambas".' }));
+  pintarTabla();
+  if (SEL) { const e = META.empresas.find((x) => x.id === SEL.id); if (e) SEL = e; }
+}
+
+function pintarTabla() {
+  const cuerpo = $('cuerpo');
+  cuerpo.replaceChildren();
+  for (const e of META.empresas) {
+    const ed = e.edicion === null ? '—' : (e.edicion_valida ? e.edicion : 'desconocida (' + e.edicion + ')');
+    const clase = e.edicion === null ? 'completa' : (e.edicion_valida ? e.edicion : 'rara');
+    const puede = e.tipo === 'app' && META.migraciones.m015;
+    const boton = crear('button', { type: 'button', text: e.tipo === 'app' ? 'Cambiar' : 'Integración' });
+    boton.disabled = !puede;
+    boton.addEventListener('click', () => abrirPanel(e));
+    cuerpo.append(crear('tr', {},
+      crear('td', { text: String(e.id) }),
+      (() => { const td = crear('td', { text: e.nombre }); td.append(crear('small', { text: 'RNC ' + e.rnc + (e.activo ? '' : ' · inactiva') + (e.en_grupo ? ' · en un grupo' : '') })); return td; })(),
+      crear('td', { text: e.tipo }),
+      crear('td', {}, crear('span', { class: 'badge ' + clase, text: ed })),
+      crear('td', { text: e.tipos.join(', ') || '—' }),
+      crear('td', { text: e.modulos.length ? e.modulos.join(', ') : (e.edicion === 'express' || e.edicion === 'ambas' ? 'todos' : '—') }),
+      crear('td', { text: e.cert_vence || '—' }),
+      crear('td', { text: e.pos ? 'sí' : 'no' }),
+      crear('td', {}, boton)));
+  }
+}
+
+function abrirPanel(e) {
+  SEL = e;
+  $('panel-titulo').textContent = 'Empresa #' + e.id + ' — ' + e.nombre + ' (RNC ' + e.rnc + ')';
+  const por_omision = e.edicion === 'express' || e.edicion === 'ambas' ? e.edicion : 'ambas';
+  $('modo-ambas').disabled = !META.migraciones.m017;
+  $('modo-' + (por_omision === 'ambas' && !META.migraciones.m017 ? 'completa' : por_omision)).checked = true;
+  const tipos = $('tipos'); tipos.replaceChildren();
+  for (const t of [...META.presets.tipos_venta, META.presets.tipo_opcional]) {
+    const c = crear('input', { type: 'checkbox', value: t }); c.checked = e.tipos.includes(t);
+    tipos.append(crear('label', {}, c, document.createTextNode(NOMBRES_TIPO[t] || t)));
+  }
+  const modulos = $('modulos'); modulos.replaceChildren();
+  for (const m of META.presets.modulos) {
+    const c = crear('input', { type: 'checkbox', value: m }); c.checked = e.modulos.length === 0 || e.modulos.includes(m);
+    modulos.append(crear('label', {}, c, document.createTextNode(NOMBRES_MODULO[m] || m)));
+  }
+  $('informe').hidden = true;
+  invalidar();
+  alternarListas();
+  $('panel').hidden = false;
+  $('panel').scrollIntoView({ block: 'nearest' });
+}
+
+function modoElegido() { const r = document.querySelector('input[name=modo]:checked'); return r ? r.value : ''; }
+function alternarListas() { const m = modoElegido(); $('grupo-listas').hidden = !(m === 'express' || m === 'ambas'); }
+function leerParams() {
+  const modo = modoElegido();
+  const tipos = [...$('tipos').querySelectorAll('input:checked')].map((c) => c.value);
+  const cajas = [...$('modulos').querySelectorAll('input')];
+  const marcados = cajas.filter((c) => c.checked).map((c) => c.value);
+  const lista = modo === 'express' || modo === 'ambas';
+  return { tenant: String(SEL.id), modo, tipos: lista ? tipos.join(',') : '', modulos: lista && marcados.length !== cajas.length ? marcados.join(',') : '' };
+}
+// Cualquier cambio en el formulario invalida el ensayo: aplicar solo se habilita con un ensayo que coincide con lo que se ve.
+function invalidar() {
+  CONF = null; ENSAYADO = '';
+  $('confirmar').hidden = true; $('entiendo').checked = false; $('aplicar').disabled = true;
+  $('informe').classList.add('viejo');
+}
+function actualizarAplicar() { $('aplicar').disabled = !(CONF && ENSAYADO === JSON.stringify(leerParams()) && $('entiendo').checked); }
+
+async function ensayo() {
+  const p = leerParams();
+  $('ensayo').disabled = true;
+  const r = await llamar('ensayo', p);
+  $('ensayo').disabled = false;
+  CONF = null; ENSAYADO = ''; $('entiendo').checked = false;
+  if (r.json.status !== true) { mensaje($('informe'), r.json.error || 'No se pudo ensayar.'); $('confirmar').hidden = true; return; }
+  pintarInforme($('informe'), r.json.data.lineas);
+  if (r.json.data.confirmacion) { CONF = r.json.data.confirmacion; ENSAYADO = JSON.stringify(p); $('confirmar').hidden = false; }
+  else { $('confirmar').hidden = true; }
+  actualizarAplicar();
+}
+async function aplicar() {
+  const p = leerParams();
+  $('aplicar').disabled = true; $('ensayo').disabled = true;
+  const r = await llamar('aplicar', Object.assign({}, p, { confirmacion: CONF }));
+  $('ensayo').disabled = false;
+  if (r.json.status !== true) { mensaje($('informe'), r.json.error || 'No se pudo aplicar.'); invalidar(); $('informe').classList.remove('viejo'); return; }
+  pintarInforme($('informe'), r.json.data.lineas);
+  CONF = null; ENSAYADO = ''; $('confirmar').hidden = true; $('entiendo').checked = false;
+  await recargar();
+}
+async function verificar() {
+  $('verificar').disabled = true;
+  const r = await llamar('verificar');
+  $('verificar').disabled = false;
+  if (r.json.status !== true) { mensaje($('informe-verificar'), r.json.error || 'No se pudo verificar.'); return; }
+  pintarInforme($('informe-verificar'), r.json.data.lineas);
+}
+
+$('conectar').addEventListener('click', conectar);
+$('token').addEventListener('keydown', (e) => { if (e.key === 'Enter') conectar(); });
+$('salir').addEventListener('click', salir);
+$('recargar').addEventListener('click', recargar);
+$('verificar').addEventListener('click', verificar);
+$('cerrar-panel').addEventListener('click', () => { $('panel').hidden = true; SEL = null; invalidar(); });
+$('ensayo').addEventListener('click', ensayo);
+$('aplicar').addEventListener('click', aplicar);
+$('entiendo').addEventListener('change', actualizarAplicar);
+$('panel').addEventListener('change', (e) => { if (e.target.id === 'entiendo') return; invalidar(); alternarListas(); });
+</script>
+</body>
+</html>

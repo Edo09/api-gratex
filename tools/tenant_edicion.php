@@ -4,6 +4,9 @@
  * y Express), la devuelve a completa o refresca el vencimiento de su certificado. Es la unica forma de cambiar master.tenants.edicion:
  * nunca con un UPDATE a mano.
  *
+ * Esta herramienta sigue siendo SOLO CLI. Su version web (la misma biblioteca, el mismo preflight, con token, HTTPS, freno al tanteo y una confirmacion que
+ * liga aplicar al ensayo) es public/tenant_edicion.php con su interfaz public/tenant_edicion.html: guia en docs/integrations/tenant-edicion-web.md.
+ *
  * Uso (desde la raiz del API; `php tools/tenant_edicion.php --help` lo muestra en pantalla):
  *   php tools/tenant_edicion.php --tenant=ID --edicion=express --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
  *   php tools/tenant_edicion.php --tenant=ID --edicion=ambas --tipos=45[,31,32,33] [--modulos=a,b] [--apply]
