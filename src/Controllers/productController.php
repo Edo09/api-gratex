@@ -2,8 +2,8 @@
 header('Access-Control-Allow-Origin: *');
 header("Access-Control-Allow-Credentials: true");
 header("Access-Control-Allow-Headers: X-API-KEY, Authorization, Origin, X-Requested-With, Content-Type, Accept, Access-Control-Request-Method");
-header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, DELETE");
-header("Allow: GET, POST, OPTIONS, PUT, DELETE");
+header("Access-Control-Allow-Methods: GET, POST, OPTIONS, PUT, PATCH, DELETE");
+header("Allow: GET, POST, OPTIONS, PUT, PATCH, DELETE");
 header('content-type: application/json; charset=utf-8');
 
 require_once(__DIR__ . '/../Models/productModel.php');
@@ -308,6 +308,40 @@ switch ($_SERVER['REQUEST_METHOD']) {
                     'new_values' => productModel::nuevosValoresParaBitacora($_PUT, $oldProduct, productModel::inventarioEstricto()),
                     'description' => 'Producto actualizado.',
                 ]);
+            }
+        }
+        echo json_encode($respuesta);
+        break;
+
+    case 'PATCH':
+        // Cambia SOLO el nombre y el precio (lista 1, sin ITBIS) de un producto; el resto no se toca. PUT
+        // reemplaza todas las columnas y no sirve para quien no tiene el producto completo (el panel web no
+        // guarda el costo ni el SKU). Las reglas del cuerpo estan en ProductPatch. Se carga aqui y no arriba: si
+        // ese archivo no se subio, GET/POST/PUT/DELETE siguen funcionando y solo falla el PATCH.
+        if (!is_file(__DIR__ . '/../Utils/ProductPatch.php')) {
+            error_log('[products] PATCH: falta src/Utils/ProductPatch.php (subida incompleta)');
+            http_response_code(500);
+            echo json_encode(['status' => false, 'error' => 'Esta función no está disponible en este momento. Avisa a soporte.']);
+            break;
+        }
+        require_once(__DIR__ . '/../Utils/ProductPatch.php');
+        $parche = ProductPatch::validar(InputSanitizer::jsonInput(false));
+        if (!$parche['ok']) {
+            http_response_code(422);
+            $respuesta = ['status' => false, 'error' => $parche['error']];
+        } else {
+            $result = $productModel->actualizarNombrePrecio($parche['id'], $parche['cambios'], $parche['esperado']);
+            if ($result[0] === 'success') {
+                $respuesta = ['status' => true, 'data' => ['id' => $parche['id']] + $result[1]];
+                AuditLogger::log([
+                    'module' => 'products', 'action' => 'UPDATE',
+                    'entity_type' => 'product', 'entity_id' => $parche['id'],
+                    'old_values' => $result[2], 'new_values' => $result[1],
+                    'description' => 'Producto actualizado (nombre y precio).',
+                ]);
+            } else {
+                http_response_code(['noexiste' => 404, 'conflicto' => 409][$result[0]] ?? 500);
+                $respuesta = ['status' => false, 'error' => $result[1]];
             }
         }
         echo json_encode($respuesta);

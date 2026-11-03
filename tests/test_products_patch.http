@@ -1,0 +1,81 @@
+### ============================================================================
+### Cambiar SOLO el nombre y el precio de un producto -> PATCH /api/products
+### Pruebas a mano en la DEMO (smhynzte_003). Cambian datos: usa un producto de prueba.
+### Antes de empezar: sube productController.php, productModel.php y src/Utils/ProductPatch.php.
+### ============================================================================
+
+@base = https://gratex.net/api
+@token = PEGA_AQUI_EL_TOKEN_DE_LA_DEMO
+@id = 1
+
+### 1. El producto como esta ahora: apunta nombre, precio, costo, sku, categoria, precios 2 a 4, ITBIS y existencia
+GET {{base}}/products?id={{id}}
+X-API-KEY: {{token}}
+
+### 2. Cambia el nombre y el precio (sin ITBIS, 4 decimales). "esperado" es lo que viste en el paso 1.
+###    Responde 200 con {id, nombre, precio}. Repite el paso 1: SOLO cambian nombre y precio.
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{
+  "id": {{id}},
+  "nombre": "Producto de prueba (PATCH)",
+  "precio": "1250.5000",
+  "esperado": { "nombre": "PEGA_EL_NOMBRE_DEL_PASO_1", "precio": "PEGA_EL_PRECIO_DEL_PASO_1" }
+}
+
+### 3. Solo el nombre: el precio no se toca
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": {{id}}, "nombre": "Producto de prueba (solo nombre)" }
+
+### 4. Alguien lo cambio en medio (esperado no coincide) -> 409 y no escribe nada
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": {{id}}, "nombre": "No debe quedar", "esperado": { "nombre": "Un nombre que no tiene" } }
+
+### 5. Un producto que no existe -> 404
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": 99999999, "nombre": "No existe" }
+
+### 6a. Sin nada que cambiar -> 422
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": {{id}} }
+
+### 6b. Nombre vacio -> 422
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": {{id}}, "nombre": "   " }
+
+### 6c. Precio negativo o con texto -> 422
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "id": {{id}}, "precio": "-5" }
+
+### 6d. Sin id -> 422
+PATCH {{base}}/products
+X-API-KEY: {{token}}
+Content-Type: application/json
+
+{ "nombre": "Sin id" }
+
+### 7. Sin token -> 401
+PATCH {{base}}/products
+Content-Type: application/json
+
+{ "id": {{id}}, "nombre": "Sin token" }

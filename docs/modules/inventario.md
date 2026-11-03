@@ -78,6 +78,32 @@ Las listas y el detalle la devuelven con el resto de la fila; el catálogo del P
   producto queda guardado y se avisa (el formulario se cierra para no crearlo dos veces).
 - Prueba: `tools/test_producto_imagen.php` (20 verificaciones, API local).
 
+### Cambiar solo el nombre y el precio (`PATCH /api/products`)
+
+`PUT /api/products` **reemplaza todas las columnas** del producto (costo, sku, descripción, categoría, listas de
+precio 2 a 4, unidad, indicadores de ITBIS, existencia mínima, activo) con lo que venga en el cuerpo, y lo que falte
+vuelve a su valor por defecto. Quien no tiene el producto completo no puede usarlo sin borrarlos. Para eso está
+`PATCH`, que recibe solo lo que cambia y **no toca ninguna otra columna**. Lo usa el panel web
+(`roberto-music-admin`, que no guarda el costo ni el SKU a propósito).
+
+```json
+{ "id": 12, "nombre": "Cabeza móvil Beam 230 7R", "precio": "10593.2203",
+  "esperado": { "nombre": "CABEZA MOVIL BEAM 230", "precio": "9800.0000" } }
+```
+
+- `id` (obligatorio); `nombre` y `precio`, opcionales pero al menos uno. El precio es el de la **lista 1, sin ITBIS**,
+  con hasta 4 decimales, como lo guarda la columna. El nombre, hasta 150 bytes (una letra con tilde o una `ñ` cuenta 2).
+- `esperado` (opcional): lo que quien edita vio antes del cambio. Si el producto ya no lo tiene, alguien lo cambió en
+  medio: responde `409` y no escribe nada. Se compara solo lo que se cambia, dentro de la misma transacción que lo
+  escribe (`FOR UPDATE`); el precio, en MySQL, DECIMAL contra DECIMAL.
+- Responde `{status:true, data:{id, nombre, precio}}` con lo que quedó. Errores: `422` (cuerpo que no sirve), `404`
+  (producto que no existe), `409` (cambió en medio), `500` (la base falló, o falta `src/Utils/ProductPatch.php`: solo
+  falla el PATCH, el resto de `/api/products` sigue igual).
+- Permiso: el módulo `products`, igual que editar el producto. Bitácora `UPDATE` con solo el nombre y el precio, antes y
+  después.
+- Reglas del cuerpo: `src/Utils/ProductPatch.php` (clase pura). Pruebas: `php tools/test_producto_patch.php` (63
+  verificaciones, sin base de datos) y, a mano en la demo, `tests/test_products_patch.http`.
+
 ## Archivos
 `db/migrations/017_add_inventory.sql`, `db/master_migrations/004_add_inventory_permission.sql`,
 `src/Models/categoryModel.php`, `src/Models/warehouseModel.php`,

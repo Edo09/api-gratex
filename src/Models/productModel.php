@@ -308,6 +308,84 @@ class productModel
         return $fila['imagen_path'] !== null && $fila['imagen_path'] !== '' ? (string) $fila['imagen_path'] : null;
     }
 
+    /**
+     * Cambia SOLO el nombre y/o el precio (lista 1) de un producto, sin tocar ninguna otra columna (PATCH
+     * /api/products; las reglas del cuerpo estan en ProductPatch). A diferencia de updateProduct, que reemplaza
+     * todo lo que no venga, esto deja intactos el costo, el SKU, la categoria, las demas listas de precio, el
+     * ITBIS y la existencia.
+     *
+     * Con $esperado solo escribe si el producto todavia tiene lo que quien edita vio: si alguien lo cambio en
+     * medio, no escribe nada. Se comprueba dentro de la misma transaccion que lo escribe (FOR UPDATE). El precio
+     * se compara en MySQL, DECIMAL contra DECIMAL, sin pasar por float.
+     *
+     * @param array<string,string> $cambios  'nombre' y/o 'precio' (texto con 4 decimales), ya validados
+     * @param array<string,string> $esperado 'nombre' y/o 'precio' vistos antes del cambio
+     * @return array ['success', despues, antes] (cada uno {nombre, precio}) | ['noexiste', texto] | ['conflicto', texto] | ['error', texto]
+     */
+    public function actualizarNombrePrecio(int $id, array $cambios, array $esperado): array
+    {
+        $transaccion = false;
+        try {
+            $this->conexion->beginTransaction();
+            $transaccion = true;
+
+            $comparaPrecio = isset($cambios['precio'], $esperado['precio']);
+            $stmt = $this->conexion->prepare(
+                'SELECT nombre, precio'
+                . ($comparaPrecio ? ', (precio = CAST(:esperado AS DECIMAL(18,4))) AS precio_igual' : '')
+                . ' FROM products WHERE id = :id FOR UPDATE'
+            );
+            $params = [':id' => $id];
+            if ($comparaPrecio) {
+                $params[':esperado'] = $esperado['precio'];
+            }
+            $stmt->execute($params);
+            $fila = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($fila === false) {
+                $this->conexion->rollBack();
+                $transaccion = false;
+                return ['noexiste', 'Este producto ya no existe; puede que otra persona lo haya eliminado.'];
+            }
+
+            $cambioNombre = isset($cambios['nombre'], $esperado['nombre']) && (string) $fila['nombre'] !== $esperado['nombre'];
+            $cambioPrecio = $comparaPrecio && (int) $fila['precio_igual'] !== 1;
+            if ($cambioNombre || $cambioPrecio) {
+                $this->conexion->rollBack();
+                $transaccion = false;
+                return ['conflicto', 'Este producto cambió en api-gratex mientras lo editabas. Actualiza la lista y vuelve a intentarlo.'];
+            }
+
+            $sets = [];
+            $valores = [':id' => $id];
+            if (isset($cambios['nombre'])) {
+                $sets[] = 'nombre = :nombre';
+                $valores[':nombre'] = $cambios['nombre'];
+            }
+            if (isset($cambios['precio'])) {
+                $sets[] = 'precio = :precio';
+                $valores[':precio'] = $cambios['precio'];
+            }
+            $this->conexion->prepare('UPDATE products SET ' . implode(', ', $sets) . ' WHERE id = :id')->execute($valores);
+            $this->conexion->commit();
+            $transaccion = false;
+
+            $antes = [
+                'nombre' => (string) $fila['nombre'],
+                'precio' => $fila['precio'] === null ? null : (string) $fila['precio'],
+            ];
+            return ['success', [
+                'nombre' => $cambios['nombre'] ?? $antes['nombre'],
+                'precio' => $cambios['precio'] ?? $antes['precio'],
+            ], $antes];
+        } catch (PDOException $e) {
+            if ($transaccion && $this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            error_log('[productos] actualizarNombrePrecio ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo actualizar el producto. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
+        }
+    }
+
     public function deleteProduct($id)
     {
         try {
