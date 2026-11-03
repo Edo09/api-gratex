@@ -928,7 +928,6 @@ final class EcfDocumento
         };
 
         $isFc = $this->tipoEcf() === '32' && (float) ($this->factura['total'] ?? 0) < 250000;
-        $endpoint = $isFc ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
 
         // RncComprador en el QR debe coincidir con el XML: la DGII valida el
         // timbre contra el e-CF emitido. E43 nunca lleva nodo Comprador y E47
@@ -938,18 +937,31 @@ final class EcfDocumento
         $incluye = $rncComprador !== '' && !in_array($this->tipoEcf(), ['43', '47'], true);
         $paramComprador = $incluye ? '&RncComprador=' . rawurlencode($rncComprador) : '';
 
-        $url = sprintf(
-            'https://ecf.dgii.gov.do/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
-            rawurlencode($ambiente),
-            $endpoint,
-            rawurlencode($rncEmisor),
-            $paramComprador,
-            rawurlencode($eNcf),
-            rawurlencode($this->formatFecha($this->fecha())),
-            rawurlencode($this->montoTotalParaTimbre()),
-            rawurlencode($fechaFirma),
-            rawurlencode($codigo)
-        );
+        if ($isFc) {
+            // FC < 250k: la DGII la consulta en fc.dgii.gov.do y solo con estos
+            // 4 parametros (Informe Tecnico e-CF v1.0, RI). En ecf.dgii.gov.do,
+            // ConsultaTimbreFC responde 404.
+            $url = sprintf(
+                'https://fc.dgii.gov.do/%s/ConsultaTimbreFC?RncEmisor=%s&ENCF=%s&MontoTotal=%s&CodigoSeguridad=%s',
+                rawurlencode($ambiente),
+                rawurlencode($rncEmisor),
+                rawurlencode($eNcf),
+                rawurlencode($this->montoTotalParaTimbre()),
+                rawurlencode($codigo)
+            );
+        } else {
+            $url = sprintf(
+                'https://ecf.dgii.gov.do/%s/ConsultaTimbre?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+                rawurlencode($ambiente),
+                rawurlencode($rncEmisor),
+                $paramComprador,
+                rawurlencode($eNcf),
+                rawurlencode($this->formatFecha($this->fecha())),
+                rawurlencode($this->montoTotalParaTimbre()),
+                rawurlencode($fechaFirma),
+                rawurlencode($codigo)
+            );
+        }
 
         return [
             'url'              => $url,

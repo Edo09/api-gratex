@@ -545,8 +545,12 @@ https://ecf.dgii.gov.do/{ambiente}/ConsultaTimbre?RncEmisor={RNCEmisor}&RncCompr
 - `MontoTotal`: el valor de `<MontoTotal>` del XML firmado, con dos decimales. Como los totales
   los calculamos nosotros, tómelo del XML y no de su propio cálculo.
 - `RncComprador`: solo si el XML lleva `RNCComprador`. En E43 y E47 no se incluye nunca.
-- En facturas de consumo E32 de menos de RD$250,000, cambie `ConsultaTimbre` por
-  `ConsultaTimbreFC`.
+- En facturas de consumo E32 de menos de RD$250,000 la URL es otra: va a `fc.dgii.gov.do` y
+  solo lleva cuatro parámetros (con la de arriba la DGII responde 404):
+
+  ```
+  https://fc.dgii.gov.do/{ambiente}/ConsultaTimbreFC?RncEmisor={RNCEmisor}&ENCF={eNCF}&MontoTotal={MontoTotal}&CodigoSeguridad={codigo_seguridad}
+  ```
 
 Los valores tienen que coincidir exactamente con los del XML firmado, o la DGII no encuentra el
 comprobante. Para comprobar su implementación, escanee el QR de un comprobante de prueba.

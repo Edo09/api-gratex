@@ -109,6 +109,9 @@ Referencia completa de payloads: [../api/facturas.md](../api/facturas.md). Datos
 - `IndicadorMontoGravado = 1` (precios con ITBIS, `precios_incluyen_itbis`): la DGII calcula los montos gravados **por tasa** (`round(suma de MontoItem / 1.18, 2)`) y el ITBIS como diferencia. Verificado contra su set de pruebas (E450000000003); ver `EcfItemMapper::desglosarIncluido`.
 - E33/E34: `RNCOtroContribuyente` debe ir null (no el RNC del comprador) o DGII devuelve error 614.
 - URL QR `ConsultaTimbre`: incluir `&RncComprador=` para todos los tipos EXCEPTO E43 y E47.
+- URL QR de E32 < 250k: `https://fc.dgii.gov.do/<ambiente>/ConsultaTimbreFC?RncEmisor=&ENCF=&MontoTotal=&CodigoSeguridad=`
+  — otro host y solo esos 4 parámetros (Informe Técnico e-CF v1.0, RI). En `ecf.dgii.gov.do`,
+  `ConsultaTimbreFC` responde 404.
 - `CodigoSeguridad`: primeros 6 caracteres crudos de `SignatureValue` — solo quitar
   espacios, nunca `+`/`/`/`=`.
 - `FechaHoraFirma` del XML debe coincidir con `fecha_emision_dgii` en la BD — capturar el

@@ -46,6 +46,7 @@ require_once __DIR__ . '/../src/Utils/FacturacionElectronica/DgiiAuthService.php
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/DgiiReceptionService.php';
 
 const CECF_BASE_URL = 'https://ecf.dgii.gov.do';
+const CECF_FC_BASE_URL = 'https://fc.dgii.gov.do';
 
 // ---------------------------------------------------------------------------
 // Funciones puras (sin red, sin base): probadas en test_consultar_ecf_dgii.php
@@ -249,7 +250,8 @@ function cecfResumen(string $encf, array $trackIds, ?array $estado, array $resul
 /**
  * URL de ConsultaTimbre, armada igual que EcfDocumento::timbre(): FechaEmision
  * d-m-Y, MontoTotal a 2 decimales, FechaFirma d-m-Y H:i:s, RncComprador salvo
- * E43/E47, ConsultaTimbreFC para E32 < 250k. Null si falta codigo, firma,
+ * E43/E47. E32 < 250k: ConsultaTimbreFC en fc.dgii.gov.do, solo con RncEmisor,
+ * ENCF, MontoTotal y CodigoSeguridad. Null si falta codigo, firma,
  * fecha o monto: abrirla en el navegador confirma que el QR resolvera.
  */
 function cecfUrlTimbre(array $r, string $rncEmisor, string $ambiente): ?string
@@ -269,16 +271,25 @@ function cecfUrlTimbre(array $r, string $rncEmisor, string $ambiente): ?string
         'ecf' => 'ecf',
         default => $ambiente,
     };
-    $endpoint = ($tipo === '32' && (float) $total < 250000) ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
+    if ($tipo === '32' && (float) $total < 250000) {
+        return sprintf(
+            '%s/%s/ConsultaTimbreFC?RncEmisor=%s&ENCF=%s&MontoTotal=%s&CodigoSeguridad=%s',
+            CECF_FC_BASE_URL,
+            rawurlencode($amb),
+            rawurlencode($rncEmisor),
+            rawurlencode($encf),
+            rawurlencode($total),
+            rawurlencode($codigo)
+        );
+    }
     $rncComprador = (string) ($r['rnc_comprador'] ?? '');
     $paramComprador = ($rncComprador !== '' && !in_array($tipo, ['43', '47'], true))
         ? '&RncComprador=' . rawurlencode($rncComprador)
         : '';
     return sprintf(
-        '%s/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+        '%s/%s/ConsultaTimbre?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
         CECF_BASE_URL,
         rawurlencode($amb),
-        $endpoint,
         rawurlencode($rncEmisor),
         $paramComprador,
         rawurlencode($encf),

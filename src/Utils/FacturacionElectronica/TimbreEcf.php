@@ -10,6 +10,7 @@
 class TimbreEcf
 {
     private const BASE_URL = 'https://ecf.dgii.gov.do';
+    private const FC_BASE_URL = 'https://fc.dgii.gov.do';
     private const RFCE_UMBRAL = 250000;
 
     /**
@@ -55,7 +56,20 @@ class TimbreEcf
             return null;
         }
 
-        $endpoint = ($tipo === '32' && (float) $monto < self::RFCE_UMBRAL) ? 'ConsultaTimbreFC' : 'ConsultaTimbre';
+        // FC < 250k: la DGII la consulta en fc.dgii.gov.do y solo con estos 4
+        // parametros (Informe Tecnico e-CF v1.0, RI). En ecf.dgii.gov.do,
+        // ConsultaTimbreFC responde 404.
+        if ($tipo === '32' && (float) $monto < self::RFCE_UMBRAL) {
+            return sprintf(
+                '%s/%s/ConsultaTimbreFC?RncEmisor=%s&ENCF=%s&MontoTotal=%s&CodigoSeguridad=%s',
+                self::FC_BASE_URL,
+                rawurlencode($amb),
+                rawurlencode($rncEmisor),
+                rawurlencode($eNcf),
+                rawurlencode($monto),
+                rawurlencode($codigo)
+            );
+        }
 
         // E43 no tiene Comprador y E47 solo IdentificadorExtranjero: sin RNCComprador
         // en el XML no va en el QR, y con el la DGII responde "no encontrado".
@@ -65,10 +79,9 @@ class TimbreEcf
             : '';
 
         return sprintf(
-            '%s/%s/%s?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
+            '%s/%s/ConsultaTimbre?RncEmisor=%s%s&ENCF=%s&FechaEmision=%s&MontoTotal=%s&FechaFirma=%s&CodigoSeguridad=%s',
             self::BASE_URL,
             rawurlencode($amb),
-            $endpoint,
             rawurlencode($rncEmisor),
             $paramComprador,
             rawurlencode($eNcf),

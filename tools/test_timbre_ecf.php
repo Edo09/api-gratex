@@ -9,6 +9,7 @@
 
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/TimbreEcf.php';
+require_once __DIR__ . '/../src/Utils/Pdf/EcfDocumento.php';
 
 $fallos = 0;
 $total = 0;
@@ -55,9 +56,18 @@ $chk(
     str_contains((string) TimbreEcf::urlDesdeXml($xml('31', 'E310000000001', '8850', '<RNCComprador>131222444</RNCComprador>'), 'ecf'), 'MontoTotal=8850.00&')
 );
 
-$fc = TimbreEcf::urlDesdeXml($xml('32', 'E320000000012', '1180.00', ''), 'ecf');
-$chk('E32 < 250k: ConsultaTimbreFC', is_string($fc) && str_contains($fc, '/ecf/ConsultaTimbreFC?'), $fc);
-$chk('E32 sin comprador: sin RncComprador', is_string($fc) && !str_contains($fc, 'RncComprador'), $fc);
+// Informe Tecnico e-CF v1.0 (RI): la FC < 250k se consulta en fc.dgii.gov.do y
+// solo con estos 4 parametros. En ecf.dgii.gov.do, ConsultaTimbreFC da 404.
+$fc = TimbreEcf::urlDesdeXml($xml('32', 'E320000000012', '1180.00', '<RNCComprador>131222444</RNCComprador>'), 'ecf');
+$chk(
+    'E32 < 250k: fc.dgii.gov.do/ConsultaTimbreFC, solo RncEmisor, ENCF, MontoTotal y CodigoSeguridad',
+    $fc === 'https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?RncEmisor=131111111&ENCF=E320000000012'
+        . '&MontoTotal=1180.00&CodigoSeguridad=Ab%2B%2FCd',
+    $fc
+);
+$fcCert = TimbreEcf::urlDesdeXml($xml('32', 'E320000000012', '1180.00', ''), 'certecf');
+$chk('E32 < 250k en certecf: fc.dgii.gov.do/CerteCF',
+    is_string($fcCert) && str_starts_with($fcCert, 'https://fc.dgii.gov.do/CerteCF/ConsultaTimbreFC?'), $fcCert);
 
 $e32g = TimbreEcf::urlDesdeXml($xml('32', 'E320000000013', '250000.00', '<RNCComprador>131222444</RNCComprador>'), 'ecf');
 $chk('E32 de 250,000 o mas: ConsultaTimbre (no FC) y con RncComprador',
@@ -68,6 +78,20 @@ $chk('E43 nunca lleva RncComprador', is_string($e43) && !str_contains($e43, 'Rnc
 
 $e47 = TimbreEcf::urlDesdeXml($xml('47', 'E470000000001', '500.00', '<IdentificadorExtranjero>X123</IdentificadorExtranjero>'), 'ecf');
 $chk('E47 (IdentificadorExtranjero) sin RncComprador', is_string($e47) && !str_contains($e47, 'RncComprador'), $e47);
+
+echo "\nEcfDocumento::timbre (QR del PDF): la misma URL que TimbreEcf\n";
+
+$doc = static function (string $tipo, string $eNcf, float $total): EcfDocumento {
+    return new EcfDocumento([
+        'tipo_ecf' => $tipo, 'e_ncf' => $eNcf, 'total' => $total, 'date' => '2026-08-04',
+        'codigo_seguridad' => 'Ab+/Cd', 'fecha_emision_dgii' => '2026-08-04 11:52:22',
+        'ambiente_dgii' => 'ecf', 'emisor' => ['rnc' => '131111111'],
+    ], ['rnc' => '131222444']);
+};
+$t = $doc('32', 'E320000000012', 1180.00)->timbre();
+$chk('E32 < 250k', ($t['url'] ?? null) === $fc, $t);
+$t = $doc('31', 'E310000000001', 8850.00)->timbre();
+$chk('E31', ($t['url'] ?? null) === $e31, $t);
 
 echo "\nCasos sin URL (null: no se inventa un QR que la DGII no encuentre)\n";
 $chk('XML sin firma', TimbreEcf::urlDesdeXml('<ECF><Encabezado/></ECF>', 'ecf') === null);

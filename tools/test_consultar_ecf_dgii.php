@@ -197,7 +197,9 @@ $res32 = $res;
 $res32['e_ncf'] = 'E320000000001';
 $res32['tipo_ecf'] = '32';
 $url = cecfUrlTimbre($res32, '131256432', 'ecf');
-$chk('timbre: E32 < 250k usa ConsultaTimbreFC', is_string($url) && str_contains($url, '/ConsultaTimbreFC?'), $url);
+$chk('timbre: E32 < 250k: fc.dgii.gov.do/ConsultaTimbreFC, sin RncComprador ni fechas',
+    $url === 'https://fc.dgii.gov.do/ecf/ConsultaTimbreFC?RncEmisor=131256432&ENCF=E320000000001'
+        . '&MontoTotal=1180.00&CodigoSeguridad=AbC123', $url);
 
 $sinCodigo = $res;
 $sinCodigo['codigo_seguridad'] = null;

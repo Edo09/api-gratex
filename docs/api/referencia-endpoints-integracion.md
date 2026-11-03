@@ -310,7 +310,7 @@ curl -X POST https://gratex.net/api/integracion/ecf -H "X-API-KEY: $API_KEY" -H 
 
 | Campo | Notas |
 |---|---|
-| `qr_url` | El contenido del código QR de la Representación Impresa, ya armado: conviértalo tal cual a QR, sin modificarlo. Va con la regla de DGII de las facturas de consumo < RD$250,000 (`ConsultaTimbreFC`) y sin `RncComprador` donde no corresponde. `null` en `sandbox` (esos comprobantes no existen en la DGII) o si no se pudo armar |
+| `qr_url` | El contenido del código QR de la Representación Impresa, ya armado: conviértalo tal cual a QR, sin modificarlo. Va con la regla de DGII de las facturas de consumo < RD$250,000 (`ConsultaTimbreFC` en `fc.dgii.gov.do`, solo con `RncEmisor`, `ENCF`, `MontoTotal` y `CodigoSeguridad`) y sin `RncComprador` donde no corresponde. `null` en `sandbox` (esos comprobantes no existen en la DGII) o si no se pudo armar |
 | `estado` | Lo que respondió la DGII al recibirlo (ver abajo) |
 | `track_id` | Identificador de la DGII. Con él se consulta el estado |
 | `codigo_seguridad` | 6 caracteres. Va en la Representación Impresa y en su QR |
