@@ -201,9 +201,12 @@ e-NCF está impreso en el recibo y **nunca vuelve al contador**. Por eso, en una
    - `respuesta_dgii` guarda la meta del envío (JSON, sin XML): `flujo` (`ECF` o
      `RFCE`), `dispensado`, `rango_id` y `secuencia_valor` (para devolver el número)
      y, en `ENVIO_INCIERTO`, también `fase_fallida`, `error` y `resultado_parcial`.
-   - **Hora:** el servidor (PHP y MySQL) corre en UTC-5, una hora detrás de la DGII
-     (UTC-4). `desde` y `fecha_emision_dgii` están en hora del servidor; el portal de
-     la DGII muestra la misma recepción una hora más tarde.
+   - **Hora:** desde noviembre de 2026 la app escribe en hora de RD (UTC-4, la de la
+     DGII; ver `src/ZonaHoraria.php`): `desde`, `fecha_emision_dgii` y el portal de la
+     DGII coinciden. Las filas de antes del cambio están en la hora del hosting
+     (central de EE. UU.): el portal de la DGII muestra la misma recepción 1 hora más
+     tarde en el horario de verano de EE. UU. (segundo domingo de marzo a primer
+     domingo de noviembre) y 2 horas fuera de él (del 1 de noviembre de 2026 al cambio).
 
 2. **Preguntar a la DGII:**
 

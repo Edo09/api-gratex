@@ -3,8 +3,10 @@
  * write_ahead_test_lib.php — ayudas comunes de las pruebas del write-ahead del
  * e-CF (spec docs/superpowers/specs/2026-10-05-ecf-write-ahead-design.md, 12).
  *
- * Incluirlo solo define funciones: no corre nada, no abre conexiones, no
- * arranca servidores.
+ * Incluirlo solo define funciones y deja PHP en hora de RD, la de la API
+ * (src/ZonaHoraria.php): asi una prueba cuenta "hoy" con el mismo reloj que los
+ * servidores y herramientas que arranca. No corre nada mas, no abre conexiones,
+ * no arranca servidores.
  *
  * Como correr las pruebas que lo usan:
  *   php -d extension=curl -d extension=openssl -d extension=pdo_mysql tools/<prueba>.php
@@ -19,6 +21,11 @@
  * "[FALLO] ..." por prueba, al final "N de M pruebas OK", y codigo de salida 1
  * si alguna fallo.
  */
+
+// La zona de src/ZonaHoraria.php sin cargar esa clase: hay pruebas que en este mismo
+// proceso cargan las clases de una copia del arbol del API, y la copia la declararia
+// otra vez (test_express_entitlements.php, modos hijo).
+date_default_timezone_set('America/Santo_Domingo');
 
 /** Una prueba: imprime [OK  ]/[FALLO] y, si falla, lo obtenido (recortado). */
 function wa_chk(string $desc, bool $ok, mixed $obtenido = null): void

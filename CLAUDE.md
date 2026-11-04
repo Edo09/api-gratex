@@ -36,6 +36,11 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
   (`estado_dgii` VARCHAR(40)) and 030 (`facturas.pos_idempotency_key` and the other POS columns: the
   confirm and incierto UPDATEs of every e-CF name them) are the release gate of the e-CF write-ahead: all three
   must say `APLICADA` in **every** tenant DB, whether it uses the POS or not.
+- **App clock = DR time** (`src/ZonaHoraria.php`, Nov 2026). The host runs US Central time with
+  daylight saving; loading the file sets PHP to `America/Santo_Domingo`, and `Database` /
+  `MasterDatabase` set each MySQL session to `-04:00`. Change both or neither:
+  `auth_tokens_emitidos.expira_at` is written by PHP and checked against MySQL `NOW()`. Rows written
+  before the change are in host time (1 h behind DR during US daylight saving, 2 h outside it).
 
 ## Key architecture
 

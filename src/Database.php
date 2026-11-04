@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/ZonaHoraria.php';
+
 class Database
 {
     private static $instance = null;
@@ -72,6 +74,7 @@ class Database
                     PDO::ATTR_PERSISTENT => false
                 ]
             );
+            ZonaHoraria::aplicarEn($this->conexion);
         } catch (PDOException $e) {
             // Nada de die(): mataba la peticion con el mensaje crudo del driver,
             // que expone usuario y host de la DB en la respuesta del API (y ningun

@@ -1,4 +1,5 @@
 <?php
+require_once(__DIR__ . '/ZonaHoraria.php');
 require_once(__DIR__ . '/Utils/TokenGenerator.php');
 
 /**
@@ -53,6 +54,7 @@ class MasterDatabase
                     PDO::ATTR_PERSISTENT => false
                 ]
             );
+            ZonaHoraria::aplicarEn($this->conexion);
         } catch (PDOException $e) {
             // Antes esto era die(): mataba el request con texto plano, filtraba
             // host/usuario del master al cliente y — peor — era INCATCHABLE, asi
