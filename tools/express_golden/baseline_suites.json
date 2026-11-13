@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "3b1942805a9d3ac3db519cb5256799271e06c627",
+    "git_sha": "ee0b4af589f8dc16f53704034889d579f746b634",
     "php": "8.5",
-    "capturado": "2026-11-12T22:35:55-04:00",
+    "capturado": "2026-11-13T16:12:33-04:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 379,
@@ -104,6 +104,13 @@
         },
         "test_grupo_multiempresa.php": {
             "total": 28,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_integracion_request_log.php": {
+            "total": 72,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
