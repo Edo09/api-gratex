@@ -106,6 +106,22 @@ class AuditLogger
         self::log($event);
     }
 
+    /**
+     * Redacta los secretos de un valor (array, objeto o escalar) con la misma lista
+     * que la bitacora. Publico para IntegracionRequestLog: una sola lista de campos
+     * sensibles para las dos bitacoras.
+     */
+    public static function redactar($data)
+    {
+        return self::redact($data);
+    }
+
+    /** ¿Ese nombre de campo es sensible (su valor nunca se guarda)? Misma lista que redactar(). */
+    public static function esCampoSensible(string $key): bool
+    {
+        return self::isSensitive($key);
+    }
+
     // ---- helpers -------------------------------------------------------------
 
     private static function cut(?string $v, int $max): ?string

@@ -288,10 +288,11 @@ DGII lo haya aceptado.** Lo que respondió la DGII está en `estado`:
   recibirlo.
 
 **Facturas de consumo (E32) de menos de RD$250,000.** La DGII recibe un resumen del
-comprobante y no genera `track_id`. La respuesta trae `"track_id": null`,
-`"dgii_response": null` y el `estado` con el prefijo `RFCE_` (lo normal es `RFCE_ACEPTADO`).
-Si recibe `RFCE_RECHAZADO`, el motivo se consulta con `GET /api/integracion/estado` usando el
-`codigo_seguridad`.
+comprobante y no genera `track_id`. La respuesta trae `"track_id": null` y el `estado` con el
+prefijo `RFCE_` (lo normal es `RFCE_ACEPTADO`). Ese estado ya es el veredicto final: la DGII
+valida el resumen en el momento. `dgii_response` trae su respuesta (`codigo`, `estado`,
+`mensajes`, `secuenciaUtilizada`); si recibe `RFCE_RECHAZADO`, el motivo está en
+`dgii_response.mensajes`.
 
 No dé por válido un comprobante hasta tener `ACEPTADO`, `ACEPTADO_CONDICIONAL` o
 `RFCE_ACEPTADO`.
@@ -330,6 +331,11 @@ consulta}`. `estado` es uno de `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`,
 `NO_ENCONTRADO` (con prefijo `RFCE_` cuando consulta por código de seguridad), o `null` si la
 DGII no devolvió un estado reconocible: en ese caso no lo trate como aceptado ni como
 rechazado y vuelva a consultar más tarde. El detalle completo de la DGII va en `consulta`.
+`fuente` dice de dónde salió: `dgii` (consulta en ese momento) o `respaldo`. En un E32 de
+menos de RD$250,000, si la consulta a la DGII falla, devolvemos el veredicto que la DGII dio al
+recibirlo, que guardamos al emitir, con `fuente: "respaldo"` y un `aviso`. Pasa siempre en
+certificación (`certecf`), donde ese servicio de la DGII no responde. En esos comprobantes,
+si no manda `codigo_seguridad`, usamos el que guardamos al emitirlo.
 
 > No reemita un comprobante rechazado con el mismo `e_ncf` sin revisar antes el mensaje de
 > `consulta`: si el rechazo no consumió la secuencia, el mismo `e_ncf` sirve; si la consumió,

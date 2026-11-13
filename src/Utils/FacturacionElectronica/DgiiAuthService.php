@@ -31,7 +31,7 @@ class DgiiAuthService
         ], null, $config['timeout']);
 
         if ($response['status_code'] < 200 || $response['status_code'] >= 300) {
-            throw new RuntimeException('DGII seed request failed: ' . $this->responseSummary($response));
+            throw new RuntimeException('DGII seed request failed: ' . $this->responseSummary($response, $endpoint));
         }
 
         if (trim($response['body']) === '') {
@@ -68,7 +68,7 @@ class DgiiAuthService
         ], $body, $config['timeout']);
 
         if ($response['status_code'] < 200 || $response['status_code'] >= 300) {
-            throw new RuntimeException('DGII seed validation failed: ' . $this->responseSummary($response));
+            throw new RuntimeException('DGII seed validation failed: ' . $this->responseSummary($response, $endpoint));
         }
 
         $tokenResponse = $this->parseAuthenticationResponse($response['body']);
@@ -140,7 +140,7 @@ class DgiiAuthService
         // lanzando excepcion.
         $tolerate = !empty($options['tolerate_http_errors']);
         if ($isError && (!$tolerate || !is_array($decoded))) {
-            throw new RuntimeException('DGII authenticated request failed: ' . $this->responseSummary($response));
+            throw new RuntimeException('DGII authenticated request failed: ' . $this->responseSummary($response, $endpoint));
         }
 
         return [
@@ -547,14 +547,49 @@ class DgiiAuthService
         return $element ? trim($element->textContent) : null;
     }
 
-    private function responseSummary(array $response): string
+    /**
+     * $endpoint: la URL llamada. Solo se agrega (sin el query string) en un 401/403,
+     * junto con la cabecera WWW-Authenticate: ahi la DGII responde con el cuerpo
+     * vacio y el motivo (token vencido, firma, audiencia...) viene en la cabecera.
+     * Sin ella un "HTTP 401" no dice que servicio ni que ambiente rechazo el token
+     * (caso tenant 18, 2026-11-13, GET /api/integracion/estado).
+     */
+    private function responseSummary(array $response, ?string $endpoint = null): string
     {
         $body = trim(strip_tags($response['body']));
         if (strlen($body) > 500) {
             $body = substr($body, 0, 500) . '...';
         }
 
-        return 'HTTP ' . $response['status_code'] . ($body !== '' ? ' - ' . $body : '');
+        $summary = 'HTTP ' . $response['status_code'] . ($body !== '' ? ' - ' . $body : '');
+        if (in_array((int) $response['status_code'], [401, 403], true)) {
+            $wwwAuth = self::headerValue((string) ($response['headers'] ?? ''), 'WWW-Authenticate');
+            if ($wwwAuth !== null) {
+                $summary .= ' [WWW-Authenticate: ' . $wwwAuth . ']';
+            }
+            if ($endpoint !== null && $endpoint !== '') {
+                $summary .= ' [' . strtok($endpoint, '?') . ']';
+            }
+        }
+
+        return $summary;
+    }
+
+    /**
+     * Valor de una cabecera en el bloque crudo de cabeceras de la respuesta (el
+     * ultimo, si hubo redirecciones o un 100 Continue). null si no vino.
+     */
+    public static function headerValue(string $rawHeaders, string $name): ?string
+    {
+        if ($rawHeaders === '' || !preg_match_all('/^' . preg_quote($name, '/') . ':[ \t]*(.*)$/mi', $rawHeaders, $m)) {
+            return null;
+        }
+        $value = trim((string) end($m[1]));
+        if ($value === '') {
+            return null;
+        }
+
+        return strlen($value) > 300 ? substr($value, 0, 300) . '...' : $value;
     }
 
     private function env(string $key, $default = null)

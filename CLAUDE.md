@@ -36,6 +36,11 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
   (`estado_dgii` VARCHAR(40)) and 030 (`facturas.pos_idempotency_key` and the other POS columns: the
   confirm and incierto UPDATEs of every e-CF name them) are the release gate of the e-CF write-ahead: all three
   must say `APLICADA` in **every** tenant DB, whether it uses the POS or not.
+- **Integration client errors:** every `/api/integracion/*` request and its response is in
+  master `integracion_request_log` (master migration 018, `src/IntegracionRequestLog.php`,
+  `docs/integrations/integracion-request-log.md`): query it before asking for logs. In `certecf`
+  the DGII rejects its own token on `fc.dgii.gov.do/certecf/consultarfce` (401 "The signature is
+  invalid"); RFCE status there only comes from the RecepcionFC response saved at emission.
 - **App clock = DR time** (`src/ZonaHoraria.php`, Nov 2026). The host runs US Central time with
   daylight saving; loading the file sets PHP to `America/Santo_Domingo`, and `Database` /
   `MasterDatabase` set each MySQL session to `-04:00`. Change both or neither:

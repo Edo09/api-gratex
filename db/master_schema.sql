@@ -196,6 +196,40 @@ CREATE TABLE IF NOT EXISTS ecf_integracion_backup (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ----------------------------------------------------------------------------
+-- integracion_request_log — cada peticion a /api/integracion/* y lo que se le
+-- contesto (master_migrations/018, src/IntegracionRequestLog.php). Para ver
+-- rapido por que le fallo algo a un cliente de integracion. Sin FK a tenants a
+-- proposito: una bitacora nunca debe fallar por integridad. Se purga sola
+-- (INTEGRACION_LOG_DIAS, 90 dias por defecto).
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS integracion_request_log (
+  id               BIGINT        NOT NULL AUTO_INCREMENT,
+  tenant_id        INT           NULL COMMENT 'Empresa por la que se actuo (tras elegir hermana por RNC). NULL = credencial invalida',
+  rnc              VARCHAR(11)   NULL,
+  api_key_prefijo  VARCHAR(8)    NULL COMMENT 'Primeros 8 caracteres del X-API-KEY; el X-API-SECRET nunca se guarda',
+  metodo           VARCHAR(10)   NOT NULL,
+  ruta             VARCHAR(255)  NOT NULL COMMENT 'Path, p. ej. /api/integracion/estado',
+  query_string     VARCHAR(1000) NULL,
+  e_ncf            VARCHAR(19)   NULL,
+  ip               VARCHAR(45)   NULL,
+  user_agent       VARCHAR(255)  NULL,
+  request_headers  TEXT          NULL COMMENT 'JSON: cabeceras utiles, sin credenciales',
+  request_body     MEDIUMTEXT    NULL,
+  request_bytes    INT UNSIGNED  NULL COMMENT 'Bytes originales; si es mayor que lo guardado, se recorto',
+  http_status      SMALLINT      NULL,
+  response_body    MEDIUMTEXT    NULL COMMENT 'Lo que se devolvio; el XML firmado va como marcador (esta en ecf_integracion_backup)',
+  response_bytes   INT UNSIGNED  NULL COMMENT 'Bytes originales de la respuesta',
+  error_interno    TEXT          NULL COMMENT 'Detalle del fallo que NO se le devolvio al cliente',
+  duracion_ms      INT UNSIGNED  NULL,
+  created_at       DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_irl_tenant_fecha (tenant_id, created_at),
+  KEY idx_irl_encf (e_ncf),
+  KEY idx_irl_status_fecha (http_status, created_at),
+  KEY idx_irl_fecha (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
 -- Tablas ESPEJO para tenants "integracion" (sin DB propia). Misma estructura
 -- que en cada tenant "app" (db/migrations/002), + tenant_id para aislar.
 -- Los tenants "app" siguen usando estas tablas dentro de SU propia DB.

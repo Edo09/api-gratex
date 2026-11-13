@@ -343,6 +343,83 @@ class IntegracionStoreModel
     }
 
     /**
+     * Lo que la DGII dijo del ultimo envio de ese e-NCF, tal como quedo en el
+     * respaldo (master_migrations/014): estado_dgii, codigo_seguridad, ambiente,
+     * dgii_respuesta y dgii_mensajes (JSON ya decodificado), created_at.
+     * null si no hay respaldo o falta la 014; nunca lanza.
+     */
+    public function getVeredictoGuardado(int $tenantId, string $rncEmisor, string $eNcf): ?array
+    {
+        try {
+            $stmt = $this->conexion->prepare(
+                'SELECT id, track_id, ambiente, codigo_seguridad, estado_dgii, dgii_mensajes, dgii_respuesta,
+                        estado_consultado_at, created_at
+                   FROM ecf_integracion_backup
+                  WHERE tenant_id = :t AND rnc_emisor = :r AND e_ncf = :e
+                  ORDER BY id DESC LIMIT 1'
+            );
+            $stmt->execute([':t' => $tenantId, ':r' => $rncEmisor, ':e' => $eNcf]);
+            $fila = $stmt->fetch();
+        } catch (\Throwable $e) {
+            error_log('[IntegracionStore] no se pudo leer el veredicto guardado de ' . $eNcf . ': ' . $e->getMessage());
+            return null;
+        }
+        if (!$fila) {
+            return null;
+        }
+        foreach (['dgii_respuesta', 'dgii_mensajes'] as $columna) {
+            if (is_string($fila[$columna] ?? null) && $fila[$columna] !== '') {
+                $decodificado = json_decode($fila[$columna], true);
+                if (json_last_error() === JSON_ERROR_NONE) {
+                    $fila[$columna] = $decodificado;
+                }
+            }
+        }
+        return $fila;
+    }
+
+    /**
+     * Respuesta de GET /integracion/estado armada con el veredicto GUARDADO de un
+     * RFCE (E32 < 250k), para cuando la consulta en vivo a la DGII falla. Pura.
+     *
+     * Vale solo para RFCE: RecepcionFC contesta en el acto con el veredicto final
+     * (Aceptado / Rechazado y el motivo), y la emision lo guarda. Un e-CF con
+     * track_id no: al emitir solo queda ENVIADO, que no es un veredicto.
+     *
+     * Caso que lo origino (tenant 18, certecf, 2026-11-13): la DGII rechaza en
+     * fc.dgii.gov.do/certecf/consultarfce el token de su propia autenticacion de
+     * certecf ("invalid_token", "The signature is invalid"); en testecf y ecf la
+     * misma consulta funciona. El cliente quedaba con un 502 y sin el motivo.
+     *
+     * @param array|null $guardado getVeredictoGuardado()
+     * @param string     $codigoPedido el codigo de seguridad consultado: tiene que ser el
+     *                   del envio guardado (otro codigo es otro envio del mismo e-NCF)
+     * @return array{estado: string, consulta: mixed, con_motivo: bool, fecha: ?string}|null
+     *         null si no hay un veredicto RFCE guardado de ese envio
+     */
+    public static function veredictoRfceGuardado(?array $guardado, string $codigoPedido): ?array
+    {
+        if ($guardado === null) {
+            return null;
+        }
+        $estado = strtoupper(trim((string) ($guardado['estado_dgii'] ?? '')));
+        if (!str_starts_with($estado, 'RFCE_') || $estado === 'RFCE_ENVIADO') {
+            return null;
+        }
+        $codigoGuardado = trim((string) ($guardado['codigo_seguridad'] ?? ''));
+        if ($codigoGuardado === '' || $codigoGuardado !== trim($codigoPedido)) {
+            return null;
+        }
+        $consulta = $guardado['dgii_respuesta'] ?? null;
+        return [
+            'estado'     => $estado,
+            'consulta'   => ($consulta === '' ? null : $consulta),
+            'con_motivo' => is_array($consulta) && array_key_exists('mensajes', $consulta),
+            'fecha'      => isset($guardado['created_at']) ? (string) $guardado['created_at'] : null,
+        ];
+    }
+
+    /**
      * Igual que getEmitidoByENCF pero CON el xml_firmado: el ultimo envio de ese
      * e-NCF, para volver a bajar el comprobante (GET /integracion/xml). Lo usa
      * la certificacion: el XML integro de cada E32 <250k se sube a mano al portal.

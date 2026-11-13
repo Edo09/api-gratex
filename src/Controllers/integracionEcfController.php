@@ -26,6 +26,7 @@ require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/TimbreEcf.php';
+require_once __DIR__ . '/../IntegracionRequestLog.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -98,6 +99,7 @@ function handleEmitirIntegracion(): void
         $result = (new ECFEmissionService())->emitir($payload);
     } catch (Throwable $e) {
         error_log('[integracionEcf] emision fallo (tenant ' . ($tenant['id'] ?? '?') . '): ' . $e->getMessage());
+        IntegracionRequestLog::anotar($e);
         AuditLogger::log([
             'module' => 'integracion', 'action' => 'INTEGRACION_EMIT',
             'entity_type' => 'ecf', 'entity_id' => $input['e_ncf'] ?? null,
@@ -111,6 +113,13 @@ function handleEmitirIntegracion(): void
         return;
     }
 
+    // Lo que contesto la DGII. En un RFCE (E32 < 250k) emitir() lo devuelve en
+    // rfce_response, con dgii_response en null: antes solo se leia dgii_response y
+    // el cliente recibia RFCE_RECHAZADO sin el motivo, que tampoco se guardaba
+    // (tenant 18, 2026-11-13). En un RFCE es el veredicto final: RecepcionFC no
+    // deja nada pendiente.
+    $dgiiRespuesta = $result['dgii_response'] ?? ($result['rfce_response'] ?? null);
+
     // Respaldo en master (best-effort: no romper la respuesta si falla).
     try {
         (new IntegracionStoreModel())->saveEmitido([
@@ -119,7 +128,7 @@ function handleEmitirIntegracion(): void
             'tipo_ecf'      => $result['tipo_ecf'] ?? ($input['tipo_ecf'] ?? null),
             'e_ncf'         => $result['e_ncf'] ?? $input['e_ncf'],
             'rnc_comprador' => $input['comprador']['rnc'] ?? null,
-            'monto_total'   => $input['totales']['monto_total'] ?? null,
+            'monto_total'   => $result['monto_total'] ?? ($input['totales']['monto_total'] ?? null),
             'track_id'      => $result['track_id'] ?? null,
             'xml_firmado'   => $result['signed_xml'],
             // Lo que la DGII dijo al recibirlo (master_migrations/014). GET /estado lo
@@ -127,11 +136,12 @@ function handleEmitirIntegracion(): void
             'ambiente'         => $result['ambiente'] ?? null,
             'codigo_seguridad' => $result['codigo_seguridad'] ?? null,
             'estado_dgii'      => $result['estado'] ?? null,
-            'dgii_mensajes'    => is_array($result['dgii_response'] ?? null) ? ($result['dgii_response']['mensajes'] ?? null) : null,
-            'dgii_respuesta'   => $result['dgii_response'] ?? null,
+            'dgii_mensajes'    => is_array($dgiiRespuesta) ? ($dgiiRespuesta['mensajes'] ?? null) : null,
+            'dgii_respuesta'   => $dgiiRespuesta,
         ]);
     } catch (Throwable $e) {
         error_log('[integracionEcf] no se pudo guardar respaldo: ' . $e->getMessage());
+        IntegracionRequestLog::anotar('No se guardo el respaldo del e-CF: ' . $e->getMessage());
     }
 
     AuditLogger::log([
@@ -157,7 +167,8 @@ function handleEmitirIntegracion(): void
         // Contenido del QR de la Representacion Impresa: el cliente solo lo convierte a QR.
         'qr_url'           => null,
         'xml_firmado'      => $result['signed_xml'] ?? null,
-        'dgii_response'    => $result['dgii_response'] ?? null,
+        // En un RFCE: {codigo, estado, mensajes, secuenciaUtilizada...} de RecepcionFC.
+        'dgii_response'    => $dgiiRespuesta,
     ];
     // Sandbox: que el cliente no pueda confundir esto con un comprobante real.
     if (SandboxEcf::activo($tenant['ambiente'] ?? null)) {
@@ -170,6 +181,7 @@ function handleEmitirIntegracion(): void
         } catch (Throwable $e) {
             // La URL es un extra: el comprobante ya se emitio y no se pierde la respuesta por ella.
             error_log('[integracionEcf] no se pudo armar qr_url: ' . $e->getMessage());
+            IntegracionRequestLog::anotar('No se armo qr_url: ' . $e->getMessage());
         }
     }
 

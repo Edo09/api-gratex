@@ -28,6 +28,7 @@ require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ACECFEmissionService.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/EcfUsuarioException.php';
+require_once __DIR__ . '/../IntegracionRequestLog.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -149,6 +150,7 @@ function handleIntegracionAprobacion(): void
     try {
         $result = (new ACECFEmissionService())->enviar($input);
     } catch (Throwable $e) {
+        IntegracionRequestLog::anotar($e);
         $dgii = parseDgiiApcResponse($e->getMessage());
         if (!$sandbox) {
             persistDecision($store, $tenantId, $input, [
@@ -268,10 +270,12 @@ function persistDecision(IntegracionStoreModel $store, int $tenantId, array $inp
             error_log('[integracionAprobacion] AVISO: decision sin persistir, 0 filas en ecf_recibidos'
                 . ' (tenant_id=' . $tenantId . ', rnc_emisor=' . ($input['rnc_emisor'] ?? '?')
                 . ', e_ncf=' . ($input['e_ncf'] ?? '?') . ')');
+            IntegracionRequestLog::anotar('Decision comercial sin persistir: 0 filas en ecf_recibidos para ese e-CF.');
         }
     } catch (Throwable $e) {
         error_log('[integracionAprobacion] no se pudo persistir decision ('
             . ($input['e_ncf'] ?? '?') . '): ' . $e->getMessage());
+        IntegracionRequestLog::anotar('No se guardo la decision comercial: ' . $e->getMessage());
     }
 }
 

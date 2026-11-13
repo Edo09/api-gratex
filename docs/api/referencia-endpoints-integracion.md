@@ -334,10 +334,11 @@ DGII lo aceptó.** Lea `estado`:
 | `RFCE_...` | Factura de consumo E32 de menos de RD$250,000 (abajo) | |
 
 **E32 de menos de RD$250,000.** La DGII recibe un resumen del comprobante y no genera
-`track_id`. La respuesta trae `"track_id": null`, `"dgii_response": null` y el `estado` con
-el prefijo `RFCE_`: lo normal es `RFCE_ACEPTADO`; también puede ser
-`RFCE_ACEPTADO_CONDICIONAL`, `RFCE_RECHAZADO` u otro. Si es `RFCE_RECHAZADO`, el motivo se ve
-con `GET /estado` usando el `codigo_seguridad`.
+`track_id`. La respuesta trae `"track_id": null` y el `estado` con el prefijo `RFCE_`: lo
+normal es `RFCE_ACEPTADO`; también puede ser `RFCE_ACEPTADO_CONDICIONAL`, `RFCE_RECHAZADO` u
+otro. Es el veredicto final: la DGII valida el resumen en el momento. `dgii_response` trae la
+respuesta de la DGII (`codigo`, `estado`, `mensajes`, `secuenciaUtilizada`); si es
+`RFCE_RECHAZADO`, el motivo está en `dgii_response.mensajes`.
 
 No dé por válido un comprobante hasta tener `ACEPTADO`, `ACEPTADO_CONDICIONAL`,
 `RFCE_ACEPTADO` o `RFCE_ACEPTADO_CONDICIONAL`.
@@ -376,7 +377,7 @@ curl "https://gratex.net/api/integracion/estado?e_ncf=E310000000001&track_id=$TR
 |---|---|---|
 | `e_ncf` | Sí | |
 | `track_id` | Recomendado | El que recibió al emitir. Mándelo siempre que lo tenga |
-| `codigo_seguridad` | Solo E32 < RD$250,000 | Esos comprobantes no tienen `track_id` |
+| `codigo_seguridad` | Solo E32 < RD$250,000 | Esos comprobantes no tienen `track_id`. Si no lo manda, usamos el que guardamos al emitir |
 | `rnc` | Recomendado | La empresa emisora |
 
 Si no manda `track_id` ni `codigo_seguridad`, usamos el `track_id` del **último envío** de
@@ -411,6 +412,7 @@ certificación si el mismo número se usó en las pruebas.
 | `estado` | `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO` o `NO_ENCONTRADO`; con prefijo `RFCE_` si consultó por `codigo_seguridad`. Puede venir `null` si la DGII no devolvió un estado reconocible: no lo trate como aceptado ni como rechazado, consulte más tarde |
 | `flujo` | `ECF` (por `track_id`) o `RFCE` (por `codigo_seguridad`) |
 | `consulta` | La respuesta de la DGII tal cual. El motivo de un rechazo está en `consulta.mensajes` |
+| `fuente` | `dgii`: consultado a la DGII en ese momento. `respaldo`: solo en E32 < RD$250,000, cuando la consulta a la DGII falla; es el veredicto que la DGII dio al recibir el comprobante, guardado al emitirlo, y viene con un `aviso` que dice por qué. En certificación (`certecf`) pasa siempre: ese servicio de la DGII no acepta su propio token |
 | `fecha_emision` | Hora en que guardamos nuestra copia, solo cuando buscamos el `track_id` por usted. No es la fecha de firma |
 
 Cada consulta deja guardado lo que respondió la DGII (estado y `mensajes`) junto a nuestra copia del comprobante, para poder revisar después el motivo de un rechazo.
@@ -426,7 +428,7 @@ Cada consulta deja guardado lo que respondió la DGII (estado y `mensajes`) junt
 
 | HTTP | Caso |
 |---|---|
-| `404` | Sin `track_id` ni `codigo_seguridad`: no tenemos registro de ese e-NCF para esa empresa, o es un E32 < RD$250,000 (mande `codigo_seguridad`) |
+| `404` | Sin `track_id` ni `codigo_seguridad`: no tenemos registro de ese e-NCF para esa empresa, o es un E32 < RD$250,000 sin código guardado (mande `codigo_seguridad`) |
 | `422` | Falta `e_ncf`, o el `rnc` no es de una de sus empresas |
 | `502` | No se pudo consultar a la DGII. Reintente más tarde |
 

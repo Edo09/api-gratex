@@ -26,6 +26,7 @@ header('Content-Type: application/json; charset=utf-8');
 require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 require_once __DIR__ . '/../TenantResolver.php';
 require_once __DIR__ . '/../Models/IntegracionStoreModel.php';
+require_once __DIR__ . '/../IntegracionRequestLog.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     http_response_code(200);
@@ -164,11 +165,17 @@ function handleIntegracionEstado(array $tenant): void
 
     // Sin track_id: se busca en el respaldo de lo que emitio este tenant. Asi el
     // cliente puede consultar sabiendo solo su e-NCF.
+    $store = new IntegracionStoreModel();
     $respaldo = null;
     if ($trackId === '' && $codigoSeguridad === '') {
-        $respaldo = (new IntegracionStoreModel())->getEmitidoByENCF($tenantId, $rncEmisor, $eNcf);
+        $respaldo = $store->getEmitidoByENCF($tenantId, $rncEmisor, $eNcf);
         $trackId = (string) ($respaldo['track_id'] ?? '');
-        if ($trackId === '') {
+        if ($trackId === '' && $respaldo !== null) {
+            // RFCE (E32 <250k): no hay track_id, pero el respaldo guarda su codigo
+            // de seguridad (master_migrations/014): no hace falta que lo mande.
+            $codigoSeguridad = trim((string) ($store->getVeredictoGuardado($tenantId, $rncEmisor, $eNcf)['codigo_seguridad'] ?? ''));
+        }
+        if ($trackId === '' && $codigoSeguridad === '') {
             respondIntegracionEstado(404, [
                 'status' => false,
                 'error' => $respaldo === null
@@ -198,6 +205,39 @@ function handleIntegracionEstado(array $tenant): void
         }
     } catch (Throwable $e) {
         error_log('[integracionEstado] consulta fallo (tenant ' . $tenantId . ', ' . $eNcf . '): ' . $e->getMessage());
+        IntegracionRequestLog::anotar($e);
+
+        // RFCE: RecepcionFC dio el veredicto final al recibirlo y la emision lo
+        // guardo. Si la consulta en vivo falla (en certecf la DGII rechaza el
+        // token en consultarfce: "The signature is invalid"), se devuelve ese
+        // veredicto en vez de un 502 sin motivo. Ver veredictoRfceGuardado().
+        $guardado = ($esRfce && !$sandbox)
+            ? IntegracionStoreModel::veredictoRfceGuardado($store->getVeredictoGuardado($tenantId, $rncEmisor, $eNcf), $codigoSeguridad)
+            : null;
+        if ($guardado !== null) {
+            respondIntegracionEstado(200, [
+                'status' => true,
+                'recurso' => 'estado',
+                'rnc' => $rncEmisor,
+                'empresa' => $tenant['nombre'],
+                'e_ncf' => $eNcf,
+                'track_id' => null,
+                'flujo' => 'RFCE',
+                'ambiente' => $ambiente,
+                'estado' => $guardado['estado'],
+                'fecha_emision' => $guardado['fecha'],
+                'consulta' => $guardado['consulta'],
+                'fuente' => 'respaldo',
+                'aviso' => 'La consulta RFCE de la DGII no respondio ('
+                    . EcfUsuarioException::mensajePublico($e) . '). Este es el veredicto que la DGII dio al'
+                    . ' recibir el RFCE, guardado al emitirlo.'
+                    . ($guardado['con_motivo'] ? '' : ' El motivo no quedo guardado en ese envio: si fue'
+                        . ' rechazado, vuelva a enviarlo y la respuesta de la emision trae el motivo en'
+                        . ' data.dgii_response.mensajes.'),
+            ]);
+            return;
+        }
+
         respondIntegracionEstado(502, [
             'status' => false,
             // Sin rutas del server ni nombres de configuracion (el detalle va al log).
@@ -215,7 +255,7 @@ function handleIntegracionEstado(array $tenant): void
     // respaldo del master es el unico lugar donde queda el motivo de un rechazo.
     // Sandbox no: ese comprobante nunca llego a la DGII.
     if (!$sandbox) {
-        (new IntegracionStoreModel())->guardarEstadoConsultado(
+        $store->guardarEstadoConsultado(
             $tenantId,
             $rncEmisor,
             $eNcf,
@@ -238,6 +278,8 @@ function handleIntegracionEstado(array $tenant): void
         'estado' => $estado,
         'fecha_emision' => $respaldo['created_at'] ?? null,
         'consulta' => $consulta['data'] ?? null,
+        // dgii = consulta en vivo; respaldo = veredicto guardado al emitir (RFCE, cuando la consulta falla).
+        'fuente' => $sandbox ? 'sandbox' : 'dgii',
     ];
     if ($sandbox) {
         $respuesta['sandbox'] = true;

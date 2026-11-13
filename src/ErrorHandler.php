@@ -70,6 +70,12 @@ class ErrorHandler
         if ($traza !== '') {
             error_log("[error {$id}] traza: {$traza}");
         }
+        // Peticion de integracion: el detalle tambien queda en su fila de la bitacora
+        // (integracion_request_log). Solo si la clase ya esta cargada: el Router la
+        // carga en esas peticiones y aqui no se incluye nada mas.
+        if (class_exists('IntegracionRequestLog', false)) {
+            IntegracionRequestLog::anotar("[error {$id}] {$que}: {$msg} ({$file}:{$line})");
+        }
         return $id;
     }
 

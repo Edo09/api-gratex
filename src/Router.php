@@ -61,6 +61,18 @@ $request_method = $_SERVER['REQUEST_METHOD'];
 // Remove base path if needed and parse endpoint
 $endpoint = parse_url($request_uri, PHP_URL_PATH);
 
+// Bitacora de integracion (master.integracion_request_log, src/IntegracionRequestLog.php):
+// lo que manda un cliente de integracion y lo que se le contesta, para ver rapido por
+// que le fallo algo. Va antes de la pagina de docs, del PermissionGate y de los
+// controllers para registrar tambien esas respuestas (401, 403, 404, un 500).
+// Solo /api/integracion/* o peticiones con X-API-SECRET; nunca rompe el ruteo.
+try {
+    require_once __DIR__ . '/IntegracionRequestLog.php';
+    IntegracionRequestLog::iniciarSiAplica();
+} catch (Throwable $e) {
+    error_log('[Router] IntegracionRequestLog fallo: ' . $e->getMessage());
+}
+
 // Serve API documentation
 $is_root = $endpoint === '/' || 
 $endpoint === '/index.php' || 

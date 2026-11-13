@@ -98,6 +98,18 @@ Endpoints internos (token de API propio vía `X-API-KEY`), útiles para diagnós
 > hay tenant). Variables `.env`: `DGII_ECF_ENVIRONMENT`, `DGII_ECF_CERT_PATH`,
 > `DGII_ECF_CERT_PASSWORD`, `OPENSSL_CONF`, `OPENSSL_MODULES`. Ver [../setup.md](../setup.md).
 
+**El mismo token sirve en `fc.dgii.gov.do`** (RecepcionFC y consultarfce, los RFCE de E32 <
+250k): ese host no tiene autenticación propia. **Excepción, certecf:**
+`fc.dgii.gov.do/certecf/consultarfce` contesta `401` con
+`WWW-Authenticate: Bearer error="invalid_token", error_description="The signature is invalid"`
+al token de `ecf.dgii.gov.do/certecf/autenticacion` (probado 2026-11-13 con el cert de Gratex:
+`testecf` y `ecf` responden 204/200 con el mismo método; `CerteCF` con mayúsculas da 502). Es
+un defecto de la DGII en certificación, no de la llamada. Por eso un RFCE en certecf solo se
+conoce por la respuesta de RecepcionFC al emitirlo; `GET /api/integracion/estado` devuelve esa
+respuesta guardada (`fuente: "respaldo"`). Un 401/403 de la DGII dice ahora la cabecera
+`WWW-Authenticate` y el servicio llamado. Caso completo:
+[integracion-request-log.md](integracion-request-log.md).
+
 ---
 
 ## e-CF saliente (nosotros → DGII)

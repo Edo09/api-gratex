@@ -74,6 +74,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [integrations/multi-tenant-onboarding.md](integrations/multi-tenant-onboarding.md) | Alta de tenants (app/integración), demo, certificación, rutas públicas admin |
 | [integrations/alta-tenant-runbook.md](integrations/alta-tenant-runbook.md) | Runbook paso a paso para dar de alta un tenant app: orden de ejecución, verificaciones y troubleshooting |
 | [integrations/cert-integracion-runbook.md](integrations/cert-integracion-runbook.md) | Runbook paso a paso para certificar un tenant integración: alta, fases por API con los runners, RI y promoción |
+| [integrations/integracion-request-log.md](integrations/integracion-request-log.md) | Bitácora de peticiones de integración (master 018): qué manda cada cliente, qué se le contesta, consultas para ver un error rápido, y el caso del 401 de la consulta RFCE en certecf |
 | [integrations/express-release-checklist.md](integrations/express-release-checklist.md) | Checklist de despliegue de Fiscalpoint Express (la API): pruebas en verde, migración master 015, subida del API y las reglas de reversa |
 
 ### Otros archivos de `docs/`
