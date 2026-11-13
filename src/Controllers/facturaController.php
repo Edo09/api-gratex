@@ -386,10 +386,21 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
 
     // No se puede facturar a si mismo: el RNCComprador no puede ser el RNC del
     // emisor. Cubre tanto el override del body como el RNC tomado del cliente.
+    // Y el emisor que venga en el body (`emisor.rnc`, lo manda el set de pruebas
+    // DGII) tiene que ser esta empresa: con el xlsx de OTRA empresa el XML salia
+    // firmado con este certificado y el RNCEmisor ajeno, y la DGII lo rechazaba
+    // ("El RNC del certificado no esta delegado...", 2026-11-12) con la fila ya
+    // guardada. /api/integracion/ecf hace la misma comparacion.
     $compradorRnc = (string) ($comprador['rnc'] ?? '');
-    if ($compradorRnc !== '') {
+    if ($compradorRnc !== '' || is_array($input['emisor'] ?? null)) {
         $emisorRnc = (string) ((new EmisorConfigModel())->get()['rnc'] ?? '');
-        if ($emisorRnc !== '' && $compradorRnc === $emisorRnc) {
+        $emisorAjeno = rncEmisorAjeno($input, $emisorRnc);
+        if ($emisorAjeno !== null) {
+            respond(false, 'El RNC del emisor que viene en la factura (' . $emisorAjeno . ') no es el de esta empresa ('
+                . preg_replace('/\D/', '', $emisorRnc) . '). Si es el set de pruebas de la DGII, ese archivo es de otra empresa: usa el de esta.', 422);
+            return;
+        }
+        if ($compradorRnc !== '' && $emisorRnc !== '' && $compradorRnc === $emisorRnc) {
             respond(false, 'El RNC de este cliente (' . $compradorRnc . ') es el de tu propia empresa, y no puedes facturarte a ti mismo. Elige otro cliente.', 422);
             return;
         }
@@ -715,6 +726,21 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
 }
 
 /**
+ * El RNC (solo digitos) de `emisor.rnc` del body cuando NO es el de la empresa
+ * ($emisorRnc, el de emisor_config), o null si no hay nada que objetar: el body
+ * no trae emisor o no trae su RNC, es el mismo (con o sin guiones), o la
+ * empresa no tiene RNC configurado (ahi la emision falla despues con su propio
+ * texto). Pura: no toca la DB. Una empresa nunca emite con el RNC de otra.
+ */
+function rncEmisorAjeno(array $input, string $emisorRnc): ?string
+{
+    $valor = is_array($input['emisor'] ?? null) ? ($input['emisor']['rnc'] ?? '') : '';
+    $delBody = is_scalar($valor) ? (string) preg_replace('/\D/', '', (string) $valor) : '';
+    $deLaEmpresa = (string) preg_replace('/\D/', '', $emisorRnc);
+    return ($delBody !== '' && $deLaEmpresa !== '' && $delBody !== $deLaEmpresa) ? $delBody : null;
+}
+
+/**
  * inventoryModel con require_once guardado: is_file antes del require, porque
  * un require que falla es un fatal que ningun try/catch atrapa, y tumbaria la
  * respuesta de una factura que la DGII ya acepto. Asi baja a excepcion.
@@ -951,6 +977,12 @@ function handleConsultarEstado(int $facturaId, facturaModel $facturaModel): void
     // existe (spec 7.3). Va antes de la ruta RFCE y de updateECFEstado.
     if (in_array($ecf['estado_dgii'], EstadosEcf::EN_VUELO, true)
         || ($ecf['estado_dgii'] === 'ENVIADO' && empty($ecf['track_id']) && !empty($ecf['e_ncf']))) {
+        // Unica excepcion: en certificacion, un RFCE que quedo incierto si se le
+        // pregunta a la DGII (ver esRfceInciertoDeCertificacion).
+        if (esRfceInciertoDeCertificacion($ecf)) {
+            handleConsultarEstadoRFCE($facturaId, $ecf, $facturaModel);
+            return;
+        }
         handleEstadoEnVuelo($facturaId, $ecf);
         return;
     }
@@ -1054,15 +1086,39 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
         return;
     }
 
+    // Solo una fila en vuelo guarda todavia la meta del envio (el RFCE incierto de
+    // certificacion, ver esRfceInciertoDeCertificacion). Con dispensado = false el
+    // e-NCF vino en el payload (set de pruebas): no hay numero que devolver al
+    // contador, y devolverlo por tipo + ambiente podria restarle uno a un contador
+    // que casualmente esta en ese valor. Una fila RFCE_ normal no trae la clave.
+    $numeroDelPayload = (facturaModel::metaEnvio($ecf['respuesta_dgii'] ?? null)['dispensado'] ?? null) === false;
+    // Si la consulta no la saca de ahi, la fila sigue en vuelo y responde como
+    // cualquier otra en vuelo (en_vuelo + nota, spec 7.3): handleEstadoEnVuelo.
+    $filaEnVuelo = in_array((string) ($ecf['estado_dgii'] ?? ''), EstadosEcf::EN_VUELO, true) ? $ecf : null;
+
     try {
         $service = new ECFEmissionService();
         $consulta = $service->consultarEstadoRFCE($ecf['e_ncf'], $codigoSeguridad, $ecf['ambiente_dgii'] ?? null);
         $estadoBase = mapEstadoFromConsulta($consulta);
         $estadoNuevo = $estadoBase !== null ? 'RFCE_' . $estadoBase : null;
+        if ($estadoNuevo === null && $filaEnVuelo !== null) {
+            // La DGII contesto algo que no es un estado: no se toca la fila.
+            handleEstadoEnVuelo($facturaId, $filaEnVuelo);
+            return;
+        }
         if ($estadoNuevo !== null) {
             $estadoAnterior = $ecf['estado_dgii'] ?? '';
             $actualizado = $facturaModel->updateECFEstado($facturaId, $estadoNuevo, $consulta['data']);
             $ecf['estado_dgii'] = $estadoNuevo;
+            // Ya hay veredicto de la DGII: si algo de lo que sigue fallara, el
+            // respaldo del catch no puede volver a decir "en vuelo" (quien
+            // consulta reenviaria un comprobante que la DGII ya tiene).
+            $respuestaGuardada['estado_dgii'] = $estadoNuevo;
+            $filaEnVuelo = null;
+            if ($estadoAnterior === EstadosEcf::ENVIO_INCIERTO) {
+                // El envio nunca tuvo respuesta de RecepcionFC: rfce_estado seguia NULL.
+                $facturaModel->completarRfceConsultado($facturaId, $estadoBase, is_array($consulta['data'] ?? null) ? $consulta['data'] : null);
+            }
             if ($estadoAnterior !== $estadoNuevo) {
                 AuditLogger::log([
                     'module' => 'facturas', 'action' => 'STATUS_CHANGE', 'entity_type' => 'factura',
@@ -1076,9 +1132,9 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
 
             // Si el RFCE es rechazado asincronamente y la secuencia no se consumió, revertir el contador
             $secuenciaUtilizada = normalizeSecuenciaUtilizada($consulta['data']['secuenciaUtilizada'] ?? null);
-            if (($estadoNuevo === 'RFCE_RECHAZADO' || $estadoNuevo === 'RFCE_NO_ENCONTRADO') && 
+            if (($estadoNuevo === 'RFCE_RECHAZADO' || $estadoNuevo === 'RFCE_NO_ENCONTRADO') &&
                 ($estadoAnterior !== 'RFCE_RECHAZADO' && $estadoAnterior !== 'RFCE_NO_ENCONTRADO')) {
-                if ($secuenciaUtilizada === false) {
+                if ($secuenciaUtilizada === false && !$numeroDelPayload) {
                     if (!empty($ecf['pos_idempotency_key'])) {
                         // Venta del POS: su e-NCF ya esta impreso en el recibo y NUNCA vuelve al
                         // contador (spec 4.2.10). Se guarda el veredicto y el numero se queda.
@@ -1115,6 +1171,10 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
     } catch (Throwable $e) {
         // La nota la puede leer el usuario: el motivo tecnico solo al error_log.
         error_log('[ECF] fallo consultando RFCE a DGII factura_id=' . $facturaId . ': ' . get_class($e) . ': ' . $e->getMessage());
+        if ($filaEnVuelo !== null) {
+            handleEstadoEnVuelo($facturaId, $filaEnVuelo);
+            return;
+        }
         $respuestaGuardada['nota'] = ($e instanceof EcfUsuarioException
             ? $e->getMensajeUsuario()
             : 'No se pudo consultar el estado en la DGII en este momento.')
@@ -1124,11 +1184,40 @@ function handleConsultarEstadoRFCE(int $facturaId, array $ecf, facturaModel $fac
 }
 
 /**
+ * true si la fila es el RFCE (E32 < 250k) de una emision de CERTIFICACION que
+ * quedo en ENVIO_INCIERTO: RecepcionFC no contesto a tiempo y no se sabe si la
+ * DGII lo recibio. A esa fila GET /estado si le pregunta a la DGII, por e-NCF +
+ * codigo de seguridad (handleConsultarEstadoRFCE), y guarda lo que conteste:
+ * RFCE_ACEPTADO, RFCE_RECHAZADO o RFCE_NO_ENCONTRADO (este ultimo deja reemitir
+ * el mismo e-NCF). Es el caso "RFCE" del procedimiento manual de
+ * docs/integrations/dgii-ecf.md, sin el UPDATE a mano.
+ *
+ * Solo en certecf, donde nada es fiscal: el asistente de certificacion
+ * (tools/send_fase2.php) lo usa para no reenviar un RFCE que la DGII ya tiene
+ * (un duplicado sale rechazado y reinicia el set). En ecf y testecf las filas
+ * en vuelo siguen como en la spec 7.3 (las resuelve soporte), igual que una
+ * venta del POS (la resuelve su reenvio automatico), una PENDIENTE_ENVIO (puede
+ * seguir enviandose) y un e-CF completo (certecf no tiene con que consultarlo
+ * sin trackId).
+ *
+ * @param array $ecf fila de facturaModel::getECFData
+ */
+function esRfceInciertoDeCertificacion(array $ecf): bool
+{
+    return ($ecf['estado_dgii'] ?? '') === EstadosEcf::ENVIO_INCIERTO
+        && ($ecf['ambiente_dgii'] ?? '') === 'certecf'
+        && empty($ecf['pos_idempotency_key'])
+        && trim((string) ($ecf['e_ncf'] ?? '')) !== ''
+        && trim((string) ($ecf['codigo_seguridad'] ?? '')) !== ''
+        && (facturaModel::metaEnvio($ecf['respuesta_dgii'] ?? null)['flujo'] ?? null) === 'RFCE';
+}
+
+/**
  * GET /estado de una fila sin veredicto que no se puede consultar: en vuelo
  * (PENDIENTE_ENVIO, ENVIO_INCIERTO) o ENVIADO sin track_id. Release 1 no llama
  * a la DGII: devuelve el estado guardado y una nota que manda a soporte
  * (spec 7.3). No ofrece ningun reenvio: la app nunca reenvia un comprobante sin
- * confirmar (decision 7).
+ * confirmar (decision 7). Excepcion: esRfceInciertoDeCertificacion.
  */
 function handleEstadoEnVuelo(int $facturaId, array $ecf): void
 {

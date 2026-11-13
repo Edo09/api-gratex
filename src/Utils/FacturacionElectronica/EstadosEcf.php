@@ -22,7 +22,8 @@ final class EstadosEcf
      * para que el flujo RFCE (E32 < 250k) se porte igual que el e-CF. ERROR y
      * RFCE_ERROR quedan fuera: ese numero se quema a proposito. Excepcion: al
      * re-correr el set de pruebas DGII en certecf la reserva archiva cualquier
-     * estado fuera de EN_VUELO (facturaModel::reservarFacturaECF).
+     * estado, tambien ENVIO_INCIERTO y una PENDIENTE_ENVIO que ya no puede
+     * estar enviandose (facturaModel::reservarFacturaECF).
      */
     public const REINTENTABLES = ['RECHAZADO', 'RFCE_RECHAZADO', 'NO_ENCONTRADO', 'RFCE_NO_ENCONTRADO'];
 
@@ -34,7 +35,8 @@ final class EstadosEcf
 
     /**
      * En vuelo: la fila ocupa su numero y la app no conoce un veredicto de la
-     * DGII. Nunca se archiva sola, no es dinero (stats y reporte de ventas la
+     * DGII. Nunca se archiva sola (salvo al re-correr el set de pruebas en
+     * certecf, ver REINTENTABLES), no es dinero (stats y reporte de ventas la
      * excluyen) y no mueve inventario.
      */
     public const EN_VUELO = [self::PENDIENTE_ENVIO, self::ENVIO_INCIERTO];

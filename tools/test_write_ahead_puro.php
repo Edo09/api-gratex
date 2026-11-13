@@ -392,7 +392,7 @@ $c = new GuionConexion();
 [$r, $e] = $reservar($c);
 wa_chk('camino feliz: devuelve factura_id, e_ncf y desde',
     $e === null && $r === ['factura_id' => 41, 'e_ncf' => 'E310000000123', 'desde' => '2026-10-05 14:03:11'], $e?->getMessage() ?? $r);
-$select = (string) $c->sql('estado_dgii FROM facturas');
+$select = (string) $c->sql('estado_dgii, respuesta_dgii FROM facturas');
 wa_chk('el SELECT bloquea (FOR UPDATE) con el predicado de eNcfYaUsado',
     str_contains($select, 'FOR UPDATE') && str_contains($select, '(ambiente_dgii = :amb OR ambiente_dgii IS NULL)'), $select);
 wa_chk('el SELECT usa el e-NCF y el ambiente del token',
@@ -1776,21 +1776,31 @@ wa_chk('17 F8: la cabecera de la 030 ya no dice que no estorba ni que sea solo p
 // 2026-10-26): un rechazo reinicio el set y los 22 originales estaban ACEPTADO o
 // RFCE_ACEPTADO y las 3 notas ENVIADO, asi que reenviar el mismo xlsx salia
 // "numero ocupado" en las 25. Con set_pruebas y ambiente certecf la reserva
-// archiva la fila previa certecf en cualquier estado fuera de vuelo.
+// archiva la fila previa certecf en cualquier estado. Desde el 2026-11-12
+// (empresa 133454394: tres RFCE con timeout de RecepcionFC quedaron en
+// ENVIO_INCIERTO y el set no se podia completar) tambien una ENVIO_INCIERTO y
+// una PENDIENTE_ENVIO vieja; solo bloquea la PENDIENTE_ENVIO reciente.
 // ---------------------------------------------------------------------------
 echo "\n== 18) Set de pruebas re-corrido en certecf ==\n";
 
 $s18Set = ['set_pruebas' => true];
 $s18Cert = ['ambiente' => 'certecf', 'ambiente_secuencia' => 'certecf', 'e_ncf' => 'E310000000034', 'dispensado' => false,
     'rango_id' => null, 'secuencia_valor' => null];
-$s18Previa = static fn(string $estado, ?string $ambiente = 'certecf'): array => [['id' => '2', 'ambiente_dgii' => $ambiente,
-    'pos_idempotency_key' => null, 'estado_dgii' => $estado]];
+$s18Previa = static fn(string $estado, ?string $ambiente = 'certecf', ?string $respuesta = null): array => [['id' => '2',
+    'ambiente_dgii' => $ambiente, 'pos_idempotency_key' => null, 'estado_dgii' => $estado, 'respuesta_dgii' => $respuesta]];
+/** Meta de una fila en vuelo (spec 6.3) reservada hace $segundos, como la escribe reservarFacturaECF. */
+$s18Meta = static fn(string $fase, int $segundos): string => (string) json_encode(['fase' => $fase,
+    'desde' => date('Y-m-d H:i:s', time() - $segundos), 'flujo' => 'RFCE', 'ambiente_secuencia' => 'certecf',
+    'dispensado' => false, 'rango_id' => null, 'secuencia_valor' => null]);
+/** Cuantos UPDATE de archivo corrio la conexion falsa. */
+$s18Archivos = static fn(GuionConexion $c): int
+    => count(array_filter($c->de('execute'), static fn(array $l): bool => str_contains($l[1], '_ARCHIVADO')));
 
 $c = new GuionConexion();
 [, $e] = $reservar($c, $s18Cert, $s18Set);
-$select = (string) $c->sql('estado_dgii FROM facturas');
-wa_chk('18: el SELECT lee tambien ambiente_dgii y pos_idempotency_key, con el mismo FOR UPDATE y predicado',
-    str_contains($select, 'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii FROM facturas') && str_contains($select, 'FOR UPDATE')
+$select = (string) $c->sql('estado_dgii, respuesta_dgii FROM facturas');
+wa_chk('18: el SELECT lee tambien ambiente_dgii, pos_idempotency_key y respuesta_dgii (la meta), con el mismo FOR UPDATE y predicado',
+    str_contains($select, 'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii, respuesta_dgii FROM facturas') && str_contains($select, 'FOR UPDATE')
     && str_contains($select, '(ambiente_dgii = :amb OR ambiente_dgii IS NULL)') && $e === null, $select);
 
 foreach (['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'RFCE_ACEPTADO', 'ENVIADO', 'EN_PROCESO', 'RFCE_ENVIADO', 'ERROR', 'RFCE_ERROR'] as $s18Estado) {
@@ -1816,15 +1826,93 @@ $c->filas['FOR UPDATE'] = $s18Previa('RECHAZADO');
 wa_chk('18: previa RECHAZADO en el set: se archiva como reintentable, sin la linea del set',
     $e === null && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => 'RECHAZADO'] && !str_contains($log, 'set de pruebas'), $log);
 
-foreach ([EstadosEcf::PENDIENTE_ENVIO, EstadosEcf::ENVIO_INCIERTO] as $s18Estado) {
+// Filas en vuelo. Solo bloquea la PENDIENTE_ENVIO que puede seguir enviandose.
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::PENDIENTE_ENVIO, 'certecf', $s18Meta('PENDIENTE_ENVIO', 5));
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa PENDIENTE_ENVIO reciente (5 s) bloquea aun en el set: ocupado, sin UPDATE ni INSERT',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en PENDIENTE_ENVIO')
+    && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null && $c->de('commit') === [] && !$c->inTransaction(),
+    $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::ENVIO_INCIERTO, 'certecf', $s18Meta('ENVIO_INCIERTO', 5));
+[$r, $e, $log] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa ENVIO_INCIERTO (el envio ya termino sin respuesta) se archiva en el set y se reserva, aunque sea de hace 5 s',
+    $e === null && ($r['factura_id'] ?? null) === 41 && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => 'ENVIO_INCIERTO']
+    && ($c->params('INSERT INTO facturas')[':e_ncf'] ?? null) === 'E310000000034'
+    && count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1 && !$c->inTransaction(),
+    $e?->getMessage() ?? $c->llamadas);
+wa_chk('18: previa ENVIO_INCIERTO: una linea de log que la nombra',
+    substr_count($log, '[ECF e-NCF=E310000000034] reservar: set de pruebas re-corrido, se archiva la fila 2 en ENVIO_INCIERTO') === 1, $log);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::ENVIO_INCIERTO);
+[$r, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa ENVIO_INCIERTO sin meta legible: se archiva igual (no depende de la hora)',
+    $e === null && ($r['factura_id'] ?? null) === 41 && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => 'ENVIO_INCIERTO'],
+    $e?->getMessage() ?? $c->llamadas);
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::PENDIENTE_ENVIO, 'certecf',
+    $s18Meta('PENDIENTE_ENVIO', facturaModel::SET_PRUEBAS_PENDIENTE_VIEJA_SEG + 300));
+[$r, $e, $log] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa PENDIENTE_ENVIO vieja (su peticion murio sin marcarla) se archiva en el set y se reserva',
+    $e === null && ($r['factura_id'] ?? null) === 41 && $c->params('_ARCHIVADO') === [':id' => 2, ':visto' => 'PENDIENTE_ENVIO']
+    && substr_count($log, 'se archiva la fila 2 en PENDIENTE_ENVIO') === 1, $e?->getMessage() ?? $log);
+
+foreach ([null, '{bad', '"Recibido"', '{"fase":"PENDIENTE_ENVIO"}'] as $s18Roto) {
     $c = new GuionConexion();
-    $c->filas['FOR UPDATE'] = $s18Previa($s18Estado);
+    $c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::PENDIENTE_ENVIO, 'certecf', $s18Roto);
     [, $e] = $reservar($c, $s18Cert, $s18Set);
-    wa_chk("18: previa en vuelo ({$s18Estado}) bloquea aun en el set: ocupado, sin UPDATE ni INSERT",
-        $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), "fila 2 en {$s18Estado}")
-        && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null && $c->de('commit') === [] && !$c->inTransaction(),
-        $e?->getMessage());
+    wa_chk('18: previa PENDIENTE_ENVIO sin "desde" legible (' . var_export($s18Roto, true) . '): no se sabe si sigue enviando, bloquea',
+        $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en PENDIENTE_ENVIO')
+        && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
 }
+
+$s18Ahora = 1794500000;
+$s18MetaFija = static fn(int $segundos): string => (string) json_encode(['fase' => 'PENDIENTE_ENVIO', 'desde' => date('Y-m-d H:i:s', $s18Ahora - $segundos)]);
+wa_chk('18: SET_PRUEBAS_PENDIENTE_VIEJA_SEG son los 5 minutos del procedimiento manual', facturaModel::SET_PRUEBAS_PENDIENTE_VIEJA_SEG === 300);
+wa_chk('18: pendienteSigueEnviando: PENDIENTE_ENVIO de 299 s sigue viva; de 300 s ya no',
+    facturaModel::pendienteSigueEnviando('PENDIENTE_ENVIO', $s18MetaFija(299), $s18Ahora) === true
+    && facturaModel::pendienteSigueEnviando('PENDIENTE_ENVIO', $s18MetaFija(300), $s18Ahora) === false);
+wa_chk('18: pendienteSigueEnviando: un "desde" en el futuro (reloj corrido) cuenta como viva',
+    facturaModel::pendienteSigueEnviando('PENDIENTE_ENVIO', $s18MetaFija(-120), $s18Ahora) === true);
+wa_chk('18: pendienteSigueEnviando: ENVIO_INCIERTO y los estados con veredicto nunca siguen enviando, tengan la meta que tengan',
+    facturaModel::pendienteSigueEnviando('ENVIO_INCIERTO', $s18MetaFija(1), $s18Ahora) === false
+    && facturaModel::pendienteSigueEnviando('ENVIADO', $s18MetaFija(1), $s18Ahora) === false
+    && facturaModel::pendienteSigueEnviando('RFCE_ACEPTADO', null, $s18Ahora) === false
+    && facturaModel::pendienteSigueEnviando('', null, $s18Ahora) === false);
+
+foreach (['ecf', 'testecf'] as $s18Amb) {
+    $c = new GuionConexion();
+    $c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::ENVIO_INCIERTO, $s18Amb, $s18Meta('ENVIO_INCIERTO', 3600));
+    [, $e] = $reservar($c, ['ambiente' => $s18Amb, 'ambiente_secuencia' => $s18Amb] + $s18Cert, $s18Set);
+    wa_chk("18: set_pruebas en {$s18Amb}: una ENVIO_INCIERTO bloquea como siempre (la resuelve soporte)",
+        $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en ENVIO_INCIERTO')
+        && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
+}
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::ENVIO_INCIERTO, 'certecf', $s18Meta('ENVIO_INCIERTO', 3600));
+[, $e] = $reservar($c, $s18Cert);
+wa_chk('18: sin set_pruebas (emision normal en certecf), previa ENVIO_INCIERTO: ocupado como siempre',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en ENVIO_INCIERTO') && $c->sql('UPDATE facturas') === null,
+    $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [['id' => '2', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => '6f1c2a9e-0d3b-4e8a-9c71-2b5d8e4f0a13',
+    'estado_dgii' => 'ENVIO_INCIERTO', 'respuesta_dgii' => $s18Meta('ENVIO_INCIERTO', 3600)]];
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: venta del POS en ENVIO_INCIERTO con el numero del set: bloquea (su reenvio automatico la resuelve)',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 2 en ENVIO_INCIERTO')
+    && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = $s18Previa(EstadosEcf::ENVIO_INCIERTO, null, $s18Meta('ENVIO_INCIERTO', 3600));
+[, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: previa ENVIO_INCIERTO sin ambiente (NULL) bloquea aun en el set',
+    $e instanceof EcfNumeroOcupadoException && $c->sql('UPDATE facturas') === null && $c->sql('INSERT INTO') === null, $e?->getMessage());
 
 $c = new GuionConexion();
 $c->filas['FOR UPDATE'] = $s18Previa('ACEPTADO', null);
@@ -1882,20 +1970,117 @@ wa_chk('18: archivo sin coincidencia en el set (otra escritura movio la fila): o
 
 $c = new GuionConexion();
 $c->filas['FOR UPDATE'] = [
-    ['id' => '2', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ACEPTADO'],
-    ['id' => '3', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ENVIO_INCIERTO'],
+    ['id' => '2', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ACEPTADO', 'respuesta_dgii' => null],
+    ['id' => '3', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'PENDIENTE_ENVIO',
+        'respuesta_dgii' => $s18Meta('PENDIENTE_ENVIO', 5)],
 ];
 [, $e] = $reservar($c, $s18Cert, $s18Set);
-wa_chk('18: si una de las previas esta en vuelo, nada queda archivado (rollBack de toda la transaccion)',
-    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 3 en ENVIO_INCIERTO')
+wa_chk('18: si una de las previas puede seguir enviandose, nada queda archivado (rollBack de toda la transaccion)',
+    $e instanceof EcfNumeroOcupadoException && str_contains($e->getMessage(), 'fila 3 en PENDIENTE_ENVIO')
     && count($c->de('rollBack')) === 1 && $c->de('commit') === [] && $c->sql('INSERT INTO') === null && !$c->inTransaction(),
     $e?->getMessage());
+
+$c = new GuionConexion();
+$c->filas['FOR UPDATE'] = [
+    ['id' => '2', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ACEPTADO', 'respuesta_dgii' => null],
+    ['id' => '3', 'ambiente_dgii' => 'certecf', 'pos_idempotency_key' => null, 'estado_dgii' => 'ENVIO_INCIERTO',
+        'respuesta_dgii' => $s18Meta('ENVIO_INCIERTO', 5)],
+];
+[$r, $e] = $reservar($c, $s18Cert, $s18Set);
+wa_chk('18: dos previas del set (ACEPTADO y ENVIO_INCIERTO): las dos se archivan y se reserva en una sola transaccion',
+    $e === null && ($r['factura_id'] ?? null) === 41 && $s18Archivos($c) === 2
+    && $c->params('_ARCHIVADO') === [':id' => 3, ':visto' => 'ENVIO_INCIERTO']
+    && count($c->de('beginTransaction')) === 1 && count($c->de('commit')) === 1 && $c->de('rollBack') === [] && !$c->inTransaction(),
+    $e?->getMessage() ?? $c->llamadas);
+wa_chk("18: 'ENVIO_INCIERTO_ARCHIVADO' y 'PENDIENTE_ENVIO_ARCHIVADO' caben en estado_dgii VARCHAR(40) (migracion 028)",
+    strlen('ENVIO_INCIERTO_ARCHIVADO') <= 40 && strlen('PENDIENTE_ENVIO_ARCHIVADO') <= 40);
 
 $s18Ctl = (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php');
 wa_chk('18: facturaController pasa el strict_input del set como set_pruebas a la reserva',
     str_contains($s18Ctl, "'set_pruebas' => \$strictInput,"));
 $s18Pos = (string) file_get_contents(__DIR__ . '/../src/Pos/PosVenta.php');
 wa_chk('18: el POS nunca manda set_pruebas', !str_contains($s18Pos, 'set_pruebas'));
+
+// -- 18b) El controlador en la certificacion (2026-11-12): GET /estado le pregunta
+// a la DGII por un RFCE que quedo incierto en certecf, y el emisor del body tiene
+// que ser la empresa. Las dos funciones son puras: se extraen del texto del
+// controlador y se corren de verdad (incluirlo manda headers y valida el token).
+$s18Ctl = str_replace("\r\n", "\n", $s18Ctl);
+$s18Extraer = static fn(string $nombre): string
+    => preg_match('/\nfunction ' . $nombre . '\(.*?\n\}\n/s', $s18Ctl, $m) ? $m[0] : '';
+foreach (['esRfceInciertoDeCertificacion', 'rncEmisorAjeno'] as $s18Nombre) {
+    $s18Fuente = $s18Extraer($s18Nombre);
+    wa_chk("18b: se encontro {$s18Nombre} en el controlador", $s18Fuente !== '');
+    if ($s18Fuente !== '' && !function_exists($s18Nombre)) {
+        eval($s18Fuente);
+    }
+}
+$s18Fila = static fn(array $cambios = []): array => $cambios + ['estado_dgii' => 'ENVIO_INCIERTO', 'ambiente_dgii' => 'certecf',
+    'pos_idempotency_key' => null, 'e_ncf' => 'E320000000011', 'codigo_seguridad' => 'Ab12Cd', 'respuesta_dgii' => $s18Meta('ENVIO_INCIERTO', 60)];
+wa_chk('18b: RFCE en ENVIO_INCIERTO de certecf: GET /estado le pregunta a la DGII', esRfceInciertoDeCertificacion($s18Fila()) === true);
+foreach ([
+    'en ecf' => ['ambiente_dgii' => 'ecf'],
+    'en testecf' => ['ambiente_dgii' => 'testecf'],
+    'sin ambiente' => ['ambiente_dgii' => null],
+    'PENDIENTE_ENVIO (puede seguir enviandose)' => ['estado_dgii' => 'PENDIENTE_ENVIO'],
+    'ya con veredicto (RFCE_ACEPTADO)' => ['estado_dgii' => 'RFCE_ACEPTADO'],
+    'venta del POS' => ['pos_idempotency_key' => '6f1c2a9e-0d3b-4e8a-9c71-2b5d8e4f0a13'],
+    'sin codigo de seguridad' => ['codigo_seguridad' => ''],
+    'sin e-NCF' => ['e_ncf' => null],
+    'e-CF completo (flujo ECF)' => ['respuesta_dgii' => (string) json_encode(['fase' => 'ENVIO_INCIERTO', 'flujo' => 'ECF'])],
+    'sin meta del envio' => ['respuesta_dgii' => null],
+] as $s18Caso => $s18Cambio) {
+    wa_chk("18b: {$s18Caso}: sigue como cualquier fila en vuelo (sin consulta a la DGII)", esRfceInciertoDeCertificacion($s18Fila($s18Cambio)) === false);
+}
+$s18Consulta = $s18Extraer('handleConsultarEstado');
+$s18Exc = strpos($s18Consulta, 'if (esRfceInciertoDeCertificacion($ecf)) {');
+wa_chk('18b: handleConsultarEstado abre esa excepcion solo dentro de la rama en vuelo y antes de handleEstadoEnVuelo',
+    $s18Exc !== false && $s18Exc > strpos($s18Consulta, 'EstadosEcf::EN_VUELO') && $s18Exc < strpos($s18Consulta, 'handleEstadoEnVuelo($facturaId, $ecf);'),
+    $s18Exc);
+$s18Rfce = $s18Extraer('handleConsultarEstadoRFCE');
+wa_chk('18b: sin veredicto de la DGII (o si la consulta falla) la fila responde como en vuelo; con veredicto, ya no',
+    substr_count($s18Rfce, 'handleEstadoEnVuelo($facturaId, $filaEnVuelo);') === 2 && str_contains($s18Rfce, '$filaEnVuelo = null;')
+    && strpos($s18Rfce, '$filaEnVuelo = null;') > strpos($s18Rfce, '->updateECFEstado('));
+wa_chk('18b: un e-NCF que vino en el payload (dispensado = false, el set) no devuelve numero al contador',
+    str_contains($s18Rfce, "['dispensado'] ?? null) === false;") && str_contains($s18Rfce, 'if ($secuenciaUtilizada === false && !$numeroDelPayload) {'));
+wa_chk('18b: al resolver un incierto se completa rfce_estado (el ZIP de XML integros lista por esa columna)',
+    str_contains($s18Rfce, 'if ($estadoAnterior === EstadosEcf::ENVIO_INCIERTO) {')
+    && str_contains($s18Rfce, '$facturaModel->completarRfceConsultado($facturaId, $estadoBase,'));
+
+$c = new GuionConexion();
+$s18Ok = puro_modelo($c)->completarRfceConsultado(8, 'ACEPTADO', ['codigo' => 1, 'estado' => 'Aceptado']);
+wa_chk('18b: completarRfceConsultado escribe rfce_estado y rfce_respuesta solo si rfce_estado sigue NULL',
+    $s18Ok === true && str_contains((string) $c->sql('rfce_estado = :estado'), 'WHERE id = :id AND rfce_estado IS NULL')
+    && $c->params('rfce_estado = :estado') === [':estado' => 'ACEPTADO', ':resp' => '{"codigo":1,"estado":"Aceptado"}', ':id' => 8],
+    $c->llamadas);
+$c = new GuionConexion();
+$c->rowCounts['rfce_estado = :estado'] = 0;
+wa_chk('18b: completarRfceConsultado devuelve false si el envio ya tenia su rfce_estado (no lo pisa)',
+    puro_modelo($c)->completarRfceConsultado(8, 'ACEPTADO', null) === false);
+$c = new GuionConexion();
+$c->errores[] = ['rfce_estado = :estado', new PDOException('se cayo la base')];
+[$s18R, $s18E, $s18Log] = puro_con_log(static fn() => puro_modelo($c)->completarRfceConsultado(8, 'ACEPTADO', null));
+wa_chk('18b: completarRfceConsultado nunca lanza: false y una linea en el log',
+    $s18E === null && $s18R === false && str_contains($s18Log, 'completarRfceConsultado factura_id=8 fallo'), $s18E?->getMessage() ?? $s18Log);
+
+wa_chk('18b: emisor.rnc de otra empresa (el set de 130968837 con la empresa 133454394): se objeta, con el RNC ajeno',
+    rncEmisorAjeno(['emisor' => ['rnc' => '130968837']], '133454394') === '130968837');
+wa_chk('18b: el mismo RNC, con o sin guiones en cualquiera de los dos lados: nada que objetar',
+    rncEmisorAjeno(['emisor' => ['rnc' => '133454394']], '133454394') === null
+    && rncEmisorAjeno(['emisor' => ['rnc' => '133-45439-4']], '133454394') === null
+    && rncEmisorAjeno(['emisor' => ['rnc' => 133454394]], '1-33-45439-4') === null);
+wa_chk('18b: sin emisor en el body, sin su RNC o con algo que no es un texto: nada que objetar',
+    rncEmisorAjeno([], '133454394') === null && rncEmisorAjeno(['emisor' => 'x'], '133454394') === null
+    && rncEmisorAjeno(['emisor' => ['razon_social' => 'X']], '133454394') === null
+    && rncEmisorAjeno(['emisor' => ['rnc' => '']], '133454394') === null
+    && rncEmisorAjeno(['emisor' => ['rnc' => ['133454394']]], '133454394') === null);
+wa_chk('18b: empresa sin RNC configurado: no se objeta aqui (la emision falla despues con su propio texto)',
+    rncEmisorAjeno(['emisor' => ['rnc' => '130968837']], '') === null);
+$s18Emitir = $s18Extraer('emitirFacturaEcf');
+$s18Guarda = strpos($s18Emitir, '$emisorAjeno = rncEmisorAjeno($input, $emisorRnc);');
+wa_chk('18b: emitirFacturaEcf corta con 422 el emisor ajeno antes de emitir (o sea, antes de reservar el e-NCF)',
+    $s18Guarda !== false && $s18Guarda < strpos($s18Emitir, '->emitir(')
+    && preg_match('/if \(\$emisorAjeno !== null\) \{\s*respond\(false, [^;]*, 422\);\s*return;/s', $s18Emitir) === 1, $s18Guarda);
 
 // ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.

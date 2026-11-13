@@ -20,8 +20,10 @@
  *      'certecf', salvo --permitir-produccion (solo por CLI: cert_run.php
  *      nunca lo pasa). Si la consulta falla, no se envia (falla cerrado).
  *
- * En modo app (sin --api-secret) no se llama: ahi el ambiente lo fuerza
- * --ambiente y estos flags se ignoran, igual que --xml-dir o --encf-start.
+ * En modo app (sin --api-secret) esa verificacion no se llama: --empresa-rnc se
+ * ignora, igual que --xml-dir o --encf-start. La fase 2 en modo app tiene la
+ * suya, certEmpresaPreflightApp() (mas abajo): el set tiene que ser de la
+ * empresa del token y salir a certecf.
  */
 
 const CERT_EMPRESA_TIMEOUT_SECONDS = 30;
@@ -188,18 +190,183 @@ function certEmpresaPreflightCli(array $o): bool
     return true;
 }
 
+/** 'CerteCF', 'cert', ' certecf ' -> 'certecf'. Los mismos alias que DgiiReceptionService::resolveEnvironment. */
+function certEmpresaNormalizarAmbiente($ambiente): string
+{
+    $amb = strtolower(trim((string) $ambiente));
+    $alias = [
+        'test' => 'testecf', 'testing' => 'testecf', 'prueba' => 'testecf',
+        'cert' => 'certecf', 'certificacion' => 'certecf',
+        'produccion' => 'ecf', 'prod' => 'ecf',
+    ];
+    return $alias[$amb] ?? $amb;
+}
+
+/**
+ * Pre-flight de la fase 2 en modo APP (X-API-KEY de un usuario de la empresa,
+ * sin --api-secret). Antes de enviar NADA:
+ *
+ *   1. Lo que se va a enviar es de UNA sola empresa (un set no mezcla RNC).
+ *   2. Solo enviando de verdad: GET /emisor con el mismo token. El RNCEmisor del
+ *      set tiene que ser el RNC de la empresa del token. El runner manda el
+ *      emisor del xlsx en cada payload (la DGII compara el set campo a campo),
+ *      asi que con el xlsx de OTRA empresa los 25 casos salian con un RNCEmisor
+ *      ajeno firmados con el certificado de esta: la DGII los rechaza ("El RNC
+ *      del certificado no esta delegado para realizar transaciones para el
+ *      RNC...") y las filas quedan en la base de esta empresa. Paso el
+ *      2026-11-12: el set de 130968837 corrido con el token de 133454394.
+ *   3. El set sale a certecf: el --ambiente de la corrida (cert_run.php manda
+ *      certecf) o, sin el, el ambiente del tenant. Fuera de certecf el set
+ *      saldria como e-CF reales o a otro ambiente: no se envia, salvo
+ *      --permitir-produccion (solo por CLI). Si el servidor no dice su ambiente
+ *      (un solo tenant, sin --ambiente) no hay nada que comparar y se sigue.
+ *
+ * Si el API contesta que no (token vencido, empresa sin datos fiscales, error
+ * interno) no se envia: los 25 casos fallarian igual, uno por uno. Una sola
+ * excepcion: si lo que contesto NO fue el API (un 406 del WAF del hosting, una
+ * pagina del proxy) y la corrida trae --ambiente=certecf, se sigue con un AVISO.
+ * Ahi la corrida no depende de esta consulta para ser segura: el set sale a
+ * certificacion y POST /api/facturas rechaza (422) un emisor.rnc que no sea el
+ * de la empresa; cortar por una regla del WAF dejaria el asistente sin correr.
+ * No escribe nada: devuelve que decir.
+ *
+ * $o:
+ *   api, api_key          la credencial de la corrida
+ *   rncs                  RNC distintos de lo que se va a enviar
+ *   origen                de donde salen, para los mensajes ('RNCEmisor de la hoja ECF')
+ *   ambiente              el --ambiente de la corrida (null o '' = el del tenant)
+ *   permitir_produccion   de certEmpresaOpciones()
+ *   dry_run               true = no consulta /emisor
+ *   consultar             solo pruebas: fn(api, key) => ['http_status', 'body']
+ *
+ * @return array{ok: bool, error: string, lineas: string[], empresa: ?array}
+ */
+function certEmpresaPreflightApp(array $o): array
+{
+    $fallo = fn(string $error) => ['ok' => false, 'error' => $error, 'lineas' => [], 'empresa' => null];
+    $origen = (string) ($o['origen'] ?? 'RNC');
+
+    $rncs = array_values(array_unique(array_filter(array_map('certEmpresaNormalizarRnc', (array) ($o['rncs'] ?? [])))));
+    if (count($rncs) > 1) {
+        return $fallo('El set mezcla varias empresas (' . $origen . ': ' . implode(', ', $rncs) . ').'
+            . ' Un set de pruebas es de UNA empresa: separalo o filtralo. No se envio nada.');
+    }
+    if ($rncs === []) {
+        return $fallo('No se pudo determinar la empresa de la corrida (' . $origen . ' vacio). No se envio nada.');
+    }
+    $rnc = $rncs[0];
+
+    if (!empty($o['dry_run'])) {
+        return ['ok' => true, 'error' => '', 'empresa' => null,
+            'lineas' => ['Empresa: (sin verificar en dry-run) — RNC ' . $rnc . ' — ambiente (sin verificar en dry-run)']];
+    }
+
+    // El --ambiente de la corrida manda sobre el del tenant (mas abajo).
+    $ambCorrida = certEmpresaNormalizarAmbiente($o['ambiente'] ?? '');
+
+    $consultar = $o['consultar'] ?? 'certEmpresaConsultarEmisor';
+    $resp = $consultar((string) ($o['api'] ?? ''), (string) ($o['api_key'] ?? ''));
+    $http = (int) ($resp['http_status'] ?? 0);
+    $body = is_array($resp['body'] ?? null) ? $resp['body'] : [];
+    $detalle = trim((string) ($body['error'] ?? ''));
+    if ($http === 401) {
+        return $fallo('El Token API del tenant no es valido o ya vencio (GET /emisor respondio HTTP 401).'
+            . ' Vuelve a hacer login (paso 1) y corre de nuevo. No se envio nada.');
+    }
+    if ($http === 0) {
+        return $fallo('No se pudo conectar con el API' . ($detalle !== '' ? ' (' . $detalle . ')' : '') . '. No se envio nada.');
+    }
+    if ($http !== 200 || ($body['status'] ?? false) !== true || !is_array($body['data'] ?? null)) {
+        $que = 'GET /emisor respondio HTTP ' . $http . ($detalle !== '' ? ' (' . substr($detalle, 0, 160) . ')' : '');
+        if (!empty($resp['sin_json'])) {
+            // No contesto nuestro API: ver la excepcion en el docblock.
+            if ($ambCorrida === 'certecf') {
+                return ['ok' => true, 'error' => '', 'empresa' => null, 'lineas' => [
+                    'AVISO: no se pudo verificar la empresa (' . $que . '). Se sigue: el set sale a certecf y el API'
+                        . ' rechaza un RNCEmisor que no sea el de la empresa del token.',
+                    'Empresa: (sin verificar) — RNC ' . $rnc . ' — ambiente certecf',
+                ]];
+            }
+            return $fallo('No se pudo verificar la empresa: ' . $que . '. Sin esa verificacion no se sabe a que ambiente'
+                . ' saldria el set (la corrida no trae --ambiente=certecf). No se envio nada.');
+        }
+        return $fallo('No se pudo verificar la empresa: ' . $que . '. No se envio nada.');
+    }
+
+    $empresa = $body['data'];
+    $nombre = trim((string) ($empresa['razon_social'] ?? $empresa['nombre_comercial'] ?? ''));
+    $rncEmpresa = certEmpresaNormalizarRnc($empresa['rnc'] ?? '');
+    if ($rncEmpresa === '') {
+        return $fallo('La empresa del token no tiene RNC en sus datos fiscales (emisor_config): completalos antes de'
+            . ' correr el set. No se envio nada.');
+    }
+    if ($rncEmpresa !== $rnc) {
+        return $fallo('El xlsx es de RNC ' . $rnc . ' y el token es de ' . ($nombre !== '' ? $nombre . ' ' : '')
+            . '(RNC ' . $rncEmpresa . '). Sube el set de pruebas de esta empresa, o entra con un usuario de la empresa'
+            . ' del set. No se envio nada.');
+    }
+
+    // A que ambiente sale el set: el --ambiente de la corrida manda; sin el, el del tenant.
+    $ambTenant = certEmpresaNormalizarAmbiente($empresa['ambiente'] ?? '');
+    $ambiente = $ambCorrida !== '' ? $ambCorrida : $ambTenant;
+    $lineas = [];
+    if ($ambiente !== '' && $ambiente !== 'certecf') {
+        // Solo ecf es produccion; testecf es otro ambiente de pruebas.
+        $efecto = $ambiente === 'ecf'
+            ? 'el set de pruebas saldria como e-CF REALES (comprobantes fiscales de verdad)'
+            : 'el set de pruebas iria a ese ambiente de la DGII, no al de certificacion';
+        $origenAmb = $ambCorrida !== '' ? "--ambiente={$ambiente}" : "la empresa esta en ambiente '{$ambiente}' y la corrida no trae --ambiente";
+        if (empty($o['permitir_produccion'])) {
+            return $fallo('El set no saldria a certecf (' . $origenAmb . '): ' . $efecto . '. No se envio nada.'
+                . ' Corre con --ambiente=certecf (cert.html lo manda solo); si de verdad quieres enviarlo a ese'
+                . ' ambiente, corre el runner por CLI con --permitir-produccion.');
+        }
+        $lineas[] = 'AVISO: --permitir-produccion: el set no sale a certecf (' . $origenAmb . '): ' . $efecto . '.';
+    }
+    $lineas[] = 'Empresa: ' . $nombre . ' — RNC ' . $rnc . ' — ambiente '
+        . ($ambiente !== '' ? $ambiente : '(el del servidor)')
+        . ($ambCorrida !== '' && $ambTenant !== '' && $ambTenant !== $ambCorrida ? " (la empresa esta en '{$ambTenant}')" : '');
+    return ['ok' => true, 'error' => '', 'lineas' => $lineas, 'empresa' => $empresa];
+}
+
+/** certEmpresaPreflightApp() para los runners: escribe lo que haya que decir y devuelve si se sigue. */
+function certEmpresaPreflightAppCli(array $o): bool
+{
+    $r = certEmpresaPreflightApp($o);
+    if (!$r['ok']) {
+        fwrite(STDERR, 'ERROR: ' . $r['error'] . "\n");
+        return false;
+    }
+    foreach ($r['lineas'] as $linea) {
+        fwrite(STDOUT, '==> ' . $linea . "\n");
+    }
+    return true;
+}
+
+/** GET /emisor con el token de la corrida (modo app): RNC, razon social y ambiente de la empresa. */
+function certEmpresaConsultarEmisor(string $apiBase, string $apiKey): array
+{
+    return certEmpresaGet(rtrim($apiBase, '/') . '/emisor', ['Accept: application/json', 'X-API-KEY: ' . $apiKey]);
+}
+
 /** GET /integracion/empresas con la credencial de la corrida. */
 function certEmpresaConsultarLista(string $apiBase, string $apiKey, string $apiSecret): array
 {
-    $ch = curl_init(rtrim($apiBase, '/') . '/integracion/empresas');
+    return certEmpresaGet(rtrim($apiBase, '/') . '/integracion/empresas', [
+        'Accept: application/json',
+        'X-API-KEY: ' . $apiKey,
+        'X-API-SECRET: ' . $apiSecret,
+    ]);
+}
+
+/** GET con curl: ['http_status', 'body'] (body siempre arreglo; un fallo de red es http_status 0). */
+function certEmpresaGet(string $url, array $headers): array
+{
+    $ch = curl_init($url);
     $opts = [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_TIMEOUT => CERT_EMPRESA_TIMEOUT_SECONDS,
-        CURLOPT_HTTPHEADER => [
-            'Accept: application/json',
-            'X-API-KEY: ' . $apiKey,
-            'X-API-SECRET: ' . $apiSecret,
-        ],
+        CURLOPT_HTTPHEADER => $headers,
     ];
     if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
         $opts[CURLOPT_SSL_OPTIONS] = CURLSSLOPT_NATIVE_CA;
@@ -214,8 +381,10 @@ function certEmpresaConsultarLista(string $apiBase, string $apiKey, string $apiS
         return ['http_status' => 0, 'body' => ['status' => false, 'error' => 'curl: ' . curl_error($ch)]];
     }
     $decoded = json_decode($raw, true);
-    return [
-        'http_status' => (int) curl_getinfo($ch, CURLINFO_HTTP_CODE),
-        'body' => is_array($decoded) ? $decoded : ['status' => false, 'error' => 'respuesta no JSON: ' . substr($raw, 0, 300)],
-    ];
+    $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    if (!is_array($decoded)) {
+        // sin_json: no contesto nuestro API (el WAF del hosting, una pagina del proxy).
+        return ['http_status' => $http, 'body' => ['status' => false, 'error' => 'respuesta no JSON: ' . substr($raw, 0, 300)], 'sin_json' => true];
+    }
+    return ['http_status' => $http, 'body' => $decoded];
 }

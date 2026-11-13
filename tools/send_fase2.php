@@ -21,10 +21,22 @@
  *       --api=https://gratex.net/api \
  *       --api-key=<api_key> --api-secret=<api_secret>
  *
+ * Modo app, antes de enviar nada (certEmpresaPreflightApp, GET /api/emisor): el
+ * RNCEmisor del xlsx tiene que ser el de la empresa del token, y el set tiene
+ * que salir a certecf (--ambiente o, sin el, el ambiente de la empresa). Con el
+ * xlsx de otra empresa, o un token vencido, el runner aborta sin mandar nada.
+ *
  * Modos:
  *   --dry-run               No envia nada; imprime los payloads que se mandarian
  *   --filter=E31,E32        Solo procesa los tipos indicados
- *   --case=E310000000005    Solo procesa este caso
+ *   --case=E310000000005    Solo procesa este caso; acepta varios separados por coma
+ *                           (--case=E320000000011,E320000000013): sirve para mandar
+ *                           SOLO lo que falto de una corrida, sin reenviar lo que la
+ *                           DGII ya acepto (un duplicado sale rechazado y reinicia el set)
+ *   --reintentos=N          Solo app: veces que se vuelve sobre un caso que no quedo
+ *                           ni emitido ni rechazado (default 2; 0 = no reintentar).
+ *                           Ver f2ReintentarPendientes().
+ *   --reintento-pausa=N     Segundos de pausa antes de cada ronda de reintentos (default 10)
  *   --output=results.json   Donde guardar el reporte (default: tools/fase2_results.json)
  *   --xml-dir=DIR           Solo integracion: guarda el XML firmado de cada caso
  *                           (default tools/xml_integracion). Sin DB propia esa
@@ -42,9 +54,10 @@
  *   --empresa-rnc=RNC       Solo integracion: la empresa elegida (integracion.html la
  *                           manda). Si el RNCEmisor de lo que se va a enviar es otro,
  *                           aborta antes de enviar nada (tambien en dry-run).
- *   --permitir-produccion   Solo integracion, solo por CLI: deja enviar a una empresa
- *                           cuyo ambiente no es 'certecf'. Sin esto el runner aborta:
- *                           el set saldria como e-CF REALES. Ver cert_empresa_preflight.php.
+ *   --permitir-produccion   Solo por CLI: deja enviar el set fuera de 'certecf'
+ *                           (integracion: el ambiente de la empresa; app: --ambiente
+ *                           o el de la empresa). Sin esto el runner aborta: el set
+ *                           saldria como e-CF REALES. Ver cert_empresa_preflight.php.
  *
  * Salida:
  *   - JSON con resultado por caso (caso, e_ncf, http_status, track_id, estado, error)
@@ -59,13 +72,33 @@ const DEFAULT_CLIENT_ID = 1;
 const DEFAULT_OUTPUT = __DIR__ . '/fase2_results.json';
 const DEFAULT_XML_DIR = __DIR__ . '/xml_integracion';
 const DEFAULT_TIMEOUT_SECONDS = 60;
+// El POST de emision espera en el servidor hasta tres llamadas a la DGII (semilla,
+// token y envio), cada una con su propio timeout (DGII_ECF_TIMEOUT, 30 s). Con 60 s
+// el runner podia cortar antes que el servidor y quedarse sin saber que paso.
+const F2_POST_TIMEOUT_SECONDS = 120;
+const DEFAULT_REINTENTOS = 2;
+const DEFAULT_REINTENTO_PAUSA_SECONDS = 10;
+// f2ClaseEnvio(): lo que f2ReintentarPendientes() vuelve a intentar (solo app).
+const F2_CLASES_REINTENTABLES = ['incierto', 'no_enviado', 'no_recibido'];
 const DEFAULT_NOTA_WAIT_SECONDS = 300;
 // Cada consulta de estado hace el login completo contra la DGII (semilla + firma):
 // no bajar mucho de aqui con 20+ comprobantes pendientes.
 const DEFAULT_NOTA_POLL_SECONDS = 15;
 
-function main(array $argv): int
+/**
+ * @param array $red Solo pruebas (tools/test_send_fase2_app.php): reemplazos de la
+ *   red de la corrida, para ejercitar main() entero sin servidor.
+ *   'enviar' fn(array $payload): array (el POST de emision), 'consultar'
+ *   fn($api, $key, $secret, $eNcf, array $s): array (la consulta de estado),
+ *   'emisor' fn($api, $key): array (GET /emisor del pre-flight de app) y
+ *   'dormir' fn(int $segundos). Lo que no venga usa la red de verdad.
+ */
+function main(array $argv, array $red = []): int
 {
+    $enviar = $red['enviar'] ?? null;
+    $consultar = $red['consultar'] ?? null;
+    $dormir = $red['dormir'] ?? null;
+
     if (!class_exists('ZipArchive')) {
         fwrite(STDERR, "ERROR: Falta la extension 'zip' en PHP CLI. Habilitala en php.ini (extension=zip) y reintenta.\n");
         return 3;
@@ -97,11 +130,14 @@ function main(array $argv): int
     $filter = isset($opts['filter'])
         ? array_map(fn($t) => ltrim(trim($t), 'eE'), explode(',', $opts['filter']))
         : [];
-    $caseFilter = $opts['case'] ?? '';
+    $casos = f2ListaCasos($opts['case'] ?? '');
     $exclude = isset($opts['exclude']) ? array_map('trim', explode(',', $opts['exclude'])) : [];
     $dryRun = isset($opts['dry-run']);
     $notaWait = isset($opts['nota-wait-accepted']) ? max(0, (int) $opts['nota-wait-accepted']) : DEFAULT_NOTA_WAIT_SECONDS;
     $notaPoll = isset($opts['nota-poll']) ? max(1, (int) $opts['nota-poll']) : DEFAULT_NOTA_POLL_SECONDS;
+    // Solo app: ver f2ReintentarPendientes().
+    $reintentos = isset($opts['reintentos']) ? max(0, (int) $opts['reintentos']) : DEFAULT_REINTENTOS;
+    $reintentoPausa = isset($opts['reintento-pausa']) ? max(0, (int) $opts['reintento-pausa']) : DEFAULT_REINTENTO_PAUSA_SECONDS;
     // Override explicito del ambiente DGII. Sin esto el ambiente sale de
     // tenants.ambiente, y un tenant ya promovido a 'ecf' emitiria el set de
     // pruebas como facturas fiscales REALES en produccion.
@@ -151,9 +187,13 @@ function main(array $argv): int
         $rows = array_values(array_filter($rows, fn($r) => in_array((string)($r['TipoeCF'] ?? ''), $filter, true)));
         fwrite(STDOUT, "==> Filtro tipos: " . implode(',', $filter) . " -> " . count($rows) . " casos\n");
     }
-    if ($caseFilter !== '') {
-        $rows = array_values(array_filter($rows, fn($r) => ($r['ENCF'] ?? '') === $caseFilter));
-        fwrite(STDOUT, "==> Filtro caso: $caseFilter -> " . count($rows) . " casos\n");
+    if ($casos !== []) {
+        $rows = array_values(array_filter($rows, fn($r) => in_array(strtoupper(trim((string) ($r['ENCF'] ?? ''))), $casos, true)));
+        fwrite(STDOUT, "==> Filtro caso: " . implode(',', $casos) . " -> " . count($rows) . " casos\n");
+        $noEstan = array_values(array_diff($casos, array_map(fn($r) => strtoupper(trim((string) ($r['ENCF'] ?? ''))), $rows)));
+        if ($noEstan !== []) {
+            fwrite(STDOUT, "    ! No estan en el set (o los quito otro filtro): " . implode(',', $noEstan) . "\n");
+        }
     }
     if ($exclude) {
         $rows = array_values(array_filter($rows, fn($r) => !in_array((string)($r['ENCF'] ?? ''), $exclude, true)));
@@ -175,8 +215,31 @@ function main(array $argv): int
     ] + certEmpresaOpciones($opts))) {
         return 2;
     }
+    // App: la misma idea contra la empresa del token (GET /emisor). El emisor del
+    // xlsx viaja en cada payload, asi que el set de otra empresa saldria con un
+    // RNCEmisor ajeno firmado con el certificado de esta.
+    if (!$integracion && $rows !== [] && !certEmpresaPreflightAppCli([
+        'api' => $apiBase,
+        'api_key' => $apiKey,
+        'rncs' => certEmpresaRncsDeFilas($rows, 'RNCEmisor')['rncs'],
+        'origen' => 'RNCEmisor de la hoja ECF',
+        'ambiente' => $ambiente,
+        'dry_run' => $dryRun,
+        'permitir_produccion' => certEmpresaOpciones($opts)['permitir_produccion'],
+        'consultar' => $red['emisor'] ?? null,
+    ])) {
+        return 2;
+    }
 
     $results = [];
+    // Solo app: payload de cada envio (indice de $results => payload), para que
+    // f2ReintentarPendientes() pueda mandarlo otra vez.
+    $payloads = [];
+    $reintentar = static function () use ($integracion, $dryRun, $reintentos, $reintentoPausa, $apiBase, $apiKey, &$results, &$payloads, $enviar, $consultar, $dormir): void {
+        if (!$integracion && !$dryRun && $reintentos > 0) {
+            f2ReintentarPendientes($apiBase, $apiKey, $results, $payloads, $reintentos, $reintentoPausa, $enviar, $consultar, $dormir);
+        }
+    };
     // Las notas van al final (sortRowsByReference). Antes de la primera se
     // espera a la DGII: ver esperarDgiiAntesDeNotas().
     $esperaHecha = false;
@@ -189,8 +252,11 @@ function main(array $argv): int
 
         if ($esNota && !$esperaHecha && !$dryRun) {
             $esperaHecha = true;
+            // App: lo que quedo sin confirmar o sin enviar se resuelve antes de
+            // consultar a la DGII y de mandar las notas.
+            $reintentar();
             if ($notaWait > 0) {
-                $espera = esperarDgiiAntesDeNotas($apiBase, $apiKey, $apiSecret, $results, $notas, $notaWait, $notaPoll, null, null, $baseDelSet);
+                $espera = esperarDgiiAntesDeNotas($apiBase, $apiKey, $apiSecret, $results, $notas, $notaWait, $notaPoll, $consultar, $dormir, $baseDelSet);
             } else {
                 fwrite(STDOUT, "\n==> --nota-wait-accepted=0: las notas salen sin esperar a la DGII.\n");
             }
@@ -245,54 +311,30 @@ function main(array $argv): int
             continue;
         }
 
-        $response = postFactura($apiBase, $apiKey, $payload, $apiSecret);
-        $entry = [
+        $response = $enviar !== null ? $enviar($payload) : postFactura($apiBase, $apiKey, $payload, $apiSecret);
+        $entry = f2ArmarEntrada([
             'caso' => $caso,
             'tipo_ecf' => $tipo,
             'e_ncf' => $encf,
             // Con credencial de grupo, la consulta de estado tiene que ir con el RNC
             // de la empresa que emitio (?rnc=), no con el de la duena de la credencial.
             'rnc_emisor' => (string) ($payload['emisor']['rnc'] ?? ''),
-            'http_status' => $response['http_status'],
-            'ok' => $response['http_status'] >= 200 && $response['http_status'] < 300 && (($response['body']['status'] ?? false) === true),
-            'response' => $response['body'],
-        ];
-
-        if ($entry['ok']) {
-            $data = $response['body']['data'] ?? [];
-            // Integracion: el XML firmado solo viene en esta respuesta. Se guarda
-            // aparte y se saca del reporte, que si no queda inmanejable.
-            if ($integracion) {
-                $entry['xml_file'] = guardarXmlFirmado($xmlDir, $encf, $data['xml_firmado'] ?? null);
-                unset($response['body']['data']['xml_firmado']);
-                $entry['response'] = $response['body'];
-            }
-            $entry['factura_id'] = $data['factura_id'] ?? null;
-            $entry['track_id'] = $data['track_id'] ?? null;
-            // Los RFCE (E32 <250k) no traen track_id: su estado se consulta con esto.
-            $entry['codigo_seguridad'] = $data['codigo_seguridad'] ?? null;
-            $entry['rfce_track_id'] = $data['rfce_track_id'] ?? null;
-            $entry['estado_dgii'] = $data['estado_dgii'] ?? $data['estado'] ?? null;
-            $entry['flujo'] = $data['flujo'] ?? null;
-            fwrite(STDOUT, sprintf(
-                "    OK  estado=%s track=%s rfce=%s flujo=%s\n",
-                $entry['estado_dgii'] ?? '?',
-                $entry['track_id'] ?? '-',
-                $entry['rfce_track_id'] ?? '-',
-                $entry['flujo'] ?? '-'
-            ));
-            if (!empty($entry['xml_file'])) {
-                fwrite(STDOUT, "    XML " . $entry['xml_file'] . "\n");
-            }
-        } else {
-            $entry['error'] = $response['body']['error'] ?? ('HTTP ' . $response['http_status']);
-            fwrite(STDOUT, "    FAIL " . $entry['error'] . "\n");
-        }
+        ], $response, $integracion, $xmlDir);
+        f2ImprimirEntrada($entry, !$integracion && $reintentos > 0);
         $results[] = $entry;
+        if (!$integracion) {
+            $payloads[array_key_last($results)] = $payload;
+        }
     }
+    // Lo que siga pendiente despues del ultimo envio: las notas, o toda la
+    // corrida si no llevaba notas (--filter=32, --case=...).
+    $reintentar();
 
     file_put_contents($output, json_encode($results, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
     printSummary($results);
+    if (!$integracion && !$dryRun) {
+        fwrite(STDOUT, f2QueFalta($results, (int) ($espera['rechazos'] ?? 0)));
+    }
     fwrite(STDOUT, "\n==> Reporte guardado en: $output\n");
     // 1 = algo no paso: nuestro API no lo emitio, la DGII lo rechazo o no lo
     // recibio, o quedaron notas sin enviar. El mismo criterio que el resumen.
@@ -315,6 +357,303 @@ function parseArgs(array $argv): array
         }
     }
     return $opts;
+}
+
+/** --case: uno o varios e-NCF separados por coma, espacio o punto y coma. En mayusculas y sin repetir. */
+function f2ListaCasos($valor): array
+{
+    if (!is_string($valor)) {
+        return [];
+    }
+    $partes = preg_split('/[\s,;]+/', strtoupper(trim($valor)), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+    return array_values(array_unique($partes));
+}
+
+/**
+ * Fila del reporte para un envio: lo que mando el runner ($base: caso, tipo_ecf,
+ * e_ncf, rnc_emisor) mas lo que contesto el API. Integracion: el XML firmado
+ * solo viene en esta respuesta; se guarda aparte y se saca del reporte, que si
+ * no queda inmanejable.
+ *
+ * App: dos fallos del 502 se dicen con sus palabras (f2ClaseEnvio), porque el
+ * texto del API esta escrito para la pantalla de facturacion ("No la emitas de
+ * nuevo") y aqui es al reves: el set tiene que volver a mandar ese e-NCF. El
+ * texto original queda en response.error.
+ */
+function f2ArmarEntrada(array $base, array $response, bool $integracion, ?string $xmlDir): array
+{
+    $http = (int) ($response['http_status'] ?? 0);
+    $body = is_array($response['body'] ?? null) ? $response['body'] : [];
+    $entry = $base + [
+        'http_status' => $http,
+        'ok' => $http >= 200 && $http < 300 && (($body['status'] ?? false) === true),
+        'response' => $body,
+    ];
+    if (!empty($response['sin_json'])) {
+        $entry['sin_json'] = true;
+    }
+
+    if (!$entry['ok']) {
+        $entry['error'] = $body['error'] ?? ('HTTP ' . $http);
+        if (!$integracion) {
+            $clase = f2ClaseEnvio($entry);
+            if ($clase === 'incierto') {
+                $entry['error'] = 'sin confirmar: la DGII no respondio a tiempo y no se sabe si lo recibio (factura_id '
+                    . (int) ($body['data']['factura_id'] ?? 0) . ')';
+            } elseif ($clase === 'no_enviado') {
+                $entry['error'] = 'no enviado (nada salio hacia la DGII): ' . $entry['error'];
+            }
+        }
+        return $entry;
+    }
+
+    $data = is_array($body['data'] ?? null) ? $body['data'] : [];
+    if ($integracion) {
+        $entry['xml_file'] = guardarXmlFirmado($xmlDir, (string) ($base['e_ncf'] ?? ''), $data['xml_firmado'] ?? null);
+        unset($body['data']['xml_firmado']);
+        $entry['response'] = $body;
+    }
+    $entry['factura_id'] = $data['factura_id'] ?? null;
+    $entry['track_id'] = $data['track_id'] ?? null;
+    // Los RFCE (E32 <250k) no traen track_id: su estado se consulta con esto.
+    $entry['codigo_seguridad'] = $data['codigo_seguridad'] ?? null;
+    $entry['rfce_track_id'] = $data['rfce_track_id'] ?? null;
+    $entry['estado_dgii'] = $data['estado_dgii'] ?? $data['estado'] ?? null;
+    $entry['flujo'] = $data['flujo'] ?? null;
+    return $entry;
+}
+
+/** Lo que dice el runner de un envio. $seReintenta (solo app): avisa que el caso vuelve a intentarse. */
+function f2ImprimirEntrada(array $entry, bool $seReintenta = false): void
+{
+    if ($entry['ok'] ?? false) {
+        fwrite(STDOUT, sprintf(
+            "    OK  estado=%s track=%s rfce=%s flujo=%s\n",
+            $entry['estado_dgii'] ?? '?',
+            $entry['track_id'] ?? '-',
+            $entry['rfce_track_id'] ?? '-',
+            $entry['flujo'] ?? '-'
+        ));
+        if (!empty($entry['xml_file'])) {
+            fwrite(STDOUT, "    XML " . $entry['xml_file'] . "\n");
+        }
+    } else {
+        fwrite(STDOUT, "    FAIL " . ($entry['error'] ?? '?') . "\n");
+    }
+    if ($seReintenta && in_array(f2ClaseEnvio($entry), F2_CLASES_REINTENTABLES, true)) {
+        fwrite(STDOUT, "         (no quedo ni emitido ni rechazado: se vuelve a intentar mas adelante en esta corrida)\n");
+    }
+}
+
+/**
+ * Que paso con un envio en modo APP (POST /api/facturas), segun lo que ese
+ * endpoint garantiza (facturaController::emitirFacturaEcf):
+ *
+ *   ok           2xx: nuestro API lo emitio (estado_dgii dice que contesto la DGII)
+ *   no_recibido  la DGII contesto sin veredicto (ERROR, RFCE_ERROR, NO_ENCONTRADO): no lo tomo
+ *   rechazado    422 con estado RECHAZADO: la DGII lo rechazo en el acto (eso reinicia el set)
+ *   incierto     502 con factura_id: la fila quedo guardada (ENVIO_INCIERTO) y no se
+ *                sabe si la DGII lo recibio: no contesto a tiempo
+ *   no_enviado   502 sin fila: fallo antes de guardar nada (token de la DGII, numero
+ *                ocupado, firma...); el API garantiza que nada salio hacia la DGII
+ *   validacion   otro 4xx: nuestro API no lo acepto (cliente, datos, token). Mandarlo
+ *                igual otra vez no cambia nada
+ *   sin_enviar   la fila nunca se mando (fallo el mapeo del xlsx, o es una nota frenada)
+ *   desconocido  red caida, otro 5xx o una respuesta que no es JSON: no se sabe que paso
+ *
+ * No vale para integracion: /api/integracion/ecf responde 502 a cualquier fallo,
+ * sin decir si hubo envio.
+ */
+function f2ClaseEnvio(array $r): string
+{
+    $estadoDe = static fn(array $data): string
+        => (string) preg_replace('/^RFCE_/', '', f2NormalizarEstado((string) ($data['estado_dgii'] ?? $data['estado'] ?? '')));
+
+    if ($r['ok'] ?? false) {
+        return in_array($estadoDe($r), ['ERROR', 'NO_ENCONTRADO'], true) ? 'no_recibido' : 'ok';
+    }
+    if (!array_key_exists('http_status', $r)) {
+        return 'sin_enviar';
+    }
+    $http = (int) $r['http_status'];
+    if ($http === 0 || !empty($r['sin_json'])) {
+        return 'desconocido';
+    }
+    $data = is_array($r['response']['data'] ?? null) ? $r['response']['data'] : [];
+    if ($http === 502) {
+        return (int) ($data['factura_id'] ?? 0) > 0 ? 'incierto' : 'no_enviado';
+    }
+    if ($http >= 400 && $http < 500) {
+        $estado = $estadoDe($data);
+        if ($estado === 'RECHAZADO') {
+            return 'rechazado';
+        }
+        return in_array($estado, ['ERROR', 'NO_ENCONTRADO'], true) ? 'no_recibido' : 'validacion';
+    }
+    return 'desconocido';
+}
+
+/**
+ * Solo modo APP. Vuelve sobre lo que no quedo ni emitido ni rechazado, antes de
+ * las notas y al final de la corrida. Un timeout de la DGII ya no deja el set a
+ * medias: el 2026-11-12 tres RFCE sin respuesta de RecepcionFC frenaron las
+ * notas, y cada corrida completa posterior reenvio lo ya aceptado (duplicados
+ * que la DGII rechaza, y un rechazo reinicia el set).
+ *
+ *  - incierto: primero se pregunta su estado (GET /facturas/{id}/estado). Para
+ *    el RFCE de un E32 < 250k el API le pregunta a la DGII por e-NCF + codigo de
+ *    seguridad (facturaController::esRfceInciertoDeCertificacion):
+ *      . la DGII ya lo tiene (aceptado o en proceso): se toma ese estado y NO se
+ *        reenvia (seria un duplicado);
+ *      . lo rechazo: queda como rechazo del envio (reinicia el set);
+ *      . no lo tiene, o no se pudo saber (un e-CF completo no se puede consultar
+ *        en certecf sin trackId; la consulta fallo): se manda de nuevo. La
+ *        reserva del set archiva el intento anterior (facturaModel::reservarFacturaECF).
+ *  - no_enviado y no_recibido: se manda de nuevo.
+ *
+ * Cada caso se manda como mucho 1 + $reintentos veces en toda la corrida
+ * ('intentos' en su fila del reporte). Un no_enviado que repite el mismo error no
+ * es pasajero (certificado, numero ocupado por otra corrida): no se insiste.
+ *
+ * @param array<int,array> $payloads indice de $results => payload enviado
+ * $enviar / $consultar / $dormir solo los cambia tools/test_send_fase2_espera.php (sin red).
+ * @return int casos que quedaron resueltos (emitidos, o que la DGII ya tenia)
+ */
+function f2ReintentarPendientes(string $apiBase, string $apiKey, array &$results, array $payloads, int $reintentos, int $pausa, ?callable $enviar = null, ?callable $consultar = null, ?callable $dormir = null): int
+{
+    $enviar = $enviar ?? static fn(array $payload): array => postFactura($apiBase, $apiKey, $payload);
+    $consultar = $consultar ?? 'f2ConsultarEstado';
+    $dormir = $dormir ?? 'sleep';
+    $identidad = array_flip(['caso', 'tipo_ecf', 'e_ncf', 'rnc_emisor']);
+    $resueltos = 0;
+
+    for ($ronda = 1; $ronda <= $reintentos; $ronda++) {
+        $pendientes = [];
+        foreach ($results as $i => $r) {
+            if (!isset($payloads[$i]) || !empty($r['sin_reintento']) || (int) ($r['intentos'] ?? 1) > $reintentos) {
+                continue;
+            }
+            $clase = f2ClaseEnvio($r);
+            if (in_array($clase, F2_CLASES_REINTENTABLES, true)) {
+                $pendientes[$i] = $clase;
+            }
+        }
+        if ($pendientes === []) {
+            break;
+        }
+        fwrite(STDOUT, sprintf(
+            "\n==> Reintento %d: %d comprobante(s) sin confirmar o sin enviar%s\n",
+            $ronda, count($pendientes), $pausa > 0 ? " (pausa de {$pausa}s para darle tiempo a la DGII)" : ''
+        ));
+        if ($pausa > 0) {
+            $dormir($pausa);
+        }
+
+        foreach ($pendientes as $i => $clase) {
+            $r = $results[$i];
+            $encf = (string) ($r['e_ncf'] ?? '');
+            fwrite(STDOUT, "  $encf\n");
+
+            if ($clase === 'incierto') {
+                $facturaId = (int) ($r['response']['data']['factura_id'] ?? 0);
+                $resp = $consultar($apiBase, $apiKey, '', $encf, ['factura_id' => $facturaId, 'track_id' => null, 'codigo_seguridad' => null]);
+                $estado = f2EstadoDeRespuesta($resp);
+                $sinPrefijo = (string) preg_replace('/^RFCE_/', '', $estado);
+                $data = is_array($resp['body']['data'] ?? null) ? $resp['body']['data'] : [];
+
+                if (f2ClaseEstado($estado) === 'aceptado' || in_array($sinPrefijo, ['EN_PROCESO', 'ENVIADO'], true)) {
+                    // La DGII ya lo tiene: reenviarlo seria un duplicado.
+                    $results[$i] = array_intersect_key($r, $identidad) + [
+                        'http_status' => 200,
+                        'ok' => true,
+                        'response' => $resp['body'],
+                        'factura_id' => $facturaId,
+                        'track_id' => $data['track_id'] ?? null,
+                        'codigo_seguridad' => null,
+                        'rfce_track_id' => null,
+                        'estado_dgii' => $estado,
+                        'flujo' => $data['flujo'] ?? null,
+                        'intentos' => (int) ($r['intentos'] ?? 1),
+                        'resuelto' => 'consulta',
+                    ];
+                    fwrite(STDOUT, "    OK  la DGII ya lo tenia (estado=$estado): no se reenvia\n");
+                    $resueltos++;
+                    continue;
+                }
+                if (f2ClaseEstado($estado) === 'rechazado') {
+                    // El envio si llego y la DGII lo rechazo: es un rechazo como
+                    // cualquier otro (esperarDgiiAntesDeNotas lo lee de response.data).
+                    $motivo = f2MensajesDeRespuesta($resp);
+                    $results[$i] = array_merge($r, [
+                        'http_status' => 422,
+                        'response' => ['status' => false, 'data' => ['factura_id' => $facturaId, 'estado_dgii' => $estado, 'consulta' => $data['consulta'] ?? null]],
+                        'error' => 'la DGII rechazo el envio que habia quedado sin confirmar' . ($motivo !== '' ? ': ' . $motivo : ''),
+                        'sin_reintento' => true,
+                    ]);
+                    fwrite(STDOUT, "    FAIL " . $results[$i]['error'] . "\n");
+                    continue;
+                }
+                fwrite(STDOUT, '    la DGII no lo tiene o no se pudo saber ('
+                    . ($estado !== '' ? $estado : f2ErrorDeConsulta($resp)) . "): se envia de nuevo\n");
+            }
+
+            $nuevo = f2ArmarEntrada(array_intersect_key($r, $identidad), $enviar($payloads[$i]), false, null);
+            $nuevo['intentos'] = (int) ($r['intentos'] ?? 1) + 1;
+            $claseNueva = f2ClaseEnvio($nuevo);
+            if ($clase === 'no_enviado' && $claseNueva === 'no_enviado'
+                && (string) ($nuevo['response']['error'] ?? '') === (string) ($r['response']['error'] ?? '')) {
+                // El mismo fallo dos veces no es pasajero: no se insiste.
+                $nuevo['sin_reintento'] = true;
+            }
+            $results[$i] = $nuevo;
+            f2ImprimirEntrada($nuevo);
+            if ($claseNueva === 'ok') {
+                $resueltos++;
+            }
+        }
+    }
+    return $resueltos;
+}
+
+/**
+ * Solo modo APP, al final de la corrida: que hacer con lo que no paso. Sin
+ * rechazos, lo que falta se manda solo (--case): reenviar el set entero mandaria
+ * otra vez lo que la DGII ya acepto, y ese duplicado sale rechazado. Con un
+ * rechazo el set ya esta reiniciado y hay que correrlo completo.
+ *
+ * @return string el texto a imprimir ('' si no falta nada). Pura: no escribe.
+ */
+function f2QueFalta(array $results, int $rechazosEnLaEspera = 0): string
+{
+    $faltan = [];
+    $huboRechazo = $rechazosEnLaEspera > 0;
+    foreach ($results as $r) {
+        // Tambien lo que la DGII no tomo (RFCE_ERROR...) aunque nuestro API haya
+        // respondido 200: sin notas en la corrida nadie mas lo marca como fallo.
+        if (!empty($r['dry_run']) || !(f2FilaFallo($r) || in_array(f2ClaseEnvio($r), F2_CLASES_REINTENTABLES, true))) {
+            continue;
+        }
+        $encf = strtoupper(trim((string) ($r['e_ncf'] ?? '')));
+        if ($encf !== '') {
+            $faltan[$encf] = true;
+        }
+        if (f2ClaseEnvio($r) === 'rechazado'
+            || f2ClaseEstado((string) ($r['estado_dgii_final'] ?? $r['estado_dgii'] ?? '')) === 'rechazado') {
+            $huboRechazo = true;
+        }
+    }
+    if ($faltan === []) {
+        return '';
+    }
+    if ($huboRechazo) {
+        return "\n==> La DGII rechazo algo y eso reinicia el set: corrige el motivo del rechazo y corre la fase COMPLETA"
+            . " de nuevo, con el mismo xlsx.\n"
+            . "    Si el motivo es que la DGII ya habia recibido ese comprobante (un duplicado de una corrida anterior), no hay"
+            . " nada que corregir: solo vuelve a correrla.\n";
+    }
+    return "\n==> Faltan " . count($faltan) . " comprobante(s) y la DGII no rechazo nada. Para completar el set SIN reenviar"
+        . " lo que ya tiene,\n    corre de nuevo solo estos (campo \"Solo estos e-NCF\" de cert.html, o --case=...):\n    "
+        . implode(',', array_keys($faltan)) . "\n";
 }
 
 /**
@@ -691,7 +1030,7 @@ function postFactura(string $apiBase, string $apiKey, array $payload, string $ap
         CURLOPT_POST => true,
         CURLOPT_POSTFIELDS => $body,
         CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_TIMEOUT => DEFAULT_TIMEOUT_SECONDS,
+        CURLOPT_TIMEOUT => F2_POST_TIMEOUT_SECONDS,
         CURLOPT_HTTPHEADER => $headers,
     ];
     if (defined('CURLOPT_SSL_OPTIONS') && defined('CURLSSLOPT_NATIVE_CA')) {
@@ -714,7 +1053,13 @@ function postFactura(string $apiBase, string $apiKey, array $payload, string $ap
 
     $decoded = json_decode($raw, true);
     if (!is_array($decoded)) {
-        $decoded = ['status' => false, 'error' => 'respuesta no JSON: ' . substr($raw, 0, 300)];
+        // sin_json: lo que contesto no fue nuestro API (un 502 del proxy, una pagina
+        // de error). f2ClaseEnvio no lo confunde con un 502 propio, que si dice que paso.
+        return [
+            'http_status' => $status,
+            'body' => ['status' => false, 'error' => 'respuesta no JSON: ' . substr($raw, 0, 300)],
+            'sin_json' => true,
+        ];
     }
     return ['http_status' => $status, 'body' => $decoded];
 }
@@ -736,8 +1081,13 @@ function printSummary(array $results): void
         $detail = ($r['ok'] ?? false)
             ? $estado . ' track=' . ($r['track_id'] ?? '-') . (!empty($r['rfce_track_id']) ? ' rfce=' . $r['rfce_track_id'] : '')
               . (!empty($r['no_recibido']) ? ' (la DGII no lo recibio)' : '')
+              . (($r['resuelto'] ?? '') === 'consulta' ? ' (quedo sin confirmar y la DGII ya lo tenia)' : '')
               . (!empty($r['dgii_mensajes']) ? ' :: ' . $r['dgii_mensajes'] : '')
             : ($r['error'] ?? '?');
+        // Solo app: cuantas veces se mando (f2ReintentarPendientes).
+        if ((int) ($r['intentos'] ?? 1) > 1) {
+            $detail .= ' [' . (int) $r['intentos'] . ' envios]';
+        }
         fwrite(STDOUT, sprintf("  %s %s | E%s | %s | %s\n", $marker, $r['caso'], $r['tipo_ecf'], $r['e_ncf'], $detail));
     }
 }
@@ -839,7 +1189,13 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
             // mapeo del xlsx: nunca se mando, solo frena la nota de ese original.
             $http = (int) ($r['http_status'] ?? 0);
             if (array_key_exists('http_status', $r) && ($http === 0 || $http >= 500)) {
-                $sinConfirmar[] = "$encf (HTTP $http: " . substr((string) ($r['error'] ?? '?'), 0, 120) . ')';
+                // App: un 502 SIN fila es un fallo anterior a la reserva y el API
+                // garantiza que nada salio hacia la DGII (f2ClaseEnvio 'no_enviado'):
+                // no es "no se sabe si llego"; solo frena la nota de ese original,
+                // como un 4xx. Integracion no distingue: todo 5xx es incierto.
+                if ($integracion || f2ClaseEnvio($r) !== 'no_enviado') {
+                    $sinConfirmar[] = "$encf (HTTP $http: " . substr((string) ($r['error'] ?? '?'), 0, 120) . ')';
+                }
             }
             continue;
         }
@@ -932,8 +1288,12 @@ function esperarDgiiAntesDeNotas(string $apiBase, string $apiKey, string $apiSec
     }
 
     if ($sinConfirmar !== [] && $rechazadosEnvio === []) {
+        // La "consola, paso 3" es de integracion.html; cert.html (app) no la tiene:
+        // ahi lo que falta se manda con --case (main() imprime la lista al final).
         $out['general'] = 'no se sabe si llegaron a la DGII ' . implode(', ', $sinConfirmar)
-            . ': revisa su estado (consola, paso 3) y, si nada quedo rechazado, manda lo que falte y despues las notas';
+            . ($integracion
+                ? ': revisa su estado (consola, paso 3) y, si nada quedo rechazado, manda lo que falte y despues las notas'
+                : ': cuando la DGII vuelva a responder, corre de nuevo solo lo que falta (la lista sale al final de esta corrida)');
         fwrite(STDOUT, "==> Las notas NO se envian: " . $out['general'] . ".\n");
         return $out;
     }

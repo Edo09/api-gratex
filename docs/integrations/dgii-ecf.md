@@ -156,6 +156,16 @@ app al abrir la factura) **no llama a la DGII**: devuelve el estado guardado y u
 nota que manda a soporte (lo mismo con una fila `ENVIADO` sin `track_id`). El
 procedimiento es un `UPDATE` de la fila, y lo que pasa después depende del caso:
 
+> **Excepción en certificación (`certecf`).** Un RFCE (E32 < 250k) que quedó en
+> `ENVIO_INCIERTO` sí se le pregunta a la DGII: `GET /api/facturas/{id}/estado` consulta por
+> e-NCF + código de seguridad y guarda lo que conteste (`RFCE_ACEPTADO`, `RFCE_RECHAZADO` o
+> `RFCE_NO_ENCONTRADO`, que deja reemitir el mismo e-NCF). Es el caso «RFCE» de la tabla de
+> abajo sin el `UPDATE` a mano (`esRfceInciertoDeCertificacion` en `facturaController.php`).
+> No aplica en `ecf`/`testecf`, ni a una venta del POS, ni a una `PENDIENTE_ENVIO`, ni a un
+> e-CF completo (certecf no tiene con qué consultarlo sin trackId). Las filas del **set de
+> pruebas** tampoco necesitan este procedimiento: ver «Set de pruebas — un envío sin
+> confirmar en una empresa `app`».
+
 - Si la DGII **tiene** el comprobante (un `trackId`, o un RFCE), el `UPDATE` devuelve
   la fila al camino normal de `GET /estado`: desde ahí la app consulta a la DGII,
   aplica el veredicto, escribe `STATUS_CHANGE` y mueve el inventario una sola vez.
@@ -234,7 +244,7 @@ e-NCF está impreso en el recibo y **nunca vuelve al contador**. Por eso, en una
    | La DGII no lo tiene (`ecf`/`testecf`: TrackIds sin resultados) | `UPDATE facturas SET estado_dgii = 'NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` (en una **fila del POS**: `SET estado_dgii = 'NO_ENCONTRADO', envio_pendiente = 0` y **nada más**: no hay `UPDATE` de `ncf_sequences`). En una fila de la app, después, **solo si ese `UPDATE` afectó 1 fila** (si afectó 0, no devuelvas el número y vuelve al paso 1), con `rango_id` y `secuencia_valor` de la meta leída en el paso 1: `UPDATE ncf_sequences SET current_value = current_value - 1 WHERE id = :rango_id AND current_value = :secuencia_valor;` Si este segundo `UPDATE` afectó 1 fila, la próxima emisión de ese tipo reutiliza este e-NCF y archiva esta fila como `NO_ENCONTRADO_ARCHIVADO`; con 0 filas el número queda como hueco (igual que un "rollback sin coincidencia") y la próxima emisión toma uno nuevo. Soporte le pide al usuario que emita de nuevo. |
    | RFCE y soporte ya sabe que la DGII no tiene el RFCE (si no, el caso RFCE de arriba deja que la consulta decida) | `UPDATE facturas SET estado_dgii = 'RFCE_NO_ENCONTRADO' WHERE id = :id AND estado_dgii IN ('PENDIENTE_ENVIO','ENVIO_INCIERTO');` (en una **fila del POS**: `SET estado_dgii = 'RFCE_NO_ENCONTRADO', envio_pendiente = 0` y **nada más**: no hay devolución de `ncf_sequences`). En una fila de la app, la misma devolución de `ncf_sequences`, con la misma condición (solo si ese `UPDATE` afectó 1 fila; si afectó 0, no devuelvas el número y vuelve al paso 1). El reintento la archiva como `RFCE_NO_ENCONTRADO_ARCHIVADO`. |
    | Fila heredada `ENVIADO` sin `track_id` (de antes del write-ahead) y la DGII no tiene el comprobante | **No se fuerza**: los `UPDATE` de arriba solo coinciden con `PENDIENTE_ENVIO`/`ENVIO_INCIERTO` y la guarda no se cambia. Avisa al usuario con su e-NCF y su `id`, y déjala como está. |
-   | `certecf` (TrackIds responde 404 allí) | Decidir entre los casos de arriba con el portal de certificación de la DGII. Un error en `certecf` no tiene efecto fiscal. |
+   | `certecf` (TrackIds responde 404 allí) | Decidir entre los casos de arriba con el portal de certificación de la DGII. Un error en `certecf` no tiene efecto fiscal. Un RFCE incierto se resuelve solo al consultar su estado (la excepción de arriba), y una fila del set de pruebas se archiva al volver a enviar ese e-NCF: no hace falta SQL. |
 
    Lo que hace la app después del `UPDATE` (revisado contra `handleConsultarEstado` en
    `src/Controllers/facturaController.php`):
@@ -387,16 +397,76 @@ respondía "número ocupado" en todos (NUEVAS IDEAS NOTICIAS RD, 2026-10-26). Re
 `facturaModel::reservarFacturaECF`: con `set_pruebas` (el `strict_input` del runner, que
 `facturaController` pasa en `$facturaInput`) y reserva en `certecf`, la fila previa `certecf`
 del mismo e-NCF se archiva (`<estado>_ARCHIVADO`, `e_ncf` NULL, compare-and-set) en cualquier
-estado fuera de vuelo, `ERROR` incluido. Siguen bloqueando: una fila en vuelo
-(`PENDIENTE_ENVIO`, `ENVIO_INCIERTO`: se resuelve con el procedimiento de arriba), una sin
-ambiente o sin estado, una venta del POS (`pos_idempotency_key`: su reenvío automático la
+estado, `ERROR` incluido, y desde el 2026-11-12 también una `ENVIO_INCIERTO` y una
+`PENDIENTE_ENVIO` de más de 5 minutos (sección siguiente). Siguen bloqueando: una
+`PENDIENTE_ENVIO` reciente (su petición puede seguir enviando: es otra corrida en curso), una
+sin ambiente o sin estado, una venta del POS (`pos_idempotency_key`: su reenvío automático la
 busca por `envio_pendiente`), y todo en `ecf`/`testecf` o sin `strict_input`. No hace falta SQL
 a mano. La DGII repite e-NCF entre un set y el siguiente (los de Gratex comparten
 E310000000034, E320000000006, E330000000001…), así que esto aplica también con un xlsx nuevo.
 Pruebas: `php tools/test_write_ahead_puro.php`, sección 18.
 
+### Set de pruebas — un envío sin confirmar en una empresa `app`
+
+**Qué pasó** (empresa RNC 133454394, 2026-11-12). En su primera corrida de la fase 2,
+RecepcionFC no contestó tres RFCE (E320000000011, E320000000013 y E320000000015: *"Operation
+timed out after 30000 milliseconds with 0 bytes received"*). Las tres filas quedaron en
+`ENVIO_INCIERTO`, el runner no mandó las notas («no se sabe si llegaron a la DGII») y en las
+corridas siguientes (una docena ese día) esos tres e-NCF respondieron **«No se pudo asignar el
+número de comprobante. Inténtalo de nuevo.»** (`502`): la reserva no archivaba una fila en vuelo. El set
+no se podía completar sin un `UPDATE` a mano, y cada corrida completa reenviaba lo que la DGII
+ya había aceptado (un duplicado sale rechazado — *"La combinación e-NCF y código de seguridad
+de este Resumen de Factura de Consumo ya han sido utilizados previamente"* — y cualquier
+rechazo reinicia el set). Una de esas corridas además usó el xlsx de **otra empresa**
+(130968837) y salió entera con ese `RNCEmisor`, firmada con el certificado de esta: la DGII
+respondió *"El RNC del certificado no está delegado para realizar transaciones para el RNC:
+130968837"* y las filas quedaron en su base.
+
+**Por qué en integración no pasa.** `integracion.html` corre el mismo runner
+(`tools/send_fase2.php` vía `cert_run.php`); la diferencia está en el servidor.
+`POST /api/integracion/ecf` no tiene base de la empresa: firma, envía y guarda un respaldo,
+así que nada local puede bloquear un e-NCF y un timeout se arregla reenviando. Y antes de
+enviar verifica que el `RNCEmisor` del set sea la empresa de la credencial (el runner con
+`GET /integracion/empresas`; el controlador con `emisor.rnc`). `POST /api/facturas` guarda la
+fila **antes** de enviar (write-ahead) y no comparaba el RNC.
+
+**Cómo queda** (modo app; integración no cambia):
+
+- **Reserva** (`facturaModel::reservarFacturaECF`): en el set y en `certecf`, una
+  `ENVIO_INCIERTO` previa se archiva como cualquier otra (su envío ya terminó sin respuesta);
+  una `PENDIENTE_ENVIO` solo si su `respuesta_dgii.desde` tiene más de 5 minutos
+  (`SET_PRUEBAS_PENDIENTE_VIEJA_SEG`, `pendienteSigueEnviando()`).
+- **Emisor** (`facturaController::emitirFacturaEcf`): si `emisor.rnc` viene en el body y no es
+  el RNC de la empresa, `422` antes de reservar nada.
+- **Runner, antes de enviar** (`certEmpresaPreflightApp`, `GET /api/emisor`): el `RNCEmisor`
+  del xlsx tiene que ser el de la empresa del token, y el set tiene que salir a `certecf`
+  (`--ambiente`, que `cert_run.php` manda siempre, o el ambiente de la empresa). Si no, o si el
+  token venció, no envía nada. `--permitir-produccion` (solo CLI) salta lo del ambiente. Si lo
+  que contesta no es el API (un `406` del WAF del hosting) y la corrida va a `certecf`, sigue
+  con un `AVISO`: el `422` del punto anterior cubre el caso.
+- **Runner, lo que no quedó ni emitido ni rechazado** (`f2ReintentarPendientes`, antes de las
+  notas y al final): un `502` con `data.factura_id` es un envío **sin confirmar** — primero se
+  consulta `GET /api/facturas/{id}/estado` (la excepción de certecf de arriba): si la DGII ya
+  lo tiene se toma ese estado y **no se reenvía**; si lo rechazó cuenta como rechazo; si no lo
+  tiene o no se puede saber (un e-CF completo, la consulta falló) se manda de nuevo y la
+  reserva archiva el intento anterior. Un `502` **sin** fila es un fallo anterior a la reserva
+  (nada salió hacia la DGII): se manda de nuevo, y ya no cuenta como «no se sabe si llegó».
+  Hasta `--reintentos` veces por caso (default 2; `0` lo apaga), con `--reintento-pausa`
+  segundos antes de cada ronda (default 10).
+- **Runner, al final**: si faltó algo y la DGII no rechazó nada, imprime la lista de e-NCF que
+  faltan para correr **solo esos** (`--case=E32…,E34…`, o el campo «Solo estos e-NCF» del paso
+  2 de `cert.html`). Con un rechazo dice que hay que correr la fase completa.
+
+Pruebas (sin base ni red): `php tools/test_write_ahead_puro.php` (sección 18),
+`php tools/test_send_fase2_espera.php` (bloques «App») y `php tools/test_send_fase2_app.php`
+(la corrida entera de `main()` sobre un xlsx de prueba, con el API y la DGII falsos).
+
 ### Wizard `cert.html` — vencimiento de la secuencia y XML íntegros de los RFCE
 
+- **Paso 2, «Solo estos e-NCF»:** `cert_run.php` lo pasa como `--case` (varios, separados por coma). Sirve
+  para mandar solo lo que faltó de una corrida — la lista sale al final de la salida del runner — sin
+  reenviar lo que la DGII ya aceptó. Las notas que se listen salen después de los originales que vayan en
+  esa misma corrida; el estado de los originales de otra corrida no se verifica en modo app.
 - **Fase 4, «Vencimiento de la secuencia»:** `cert_run.php` lo pasa como `--fecha-vencimiento-secuencia`
   y el runner lo pone en `fecha_vencimiento_secuencia` de cada payload (ahora también en empresas `app`,
   no solo integración). Pisa el del rango en `ncf_sequences`; vacío = el del rango. Úsalo cuando la DGII

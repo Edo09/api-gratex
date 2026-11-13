@@ -15,7 +15,12 @@
  *     xlsx       = archivo del set de pruebas DGII (fase 2 y 3)
  *     empresa_rnc = solo integracion (opcional): RNC de la empresa elegida; el
  *                  runner aborta si el set es de otra (--empresa-rnc)
- *     [api, filter, case, exclude, counts, nota-wait-accepted, nota-poll, dry-run]
+ *     [api, filter, case, exclude, counts, nota-wait-accepted, nota-poll,
+ *      reintentos, reintento-pausa, dry-run]
+ *
+ * Fase 2 en modo app: el runner verifica solo (GET /api/emisor con el api_key)
+ * que el xlsx sea de la empresa del token y que el set salga a certecf; `case`
+ * acepta varios e-NCF separados por coma para mandar solo lo que falto.
  *
  * La salida es texto plano en vivo (progreso del runner).
  */
@@ -176,8 +181,9 @@ if ($esIntegracion) {
         $argv[] = '--fecha-vencimiento-secuencia=' . $_REQUEST['fecha_venc_secuencia'];
     }
 }
-// Passthrough de flags opcionales (filtros / control de notas fase 4).
-foreach (['filter', 'case', 'exclude', 'counts', 'nota-wait-accepted', 'nota-poll', 'refs-e31', 'refs-date'] as $k) {
+// Passthrough de flags opcionales (filtros / control de notas fase 4 / reintentos
+// de la fase 2 en modo app). --permitir-produccion NUNCA sale de aqui: solo por CLI.
+foreach (['filter', 'case', 'exclude', 'counts', 'nota-wait-accepted', 'nota-poll', 'refs-e31', 'refs-date', 'reintentos', 'reintento-pausa'] as $k) {
     if (isset($_REQUEST[$k]) && $_REQUEST[$k] !== '') {
         $argv[] = '--' . $k . '=' . $_REQUEST[$k];
     }

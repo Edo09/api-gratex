@@ -59,6 +59,15 @@ class facturaModel
      */
     public const ESTADOS_NOTA_VIGENTE = ['ACEPTADO', 'ACEPTADO_CONDICIONAL', 'EN_PROCESO', 'ENVIADO', ...EstadosEcf::EN_VUELO];
 
+    /**
+     * Set de pruebas DGII re-corrido en certecf (reservarFacturaECF): segundos
+     * desde la reserva (meta 'desde') a partir de los cuales una fila
+     * PENDIENTE_ENVIO ya no puede seguir enviandose: su peticion murio sin
+     * marcarla. Es la regla de 5 minutos del procedimiento manual de
+     * docs/integrations/dgii-ecf.md ("Resolver una factura sin confirmar").
+     */
+    public const SET_PRUEBAS_PENDIENTE_VIEJA_SEG = 300;
+
     public function __construct()
     {
         $this->conexion = Database::getInstance()->getConnection();
@@ -1424,12 +1433,18 @@ class facturaModel
      *     (<estado>_ARCHIVADO, e_ncf NULL) y se inserta la nueva;
      *   - set de pruebas DGII re-corrido ($factura['set_pruebas'] y ambiente
      *     'certecf', la fila previa tambien 'certecf'): se archiva igual en
-     *     cualquier estado que no este en vuelo (ACEPTADO, ENVIADO, ERROR...).
-     *     La DGII reinicia el set entero ante un solo rechazo y exige reenviar
-     *     los MISMOS e-NCF; en certificacion nada es fiscal;
-     *   - cualquier otro estado: EcfNumeroOcupadoException, sin tocar nada. Una
-     *     fila en vuelo (EstadosEcf::EN_VUELO), sin estado o venta del POS
-     *     (pos_idempotency_key) bloquea siempre fuera de los reintentables.
+     *     cualquier estado (ACEPTADO, ENVIADO, ERROR...). La DGII reinicia el
+     *     set entero ante un solo rechazo y exige reenviar los MISMOS e-NCF; en
+     *     certificacion nada es fiscal. Tambien una ENVIO_INCIERTO: su envio ya
+     *     termino sin respuesta de la DGII (timeout) y, si bloqueara, ese e-NCF
+     *     del set no podria salir nunca mas (RFCE E32 de la empresa 133454394,
+     *     2026-11-12: tres timeouts de RecepcionFC dejaron el set sin poder
+     *     completarse). De las en vuelo solo bloquea la PENDIENTE_ENVIO
+     *     reciente (pendienteSigueEnviando): su peticion puede seguir enviando;
+     *   - cualquier otro caso: EcfNumeroOcupadoException, sin tocar nada. Fuera
+     *     del set, una fila en vuelo (EstadosEcf::EN_VUELO) bloquea siempre; una
+     *     sin estado o una venta del POS (pos_idempotency_key) bloquea siempre,
+     *     tambien en el set.
      *
      * SELECT ... FOR UPDATE sobre un e-NCF que no existe toma gap locks que dos
      * sesiones pueden tener a la vez (REPEATABLE READ): el arbitro es la clave
@@ -1494,8 +1509,9 @@ class facturaModel
             try {
                 $this->conexion->beginTransaction();
 
+                // respuesta_dgii: la meta 'desde' de una fila en vuelo (pendienteSigueEnviando).
                 $previas = $this->conexion->prepare(
-                    'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii FROM facturas
+                    'SELECT id, ambiente_dgii, pos_idempotency_key, estado_dgii, respuesta_dgii FROM facturas
                      WHERE e_ncf = :e AND (ambiente_dgii = :amb OR ambiente_dgii IS NULL) FOR UPDATE'
                 );
                 $previas->execute([':e' => $eNcf, ':amb' => $ambiente]);
@@ -1503,13 +1519,15 @@ class facturaModel
                     $estadoPrevio = (string) ($previa['estado_dgii'] ?? '');
                     $reintentable = in_array($estadoPrevio, EstadosEcf::REINTENTABLES, true);
                     // Corrida anterior del set: una fila sin ambiente puede ser de
-                    // produccion, una en vuelo puede estar enviandose ahora mismo y
-                    // una venta del POS (envio_pendiente, su reenvio automatico) no
-                    // es del set.
+                    // produccion y una venta del POS (envio_pendiente, su reenvio
+                    // automatico) no es del set. De las en vuelo solo bloquea la
+                    // PENDIENTE_ENVIO reciente, que puede estar enviandose ahora
+                    // mismo; una ENVIO_INCIERTO ya termino su intento sin respuesta
+                    // y el set tiene que poder reenviar ese mismo e-NCF.
                     $delSetAnterior = !$reintentable && $setPruebas && $estadoPrevio !== ''
                         && ($previa['ambiente_dgii'] ?? null) === 'certecf'
                         && ($previa['pos_idempotency_key'] ?? null) === null
-                        && !in_array($estadoPrevio, EstadosEcf::EN_VUELO, true);
+                        && !self::pendienteSigueEnviando($estadoPrevio, $previa['respuesta_dgii'] ?? null);
                     if (!$reintentable && !$delSetAnterior) {
                         $this->deshacer();
                         throw new EcfNumeroOcupadoException($eNcf, $ambiente, 'fila ' . (int) $previa['id'] . ' en ' . $estadoPrevio);
@@ -1640,6 +1658,28 @@ class facturaModel
                 throw $e;
             }
         }
+    }
+
+    /**
+     * true si una fila en vuelo puede estar enviandose todavia en otra peticion:
+     * una PENDIENTE_ENVIO reservada hace menos de SET_PRUEBAS_PENDIENTE_VIEJA_SEG
+     * (meta 'desde', hora de este servidor PHP, la misma de time()), o sin
+     * 'desde' legible (no se sabe: se trata como viva). Una ENVIO_INCIERTO
+     * nunca: su peticion ya termino de enviar, o murio y el registro de cierre
+     * la marco. Cualquier otro estado tampoco. Pura: no toca la DB; $ahora es
+     * time() salvo en las pruebas.
+     */
+    public static function pendienteSigueEnviando(string $estado, ?string $respuestaDgii, ?int $ahora = null): bool
+    {
+        if ($estado !== EstadosEcf::PENDIENTE_ENVIO) {
+            return false;
+        }
+        $texto = self::metaEnvio($respuestaDgii)['desde'] ?? null;
+        $desde = is_string($texto) ? strtotime($texto) : false;
+        if ($desde === false) {
+            return true;
+        }
+        return (($ahora ?? time()) - $desde) < self::SET_PRUEBAS_PENDIENTE_VIEJA_SEG;
     }
 
     /** Meta del envio para respuesta_dgii (spec 6.3), sin XML. La lee metaEnvio(). */
@@ -1826,6 +1866,31 @@ class facturaModel
             ]);
             return $stmt->rowCount() > 0;
         } catch (PDOException $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Completa rfce_estado y rfce_respuesta de un RFCE que nunca tuvo respuesta de
+     * RecepcionFC (quedo ENVIO_INCIERTO) con lo que la DGII contesto despues en la
+     * consulta por codigo de seguridad. Solo si rfce_estado sigue NULL: el de un
+     * envio que si tuvo respuesta no se pisa. Sin esto la fila resuelta quedaba con
+     * estado_dgii RFCE_ACEPTADO y rfce_estado NULL, y lo que lista los RFCE por esa
+     * columna (el ZIP de XML integros de cert.html) no la veia. Nunca lanza: el
+     * veredicto ya quedo en estado_dgii (updateECFEstado); esto es un dato de apoyo.
+     *
+     * @param string $estado el de la consulta, sin el prefijo RFCE_ (ACEPTADO, RECHAZADO, NO_ENCONTRADO...)
+     */
+    public function completarRfceConsultado(int $facturaId, string $estado, ?array $respuesta): bool
+    {
+        try {
+            $stmt = $this->conexion->prepare(
+                'UPDATE facturas SET rfce_estado = :estado, rfce_respuesta = :resp WHERE id = :id AND rfce_estado IS NULL'
+            );
+            $stmt->execute([':estado' => $estado, ':resp' => self::json($respuesta), ':id' => $facturaId]);
+            return $stmt->rowCount() > 0;
+        } catch (Throwable $e) {
+            error_log('[ECF] completarRfceConsultado factura_id=' . $facturaId . ' fallo: ' . $e->getMessage());
             return false;
         }
     }

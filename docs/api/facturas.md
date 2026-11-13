@@ -233,6 +233,14 @@ una nota. Nunca responde `422` para una factura que existe.
 - Cuando la consulta normal pasa una factura a `ACEPTADO`/`ACEPTADO_CONDICIONAL` (o
   sus `RFCE_`) desde un estado sin aceptar, mueve el inventario de esa venta, una
   sola vez.
+- **Excepción, solo en certificación (`ambiente_dgii = certecf`):** un RFCE (E32 < 250k) en
+  `ENVIO_INCIERTO` **sí** se consulta en la DGII, por e-NCF + código de seguridad, y la respuesta es
+  la de un RFCE normal (`flujo: "RFCE"`, `consulta`), con `estado_dgii` `RFCE_ACEPTADO`,
+  `RFCE_RECHAZADO` o `RFCE_NO_ENCONTRADO`. Si la consulta falla, responde el estado guardado con
+  `nota`. No aplica a una venta del POS ni a una `PENDIENTE_ENVIO`. Lo usa el asistente de
+  certificación para no reenviar un RFCE que la DGII ya tiene
+  ([../integrations/dgii-ecf.md](../integrations/dgii-ecf.md), «Set de pruebas — un envío sin
+  confirmar en una empresa `app`»).
 
 ---
 
@@ -1148,6 +1156,9 @@ eso se pudo escribir, y la respuesta trae `data`:
 - Un `502` **sin** `data` es un fallo antes del envío: nada llegó a la DGII y se puede
   reintentar. Incluye `'No se pudo asignar el número de comprobante. Inténtalo de
   nuevo.'`: otra fila ya tiene ese e-NCF y el reintento toma el siguiente.
+- `422` `'El RNC del emisor que viene en la factura (…) no es el de esta empresa (…)…'`: el body
+  trae `emisor.rnc` (lo manda el set de pruebas DGII, `strict_input`) y no es el RNC de
+  `emisor_config`. Se corta antes de tomar el número: una empresa nunca emite con el RNC de otra.
 - `422` `'No se pudo calcular el total de la factura. Revisa las líneas e inténtalo de
   nuevo.'`: un `strict_input` cuyo `totales` no trae un `monto_total` numérico. Se
   corta antes de tomar el número.

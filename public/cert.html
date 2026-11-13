@@ -110,11 +110,17 @@ const STEPS = [
        <input type="file" id="xlsx2" accept=".xlsx,.xlsm">
        <label>Filtro por tipo (opcional, ej. 32 o E32 — separa con coma)</label>
        <input type="text" id="filter2" placeholder="vacío = todos">
-       <button class="act" data-run="2" data-xlsx="xlsx2" data-filter="filter2">Correr Fase 2</button>
-       <button class="act ghost" data-run="2" data-xlsx="xlsx2" data-filter="filter2" data-dry="1">Dry-run (no envía)</button>
+       <label>Solo estos e-NCF (opcional — para mandar solo lo que faltó de una corrida)</label>
+       <input type="text" id="case2" placeholder="vacío = todo el set. Ej. E320000000011,E320000000013,E340000000016">
+       <button class="act" data-run="2" data-xlsx="xlsx2" data-filter="filter2" data-case="case2">Correr Fase 2</button>
+       <button class="act ghost" data-run="2" data-xlsx="xlsx2" data-filter="filter2" data-case="case2" data-dry="1">Dry-run (no envía)</button>
        <pre class="runout" style="display:none"></pre>
      </div>
      <p class="muted">⚠️ Si DGII rechaza <b>cualquier</b> comprobante reinicia el set completo: deben pasar todos en una corrida limpia. Usa el <b>Token API del tenant</b> + <b>CERT_RUN_TOKEN</b> de arriba.</p>
+     <p class="muted">Antes de enviar, la corrida verifica que el xlsx sea de <b>la empresa del token</b> (con el set de otra empresa no manda nada).
+     Si la DGII no responde a tiempo en algún comprobante, lo vuelve a intentar sola antes de las notas. Si aun así algo queda sin enviar y
+     <b>no hubo rechazos</b>, al final sale la lista de e-NCF que faltan: pégala en «Solo estos e-NCF» y corre de nuevo. Volver a correr el set
+     entero manda otra vez lo que la DGII ya aceptó, y ese duplicado sale rechazado (y reinicia el set).</p>
      ${RFCE_PANEL}` },
 
   { n:3,  t:'Pruebas de Datos Aprobación Comercial', tipo:'auto', body:`
@@ -306,6 +312,12 @@ function wireRunner(btn) {
     }
     if (btn.dataset.filter && document.getElementById(btn.dataset.filter).value.trim())
       fd.append('filter', document.getElementById(btn.dataset.filter).value.trim());
+    if (btn.dataset.case && document.getElementById(btn.dataset.case).value.trim()) {
+      // Acepta la lista tal como la imprime el runner al final ("E32...,E34...").
+      const casos = document.getElementById(btn.dataset.case).value.trim().toUpperCase().split(/[\s,;]+/).filter(Boolean);
+      if (casos.some(c => !/^E(3[1-4]|4[1-7])\d{10}$/.test(c))) { alert('«Solo estos e-NCF» lleva e-NCF completos (ej. E320000000011), separados por coma.'); return; }
+      fd.append('case', casos.join(','));
+    }
     if (btn.dataset.counts && document.getElementById(btn.dataset.counts).value.trim())
       fd.append('counts', document.getElementById(btn.dataset.counts).value.trim());
     if (btn.dataset.wait && document.getElementById(btn.dataset.wait).value.trim())
