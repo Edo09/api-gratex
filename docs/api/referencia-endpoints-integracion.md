@@ -412,7 +412,7 @@ certificación si el mismo número se usó en las pruebas.
 | `estado` | `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`, `RECHAZADO` o `NO_ENCONTRADO`; con prefijo `RFCE_` si consultó por `codigo_seguridad`. Puede venir `null` si la DGII no devolvió un estado reconocible: no lo trate como aceptado ni como rechazado, consulte más tarde |
 | `flujo` | `ECF` (por `track_id`) o `RFCE` (por `codigo_seguridad`) |
 | `consulta` | La respuesta de la DGII tal cual. El motivo de un rechazo está en `consulta.mensajes` |
-| `fuente` | `dgii`: consultado a la DGII en ese momento. `respaldo`: solo en E32 < RD$250,000, cuando la consulta a la DGII falla; es el veredicto que la DGII dio al recibir el comprobante, guardado al emitirlo, y viene con un `aviso` que dice por qué. En certificación (`certecf`) pasa siempre: ese servicio de la DGII no acepta su propio token |
+| `fuente` | `dgii`: consultado a la DGII en ese momento. Solo en E32 < RD$250,000, cuando esa consulta falla: `timbre_dgii`, el estado que muestra la consulta pública del timbre de la DGII (la página del QR, en `timbre_url`; sin el motivo, así que `consulta` trae la respuesta de la DGII al recibirlo si se guardó), o `respaldo`, el veredicto guardado al emitir si la página tampoco responde. Las dos vienen con un `aviso`. En certificación (`certecf`) pasa siempre: ese servicio de la DGII no acepta su propio token |
 | `fecha_emision` | Hora en que guardamos nuestra copia, solo cuando buscamos el `track_id` por usted. No es la fecha de firma |
 
 Cada consulta deja guardado lo que respondió la DGII (estado y `mensajes`) junto a nuestra copia del comprobante, para poder revisar después el motivo de un rechazo.

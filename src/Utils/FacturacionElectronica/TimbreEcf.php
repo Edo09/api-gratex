@@ -91,4 +91,52 @@ class TimbreEcf
             rawurlencode($codigo)
         );
     }
+
+    /**
+     * Estado que muestra la pagina publica del timbre (la del QR): ACEPTADO,
+     * ACEPTADO_CONDICIONAL, RECHAZADO, EN_PROCESO o NO_ENCONTRADO ("No fue encontrada
+     * la factura"). null si la pagina no trae ninguno reconocible (otra pagina, un
+     * desafio del WAF). Pura.
+     *
+     * Fiable (2026-11-13): para un mismo e-NCF muestra "Rechazado" con el codigo de
+     * seguridad del envio rechazado y "Aceptado" con el del aceptado (tenant 6, ecf), y
+     * "No fue encontrada" con un codigo inventado.
+     */
+    public static function estadoDePagina(string $html): ?string
+    {
+        if (stripos($html, 'No fue encontrada') !== false) {
+            return 'NO_ENCONTRADO';
+        }
+        if (!preg_match('#<th[^>]*>\s*Estado\s*</th>\s*<td[^>]*>\s*([^<]+?)\s*</td>#i', $html, $m)) {
+            return null;
+        }
+        $texto = strtolower(trim(html_entity_decode($m[1], ENT_QUOTES | ENT_HTML5, 'UTF-8')));
+        return match (true) {
+            str_contains($texto, 'rechaz')    => 'RECHAZADO',
+            str_contains($texto, 'condicion') => 'ACEPTADO_CONDICIONAL',
+            str_contains($texto, 'acept')     => 'ACEPTADO',
+            str_contains($texto, 'proceso')   => 'EN_PROCESO',
+            default                           => null,
+        };
+    }
+
+    /**
+     * Abre la URL del timbre (urlDesdeXml) y devuelve el estado que muestra la DGII.
+     * La pagina es publica (sin token): sirve donde la consulta con token falla. Caso:
+     * RFCE en certecf, donde fc.dgii.gov.do/certecf/consultarfce rechaza el token de la
+     * propia DGII (401 "The signature is invalid", 2026-11-13). Lanza si no hay
+     * respuesta HTTP.
+     *
+     * @return array{estado: ?string, http: int, url: string}
+     */
+    public static function consultarEstado(DgiiAuthService $auth, string $url, int $timeout = 20): array
+    {
+        $r = $auth->obtenerPaginaPublica($url, $timeout);
+        $http = (int) ($r['status_code'] ?? 0);
+        return [
+            'estado' => $http === 200 ? self::estadoDePagina((string) ($r['body'] ?? '')) : null,
+            'http'   => $http,
+            'url'    => $url,
+        ];
+    }
 }

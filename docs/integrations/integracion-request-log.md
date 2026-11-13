@@ -90,15 +90,19 @@ devuelto como `RFCE_RECHAZADO`. Se encontraron tres cosas:
    `WWW-Authenticate: Bearer error="invalid_token", error_description="The signature is invalid"`
    al token de `ecf.dgii.gov.do/certecf/autenticacion`. Con el mismo método, `testecf` y `ecf`
    contestan bien (204 si no existe, 200 con el estado). Es un defecto de la DGII en
-   certificación. Para un RFCE, `GET /api/integracion/estado` ahora devuelve en ese caso el
-   veredicto que la DGII dio al recibirlo y que quedó guardado al emitir, con `fuente: "respaldo"`
-   y un `aviso`, en vez de un 502.
-3. **La consulta pública del timbre muestra los dos como "Aceptado".**
+   certificación. Para un RFCE, `GET /api/integracion/estado` ahora toma en ese caso el estado
+   VIVO de la consulta pública del timbre (`TimbreEcf::consultarEstado`, la página del QR, sin
+   token: `fuente: "timbre_dgii"`, `timbre_url`) y corrige el respaldo; si la página tampoco
+   responde, devuelve el veredicto guardado al emitir (`fuente: "respaldo"`). Ya no un 502.
+3. **La DGII los tiene ACEPTADOS: el `RFCE_RECHAZADO` era nuestro.**
    `https://fc.dgii.gov.do/CerteCF/ConsultaTimbreFC?...` dice `Estado Aceptado` para los dos
-   códigos de seguridad (con un código inventado dice "No fue encontrada"). La respuesta
-   original de RecepcionFC se perdió por el punto 1, así que no se sabe qué motivo dio. El
-   mismo patrón aparece en `E320000000369` de Gratex (certecf, junio). Un envío nuevo ya trae
-   la respuesta completa en `dgii_response` y queda en esta bitácora.
+   códigos de seguridad. La página es fiable: para `E320000000002` del tenant 6 (ecf) dice
+   "Rechazado" con el código del envío que la DGII rechazó (respuesta guardada: "El e-NCF ...
+   ya ha sido utilizado previamente") y "Aceptado" con el del envío aceptado; con un código
+   inventado, "No fue encontrada". La respuesta original de RecepcionFC se perdió por el punto
+   1, así que no se sabe por qué el mapeo dio rechazado. El mismo patrón aparece en
+   `E320000000369` de Gratex (certecf, junio). Un envío nuevo ya trae la respuesta completa en
+   `dgii_response` y queda en esta bitácora: es lo que hay que mirar si se repite.
 
 Además, todo 401/403 de la DGII ahora dice la cabecera `WWW-Authenticate` y el servicio
 llamado (`DgiiAuthService::responseSummary`). Antes solo decía `HTTP 401`.

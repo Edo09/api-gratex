@@ -331,11 +331,14 @@ consulta}`. `estado` es uno de `ACEPTADO`, `ACEPTADO_CONDICIONAL`, `EN_PROCESO`,
 `NO_ENCONTRADO` (con prefijo `RFCE_` cuando consulta por código de seguridad), o `null` si la
 DGII no devolvió un estado reconocible: en ese caso no lo trate como aceptado ni como
 rechazado y vuelva a consultar más tarde. El detalle completo de la DGII va en `consulta`.
-`fuente` dice de dónde salió: `dgii` (consulta en ese momento) o `respaldo`. En un E32 de
-menos de RD$250,000, si la consulta a la DGII falla, devolvemos el veredicto que la DGII dio al
-recibirlo, que guardamos al emitir, con `fuente: "respaldo"` y un `aviso`. Pasa siempre en
-certificación (`certecf`), donde ese servicio de la DGII no responde. En esos comprobantes,
-si no manda `codigo_seguridad`, usamos el que guardamos al emitirlo.
+`fuente` dice de dónde salió: `dgii` (consulta en ese momento), `timbre_dgii` o `respaldo`.
+En un E32 de menos de RD$250,000, si la consulta a la DGII falla, el estado sale de la consulta
+pública del timbre de la DGII (la misma página del QR, `timbre_url`), con `fuente:
+"timbre_dgii"`; esa página no da el motivo, así que `consulta` trae la respuesta de la DGII
+al recibirlo, si la guardamos. Si la página tampoco responde, devolvemos el veredicto guardado
+al emitir (`fuente: "respaldo"`). Las dos vienen con un `aviso`. En certificación (`certecf`)
+pasa siempre: ese servicio de la DGII no acepta su propio token. En esos comprobantes, si no
+manda `codigo_seguridad`, usamos el que guardamos al emitirlo.
 
 > No reemita un comprobante rechazado con el mismo `e_ncf` sin revisar antes el mensaje de
 > `consulta`: si el rechazo no consumió la secuencia, el mismo `e_ncf` sirve; si la consumió,

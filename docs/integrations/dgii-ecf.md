@@ -104,9 +104,10 @@ Endpoints internos (token de API propio vía `X-API-KEY`), útiles para diagnós
 `WWW-Authenticate: Bearer error="invalid_token", error_description="The signature is invalid"`
 al token de `ecf.dgii.gov.do/certecf/autenticacion` (probado 2026-11-13 con el cert de Gratex:
 `testecf` y `ecf` responden 204/200 con el mismo método; `CerteCF` con mayúsculas da 502). Es
-un defecto de la DGII en certificación, no de la llamada. Por eso un RFCE en certecf solo se
-conoce por la respuesta de RecepcionFC al emitirlo; `GET /api/integracion/estado` devuelve esa
-respuesta guardada (`fuente: "respaldo"`). Un 401/403 de la DGII dice ahora la cabecera
+un defecto de la DGII en certificación, no de la llamada. Por eso, para un RFCE en certecf,
+`GET /api/integracion/estado` toma el estado de la consulta pública del timbre (la página del
+QR, sin token: `fuente: "timbre_dgii"`) y, si no responde, la respuesta de RecepcionFC guardada
+al emitir (`fuente: "respaldo"`). Un 401/403 de la DGII dice ahora la cabecera
 `WWW-Authenticate` y el servicio llamado. Caso completo:
 [integracion-request-log.md](integracion-request-log.md).
 

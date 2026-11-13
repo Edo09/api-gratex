@@ -152,7 +152,9 @@ function handleIntegracionEstado(array $tenant): void
 {
     $eNcf = trim((string) ($_GET['e_ncf'] ?? ''));
     $trackId = trim((string) ($_GET['track_id'] ?? ''));
-    $codigoSeguridad = trim((string) ($_GET['codigo_seguridad'] ?? ''));
+    // Un '+' sin codificar en el query llega como espacio, y el codigo de seguridad
+    // (base64) nunca lleva espacios: K y2JW es K+y2JW.
+    $codigoSeguridad = str_replace(' ', '+', trim((string) ($_GET['codigo_seguridad'] ?? '')));
 
     if ($eNcf === '') {
         respondIntegracionEstado(422, ['status' => false, 'error' => 'Falta e_ncf.']);
@@ -207,10 +209,42 @@ function handleIntegracionEstado(array $tenant): void
         error_log('[integracionEstado] consulta fallo (tenant ' . $tenantId . ', ' . $eNcf . '): ' . $e->getMessage());
         IntegracionRequestLog::anotar($e);
 
-        // RFCE: RecepcionFC dio el veredicto final al recibirlo y la emision lo
-        // guardo. Si la consulta en vivo falla (en certecf la DGII rechaza el
-        // token en consultarfce: "The signature is invalid"), se devuelve ese
-        // veredicto en vez de un 502 sin motivo. Ver veredictoRfceGuardado().
+        // RFCE cuya consulta con token falla (en certecf la DGII rechaza su propio
+        // token en consultarfce: "The signature is invalid"). Primero, el estado VIVO
+        // de la pagina publica del timbre (la del QR, sin token).
+        $vivo = ($esRfce && !$sandbox)
+            ? estadoRfceEnTimbre($store, $tenantId, $rncEmisor, $eNcf, $codigoSeguridad, $ambiente)
+            : null;
+        if ($vivo !== null) {
+            $estadoVivo = 'RFCE_' . $vivo['estado'];
+            $previo = $store->getVeredictoGuardado($tenantId, $rncEmisor, $eNcf);
+            // Corrige el respaldo con lo que dice la DGII; la respuesta guardada al
+            // emitir no se pisa (null no sobreescribe).
+            $store->guardarEstadoConsultado($tenantId, $rncEmisor, $eNcf, null, $estadoVivo, $ambiente, null);
+            respondIntegracionEstado(200, [
+                'status' => true,
+                'recurso' => 'estado',
+                'rnc' => $rncEmisor,
+                'empresa' => $tenant['nombre'],
+                'e_ncf' => $eNcf,
+                'track_id' => null,
+                'flujo' => 'RFCE',
+                'ambiente' => $ambiente,
+                'estado' => $estadoVivo,
+                'fecha_emision' => $previo['created_at'] ?? null,
+                // La respuesta de la DGII al recibirlo, si quedo guardada (el motivo de un rechazo).
+                'consulta' => $previo['dgii_respuesta'] ?? null,
+                'fuente' => 'timbre_dgii',
+                'timbre_url' => $vivo['url'],
+                'aviso' => 'La consulta RFCE de la DGII no respondio (' . EcfUsuarioException::mensajePublico($e)
+                    . '). El estado es el que muestra la DGII en su consulta publica del timbre (la del QR),'
+                    . ' que no trae el motivo; en consulta va la respuesta de la DGII al recibirlo, si se guardo.',
+            ]);
+            return;
+        }
+
+        // Si tampoco: el veredicto que RecepcionFC dio al recibirlo, guardado al
+        // emitir, en vez de un 502 sin motivo. Ver veredictoRfceGuardado().
         $guardado = ($esRfce && !$sandbox)
             ? IntegracionStoreModel::veredictoRfceGuardado($store->getVeredictoGuardado($tenantId, $rncEmisor, $eNcf), $codigoSeguridad)
             : null;
@@ -286,6 +320,42 @@ function handleIntegracionEstado(array $tenant): void
         $respuesta['aviso'] = SandboxEcf::aviso();
     }
     respondIntegracionEstado(200, $respuesta);
+}
+
+/**
+ * Estado VIVO de un RFCE en la pagina publica del timbre de la DGII (sin token), para
+ * cuando consultarfce falla. Usa el XML del ultimo envio guardado de ese e-NCF y solo
+ * si su codigo de seguridad es el consultado (otro codigo = otro envio). null si no
+ * hay XML, si el codigo no coincide o si la pagina no dio un estado reconocible.
+ *
+ * @return array{estado: string, url: string}|null
+ */
+function estadoRfceEnTimbre(
+    IntegracionStoreModel $store,
+    int $tenantId,
+    string $rncEmisor,
+    string $eNcf,
+    string $codigoSeguridad,
+    ?string $ambiente
+): ?array {
+    try {
+        require_once __DIR__ . '/../Utils/FacturacionElectronica/TimbreEcf.php';
+        $fila = $store->getXmlEmitidoByENCF($tenantId, $rncEmisor, $eNcf);
+        $xml = (string) ($fila['xml_firmado'] ?? '');
+        if ($xml === '' || $codigoSeguridad === '' || ECFEmissionService::codigoSeguridadDeXml($xml) !== $codigoSeguridad) {
+            return null;
+        }
+        $url = TimbreEcf::urlDesdeXml($xml, (string) $ambiente);
+        if ($url === null) {
+            return null;
+        }
+        $r = TimbreEcf::consultarEstado(new DgiiAuthService(), $url);
+        IntegracionRequestLog::anotar('Timbre publico DGII: HTTP ' . $r['http'] . ', estado ' . ($r['estado'] ?? 'no reconocido') . ' (' . $url . ')');
+        return $r['estado'] !== null ? ['estado' => $r['estado'], 'url' => $url] : null;
+    } catch (Throwable $e) {
+        IntegracionRequestLog::anotar('Timbre publico DGII: ' . $e->getMessage());
+        return null;
+    }
 }
 
 /**

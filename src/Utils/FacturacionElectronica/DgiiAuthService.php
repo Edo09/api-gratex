@@ -153,6 +153,26 @@ class DgiiAuthService
     }
 
     /**
+     * GET a una pagina PUBLICA de la DGII (sin token), con la misma capa HTTP y TLS
+     * que las llamadas autenticadas (DGII_ECF_CAINFO). La usa TimbreEcf para leer el
+     * estado de la consulta publica del timbre (la URL del QR).
+     *
+     * @return array{status_code: int, headers: string, body: string}
+     */
+    public function obtenerPaginaPublica(string $url, ?int $timeout = null): array
+    {
+        if (!preg_match('#^https://(ecf|fc)\.dgii\.gov\.do/#i', $url)) {
+            throw new RuntimeException('Solo paginas publicas de la DGII.');
+        }
+        $config = $this->buildConfig($timeout !== null && $timeout > 0 ? ['timeout' => $timeout] : []);
+
+        return $this->request('GET', $url, [
+            'Accept: text/html, */*',
+            'User-Agent: Mozilla/5.0 (compatible; Fiscalpoint-API)',
+        ], null, $config['timeout']);
+    }
+
+    /**
      * Ambiente (testecf | certecf | ecf) con el que autenticar() pediria el token
      * con estas mismas $options, SIN llamar a la DGII: el override de $options, el
      * del tenant (AmbienteResolver) o el global del .env, con los alias ya

@@ -21,6 +21,7 @@
 require_once __DIR__ . '/../src/IntegracionRequestLog.php';
 require_once __DIR__ . '/../src/Models/IntegracionStoreModel.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/DgiiAuthService.php';
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/TimbreEcf.php';
 require_once __DIR__ . '/write_ahead_test_lib.php';
 
 $fallos = 0;
@@ -200,6 +201,26 @@ $s401 = $resumen->invoke($auth, ['status_code' => 401, 'headers' => $cabeceras, 
 $chk('el 401 dice el motivo y el servicio (sin el query)', $s401 === 'HTTP 401 [WWW-Authenticate: Bearer error="invalid_token", error_description="The signature is invalid"] [https://fc.dgii.gov.do/certecf/consultarfce/api/Consultas/Consulta]', $s401);
 $s400 = $resumen->invoke($auth, ['status_code' => 400, 'headers' => $cabeceras, 'body' => '"Para consultar el estado de esta factura, es necesario completar el campo Cod_Seguridad."'], 'https://ecf.dgii.gov.do/x?a=1');
 $chk('un 400 sigue igual que antes (sin cabecera ni URL)', $s400 === 'HTTP 400 - "Para consultar el estado de esta factura, es necesario completar el campo Cod_Seguridad."', $s400);
+
+// ---------------------------------------------------------------------------
+echo "\n6b. Estado en la pagina publica del timbre (RFCE cuando consultarfce falla)\n";
+// Fragmentos con la forma real de fc.dgii.gov.do/{amb}/ConsultaTimbreFC (2026-11-13).
+$pagina = static fn(string $estado): string => "<table class=\"table\">\n  <tr>\n    <th>\n      RNC Emisor\n    </th>\n    <td>\n      03900240189\n    </td>\n  </tr>\n"
+    . "  <tr>\n    <th>\n                    Estado\n                </th>\n                <td>\n                    {$estado}\n                </td>\n  </tr>\n</table>";
+$chk('Aceptado', TimbreEcf::estadoDePagina($pagina('Aceptado')) === 'ACEPTADO', TimbreEcf::estadoDePagina($pagina('Aceptado')));
+$chk('Rechazado', TimbreEcf::estadoDePagina($pagina('Rechazado')) === 'RECHAZADO');
+$chk('Aceptado Condicional (antes que Aceptado)', TimbreEcf::estadoDePagina($pagina('Aceptado Condicional')) === 'ACEPTADO_CONDICIONAL');
+$chk('En Proceso', TimbreEcf::estadoDePagina($pagina('En Proceso')) === 'EN_PROCESO');
+$chk('"No fue encontrada la factura (e-CF)"', TimbreEcf::estadoDePagina('<tr class="text-danger"><td colspan="2">No fue encontrada la factura (e-CF)</td></tr>') === 'NO_ENCONTRADO');
+$chk('otra pagina (desafio del WAF, 404): null', TimbreEcf::estadoDePagina('<html><title>MY NS HOME PAGE</title>404 Not Found.</html>') === null);
+$chk('estado desconocido: null', TimbreEcf::estadoDePagina($pagina('Anulado?')) === null);
+$auth = (new ReflectionClass(DgiiAuthService::class))->newInstanceWithoutConstructor();
+try {
+    $auth->obtenerPaginaPublica('https://ejemplo.com/ConsultaTimbreFC');
+    $chk('obtenerPaginaPublica: solo paginas de la DGII', false);
+} catch (RuntimeException $e) {
+    $chk('obtenerPaginaPublica: solo paginas de la DGII', str_contains($e->getMessage(), 'DGII'), $e->getMessage());
+}
 
 // ---------------------------------------------------------------------------
 echo "\n7. SQLite: guardar y purgar\n";
