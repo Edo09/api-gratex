@@ -40,7 +40,9 @@ unidades-medida, branding/plantillas PDF, integración, roles/permisos (RBAC, ga
   master `integracion_request_log` (master migration 018, `src/IntegracionRequestLog.php`,
   `docs/integrations/integracion-request-log.md`): query it before asking for logs. In `certecf`
   the DGII rejects its own token on `fc.dgii.gov.do/certecf/consultarfce` (401 "The signature is
-  invalid"); RFCE status there only comes from the RecepcionFC response saved at emission.
+  invalid"); RFCE status there only comes from the RecepcionFC response saved at emission. Never
+  trust the public timbre page (`ConsultaTimbreFC`) in `certecf`: it says "Aceptado" even for
+  RFCE the DGII rejected for certification reasons (145 "fase válida", "postulación activa").
 - **App clock = DR time** (`src/ZonaHoraria.php`, Nov 2026). The host runs US Central time with
   daylight saving; loading the file sets PHP to `America/Santo_Domingo`, and `Database` /
   `MasterDatabase` set each MySQL session to `-04:00`. Change both or neither:

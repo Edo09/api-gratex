@@ -210,8 +210,9 @@ function handleIntegracionEstado(array $tenant): void
         IntegracionRequestLog::anotar($e);
 
         // RFCE cuya consulta con token falla (en certecf la DGII rechaza su propio
-        // token en consultarfce: "The signature is invalid"). Primero, el estado VIVO
-        // de la pagina publica del timbre (la del QR, sin token).
+        // token en consultarfce: "The signature is invalid"). En ecf/testecf, el estado
+        // VIVO de la pagina publica del timbre (la del QR, sin token); en certecf no
+        // (dice "Aceptado" a rechazos de la certificacion): ahi va el guardado, abajo.
         $vivo = ($esRfce && !$sandbox)
             ? estadoRfceEnTimbre($store, $tenantId, $rncEmisor, $eNcf, $codigoSeguridad, $ambiente)
             : null;
@@ -325,8 +326,9 @@ function handleIntegracionEstado(array $tenant): void
 /**
  * Estado VIVO de un RFCE en la pagina publica del timbre de la DGII (sin token), para
  * cuando consultarfce falla. Usa el XML del ultimo envio guardado de ese e-NCF y solo
- * si su codigo de seguridad es el consultado (otro codigo = otro envio). null si no
- * hay XML, si el codigo no coincide o si la pagina no dio un estado reconocible.
+ * si su codigo de seguridad es el consultado (otro codigo = otro envio). null en
+ * certecf (la pagina no refleja los rechazos de la certificacion), si no hay XML, si
+ * el codigo no coincide o si la pagina no dio un estado reconocible.
  *
  * @return array{estado: string, url: string}|null
  */
@@ -340,6 +342,11 @@ function estadoRfceEnTimbre(
 ): ?array {
     try {
         require_once __DIR__ . '/../Utils/FacturacionElectronica/TimbreEcf.php';
+        // En certecf la pagina dice "Aceptado" aunque la DGII lo haya rechazado por la
+        // certificacion (145, postulacion): ahi manda el veredicto guardado al emitir.
+        if (!TimbreEcf::paginaReflejaRechazos((string) $ambiente)) {
+            return null;
+        }
         $fila = $store->getXmlEmitidoByENCF($tenantId, $rncEmisor, $eNcf);
         $xml = (string) ($fila['xml_firmado'] ?? '');
         if ($xml === '' || $codigoSeguridad === '' || ECFEmissionService::codigoSeguridadDeXml($xml) !== $codigoSeguridad) {

@@ -90,19 +90,27 @@ devuelto como `RFCE_RECHAZADO`. Se encontraron tres cosas:
    `WWW-Authenticate: Bearer error="invalid_token", error_description="The signature is invalid"`
    al token de `ecf.dgii.gov.do/certecf/autenticacion`. Con el mismo método, `testecf` y `ecf`
    contestan bien (204 si no existe, 200 con el estado). Es un defecto de la DGII en
-   certificación. Para un RFCE, `GET /api/integracion/estado` ahora toma en ese caso el estado
-   VIVO de la consulta pública del timbre (`TimbreEcf::consultarEstado`, la página del QR, sin
-   token: `fuente: "timbre_dgii"`, `timbre_url`) y corrige el respaldo; si la página tampoco
-   responde, devuelve el veredicto guardado al emitir (`fuente: "respaldo"`). Ya no un 502.
-3. **La DGII los tiene ACEPTADOS: el `RFCE_RECHAZADO` era nuestro.**
-   `https://fc.dgii.gov.do/CerteCF/ConsultaTimbreFC?...` dice `Estado Aceptado` para los dos
-   códigos de seguridad. La página es fiable: para `E320000000002` del tenant 6 (ecf) dice
-   "Rechazado" con el código del envío que la DGII rechazó (respuesta guardada: "El e-NCF ...
-   ya ha sido utilizado previamente") y "Aceptado" con el del envío aceptado; con un código
-   inventado, "No fue encontrada". La respuesta original de RecepcionFC se perdió por el punto
-   1, así que no se sabe por qué el mapeo dio rechazado. El mismo patrón aparece en
-   `E320000000369` de Gratex (certecf, junio). Un envío nuevo ya trae la respuesta completa en
-   `dgii_response` y queda en esta bitácora: es lo que hay que mirar si se repite.
+   certificación. Para un RFCE, `GET /api/integracion/estado` ya no responde 502 en ese caso:
+   en `ecf` y `testecf` toma el estado vivo de la consulta pública del timbre
+   (`TimbreEcf::consultarEstado`, la página del QR, sin token: `fuente: "timbre_dgii"`,
+   `timbre_url`); en `certecf`, el veredicto guardado al emitir (`fuente: "respaldo"`).
+3. **Los rechazos eran de verdad: la empresa no estaba en un paso que reciba envíos.** Las
+   dos E32 salieron después de terminar el set de pruebas, las aprobaciones y los 10 tipos
+   (13:08–14:00). El E31 `E310000000001` que mandaron a las 16:02 lo rechazó la DGII con el
+   145, *"No se encuentra en una fase válida dentro del proceso de certificación"*
+   (ConsultaResultado sí funciona en certecf). Casi seguro las dos E32 tienen el mismo motivo;
+   su respuesta exacta se perdió por el punto 1.
+
+   **Error que cometimos al diagnosticarlo (2026-11-13):** la página pública del timbre en
+   certecf dice "Aceptado" para las dos, y un primer arreglo la usó en `/estado`: a AGROVISA se
+   le devolvió `RFCE_ACEPTADO` esa noche y el respaldo quedó así hasta el 2026-11-14, cuando se
+   restauró a `RFCE_RECHAZADO`. En certecf esa página **no** refleja los rechazos de la
+   certificación: Gratex `E320000000369` (2026-06-12) tiene guardada la respuesta de
+   RecepcionFC `"codigo":2,"estado":"Rechazado"`, *"El RNC Emisor 131256432, no tiene una
+   postulación activa"*, y la página lo muestra "Aceptado". En `ecf` y `testecf` sí los refleja:
+   con un mismo e-NCF del tenant 6 (ecf) dice "Rechazado" para el envío rechazado y "Aceptado"
+   para el aceptado, y en testecf (tenant 5) muestra "Rechazado" para un rechazo conocido. Por
+   eso `TimbreEcf::paginaReflejaRechazos()` la descarta en certecf.
 
 Además, todo 401/403 de la DGII ahora dice la cabecera `WWW-Authenticate` y el servicio
 llamado (`DgiiAuthService::responseSummary`). Antes solo decía `HTTP 401`.

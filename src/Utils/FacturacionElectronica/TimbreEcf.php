@@ -93,14 +93,28 @@ class TimbreEcf
     }
 
     /**
+     * ¿La pagina publica del timbre dice la verdad sobre un rechazo en ese ambiente?
+     *
+     * En ecf y testecf si: para un mismo e-NCF muestra "Rechazado" con el codigo de
+     * seguridad del envio rechazado y "Aceptado" con el del aceptado (tenant 6 en ecf,
+     * "e-NCF ya utilizado"; tenant 5 en testecf, 2026-11-13).
+     *
+     * En certecf NO: muestra "Aceptado" para un RFCE que RecepcionFC rechazo por el
+     * proceso de certificacion (Gratex E320000000369, 2026-06-12: "codigo 2, no tiene
+     * una postulacion activa"). Asi le devolvimos RFCE_ACEPTADO a AGROVISA (tenant 18,
+     * 2026-11-13) por dos E32 rechazados con el 145 ("fase valida").
+     */
+    public static function paginaReflejaRechazos(string $ambiente): bool
+    {
+        return in_array(strtolower(trim($ambiente)), ['ecf', 'testecf'], true);
+    }
+
+    /**
      * Estado que muestra la pagina publica del timbre (la del QR): ACEPTADO,
      * ACEPTADO_CONDICIONAL, RECHAZADO, EN_PROCESO o NO_ENCONTRADO ("No fue encontrada
      * la factura"). null si la pagina no trae ninguno reconocible (otra pagina, un
-     * desafio del WAF). Pura.
-     *
-     * Fiable (2026-11-13): para un mismo e-NCF muestra "Rechazado" con el codigo de
-     * seguridad del envio rechazado y "Aceptado" con el del aceptado (tenant 6, ecf), y
-     * "No fue encontrada" con un codigo inventado.
+     * desafio del WAF). Pura. En certecf no sirve para un rechazo: ver
+     * paginaReflejaRechazos().
      */
     public static function estadoDePagina(string $html): ?string
     {

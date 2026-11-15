@@ -214,6 +214,10 @@ $chk('En Proceso', TimbreEcf::estadoDePagina($pagina('En Proceso')) === 'EN_PROC
 $chk('"No fue encontrada la factura (e-CF)"', TimbreEcf::estadoDePagina('<tr class="text-danger"><td colspan="2">No fue encontrada la factura (e-CF)</td></tr>') === 'NO_ENCONTRADO');
 $chk('otra pagina (desafio del WAF, 404): null', TimbreEcf::estadoDePagina('<html><title>MY NS HOME PAGE</title>404 Not Found.</html>') === null);
 $chk('estado desconocido: null', TimbreEcf::estadoDePagina($pagina('Anulado?')) === null);
+$chk('la pagina refleja rechazos en ecf y testecf', TimbreEcf::paginaReflejaRechazos('ecf') && TimbreEcf::paginaReflejaRechazos(' TesteCF '));
+$chk('... pero NO en certecf (muestra "Aceptado" a un rechazo de la certificacion)', !TimbreEcf::paginaReflejaRechazos('certecf')
+    && !TimbreEcf::paginaReflejaRechazos('CerteCF'));
+$chk('... ni en sandbox ni sin ambiente', !TimbreEcf::paginaReflejaRechazos('sandbox') && !TimbreEcf::paginaReflejaRechazos(''));
 $auth = (new ReflectionClass(DgiiAuthService::class))->newInstanceWithoutConstructor();
 try {
     $auth->obtenerPaginaPublica('https://ejemplo.com/ConsultaTimbreFC');
