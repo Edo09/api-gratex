@@ -3,6 +3,7 @@ require_once(__DIR__ . '/../Utils/TokenGenerator.php');
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../MasterDatabase.php');
 require_once(__DIR__ . '/../TenantResolver.php');
+require_once(__DIR__ . '/../AccesoGlobal.php');
 
 class authModel
 {
@@ -43,8 +44,11 @@ class authModel
             // conexion que api_tokens (master en MT, tenant DB en single).
             // last_used y created_at son para el vencimiento por inactividad de las
             // empresas Express (AuthMiddleware::validateRequest); el resto los ignora.
+            // u.tenant_id es la empresa del usuario: la del token puede ser otra solo
+            // con acceso global (sesionEnEmpresaPermitida).
             $sql = self::multiTenant()
-                ? "SELECT t.user_id, t.tenant_id, t.is_active, u.role, t.last_used, t.created_at
+                ? "SELECT t.user_id, t.tenant_id, t.is_active, u.role, t.last_used, t.created_at,
+                          u.tenant_id AS usuario_tenant_id
                      FROM api_tokens t JOIN users u ON u.id = t.user_id
                     WHERE t.token_hash = :token_hash LIMIT 1"
                 : "SELECT t.user_id, t.is_active, u.role, t.last_used, t.created_at
@@ -54,7 +58,7 @@ class authModel
             $stmt->execute([':token_hash' => $token_hash]);
             $row = $stmt->fetch();
 
-            if ($row && $row['is_active'] == 1) {
+            if ($row && $row['is_active'] == 1 && (!self::multiTenant() || $this->sesionEnEmpresaPermitida($row, $token_hash))) {
                 return [
                     'valid' => true,
                     'user_id' => (int)$row['user_id'],
@@ -68,6 +72,60 @@ class authModel
         } catch (PDOException $e) {
             return ['valid' => false, 'user_id' => null];
         }
+    }
+
+    /**
+     * ¿Vale el token de esta fila (validateToken) en la empresa que dice? Si es la del
+     * usuario, si y sin consultar nada mas: es el caso de todos los usuarios. Si es
+     * otra, solo con acceso global, si esa empresa sigue disponible y si no lleva mas de
+     * AccesoGlobal::HORAS_INACTIVIDAD sin uso.
+     *
+     * Cuando se niega por algo definitivo (el acceso se leyo y es 0, la empresa ya no
+     * esta disponible, o vencio), el token ademas se REVOCA: si no, devolverle el acceso
+     * al usuario o reactivar la empresa lo reviviria sin pasar por el login (una copia
+     * filtrada incluida). Un fallo al leer la empresa o la columna solo niega esta vez.
+     */
+    private function sesionEnEmpresaPermitida(array $row, string $tokenHash): bool
+    {
+        $empresaUsuario = (int) ($row['usuario_tenant_id'] ?? 0);
+        $empresaSesion = (int) ($row['tenant_id'] ?? 0);
+        if ($empresaSesion === $empresaUsuario) {
+            return true;
+        }
+        try {
+            $fila = MasterDatabase::getInstance()->getTenantById($empresaSesion);
+        } catch (Throwable $e) {
+            error_log('[authModel] sesion en otra empresa: no se pudo leer la empresa ' . $empresaSesion . ': ' . $e->getMessage());
+            return false;
+        }
+        $acceso = AccesoGlobal::leerAcceso($this->conexion, (int) $row['user_id']);
+        $permitida = AccesoGlobal::sesionPermitida($empresaUsuario, $empresaSesion, $acceso === true, $fila)
+            && !AccesoGlobal::sesionVencida($row['last_used'] ?? null, $row['created_at'] ?? null, time());
+        if (!$permitida && $acceso !== null) {
+            $this->revokeTokenByHash($tokenHash);
+        }
+        return $permitida;
+    }
+
+    /** ¿El usuario tiene acceso global (master.users.acceso_global = 1)? Siempre false sin multi-tenant. */
+    public function tieneAccesoGlobal(int $userId): bool
+    {
+        return self::multiTenant() && AccesoGlobal::tieneAcceso($this->conexion, $userId);
+    }
+
+    /**
+     * Cierra TODAS las sesiones activas de un usuario (todas sus empresas, pestañas y
+     * equipos). Es el "Cerrar sesion" de un usuario de soporte: cada cambio de empresa
+     * abre una sesion nueva y deja la anterior viva, asi que cerrar solo la actual
+     * dejaria otras abiertas en empresas cliente. Quien llama decide para quien.
+     *
+     * @return int cuantas sesiones cerro
+     */
+    public function cerrarTodasLasSesiones(int $userId): int
+    {
+        $st = $this->conexion->prepare('UPDATE api_tokens SET is_active = 0 WHERE user_id = :u AND is_active = 1');
+        $st->execute([':u' => $userId]);
+        return $st->rowCount();
     }
 
     /**
@@ -161,9 +219,15 @@ class authModel
      * del boton POS (app.* -> pos.*, ver posMasterModel::canjearCodigo). Misma
      * respuesta que loginUser, sin clave.
      *
-     * @return array ['success', ['token','user'], ['tenant_id']] o ['error', mensaje]
+     * $empresaSesion: la empresa del codigo (la de la sesion de app.* que lo pidio).
+     * Para un usuario normal es la suya; para uno de soporte que estaba en otra
+     * empresa, esa otra, y solo si todavia tiene acceso global y la empresa sigue
+     * disponible. null = la empresa del usuario.
+     *
+     * @return array ['success', ['token','user'], ['tenant_id']] o ['error', mensaje] (o ['error', mensaje,
+     *               AccesoGlobal::CODIGO_SIN_ACCESO] si la empresa no es la suya y no puede estar en ella)
      */
-    public function iniciarSesionPorId(int $userId): array
+    public function iniciarSesionPorId(int $userId, ?int $empresaSesion = null): array
     {
         try {
             $sql = self::multiTenant()
@@ -175,7 +239,15 @@ class authModel
             if (!$user) {
                 return ['error', 'Ese usuario ya no existe.'];
             }
-            return $this->emitirSesion($user);
+            if (self::multiTenant() && $empresaSesion !== null) {
+                $empresaUsuario = (int) ($user['tenant_id'] ?? 0);
+                $fila = $empresaSesion === $empresaUsuario ? null : MasterDatabase::getInstance()->getTenantById($empresaSesion);
+                $acceso = $empresaSesion !== $empresaUsuario && AccesoGlobal::tieneAcceso($this->conexion, $userId);
+                if (!AccesoGlobal::sesionPermitida($empresaUsuario, $empresaSesion, $acceso, $fila)) {
+                    return ['error', AccesoGlobal::MSG_SIN_ACCESO, AccesoGlobal::CODIGO_SIN_ACCESO];
+                }
+            }
+            return $this->emitirSesion($user, self::multiTenant() ? $empresaSesion : null);
         } catch (PDOException $e) {
             error_log('[authModel] iniciarSesionPorId: ' . $e->getMessage());
             return ['error', 'No se pudo iniciar sesión por un problema del sistema. Inténtalo de nuevo en unos minutos.'];
@@ -184,23 +256,28 @@ class authModel
 
     /**
      * Crea el token de sesion (api_tokens guarda solo su sha256) y arma la
-     * respuesta del login. Compartido por loginUser e iniciarSesionPorId.
+     * respuesta del login. Compartido por loginUser, iniciarSesionPorId y cambiarEmpresaSesion.
      *
      * @param array $user Fila de users (sin la clave hace falta).
+     * @param ?int $empresaSesion empresa del token si no es la del usuario: la que eligio
+     *        un usuario de soporte (POST /api/auth/empresa, cambiarEmpresaSesion) o la del
+     *        canje del POS pedido desde otra empresa (iniciarSesionPorId). Quien llama ya
+     *        la verifico. null = la del usuario, como en el login.
      */
-    private function emitirSesion(array $user): array
+    private function emitirSesion(array $user, ?int $empresaSesion = null): array
     {
         // Generate new token for this login
         $token = TokenGenerator::generateApiToken();
         $token_hash = TokenGenerator::hashToken($token);
         $created_at = date('Y-m-d H:i:s');
+        $empresa = $empresaSesion ?? (isset($user['tenant_id']) ? (int) $user['tenant_id'] : null);
 
         if (self::multiTenant()) {
             $sql = "INSERT INTO api_tokens(user_id, tenant_id, token_hash, created_at) VALUES(:user_id, :tenant_id, :token_hash, :created_at)";
             $stmt = $this->conexion->prepare($sql);
             $stmt->execute([
                 ':user_id' => $user['id'],
-                ':tenant_id' => $user['tenant_id'],
+                ':tenant_id' => $empresa,
                 ':token_hash' => $token_hash,
                 ':created_at' => $created_at
             ]);
@@ -219,20 +296,118 @@ class authModel
         // La empresa se lee una vez del master (sin master, en un solo tenant, no hay fila): solo si es Express
         // (master.tenants.edicion) sus permisos salen cruzados con los modulos de su edicion y el user trae
         // entitlements. Para toda otra empresa el user sale exactamente como siempre.
-        $fila = $this->filaTenant($user['tenant_id'] ?? null);
+        // La empresa es la de la sesion ($empresa): la del usuario, salvo la que eligio un
+        // usuario de soporte (cambiarEmpresaSesion) o la del canje del POS pedido desde otra.
+        $fila = $this->filaTenant($empresa);
         $user_data = [
             'id' => (int)$user['id'],
             'email' => $user['email'],
             'username' => $user['username'],
             'name' => $user['name'] . ' ' . $user['last_name'],
             'role' => $user['role'],
-            'permissions' => $this->permissionsForUser($user['tenant_id'] ?? null, $user['role'], $fila),
+            'permissions' => $this->permissionsForUser($empresa, $user['role'], $fila),
         ];
         $user_data = $this->conEntitlements($user_data, $fila);
+        $user_data = $this->conAccesoGlobal($user_data, (int) $user['id'], $fila, isset($user['tenant_id']) ? (int) $user['tenant_id'] : null);
 
-        // Tercer elemento: empresa del usuario, solo para la bitacora.
-        return ['success', ['token' => $token, 'user' => $user_data],
-            ['tenant_id' => isset($user['tenant_id']) ? (int) $user['tenant_id'] : null]];
+        // Tercer elemento: empresa de la sesion, solo para la bitacora.
+        return ['success', ['token' => $token, 'user' => $user_data], ['tenant_id' => $empresa]];
+    }
+
+    /**
+     * Agrega al user del login y de /me, solo si el usuario tiene acceso global:
+     *   acceso_global: true
+     *   empresa: {id, nombre, rnc, ambiente, propia} de la empresa de la sesion;
+     *            propia = es la empresa del usuario (false: esta en la de un cliente)
+     * Para cualquier otro usuario devuelve $user_data tal cual, sin las claves (ni
+     * como false o null): su respuesta no cambia. Sin multi-tenant no hay empresas
+     * entre las que moverse.
+     *
+     * @param ?array $fila fila de master.tenants de la empresa de la sesion, o null
+     * @param ?int $empresaUsuario users.tenant_id del usuario
+     */
+    private function conAccesoGlobal(array $user_data, int $userId, ?array $fila, ?int $empresaUsuario): array
+    {
+        if (!self::multiTenant() || !AccesoGlobal::tieneAcceso($this->conexion, $userId)) {
+            return $user_data;
+        }
+        $user_data['acceso_global'] = true;
+        if ($fila !== null) {
+            $user_data['empresa'] = AccesoGlobal::empresaPublica($fila)
+                + ['propia' => $empresaUsuario !== null && (int) ($fila['id'] ?? 0) === $empresaUsuario];
+        }
+        return $user_data;
+    }
+
+    /**
+     * GET /api/auth/empresas: las empresas a las que el usuario puede pasar su sesion
+     * (AccesoGlobal::empresas), o null si no tiene acceso global.
+     *
+     * @return ?list<array{id:int, nombre:string, rnc:string, ambiente:string, propia:bool}>
+     */
+    public function empresasAccesoGlobal(int $userId): ?array
+    {
+        if (!self::multiTenant() || !AccesoGlobal::tieneAcceso($this->conexion, $userId)) {
+            return null;
+        }
+        $st = $this->conexion->prepare('SELECT tenant_id FROM users WHERE id = :id LIMIT 1');
+        $st->execute([':id' => $userId]);
+        return AccesoGlobal::empresas($this->conexion, (int) $st->fetchColumn());
+    }
+
+    /**
+     * POST /api/auth/empresa: una sesion NUEVA de $userId en la empresa $destino (un
+     * token nuevo, con la misma respuesta que el login). Pide acceso global y una
+     * empresa disponible (AccesoGlobal).
+     *
+     * Token nuevo y no el mismo movido de empresa, a proposito: el token se comparte
+     * entre las pestañas del navegador. Si se moviera, otra pestaña que sigue mostrando
+     * la empresa anterior (una factura a medio hacer, con sus clientes y productos)
+     * mandaria sus peticiones a la nueva y podria emitir un e-CF en la empresa
+     * equivocada. Con uno nuevo, cada pestaña sigue en la empresa de su token y la
+     * sesion anterior no se cierra.
+     *
+     * A la empresa en la que ya esta la sesion ($empresaActual) responde 409 sin abrir
+     * otra: una sesion nueva sin su fila de bitacora no tendria a que atribuirse.
+     *
+     * @return array ['success', ['token','user'], ['tenant_id' => destino, 'empresa_usuario' => users.tenant_id]]
+     *               (los dos primeros como loginUser) o ['error', mensaje, http, codigo]
+     */
+    public function cambiarEmpresaSesion(int $userId, int $destino, ?int $empresaActual = null): array
+    {
+        if (!self::multiTenant()) {
+            return ['error', AccesoGlobal::MSG_SIN_ACCESO, 403, AccesoGlobal::CODIGO_SIN_ACCESO];
+        }
+        try {
+            if (!AccesoGlobal::tieneAcceso($this->conexion, $userId)) {
+                return ['error', AccesoGlobal::MSG_SIN_ACCESO, 403, AccesoGlobal::CODIGO_SIN_ACCESO];
+            }
+            if ($empresaActual !== null && $destino === $empresaActual) {
+                return ['error', AccesoGlobal::MSG_MISMA_EMPRESA, 409, AccesoGlobal::CODIGO_MISMA_EMPRESA];
+            }
+            $fila = MasterDatabase::getInstance()->getTenantById($destino);
+            if (!AccesoGlobal::empresaDisponible($fila)) {
+                return ['error', AccesoGlobal::MSG_EMPRESA_NO_DISPONIBLE, 404, AccesoGlobal::CODIGO_EMPRESA_NO_DISPONIBLE];
+            }
+            $st = $this->conexion->prepare(
+                'SELECT id, tenant_id, email, username, name, last_name, role FROM users WHERE id = :id LIMIT 1'
+            );
+            $st->execute([':id' => $userId]);
+            $user = $st->fetch();
+            if (!$user) {
+                return ['error', 'Tu usuario ya no existe. Vuelve a iniciar sesión.', 401, 'SESION_INVALIDA'];
+            }
+            $r = $this->emitirSesion($user, $destino);
+            if ($r[0] === 'success') {
+                // Para la bitacora: el controller nombra la empresa de origen solo si es la
+                // del propio usuario (nunca la de otro cliente).
+                $r[2]['empresa_usuario'] = (int) $user['tenant_id'];
+            }
+            return $r;
+        } catch (Throwable $e) {
+            error_log('[authModel] cambiarEmpresaSesion: ' . $e->getMessage());
+            return ['error', 'No se pudo cambiar de empresa. Inténtalo de nuevo.', 500, 'ERROR_INTERNO'];
+        }
     }
 
     /**
@@ -332,10 +507,14 @@ class authModel
 
     /**
      * Perfil del usuario actual + sus modulos (para GET /api/auth/me). Lo mismo que el user del login, bloque entitlements
-     * incluido cuando la empresa es Express.
+     * incluido cuando la empresa es Express, y acceso_global + empresa cuando el usuario es de soporte.
+     *
+     * $empresaSesion: la empresa de la sesion (la del token, AuthMiddleware::validateRequest), que es la que decide los
+     * permisos: PermissionGate busca el rol en ella. Para un usuario normal es la suya; para uno de soporte, la que eligio.
+     * null = la empresa del usuario.
      * @return array|null
      */
-    public function getUserProfile($user_id)
+    public function getUserProfile($user_id, ?int $empresaSesion = null)
     {
         try {
             $cols = 'id, email, username, name, last_name, role' . (self::multiTenant() ? ', tenant_id' : '');
@@ -345,14 +524,14 @@ class authModel
             if (!$u) {
                 return null;
             }
-            // La empresa del usuario: si es la que la peticion ya resolvio (validateRequest acaba de leerla), esa fila, y /me no
+            // La empresa de la sesion: si es la que la peticion ya resolvio (validateRequest acaba de leerla), esa fila, y /me no
             // suma una consulta al master; si no, una lectura (filaTenant).
-            $tenantId = $u['tenant_id'] ?? null;
+            $tenantId = self::multiTenant() && $empresaSesion !== null ? $empresaSesion : ($u['tenant_id'] ?? null);
             $actual = TenantResolver::current();
             $fila = ($actual !== null && $tenantId !== null && (int) ($actual['id'] ?? 0) === (int) $tenantId)
                 ? $actual
                 : $this->filaTenant($tenantId);
-            return $this->conEntitlements([
+            $perfil = $this->conEntitlements([
                 'id' => (int) $u['id'],
                 'email' => $u['email'],
                 'username' => $u['username'],
@@ -360,6 +539,7 @@ class authModel
                 'role' => $u['role'],
                 'permissions' => $this->permissionsForUser($tenantId, $u['role'], $fila),
             ], $fila);
+            return $this->conAccesoGlobal($perfil, (int) $u['id'], $fila, isset($u['tenant_id']) ? (int) $u['tenant_id'] : null);
         } catch (PDOException $e) {
             return null;
         }

@@ -318,10 +318,10 @@ wa_chk('verificador del master: la cabecera menciona la 015',
 
 // README de db/migrations y docs/database/schema.md (este estaba atrasado).
 // La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
-// lo ejecutan con PREPARE/EXECUTE (007, 008, 010, 011, 012, 013, 014 y 015; la lista del tenant, 018 y 026 a 035, ya
+// lo ejecutan con PREPARE/EXECUTE (007, 008, 010 a 015, 017, 018 y 019; la lista del tenant, 018 y 026 a 035, ya
 // era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
-wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015 y 017 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015 y 017'));
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018 y 019 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018 y 019'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
@@ -1218,6 +1218,12 @@ final class ExpSentenciaFalsa
     {
         return $this->conexion->fila;
     }
+
+    /** La unica lectura de una columna sola es users.acceso_global (AccesoGlobal::leerAcceso): la usuaria de prueba no es de soporte. */
+    public function fetchColumn(): mixed
+    {
+        return 0;
+    }
 }
 
 /** Conexion de mentira: la propiedad conexion de authModel no tiene tipo, asi que no hace falta un PDO. */
@@ -1246,8 +1252,10 @@ $s4MtAntes = getenv('MULTI_TENANT_ENABLED');
 try {
     foreach (['multi-tenant' => true, 'un solo tenant' => false] as $s4Modo => $s4Mt) {
         putenv('MULTI_TENANT_ENABLED=' . ($s4Mt ? 'true' : 'false'));
+        // usuario_tenant_id (la empresa del usuario, master 019): igual a la del token, el caso de todo usuario que no
+        // es de soporte; asi validateToken no consulta nada mas (ver authModel::sesionEnEmpresaPermitida).
         $s4Fila = ['user_id' => '7', 'is_active' => '1', 'role' => 'admin', 'last_used' => '2026-10-20 10:00:00', 'created_at' => '2026-10-01 08:00:00']
-            + ($s4Mt ? ['tenant_id' => '12'] : []);
+            + ($s4Mt ? ['tenant_id' => '12', 'usuario_tenant_id' => '12'] : []);
         $s4Con = new ExpConexionFalsa($s4Fila);
         $s4R = $s4Modelo($s4Con)->validateToken('token-de-prueba');
         wa_chk("validateToken ({$s4Modo}): el SELECT pide t.last_used, t.created_at y sigue buscando por el hash del token",

@@ -99,7 +99,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 ]);
                 roles_respond(['status' => true, 'data' => ['user_id' => $userId, 'role' => $roleName]]);
             }
-            roles_respond(['status' => false, 'error' => $res[1]], 400);
+            roles_respond(['status' => false, 'error' => $res[1]], $res[2] ?? 400);
         }
         // Actualizar un rol:  PUT /api/roles/{id} {description?, permissions?}
         if ($sub === null || !ctype_digit((string) $sub)) {

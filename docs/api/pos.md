@@ -35,6 +35,7 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `POS_INACTIVO` | 403 | "El POS no está activo para esta empresa" |
 | `EMPRESA_INACTIVA` | 403 | Igual |
 | `CODIGO_INVALIDO` | 401 | El enlace del botón POS venció o se usó: login normal |
+| `SIN_ACCESO_GLOBAL` | 403 | Canje: el código es de una empresa que no es la del usuario (un usuario de soporte que estaba en un cliente) y ya no puede estar en ella: login normal. Ver [../modules/acceso-global.md](../modules/acceso-global.md) |
 | `SIN_PERMISO` | 403 | El usuario no tiene el módulo `pos` |
 | `CAJA_OCUPADA` | 409 | "Esta caja ya tiene un equipo": confirmar y repetir con `reemplazar: true` |
 | `DUPLICADO`, `NOMBRE_REQUERIDO`, `ROL_INVALIDO`, `CAMPO_INVALIDO` | 409 / 422 | Error en el formulario |

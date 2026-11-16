@@ -54,6 +54,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/representacion-impresa-pos.md](modules/representacion-impresa-pos.md) | Tirilla POS de 80, 76 o 72 mm: `?formato=pos` / `pos76` / `pos72`, alto variable, contenido compartido con la hoja carta |
 | [modules/reporte-ventas.md](modules/reporte-ventas.md) | Reporte de ventas de gestión: `/api/reportes/ventas`, detalle y agrupaciones por cliente, forma de pago y usuario |
 | [modules/roles-permisos.md](modules/roles-permisos.md) | RBAC: roles per-tenant, permisos, gate central, `/api/roles` |
+| [modules/acceso-global.md](modules/acceso-global.md) | Usuario de soporte que entra a todas las empresas (`users.acceso_global`, master 019): `/api/auth/empresas`, `/api/auth/empresa`, bitácora, cómo dar y quitar el acceso |
 | [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos, ventas y compras que mueven existencia (ajustes, kardex, valor de inventario) y el [interruptor «Bloquear ventas sin existencia»](modules/inventario.md#control-de-existencias-en-las-ventas): cómo funciona, encender, apagar y límites |
 | [modules/auditoria.md](modules/auditoria.md) | Bitácora de auditoría (`audit_logs`): quién hizo qué y cuándo, `AuditLogger`, `GET /api/audit-logs` |
 

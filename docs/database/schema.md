@@ -108,6 +108,7 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 | `username` | varchar(50) | único **global** (login resuelve el tenant sin tenant_id; un username vive en un solo tenant) |
 | `password` | varchar(255) | hash bcrypt |
 | `role` | varchar(20) | default `user` |
+| `acceso_global` | tinyint(1) | default 0. `1` = soporte: puede abrir sesión en cualquier empresa tipo app, activa y que no sea solo Express (`/api/auth/empresas`, `/api/auth/empresa`). Solo por SQL; no se edita, borra ni cambia de rol desde la app (master_migration 019, ver [../modules/acceso-global.md](../modules/acceso-global.md)) |
 | `tenant_id` | int | tenant al que pertenece |
 
 ### `api_tokens` (master)
@@ -118,7 +119,7 @@ Fuente: `db/tenant_schema.sql` (snapshot consolidado, base + migraciones 001–0
 | `token_hash` | varchar(64) | UNIQUE, sha256 del token |
 | `created_at` / `last_used` | datetime | `last_used` se actualiza en cada validación |
 | `is_active` | tinyint(1) | default 1 |
-| `tenant_id` | int | tenant del token (sin huevo-gallina) |
+| `tenant_id` | int | tenant del token = empresa de la sesión (sin huevo-gallina). Es el de `users.tenant_id`, salvo en un usuario con `acceso_global`, que puede tener sesiones en otras empresas |
 
 ---
 

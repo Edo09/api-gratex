@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../MasterDatabase.php');
+require_once(__DIR__ . '/../AccesoGlobal.php');
 
 /**
  * userModel — gestion de usuarios de un tenant (RBAC).
@@ -59,16 +60,37 @@ class userModel
     }
 
     /**
+     * ¿Es un usuario de soporte (master.users.acceso_global = 1, docs/modules/acceso-global.md)?
+     * Entra a TODAS las empresas: quien pudiera cambiarle la clave, el correo o el rol desde
+     * la app de su empresa se quedaria con ese acceso. Sin multi-tenant no hay soporte.
+     */
+    private function esUsuarioSoporte(int $id): bool
+    {
+        return self::multiTenant() && AccesoGlobal::tieneAcceso($this->conexion, $id);
+    }
+
+    /**
      * Actualiza campos de un usuario del tenant. Solo campos enviados.
      * $fields: name, last_name, email, username, role, password (cualquier subconjunto).
-     * @return array ['success', null] | ['error', mensaje]
+     * Un usuario de soporte solo lo cambia el mismo ($actorId), y nunca su rol: lo demas,
+     * por SQL en la master.
+     * @param ?int $actorId el usuario que hace el cambio (el de la sesion)
+     * @return array ['success', null] | ['error', mensaje] | ['error', mensaje, 403] (usuario de soporte)
      */
-    public function updateUser(?int $tenantId, int $id, array $fields): array
+    public function updateUser(?int $tenantId, int $id, array $fields, ?int $actorId = null): array
     {
         $current = $this->getUser($tenantId, $id);
         if (!$current) {
             // Otro administrador lo borro mientras se editaba (o no es de esta empresa).
             return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
+        }
+        if ($this->esUsuarioSoporte($id)) {
+            if ($actorId !== $id) {
+                return ['error', AccesoGlobal::MSG_USUARIO_SOPORTE, 403];
+            }
+            if (isset($fields['role']) && trim((string) $fields['role']) !== (string) $current['role']) {
+                return ['error', AccesoGlobal::MSG_ROL_SOPORTE, 403];
+            }
         }
 
         // Unicidad: email y username globales (excluyendo al propio usuario).
@@ -117,11 +139,14 @@ class userModel
         }
     }
 
-    /** Borra un usuario del tenant. */
+    /** Borra un usuario del tenant. Un usuario de soporte no se borra desde la app (403). */
     public function deleteUser(?int $tenantId, int $id): array
     {
         if (!$this->getUser($tenantId, $id)) {
             return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
+        }
+        if ($this->esUsuarioSoporte($id)) {
+            return ['error', AccesoGlobal::MSG_USUARIO_SOPORTE, 403];
         }
         try {
             $this->conexion->prepare('DELETE FROM users WHERE id = :id')->execute([':id' => $id]);

@@ -85,6 +85,8 @@ CREATE TABLE IF NOT EXISTS users (
   username   VARCHAR(50)  NOT NULL,
   password   VARCHAR(255) NOT NULL,
   role       VARCHAR(20)  DEFAULT 'user',
+  acceso_global TINYINT(1) NOT NULL DEFAULT 0
+               COMMENT 'Soporte: 1 = el usuario puede pasar su sesion a cualquier empresa tipo app, activa y que no sea solo Express (GET /api/auth/empresas, POST /api/auth/empresa). 0 = solo la suya. Se cambia solo por SQL. Ver master_migrations/019',
   created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uq_users_email (email),
   UNIQUE KEY uq_users_username (username),

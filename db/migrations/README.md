@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017 y 018).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034 y 035; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018 y 019).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -63,6 +63,10 @@ que ningún otro plan los tome:
   usar las dos versiones; `express` limita a la empresa entera). Toma la 017 y
   no la 016 a propósito: la 016 sigue reservada para el plan ITBIS, que todavía
   no tiene archivo, y así ninguna reserva se renumera. Necesita la 015.
+- **Master 019**: `db/master_migrations/019_users_acceso_global.sql` (2026-11-14).
+  Agrega `users.acceso_global TINYINT(1) NOT NULL DEFAULT 0`: el usuario de soporte
+  que entra a todas las empresas (`docs/modules/acceso-global.md`). No enciende a
+  nadie. La 018 es `018_integracion_request_log.sql`; la 016 sigue reservada.
 - Antes de crear una migración: `git fetch` y las dos listas, una por serie (con
   la barra final, que lista los archivos y no el directorio):
   `git ls-tree --name-only origin/master db/migrations/ | tail -4` (tenant) y

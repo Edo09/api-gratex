@@ -120,13 +120,26 @@ switch ($_SERVER['REQUEST_METHOD']) {
                             'success' => true,
                             'message' => $respuesta_revoke[1]
                         ];
+                        // "Cerrar sesion" de la app manda {todas:true}. Para un usuario de
+                        // soporte (acceso global) cierra TODAS sus sesiones: cada cambio de
+                        // empresa abrio una nueva y dejo la anterior viva. Para cualquier
+                        // otro usuario no cambia nada (sus otros equipos siguen), y el
+                        // signout del POS, que no lo manda, tampoco.
+                        $otras = 0;
+                        $userIdSalida = (int) ($validation['user_id'] ?? 0);
+                        if (is_object($_POST) && !empty($_POST->todas) && $userIdSalida > 0
+                            && $authModel->tieneAccesoGlobal($userIdSalida)) {
+                            $otras = $authModel->cerrarTodasLasSesiones($userIdSalida);
+                        }
                         AuditLogger::authEvent([
                             'action'             => 'LOGOUT',
                             'user_id'            => $validation['user_id'] ?? null,
                             'tenant_id'          => $validation['tenant_id'] ?? null,
                             'session_token_hash' => $token_hash,
                             'success'            => true,
-                            'description'        => 'Cierre de sesion (token revocado).',
+                            'description'        => $otras > 0
+                                ? 'Cierre de sesion de soporte: token revocado y ' . $otras . ' sesion(es) mas cerradas en sus empresas.'
+                                : 'Cierre de sesion (token revocado).',
                         ]);
                     } else {
                         $respuesta = ['success' => false, 'error' => $respuesta_revoke[1]];
@@ -148,6 +161,11 @@ switch ($_SERVER['REQUEST_METHOD']) {
         else if (preg_match('#/api/auth/pos-handoff/?$#', $endpoint)) {
             authPosHandoff($auth);
         }
+        // Soporte (master.users.acceso_global, docs/modules/acceso-global.md): abre
+        // una sesion nueva (token nuevo) en otra empresa. La lista es GET /api/auth/empresas.
+        else if (preg_match('#/api/auth/empresa/?$#', $endpoint)) {
+            authCambiarEmpresa($auth, $authModel, $_POST);
+        }
         else {
             echo json_encode(['success' => false, 'error' => 'Invalid endpoint']);
         }
@@ -165,7 +183,9 @@ switch ($_SERVER['REQUEST_METHOD']) {
                 echo json_encode(['success' => false, 'error' => $v['message'] ?? 'Unauthorized']);
                 break;
             }
-            $profile = $authModel->getUserProfile($v['user_id']);
+            // Los permisos son los de la empresa de la SESION (la del token): la del
+            // usuario, salvo un usuario de soporte que paso a otra.
+            $profile = $authModel->getUserProfile($v['user_id'], isset($v['tenant_id']) ? (int) $v['tenant_id'] : null);
             if (!$profile) {
                 http_response_code(404);
                 echo json_encode(['success' => false, 'error' => 'Usuario no encontrado']);
@@ -174,7 +194,12 @@ switch ($_SERVER['REQUEST_METHOD']) {
             echo json_encode(['success' => true, 'data' => ['user' => $profile]]);
             break;
         }
-        // Solo GET /api/auth/me esta soportado.
+        // Soporte: empresas a las que el usuario puede pasar su sesion.
+        if (preg_match('#/api/auth/empresas/?$#', $endpoint)) {
+            authListarEmpresas($auth, $authModel);
+            break;
+        }
+        // Solo GET /api/auth/me y GET /api/auth/empresas estan soportados.
         http_response_code(404);
         echo json_encode(['success' => false, 'error' => 'Endpoint no encontrado. Use GET /api/auth/me.']);
         break;
@@ -251,12 +276,17 @@ function authPosCanje(authModel $authModel, $body): void
             throw new PosError('Tu empresa no está activa.', 403, 'EMPRESA_INACTIVA');
         }
         PosAuth::exigirPosActivo(TenantResolver::current());
-        $perfil = $authModel->getUserProfile($canje['user_id']);
+        // La empresa es la del codigo: la de la sesion de app.* que lo pidio (para un
+        // usuario de soporte, la empresa en la que estaba, no la suya).
+        $perfil = $authModel->getUserProfile($canje['user_id'], (int) $canje['tenant_id']);
         if ($perfil === null || !PermissionGate::permMatches($perfil['permissions'] ?? [], 'pos')) {
             throw new PosError('No tienes permiso para abrir el POS. Pídeselo a un administrador.', 403, 'SIN_PERMISO');
         }
 
-        $sesion = $authModel->iniciarSesionPorId($canje['user_id']);
+        $sesion = $authModel->iniciarSesionPorId($canje['user_id'], (int) $canje['tenant_id']);
+        if ($sesion[0] !== 'success' && ($sesion[2] ?? null) === AccesoGlobal::CODIGO_SIN_ACCESO) {
+            throw new PosError($sesion[1], 403, AccesoGlobal::CODIGO_SIN_ACCESO);
+        }
         if ($sesion[0] !== 'success') {
             throw new PosError($sesion[1], 500, 'ERROR_INTERNO');
         }
@@ -278,5 +308,106 @@ function authPosCanje(authModel $authModel, $body): void
         error_log('[auth] pos-handoff/canje: ' . $e->getMessage());
         http_response_code(500);
         echo json_encode(['success' => false, 'error' => 'No se pudo abrir el POS. Inténtalo de nuevo.', 'codigo' => 'ERROR_INTERNO']);
+    }
+}
+
+/**
+ * GET /api/auth/empresas — usuario de soporte (master.users.acceso_global = 1): las
+ * empresas a las que puede pasar su sesion y en cual esta ahora.
+ *   200 {success:true, data:{actual:<tenant_id de la sesion>, empresas:[{id, nombre, rnc, ambiente, propia}]}}
+ *   401 sin sesion; 403 {codigo:'SIN_ACCESO_GLOBAL'} para cualquier otro usuario.
+ * Ver docs/modules/acceso-global.md.
+ */
+function authListarEmpresas(AuthMiddleware $auth, authModel $authModel): void
+{
+    try {
+        $v = $auth->validateRequest();
+        if (empty($v['valid']) || ($v['user_id'] ?? null) === null) {
+            http_response_code(401);
+            echo json_encode(['success' => false, 'error' => $v['message'] ?? 'Unauthorized']);
+            return;
+        }
+        $empresas = $authModel->empresasAccesoGlobal((int) $v['user_id']);
+        if ($empresas === null) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => AccesoGlobal::MSG_SIN_ACCESO, 'codigo' => AccesoGlobal::CODIGO_SIN_ACCESO]);
+            return;
+        }
+        echo json_encode(['success' => true, 'data' => [
+            'actual' => isset($v['tenant_id']) ? (int) $v['tenant_id'] : null,
+            'empresas' => $empresas,
+        ]]);
+    } catch (Throwable $e) {
+        error_log('[auth] empresas: ' . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'No se pudo cargar la lista de empresas. Inténtalo de nuevo.', 'codigo' => 'ERROR_INTERNO']);
+    }
+}
+
+/**
+ * POST /api/auth/empresa {tenant_id} — usuario de soporte: abre una sesion NUEVA en la
+ * empresa elegida, con el rol del usuario buscado en ella. Es un token nuevo, no el
+ * mismo movido (ver authModel::cambiarEmpresaSesion): la sesion de la que sale sigue
+ * valida en su empresa, asi otra pestaña abierta no pasa a la empresa nueva sin saberlo.
+ *   200 {success:true, data:{token, user}}  (la misma forma que el login)
+ *   400 EMPRESA_REQUERIDA, 401 sin sesion, 403 SIN_ACCESO_GLOBAL, 404 EMPRESA_NO_DISPONIBLE,
+ *   409 MISMA_EMPRESA (la sesion ya esta en esa empresa: no se abre otra).
+ * Queda en la bitacora DE LA EMPRESA ELEGIDA (CAMBIO_EMPRESA): su administrador ve
+ * quien entro. La empresa de origen se nombra solo si es la del propio usuario de
+ * soporte (la del operador): nunca el nombre ni el id de otro cliente.
+ *
+ * @param mixed $body
+ */
+function authCambiarEmpresa(AuthMiddleware $auth, authModel $authModel, $body): void
+{
+    try {
+        $v = $auth->validateRequest();
+        if (empty($v['valid']) || ($v['user_id'] ?? null) === null) {
+            http_response_code(401);
+            echo json_encode(['success' => false, 'error' => $v['message'] ?? 'Unauthorized']);
+            return;
+        }
+        $destino = AccesoGlobal::leerEmpresaId($body);
+        if ($destino === null) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => AccesoGlobal::MSG_EMPRESA_REQUERIDA, 'codigo' => AccesoGlobal::CODIGO_EMPRESA_REQUERIDA]);
+            return;
+        }
+        $userId = (int) $v['user_id'];
+        $desde = isset($v['tenant_id']) ? (int) $v['tenant_id'] : 0;
+        $r = $authModel->cambiarEmpresaSesion($userId, $destino, $desde);
+        if ($r[0] !== 'success') {
+            http_response_code($r[2]);
+            echo json_encode(['success' => false, 'error' => $r[1], 'codigo' => $r[3]]);
+            return;
+        }
+        $perfil = $r[1]['user'];
+        // La empresa de origen se nombra solo si es la del propio usuario de soporte (la
+        // del operador). Si venia de otro cliente, ni su nombre ni su id: la bitacora de
+        // esta empresa la lee su administrador, y no tiene por que saber quien mas es cliente.
+        $desdePropia = $desde === (int) ($r[2]['empresa_usuario'] ?? -1);
+        $origen = TenantResolver::current();
+        $nombreOrigen = $desdePropia && (int) ($origen['id'] ?? 0) === $desde && !empty($origen['nombre'])
+            ? (string) $origen['nombre'] : null;
+        AuditLogger::authEvent([
+            'action'             => 'CAMBIO_EMPRESA',
+            'tenant_id'          => $destino,
+            'user_id'            => $userId,
+            'username'           => $perfil['username'] ?? null,
+            'email'              => $perfil['email'] ?? null,
+            // La sesion NUEVA: lo que haga en esta empresa queda con el mismo hash.
+            'session_token_hash' => hash('sha256', $r[1]['token']),
+            'success'            => true,
+            'old_values'         => $desdePropia ? ['tenant_id' => $desde] : null,
+            'new_values'         => ['tenant_id' => $destino],
+            'description'        => $nombreOrigen !== null
+                ? 'Soporte (acceso global) entró a esta empresa desde ' . $nombreOrigen . '.'
+                : 'Soporte (acceso global) entró a esta empresa.',
+        ]);
+        echo json_encode(['success' => true, 'data' => ['token' => $r[1]['token'], 'user' => $perfil]]);
+    } catch (Throwable $e) {
+        error_log('[auth] empresa: ' . $e->getMessage());
+        http_response_code(500);
+        echo json_encode(['success' => false, 'error' => 'No se pudo cambiar de empresa. Inténtalo de nuevo.', 'codigo' => 'ERROR_INTERNO']);
     }
 }

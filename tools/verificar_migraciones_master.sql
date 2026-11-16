@@ -7,7 +7,7 @@
 -- deja creado: una columna, una tabla o un indice.
 --
 -- Uso: en phpMyAdmin entra a la base master (en el server:
--- mtldtmte_master_gratex; en local: gratex_master) y ejecuta todo el archivo.
+-- smhynzte_master_gratex; en local: gratex_master) y ejecuta todo el archivo.
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden:
 -- varias de las viejas (001 a 006) estan hechas para correr UNA sola vez y
 -- fallan, o duplican filas, si se repiten. Las nuevas (007 en adelante) se
@@ -122,6 +122,17 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'tenants'
                    AND COLUMN_NAME = 'edicion' AND LOCATE('''ambas''', COLUMN_TYPE) > 0)
+  UNION ALL
+  SELECT '018', '018_integracion_request_log.sql',
+         'tabla integracion_request_log',
+         EXISTS (SELECT 1 FROM information_schema.TABLES
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'integracion_request_log')
+  UNION ALL
+  SELECT '019', '019_users_acceso_global.sql',
+         'columna users.acceso_global',
+         EXISTS (SELECT 1 FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+                   AND COLUMN_NAME = 'acceso_global')
 ) m
 ORDER BY m.migracion;
 

@@ -1,6 +1,7 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
 require_once(__DIR__ . '/../MasterDatabase.php');
+require_once(__DIR__ . '/../AccesoGlobal.php');
 
 /**
  * RoleModel — CRUD de roles + permisos (RBAC per-tenant).
@@ -243,6 +244,11 @@ class RoleModel
         $u->execute($params);
         if (!$u->fetch()) {
             return ['error', 'Ese usuario ya no existe. Recarga la lista.'];
+        }
+        // Un usuario de soporte (acceso global) usa el mismo rol en TODAS las empresas:
+        // cambiarlo desde la app de una cambiaria lo que puede hacer en todas. Solo por SQL.
+        if (self::multiTenant() && AccesoGlobal::tieneAcceso($this->conexion, $userId)) {
+            return ['error', AccesoGlobal::MSG_ROL_SOPORTE, 403];
         }
         // El rol debe existir para el tenant.
         $r = $this->conexion->prepare('SELECT id FROM roles WHERE tenant_id = :tid AND name = :name LIMIT 1');

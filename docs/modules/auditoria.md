@@ -106,10 +106,11 @@ contenga: `password`, `pass`, `secret`, `api_secret`, `token`, `authorization`,
 `ACECF_SENT`, `ACECF_RECEIVED`, `INTEGRACION_EMIT`, `INTEGRACION_ACECF`,
 `NCF_RANGE_REGISTER`, `NCF_SEQUENCE_UPDATE`, `LOGO_UPLOAD`, `LOGO_DELETE`,
 `AJUSTE_CREAR`, `AJUSTE_ANULAR`, `INVENTARIO_CONFIG`, `LOGIN_SUCCESS`, `LOGIN_FAILED`, `LOGOUT`,
-`ACCESS_DENIED`, `DGII_AUTH_IN_OK`, `DGII_AUTH_IN_FAILED`, `DGII_AUTH_OUT_FAILED`.
+`CAMBIO_EMPRESA`, `ACCESS_DENIED`, `DGII_AUTH_IN_OK`, `DGII_AUTH_IN_FAILED`, `DGII_AUTH_OUT_FAILED`.
 
 | Acción | Módulo | Cuándo |
 |---|---|---|
+| `CAMBIO_EMPRESA` | `auth` | Un usuario de soporte (acceso global) abre sesión en esta empresa (`POST /api/auth/empresa`). `tenant_id` = la empresa a la que entró; `new_values` `{tenant_id}`; `session_token_hash` = la sesión nueva, así lo que haga después se une a esta fila. La empresa de origen solo aparece (`description` y `old_values`) si es la del propio usuario de soporte, nunca la de otro cliente. En la web, «Entrada de soporte». Ver [acceso-global.md](acceso-global.md). |
 | `ACCESS_DENIED` | el módulo al que se intentó entrar | Un usuario con sesión válida pide un módulo que su rol no tiene (**403**). Lo registran `PermissionGate::deny`, `auditLogController` e `inventarioController` (un `PUT /api/inventario/configuracion` de un rol que no es `admin`: módulo `inventario`, motivo `rol distinto de admin`). `new_values.bloqueado=false` = modo sombra (`PERMISSIONS_ENFORCE=false`): se anotó pero no se bloqueó. Los **401** (token vencido o falso) no se registran a propósito: cada sesión que expira con la app abierta dejaría filas sin usuario. |
 | `INVENTARIO_CONFIG` | `inventario` | Un admin enciende o apaga «Bloquear ventas sin existencia» de su empresa (`PUT /api/inventario/configuracion`, solo rol `admin`). `entity_type` `inventario_config`, `entity_id` = el id de la empresa. `old_values` / `new_values`: `{ bloquear_sin_existencia: bool }`. Se registra solo cuando el cambio quedó guardado; si falla la escritura (p. ej. la migración master `013` sin correr) no hay fila de éxito. |
 | `DGII_AUTH_IN_OK` | `dgii-auth` | Token emitido a quien se autentica contra nuestro receptor (incluye los reintentos sobre una semilla ya canjeada). Sin empresa. |
@@ -225,7 +226,8 @@ tabla de arriba). El ajuste `INVENTARIO_INICIAL` con que se abre la existencia d
 recepción (ligada al token DGII), emisión/aprobación por integración, emisión sin
 confirmar de la DGII (`EMIT success=0` con la fila en `new_values`) y e-NCF consumidos
 sin fila (`NCF_SEQUENCE_UPDATE success=0`). Auth: login
-ok/fallido (en la empresa del usuario), logout. Accesos denegados (403).
+ok/fallido (en la empresa del usuario), logout, entrada de soporte (`CAMBIO_EMPRESA`, en la
+empresa a la que entra). Accesos denegados (403).
 Autenticación DGII entrante (todo) y saliente (fallos).
 
 **Fuera de alcance** (futuro, trivial con la misma línea): auditar lecturas

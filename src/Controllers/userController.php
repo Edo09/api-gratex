@@ -122,7 +122,8 @@ switch ($_SERVER['REQUEST_METHOD']) {
             }
         }
         $oldUser = $userModel->getUser($tenantId, $id);
-        $res = $userModel->updateUser($tenantId, $id, $fields);
+        // El actor: a un usuario de soporte (acceso global) solo lo cambia el mismo.
+        $res = $userModel->updateUser($tenantId, $id, $fields, (int) ($me['user_id'] ?? 0));
         if ($res[0] === 'success') {
             $newUser = $userModel->getUser($tenantId, $id);
             AuditLogger::log([
@@ -133,7 +134,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             ]);
             users_respond(['status' => true, 'data' => $newUser]);
         }
-        users_respond(['status' => false, 'error' => $res[1]], 400);
+        users_respond(['status' => false, 'error' => $res[1]], $res[2] ?? 400);
         break;
 
     case 'DELETE':
@@ -154,7 +155,7 @@ switch ($_SERVER['REQUEST_METHOD']) {
             ]);
             users_respond(['status' => true, 'data' => 'Usuario eliminado']);
         }
-        users_respond(['status' => false, 'error' => $res[1]], 400);
+        users_respond(['status' => false, 'error' => $res[1]], $res[2] ?? 400);
         break;
 
     default:
