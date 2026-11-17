@@ -60,7 +60,7 @@ petición de Gratex no carga el código ni el PDF de Ferretería).
 | `src/features/cotizaciones/CotizacionFormView.tsx` | El formulario de Gratex (sin cambios) |
 | `src/features/cotizaciones/AccionesCotizacion.tsx` | Las acciones de una cotización guardada (PDF, Conduce, Facturar) según `formatoDeFila`. Las usan la fila del listado (`CotizacionesView`, que elige las columnas) y la barra de arriba de `FerreteriaCotizacionForm` |
 | `src/features/cotizaciones/permisosCotizacion.ts` | `usePermisosCotizacion()`: qué acciones puede usar el rol (`puedeEcf`, `puedeSimple`, `puedeConduce`), calculado una vez por pantalla |
-| `src/features/cotizaciones/formatos/ferreteria/` | `FerreteriaCotizacionForm.tsx`, `totales.ts` (misma cuenta que el PHP), `schema.ts` (Zod), `conversion.ts` (Facturar), y lo que comparte con el conduce: `lineas.ts`, `DescripcionLinea.tsx`, `BloqueCliente.tsx` |
+| `src/features/cotizaciones/formatos/ferreteria/` | `FerreteriaCotizacionForm.tsx`, `totales.ts` (misma cuenta que el PHP), `descuento.ts` (el reparto del descuento y los %, misma cuenta que `FerreteriaFormato::repartirDescuento`) y `CampoDescuento.tsx` (el renglón "Descuento"), `schema.ts` (Zod), `conversion.ts` (Facturar), y lo que comparte con el conduce: `lineas.ts`, `DescripcionLinea.tsx`, `BloqueCliente.tsx` |
 | `scripts/parity-cotizacion-ferreteria.ts` | Corre `totalesFerreteria()` sobre la copia del fixture del backend |
 | `src/features/conduces/` | Los conduces: `ConducesView.tsx` (la lista), `ConduceEditor.tsx` + `ConduceForm.tsx` (el formulario), `schema.ts` (Zod) y `conversion.ts` (Facturar). El menú los muestra solo con el formato `ferreteria` (`NavItem.formato`, `useFormatoTenant()`) |
 
@@ -174,11 +174,14 @@ al centavo. Todo monto, cada suma incluida, va con `Redondeo::r2`.
 |------|-------|
 | Base de la línea | `r2(r2(cantidad) × r4(precio sin ITBIS))` |
 | ITBIS de la línea | `r2(base × tasa)`; tasa 0.18 / 0.16 / 0 / 0 para el indicador 1 / 2 / 3 / 4 |
-| **Sub-total RD$** | `r2(Σ bases)` |
-| **ITBIS** | `r2(Σ ITBIS de las líneas)`. Rótulo `ITBIS 18%` si todo lo gravado va al 18%; si no, `ITBIS` |
+| **Sub-total RD$** | `r2(Σ bases)`, SIN descuento |
+| − Descuento | Monto tecleado en el renglón "Descuento" (≥ 0, 2 decimales). Se aplica `min(r2(descuento), Sub-total)`; uno que pase del Sub-total se rechaza (`422`) |
+| Sub-total neto | `r2(Sub-total − descuento)`: la base del ITBIS y de la retención |
+| Reparto del descuento | Método del acumulado: a la línea i le toca `r2(descuento × Σ bases hasta i / Sub-total) − lo ya repartido`. La suma de las partes es exactamente el descuento; sin empates ni línea "de ajuste" |
+| **ITBIS** | `r2(Σ r2( r2(base − parte) × tasa ))`: cada línea paga su tasa sobre lo que le queda del descuento. Sin descuento es `r2(Σ ITBIS de las líneas)`. Rótulo `ITBIS 18%` si todo lo gravado va al 18%; si no, `ITBIS` |
 | + Cargos bancarios, + Manejos de operaciones bancarias, + Costo mano de obra | Montos tecleados, ≥ 0, sin ITBIS |
-| **TOTAL RD$** | `r2(Sub-total + ITBIS + cargos + manejo + mano de obra)` |
-| − Retención Renta por Tercero 5% | Casilla; si está marcada, `r2(Sub-total × 0.05)`, recalculada en cada guardado |
+| **TOTAL RD$** | `r2(Sub-total neto + ITBIS + cargos + manejo + mano de obra)` |
+| − Retención Renta por Tercero 5% | Casilla; si está marcada, `r2(Sub-total neto × 0.05)`, recalculada en cada guardado |
 | Adeudado | `r2(TOTAL − retención)` |
 | − Abono realizado | Tecleado, ≥ 0, y `abono ≤ adeudado` (comparando los redondeados) |
 | **Restante (Adeudado)** | `r2(adeudado − abono)`. No se guarda; se muestra solo si hay retención o abono |
@@ -188,13 +191,24 @@ lo mismo que el 18% del Sub-total de la hoja: 41,860.00 / 7,534.80 / 49,394.80,
 27,278.00 / 4,910.04 / 32,188.04 y 8,260.00 / 1,486.80 / 9,746.80. Con centavos
 puede diferir en uno; se eligió por línea porque es lo que hace el e-CF.
 
+**El descuento** va antes del ITBIS porque un descuento comercial baja la base
+gravable. Se reparte por línea (y no se le aplica el % al ITBIS total) para que con tasas
+mezcladas cada tasa baje en proporción, y para que la factura que sale de la cotización,
+que guarda el descuento por línea, dé el mismo ITBIS y el mismo TOTAL al centavo. Las
+líneas (`lineas` de `totales()`, `subtotal` e `itbis_amount` guardados) siguen siendo el
+valor SIN descuento; `totales()` devuelve además `descuento` y `subtotal_neto`.
+Ejemplo (la captura de la pantalla): 600 × 99.00 = 59,400.00, descuento 5,940.00
+(10%) → Sub-total neto 53,460.00, ITBIS 9,622.80, TOTAL 63,082.80. Las cuentas son las de
+`FerreteriaFormato::descuentoAplicable()` y `::repartirDescuento()` y las de
+`descuento.ts` del front, operación por operación.
+
 ### Validación
 
 `FerreteriaFormato::validarForma()` revisa la forma y los rangos del cuerpo sin DB
 (las reglas de unidades llegan inyectadas). Después, `aplicarCatalogo()` aplica lo que
 contestó la base: que el cliente exista, que cada producto exista (bien/servicio sale
-del producto, no de la pantalla), los totales y el tope del abono. Ambas son puras y
-las prueba el CLI. Los textos de cada `422` están en
+del producto, no de la pantalla), los totales y los topes del descuento (no pasa del
+Sub-total) y del abono. Ambas son puras y las prueba el CLI. Los textos de cada `422` están en
 [../api/cotizaciones.md](../api/cotizaciones.md#errores-de-ferretería).
 
 La descripción de cada línea pasa por `limpiarDescripcion()` antes de validarse y
@@ -227,10 +241,20 @@ cliente (si no, el nombre de la empresa, si no, el nombre), recortada a 100.
 
 ### Ajustes
 
-Conceptos de Ferretería: `cargos_bancarios`, `manejo_bancario`, `mano_obra`, `abono`
-(montos) y `retencion_isr` (casilla en el cuerpo, monto en la base). Un PUT reemplaza
-el set completo. En el GET, `ajustes.retencion_isr` es el monto guardado; el
+Conceptos de Ferretería: `cargos_bancarios`, `manejo_bancario`, `mano_obra`, `abono`,
+`descuento` (montos) y `retencion_isr` (casilla en el cuerpo, monto en la base). Un PUT
+reemplaza el set completo. En el GET, `ajustes.retencion_isr` es el monto guardado; el
 formulario marca la casilla si es > 0.
+
+`descuento` es el renglón "Descuento" bajo el Sub-total: lo único que se guarda es su
+monto en RD$ (la pantalla ofrece además un % para escribirlo, que no se guarda). No
+necesitó migración: `cotizacion_ajustes.concepto` es un `VARCHAR(30)` genérico y
+`cotizacionModel::ajustesAGuardar()` guarda cada concepto declarado con el monto que
+calculó `totales()` (para `descuento`, el aplicado). Un backend anterior lo rechaza como
+concepto desconocido; por eso `GET /api/branding` devuelve `cotizacion_descuento: true`
+(capacidad del código, no un ajuste del tenant) y el front solo muestra la fila si lo lee.
+Bajar el código después de guardar cotizaciones con descuento no está soportado: el PDF
+anterior ignora el concepto y su TOTAL impreso no cuadraría con el guardado.
 
 ### El PDF de Ferretería
 
@@ -248,7 +272,9 @@ el emisor (`EmisorConfigModel::get()`), el cliente y la ruta del logo
 - La marca `***********No hay más productos debajo de la línea*****` justo después de
   la última línea, siempre en su misma página.
 - Los totales en el orden de arriba; solo las filas con valor (Sub-total, ITBIS y
-  TOTAL siempre).
+  TOTAL siempre). El descuento, si hay, es la fila `Descuento` entre el Sub-total (el de
+  las líneas, sin descuento) y el ITBIS (el del Sub-total ya rebajado), con su monto en
+  negativo (`-5,940.00`).
 - `Recibido por:` y el pie: razón social, correo (azul, subrayado) y
   `Teléfono <telefono>` de `emisor_config`. Cada parte solo si tiene valor.
 - Saltos de página: la cabecera de la tabla se repite solo en páginas con filas; el
@@ -265,8 +291,12 @@ mismo.
 
 "Facturar ▾" abre la factura e-CF o la factura simple prellenada con el cliente y las
 líneas ligadas a sus productos (así la factura mueve inventario). El descuento fijo
-del cliente se aplica como siempre, con un aviso. Los cargos no se copian como líneas
-(sale un aviso) y la retención y el abono tampoco (el pago se registra en la factura).
+del cliente se aplica como siempre, con un aviso, salvo que la cotización traiga el suyo
+(el renglón "Descuento"): entonces ese pasa a las líneas de la factura, repartido por
+línea y en % (cada línea recibe el % que le hace dar justo su parte, así la factura e-CF
+da el mismo ITBIS y TOTAL), y el del cliente no se suma (sería descontar dos veces). Los
+cargos no se copian como líneas (sale un aviso) y la retención y el abono tampoco (el
+pago se registra en la factura). Un conduce no lleva descuento: lo avisa al abrirlo.
 En factura simple, cada precio lleva su ITBIS dentro. Una cotización no revisa ni reserva
 existencia: con «Bloquear ventas sin existencia» encendido, la factura puede rechazarse con
 `422` `STOCK_INSUFICIENTE` al facturar
@@ -388,7 +418,8 @@ formatos de `src/Utils/Cotizacion/`; Gratex y la facturación siguen con su `rou
 | Reglas, totales contra las hojas, validación, número, PDF, modelo con una conexión falsa, registro | `php tools/test_cotizacion_ferreteria.php` (desde `api-gratex`, sin DB; termina en `N/N OK` y sale con 1 si algo falla) |
 | PDF para comparar con el Excel | `php tools/test_cotizacion_ferreteria.php --pdf` (o `--grid`, con la rejilla de 10 mm) → `tools/out/` |
 | Orden de las FK del snapshot y SQL dinámico de la 026 y la 031, sin MySQL | `php tools/check_tenant_schema_orden.php` (`--mostrar` imprime el SQL armado) |
-| Paridad del front | `node scripts/parity-cotizacion-ferreteria.ts` (desde `fiscalo`) |
+| Paridad del front (también con los casos de descuento del fixture) | `node scripts/parity-cotizacion-ferreteria.ts` (desde `fiscalo`) |
+| Descuento en el front: las cuentas contra una referencia en enteros y la factura que sale de la cotización | `node scripts/test-descuento-cotizacion.ts` y `node scripts/test-descuento-factura.ts` (desde `fiscalo`) |
 | API real (crear, editar, vista previa, PDF, borrar, cada `422`, el `409`, la regresión de Gratex) y las comprobaciones M1-M12 de servidor: la 026 dos veces sobre un volcado de cada DB de tenant, la numeración con cinco creaciones simultáneas (`GET_LOCK`) y el estado que queda en la base | `tests/test_cotizaciones_ferreteria.http` contra un servidor con las migraciones |
 | Conduces: reglas, número, PDF en modo conduce, el modelo con una conexión falsa y las piezas del controller | `php tools/test_conduces.php` (sin DB; `--pdf` → `tools/out/`) |
 | Conduces contra MySQL de verdad (la base scratch): la 031 dos veces, el snapshot nuevo, conduceModel de punta a punta (con la búsqueda por el código de la cotización), un 1062 real, cinco creaciones en paralelo y las reglas ON DELETE | `php -d extension=pdo_mysql tools/test_conduces_mysql.php` (credenciales en `tools/.env`, ignorado por git; solo `smhynzte_conduces_scratch`) |

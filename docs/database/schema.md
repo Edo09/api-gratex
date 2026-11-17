@@ -153,8 +153,9 @@ DGII, ej. `43`), `indicador_facturacion` (1=ITBIS18 2=ITBIS16 3=ITBIS0 4=Exento)
 
 `cotizacion_ajustes` (026): `id`, `cotizacion_id` (FK `cotizaciones` CASCADE), `concepto`
 varchar(30) (clave del formato; Ferretería: `cargos_bancarios`, `manejo_bancario`, `mano_obra`,
-`abono`, `retencion_isr`), `monto` decimal(18,2). UNIQUE `uk_cotizacion_ajuste (cotizacion_id,
-concepto)`; solo se guardan los montos distintos de cero. Detalle:
+`abono`, `descuento`, `retencion_isr`), `monto` decimal(18,2). UNIQUE `uk_cotizacion_ajuste
+(cotizacion_id, concepto)`; solo se guardan los montos distintos de cero. `descuento` (el
+renglón "Descuento", se resta del Sub-total antes del ITBIS) no necesitó migración. Detalle:
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md).
 
 ### `conduces` / `conduce_items` / `conduce_secuencia` (031)

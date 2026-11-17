@@ -346,6 +346,165 @@
         "etiqueta_itbis": "ITBIS 18%",
         "mostrar_restante": false
       }
+    },
+    {
+      "id": "descuento_captura",
+      "hoja": null,
+      "code": "COT-000011",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 600, "description": "SUMINISTRO DE MATERIALES", "amount": 99, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false, "descuento": 5940 },
+      "esperado": {
+        "subtotal": 59400,
+        "descuento": 5940,
+        "subtotal_neto": 53460,
+        "itbis": 9622.8,
+        "total": 63082.8,
+        "retencion_isr": 0,
+        "adeudado": 63082.8,
+        "abono": 0,
+        "restante": 63082.8,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 59400, "itbis": 10692 }
+        ]
+      }
+    },
+    {
+      "id": "descuento_mixto",
+      "hoja": null,
+      "code": "COT-000012",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "A AL 18%", "amount": 1000, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "B AL 16%", "amount": 500, "indicador_facturacion": 2 },
+        { "quantity": 1, "description": "C EXENTO", "amount": 200, "indicador_facturacion": 4 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false, "descuento": 170 },
+      "esperado": {
+        "subtotal": 1700,
+        "descuento": 170,
+        "subtotal_neto": 1530,
+        "itbis": 234,
+        "total": 1764,
+        "retencion_isr": 0,
+        "adeudado": 1764,
+        "abono": 0,
+        "restante": 1764,
+        "etiqueta_itbis": "ITBIS",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 1000, "itbis": 180 },
+          { "base": 500, "itbis": 80 },
+          { "base": 200, "itbis": 0 }
+        ]
+      }
+    },
+    {
+      "id": "descuento_centavos",
+      "hoja": null,
+      "code": "COT-000013",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "ARTICULO UNO", "amount": 33.33, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO DOS", "amount": 33.33, "indicador_facturacion": 1 },
+        { "quantity": 1, "description": "ARTICULO TRES", "amount": 33.33, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false, "descuento": 10 },
+      "esperado": {
+        "subtotal": 99.99,
+        "descuento": 10,
+        "subtotal_neto": 89.99,
+        "itbis": 16.2,
+        "total": 106.19,
+        "retencion_isr": 0,
+        "adeudado": 106.19,
+        "abono": 0,
+        "restante": 106.19,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false,
+        "lineas": [
+          { "base": 33.33, "itbis": 6 },
+          { "base": 33.33, "itbis": 6 },
+          { "base": 33.33, "itbis": 6 }
+        ]
+      }
+    },
+    {
+      "id": "descuento_retencion_abono",
+      "hoja": null,
+      "code": "COT-000014",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "ARTICULO CON DESCUENTO, RETENCION Y ABONO", "amount": 1000, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 500, "retencion_isr": true, "descuento": 100 },
+      "esperado": {
+        "subtotal": 1000,
+        "descuento": 100,
+        "subtotal_neto": 900,
+        "itbis": 162,
+        "total": 1062,
+        "retencion_isr": 45,
+        "adeudado": 1017,
+        "abono": 500,
+        "restante": 517,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": true,
+        "error_abono": null
+      }
+    },
+    {
+      "id": "descuento_total",
+      "hoja": null,
+      "code": "COT-000015",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "ARTICULO CON EL 100% DE DESCUENTO", "amount": 100, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false, "descuento": 100 },
+      "esperado": {
+        "subtotal": 100,
+        "descuento": 100,
+        "subtotal_neto": 0,
+        "itbis": 0,
+        "total": 0,
+        "retencion_isr": 0,
+        "adeudado": 0,
+        "abono": 0,
+        "restante": 0,
+        "etiqueta_itbis": "ITBIS 18%",
+        "mostrar_restante": false,
+        "error_descuento": null
+      }
+    },
+    {
+      "id": "descuento_excesivo",
+      "hoja": null,
+      "code": "COT-000016",
+      "date": "2026-11-17 10:00:00",
+      "cliente": { "razon_social": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "company_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "client_name": "HOSPITAL DOCENTE DR. FRANCISCO E. MOSCOSO PUELLO", "rnc": "401515131" },
+      "lineas": [
+        { "quantity": 1, "description": "ARTICULO CON UN DESCUENTO DE MAS", "amount": 100, "indicador_facturacion": 1 }
+      ],
+      "ajustes": { "cargos_bancarios": 10, "manejo_bancario": 0, "mano_obra": 0, "abono": 0, "retencion_isr": false, "descuento": 150 },
+      "esperado": {
+        "subtotal": 100,
+        "descuento": 100,
+        "subtotal_neto": 0,
+        "itbis": 0,
+        "total": 10,
+        "etiqueta_itbis": "ITBIS 18%",
+        "error_descuento": "El descuento (RD$ 150.00) no puede ser mayor que el sub-total (RD$ 100.00)."
+      }
     }
   ]
 }

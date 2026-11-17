@@ -29,11 +29,15 @@ require_once __DIR__ . '/../../RequestContext.php';
 final class FerreteriaFormato extends CotizacionFormato
 {
     public const NOMBRE = 'ferreteria';
-    /** Ajustes con monto que acepta este formato (cotizacion_ajustes.concepto). */
-    public const AJUSTES_MONTO = ['cargos_bancarios', 'manejo_bancario', 'mano_obra', 'abono'];
+    /**
+     * Ajustes con monto que acepta este formato (cotizacion_ajustes.concepto).
+     * `descuento` es el de la fila "Descuento" bajo el Sub-total: se resta ANTES
+     * del ITBIS (ver totales()), a diferencia de los demás, que van después.
+     */
+    public const AJUSTES_MONTO = ['cargos_bancarios', 'manejo_bancario', 'mano_obra', 'abono', 'descuento'];
     /** La retención llega como casilla (bool) y se guarda como monto. */
     public const RETENCION = 'retencion_isr';
-    /** Retención Renta por Tercero: 5% del Sub-total, el monto antes del ITBIS. */
+    /** Retención Renta por Tercero: 5% del Sub-total (ya con el descuento), el monto antes del ITBIS. */
     public const TASA_RETENCION = 0.05;
     /** Tope de la descripción de una línea: así una fila siempre cabe en una página del PDF. */
     public const MAX_DESCRIPCION = 1000;
@@ -46,6 +50,7 @@ final class FerreteriaFormato extends CotizacionFormato
         'manejo_bancario' => 'Manejos de operaciones bancarias',
         'mano_obra' => 'Costo mano de obra',
         'abono' => 'Abono realizado',
+        'descuento' => 'Descuento',
     ];
 
     private const MESES = [
@@ -73,23 +78,80 @@ final class FerreteriaFormato extends CotizacionFormato
     }
 
     /**
+     * El descuento que de verdad se aplica: a centavos, nunca negativo y nunca
+     * más que el Sub-total (un descuento no puede dejar el documento en
+     * negativo). Lo que se pasa de más lo rechaza errorDescuento(); esto solo
+     * evita que totales() dé un TOTAL absurdo con lo que reciba.
+     *
+     * Misma cuenta que descuentoAplicable() de fiscalo (ferreteria/descuento.ts).
+     */
+    public static function descuentoAplicable(float $subtotal, float $descuento): float
+    {
+        $d = is_finite($descuento) ? Redondeo::r2($descuento) : 0.0;
+        return $d > 0 ? min($d, $subtotal) : 0.0;
+    }
+
+    /**
+     * Reparte el descuento entre las líneas en proporción a la base de cada una,
+     * al centavo y sin dejar resto: la suma de las partes es EXACTAMENTE el
+     * descuento. Cada tasa (18% / 16% / exento) baja lo que le toca y la factura
+     * que sale de la cotización guarda el descuento por línea.
+     *
+     * Método del acumulado: a la línea i le toca lo que debe llevar repartido
+     * hasta ella, redondeado, menos lo ya repartido. Sin empates que desempatar
+     * ni línea "de ajuste": el resto se va corriendo y la última cierra en el
+     * descuento. Misma cuenta, operación por operación, que repartirDescuento()
+     * de fiscalo (ferreteria/descuento.ts): (d × acumulado) / total, en ese orden.
+     *
+     * @param float[] $bases la base de cada línea (cantidad × precio, ya redondeada)
+     * @return float[] la parte de cada línea, en el mismo orden
+     */
+    public static function repartirDescuento(array $bases, float $descuento): array
+    {
+        $total = Redondeo::r2(array_sum($bases));
+        $d = self::descuentoAplicable($total, $descuento);
+        if ($d <= 0) {
+            return array_fill(0, count($bases), 0.0);
+        }
+        $acumBase = 0.0;
+        $repartido = 0.0;
+        $partes = [];
+        foreach ($bases as $base) {
+            $acumBase = Redondeo::r2($acumBase + $base);
+            $hasta = Redondeo::r2(($d * $acumBase) / $total);
+            $partes[] = Redondeo::r2($hasta - $repartido);
+            $repartido = $hasta;
+        }
+        return $partes;
+    }
+
+    /**
      * Totales de la cotización (spec 6.2), con las reglas de línea del e-CF:
      * base = r2(r2(cantidad) × r4(precio sin ITBIS)) e ITBIS por línea sobre
-     * esa base. Sin descuento: el fijo del cliente lo aplica la factura al
-     * convertir, no la cotización.
+     * esa base. El descuento fijo del cliente no entra aquí: lo aplica la
+     * factura al convertir (salvo que la cotización traiga el suyo).
+     *
+     * El descuento (la fila "Descuento", ajuste `descuento`) se resta del
+     * Sub-total ANTES del ITBIS: se reparte entre las líneas en proporción a su
+     * base (repartirDescuento) y cada una paga su tasa sobre lo que le queda,
+     * igual que lo hará la factura. `lineas` sigue siendo el valor de cada línea
+     * SIN descuento (cantidad × precio y el ITBIS de ese valor); `subtotal` es
+     * la suma de esas líneas, `subtotal_neto` lo que queda tras el descuento e
+     * `itbis` el de ese neto.
      *
      * Las sumas se redondean al final, como totalesDocumento del front. Los
      * cargos y la mano de obra van después del ITBIS y no lo llevan; la
-     * retención y el abono no cambian el TOTAL, solo lo que queda por pagar.
+     * retención y el abono no cambian el TOTAL, solo lo que queda por pagar. La
+     * retención es el 5% del Sub-total neto.
      *
      * @param array<int,array{quantity:float,amount:float,indicador_facturacion:int}> $lineas
-     * @param array{cargos_bancarios:float,manejo_bancario:float,mano_obra:float,abono:float,retencion_isr:bool} $ajustes
+     * @param array{cargos_bancarios:float,manejo_bancario:float,mano_obra:float,abono:float,retencion_isr:bool,descuento?:float} $ajustes
      */
     public static function totales(array $lineas, array $ajustes): array
     {
         $porLinea = [];
+        $bases = [];
         $sumaBase = 0.0;
-        $sumaItbis = 0.0;
         $gravadas = 0;
         $todasAl18 = true;
         foreach (array_values($lineas) as $l) {
@@ -97,25 +159,35 @@ final class FerreteriaFormato extends CotizacionFormato
             $base = Redondeo::r2(Redondeo::r2((float) $l['quantity']) * Redondeo::r4((float) $l['amount']));
             $itbis = Redondeo::r2($base * self::tasa($indicador));
             $porLinea[] = ['base' => $base, 'itbis' => $itbis];
+            $bases[] = $base;
             $sumaBase += $base;
-            $sumaItbis += $itbis;
             if ($itbis > 0) {
                 $gravadas++;
                 $todasAl18 = $todasAl18 && $indicador === 1;
             }
         }
         $subtotal = Redondeo::r2($sumaBase);
+        $descuento = self::descuentoAplicable($subtotal, (float) ($ajustes['descuento'] ?? 0));
+        $neto = Redondeo::r2($subtotal - $descuento);
+        // Sin descuento las partes son 0 y esto es exactamente Σ ITBIS de cada línea.
+        $partes = self::repartirDescuento($bases, $descuento);
+        $sumaItbis = 0.0;
+        foreach (array_values($lineas) as $i => $l) {
+            $sumaItbis += Redondeo::r2(Redondeo::r2($bases[$i] - $partes[$i]) * self::tasa((int) ($l['indicador_facturacion'] ?? 1)));
+        }
         $itbis = Redondeo::r2($sumaItbis);
         $cargos = Redondeo::r2((float) ($ajustes['cargos_bancarios'] ?? 0));
         $manejo = Redondeo::r2((float) ($ajustes['manejo_bancario'] ?? 0));
         $manoObra = Redondeo::r2((float) ($ajustes['mano_obra'] ?? 0));
-        $total = Redondeo::r2($subtotal + $itbis + $cargos + $manejo + $manoObra);
-        $retencion = !empty($ajustes[self::RETENCION]) ? Redondeo::r2($subtotal * self::TASA_RETENCION) : 0.0;
+        $total = Redondeo::r2($neto + $itbis + $cargos + $manejo + $manoObra);
+        $retencion = !empty($ajustes[self::RETENCION]) ? Redondeo::r2($neto * self::TASA_RETENCION) : 0.0;
         $adeudado = Redondeo::r2($total - $retencion);
         $abono = Redondeo::r2((float) ($ajustes['abono'] ?? 0));
         return [
             'lineas' => $porLinea,
             'subtotal' => $subtotal,
+            'descuento' => $descuento,
+            'subtotal_neto' => $neto,
             'itbis' => $itbis,
             'cargos_bancarios' => $cargos,
             'manejo_bancario' => $manejo,
@@ -150,6 +222,28 @@ final class FerreteriaFormato extends CotizacionFormato
         }
         return 'El abono (RD$ ' . number_format($abono, 2) . ') no puede ser mayor que lo adeudado (RD$ '
             . number_format($adeudado, 2) . ').';
+    }
+
+    /**
+     * El descuento no puede pasar del Sub-total (el documento no queda en
+     * negativo). Se compara el monto PEDIDO, ya a centavos, con el Sub-total de
+     * totales(): totales() acota el descuento a ese Sub-total, así que mirar su
+     * `descuento` nunca vería el exceso. Igual que el abono, se comparan montos
+     * redondeados, y pedir justo el Sub-total (un 100%) es válido.
+     *
+     * @param array $totales salida de totales()
+     * @param float $pedido  el descuento que mandó el usuario (cot['ajustes']['descuento'])
+     * @return string|null el mensaje para el usuario, o null si está bien
+     */
+    public static function errorDescuento(array $totales, float $pedido): ?string
+    {
+        $pedido = is_finite($pedido) ? Redondeo::r2($pedido) : 0.0;
+        $subtotal = (float) ($totales['subtotal'] ?? 0);
+        if ($pedido <= $subtotal) {
+            return null;
+        }
+        return 'El descuento (RD$ ' . number_format($pedido, 2) . ') no puede ser mayor que el sub-total (RD$ '
+            . number_format($subtotal, 2) . ').';
     }
 
     /**
@@ -426,7 +520,9 @@ final class FerreteriaFormato extends CotizacionFormato
         }
         $cot['items'] = $items;
         $tot = self::totales(self::lineasDesdeFilas($cot['items']), $cot['ajustes']);
-        $error = self::errorAbono($tot);
+        // El descuento primero: pasado del Sub-total, el TOTAL (y con él lo
+        // adeudado, que juzga al abono) ya no significa nada.
+        $error = self::errorDescuento($tot, (float) ($cot['ajustes']['descuento'] ?? 0)) ?? self::errorAbono($tot);
         if ($error !== null) {
             return ['error', $error, 422];
         }
@@ -644,8 +740,11 @@ final class FerreteriaFormato extends CotizacionFormato
     }
 
     /**
-     * Los cuatro montos y la casilla de retención, o el mensaje para el
-     * usuario. Sin ajustes = ninguno: un PUT reemplaza el set completo.
+     * Los cinco montos (cargos, manejo, mano de obra, abono y descuento) y la
+     * casilla de retención, o el mensaje para el usuario. Sin ajustes =
+     * ninguno: un PUT reemplaza el set completo. Que el descuento no pase del
+     * Sub-total no se juzga aquí (hace falta calcular las líneas): ver
+     * errorDescuento().
      */
     private static function normalizarAjustes(mixed $ajustes): array|string
     {
@@ -654,6 +753,7 @@ final class FerreteriaFormato extends CotizacionFormato
             'manejo_bancario' => 0.0,
             'mano_obra' => 0.0,
             'abono' => 0.0,
+            'descuento' => 0.0,
             self::RETENCION => false,
         ];
         if ($ajustes === null) {

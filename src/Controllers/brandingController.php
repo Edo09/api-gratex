@@ -90,6 +90,13 @@ function brCurrent(int $tenantId): array
         // ven el mismo valor. Solo lectura: se cambia por SQL y el PUT no lo
         // acepta. Sin la columna (011 sin correr) todo tenant es 'gratex'.
         'cotizacion_formato'  => (string) ($tenant['cotizacion_formato'] ?? 'gratex'),
+        // Este backend guarda el ajuste `descuento` de la cotizacion de
+        // Ferreteria (la fila "Descuento", FerreteriaFormato::totales) y lo
+        // imprime en el PDF. El front solo ofrece la fila si lee esto en true:
+        // un backend anterior rechaza el concepto desconocido con 422, asi que
+        // no puede mostrarla. No depende del tenant: es una capacidad del
+        // codigo, no un ajuste; el front solo la mira en el formato 'ferreteria'.
+        'cotizacion_descuento' => true,
         // POS activo para la empresa (master.tenants.pos_enabled, migracion
         // master 012): con esto el front decide si muestra el boton POS (A1).
         // Solo lectura: se activa por SQL. Sin la columna, nadie tiene POS.

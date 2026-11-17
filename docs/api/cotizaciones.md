@@ -137,7 +137,9 @@ Cómo leer la fila:
 - **`ajustes`** es **siempre un objeto JSON** con clave = concepto y monto DECIMAL.
   Un concepto que no viene vale 0. Las filas de Gratex traen `{}` sin consultar la
   tabla (una base sin la 026 nunca vacía el listado de Gratex). En Ferretería,
-  `retencion_isr` es el **monto** de la retención guardada (no la casilla).
+  `retencion_isr` es el **monto** de la retención guardada (no la casilla) y
+  `descuento` el del renglón "Descuento": `subtotal` va SIN restarlo, e `itbis` y
+  `total` ya lo llevan.
 - **`client_name`, `company_name`, `rnc`** vienen del cliente (`LEFT JOIN clients`):
   el `client_name` que se guardó en `cotizaciones` queda tapado por el del JOIN.
 - `description`: las descripciones de las líneas unidas con `\n`, para la lista.
@@ -264,7 +266,7 @@ código vive en `src/Utils/Cotizacion/FerreteriaFormato.php`; el PDF, en
     { "product_id": null, "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 }
   ],
   "ajustes": { "cargos_bancarios": 0, "manejo_bancario": 0, "mano_obra": 1500,
-               "abono": 0, "retencion_isr": false }
+               "abono": 0, "retencion_isr": false, "descuento": 0 }
 }
 ```
 
@@ -297,11 +299,15 @@ código vive en `src/Utils/Cotizacion/FerreteriaFormato.php`; el PDF, en
 | `manejo_bancario` | Igual | Se suma al TOTAL, sin ITBIS |
 | `mano_obra` | Igual | Se suma al TOTAL, sin ITBIS |
 | `abono` | Igual, y no puede pasar de lo adeudado | Resta de lo adeudado |
-| `retencion_isr` | **Booleano** (`true`/`false`; otro tipo → `422`) | `true` = 5% del Sub-total, restado de lo adeudado |
+| `retencion_isr` | **Booleano** (`true`/`false`; otro tipo → `422`) | `true` = 5% del Sub-total **neto** (ya con el descuento), restado de lo adeudado |
+| `descuento` | ≥ 0, hasta 2 decimales, `null` = 0, y no puede pasar del Sub-total (puede ser igual: un 100%) | **Se resta del Sub-total ANTES del ITBIS** (el ITBIS y la retención se calculan sobre lo que queda) |
 
 Cualquier otra clave → `422`. Solo se guardan los montos distintos de cero; la
-retención se guarda como monto (`r2(Sub-total × 0.05)`) y se recalcula en cada
-guardado.
+retención se guarda como monto (`r2(Sub-total neto × 0.05)`) y se recalcula en cada
+guardado. El `descuento` es el renglón "Descuento" que la pantalla ofrece bajo el
+Sub-total; un backend anterior a este concepto lo rechaza (`422`, concepto
+desconocido), por eso `GET /api/branding` avisa con `cotizacion_descuento: true` cuando
+se puede usar.
 
 **Lo que calcula el servidor** (todo redondeado a 2 decimales con
 `Redondeo::r2`, igual que la pantalla):
@@ -310,11 +316,19 @@ guardado.
 |-------|-------|
 | Base de la línea (`subtotal`) | `r2(r2(quantity) × r4(amount))` |
 | ITBIS de la línea (`itbis_amount`) | `r2(base × tasa)`, tasa 0.18 / 0.16 / 0 / 0 |
-| Sub-total RD$ (`cotizaciones.subtotal`) | Suma de las bases |
-| ITBIS (`cotizaciones.itbis`) | Suma de los ITBIS de las líneas |
-| TOTAL RD$ (`cotizaciones.total`) | Sub-total + ITBIS + cargos bancarios + manejo bancario + mano de obra |
+| Sub-total RD$ (`cotizaciones.subtotal`) | Suma de las bases (SIN descuento) |
+| Descuento | `min(r2(descuento), Sub-total)`, nunca negativo. Lo escrito de más se rechaza (`422`) antes de llegar aquí |
+| Sub-total neto | `r2(Sub-total − descuento)`: la base del ITBIS y de la retención |
+| Reparto del descuento | A cada línea le toca `r2(descuento × acumulado de bases / Sub-total) − lo ya repartido` (método del acumulado: la suma de las partes es exactamente el descuento). Cada tasa baja en proporción |
+| ITBIS (`cotizaciones.itbis`) | `r2(Σ r2( r2(base − parte) × tasa ))`: cada línea paga su tasa sobre lo que le queda. Sin descuento es la suma de los ITBIS de las líneas |
+| TOTAL RD$ (`cotizaciones.total`) | Sub-total neto + ITBIS + cargos bancarios + manejo bancario + mano de obra |
+| Retención 5% | `r2(Sub-total neto × 0.05)` |
 | Adeudado | TOTAL − retención |
 | Restante (Adeudado) | Adeudado − abono. No se guarda; el PDF lo imprime solo si hay retención o abono |
+
+Cada línea guarda su `subtotal` (base) e `itbis_amount` SIN descuento: el descuento es
+del documento y vive en `cotizacion_ajustes`. La cabecera guarda el `subtotal` de las
+líneas, y el `itbis` y el `total` ya con el descuento.
 
 Numeración: `numero` = el mayor + 1 de la base del tenant, `code` =
 `COT-` + 6 cifras (`COT-000123`). Nunca cambian al editar.
@@ -354,7 +368,8 @@ fecha (`SEPTIEMBRE 2/2026.-`), número, cliente (razón social, si no nombre de 
 empresa, si no nombre) y su RNC con guiones, tabla `Cantidad | Descripción
 mercancías | Valor Unitario | Valor Total RD$`, la marca "No hay más productos
 debajo de la línea", los totales (solo las filas con valor; Sub-total, ITBIS y
-TOTAL siempre), "Recibido por:" y el pie con la razón social, el correo y el
+TOTAL siempre; el descuento, si hay, como fila `Descuento` con su monto en negativo
+entre el Sub-total y el ITBIS), "Recibido por:" y el pie con la razón social, el correo y el
 teléfono de `emisor_config`. Detalle en
 [../modules/cotizaciones-formatos.md](../modules/cotizaciones-formatos.md#el-pdf-de-ferretería).
 
@@ -386,9 +401,10 @@ Todos con `status: false`. `N` es el número de la línea como la ve el usuario 
 | 422 | `Línea N: el producto ya no existe en el catálogo. Búscalo de nuevo o déjala como línea libre.` |
 | 422 | `Un producto de la cotización ya no existe en el catálogo (lo eliminaron mientras la editabas). Búscalo de nuevo o quita la línea.` (lo borraron entre la revisión y el guardado) |
 | 422 | `Los cargos y abonos de la cotización no son válidos. Revísalos.` (`ajustes` no es objeto) |
-| 422 | `Los cargos y abonos traen un concepto que este formato no conoce («descuento»).` |
-| 422 | `«Costo mano de obra» no es un monto válido. Revísalo.` / `… no puede ser negativo.` / `… admite hasta 2 decimales.` (lo mismo para «Cargos bancarios», «Manejos de operaciones bancarias» y «Abono realizado») |
+| 422 | `Los cargos y abonos traen un concepto que este formato no conoce («propina»).` (cualquier clave que no sea de las de la tabla de ajustes) |
+| 422 | `«Costo mano de obra» no es un monto válido. Revísalo.` / `… no puede ser negativo.` / `… admite hasta 2 decimales.` (lo mismo para «Cargos bancarios», «Manejos de operaciones bancarias», «Abono realizado» y «Descuento») |
 | 422 | `La casilla «Retención Renta por Tercero 5%» no es válida: tiene que ser sí o no.` |
+| 422 | `El descuento (RD$ 50,000.00) no puede ser mayor que el sub-total (RD$ 41,860.00).` (se juzga antes que el abono) |
 | 422 | `El abono (RD$ 50,000.00) no puede ser mayor que lo adeudado (RD$ 49,394.80).` |
 | 404 | `Esta cotización ya no existe. Puede que la hayan eliminado; vuelve al listado.` (PUT de una que ya no existe, o que la borran mientras se guarda) |
 | 409 | `La pantalla de cotizaciones está desactualizada (cambió el formato de tu empresa). Recarga la página.` |

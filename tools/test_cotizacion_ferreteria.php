@@ -50,9 +50,11 @@ if (!is_array($fixture) || !isset($fixture['casos'], $fixture['emisor'])) {
 $casos = array_column($fixture['casos'], null, 'id');
 
 echo "== Fixtures ==\n";
-$chk('el fixture trae los 10 casos', array_keys($casos) === [
+$chk('el fixture trae los 16 casos', array_keys($casos) === [
     'pintura', 'pintura_retencion_abono', 'pintura_mano_obra', 'b150000049', 'ceramicas',
     'redondeo_8475', 'flotante', 'mixto', 'exento', 'largo_60',
+    'descuento_captura', 'descuento_mixto', 'descuento_centavos', 'descuento_retencion_abono',
+    'descuento_total', 'descuento_excesivo',
 ]);
 // D = A × C y Sub-total = SUM(D): la cuenta de la hoja, sin Redondeo, para
 // que un error al copiar una línea no se esconda detrás del código probado.
@@ -200,6 +202,11 @@ foreach ($casos as $id => $caso) {
             $msg = FerreteriaFormato::errorAbono($t);
             $chk("{$id}: errorAbono " . ($esperado === null ? 'null' : 'con mensaje') . ' (dio ' . var_export($msg, true) . ')',
                 $esperado === null ? $msg === null : $msg !== null);
+        } elseif ($clave === 'error_descuento') {
+            // Se juzga el descuento PEDIDO (el del caso), no el que totales() acota al Sub-total.
+            $msg = FerreteriaFormato::errorDescuento($t, (float) ($caso['ajustes']['descuento'] ?? 0));
+            $chk("{$id}: errorDescuento " . ($esperado === null ? 'null' : 'con el mensaje del caso') . ' (dio ' . var_export($msg, true) . ')',
+                $esperado === null ? $msg === null : $msg === $esperado);
         } else {
             $obtenido = $t[$clave] ?? '(falta)';
             $ok = (is_bool($esperado) || is_string($esperado)) ? $obtenido === $esperado : $igual($obtenido, $esperado);
@@ -211,7 +218,7 @@ foreach ($casos as $id => $caso) {
 
 $t = $totalesDe($casos['pintura']);
 $chk('las claves de totales(), en el orden del contrato', array_keys($t) === [
-    'lineas', 'subtotal', 'itbis', 'cargos_bancarios', 'manejo_bancario', 'mano_obra', 'total',
+    'lineas', 'subtotal', 'descuento', 'subtotal_neto', 'itbis', 'cargos_bancarios', 'manejo_bancario', 'mano_obra', 'total',
     'retencion_isr', 'adeudado', 'abono', 'restante', 'etiqueta_itbis', 'mostrar_restante',
 ]);
 $soloMontos = array_diff_key($t, array_flip(['lineas', 'etiqueta_itbis', 'mostrar_restante']));
@@ -245,6 +252,109 @@ $msg = FerreteriaFormato::errorAbono($conAbono(47301.81, true));
 $chk('con retención lo adeudado es TOTAL − retención (47,301.80)',
     $msg === 'El abono (RD$ 47,301.81) no puede ser mayor que lo adeudado (RD$ 47,301.80).'
     && FerreteriaFormato::errorAbono($conAbono(47301.8, true)) === null);
+
+echo "\n== FerreteriaFormato::descuentoAplicable / repartirDescuento ==\n";
+// Las mismas cifras que scripts/test-descuento-cotizacion.ts del front: hechas a mano.
+$chk('descuentoAplicable: negativo => 0, 3 decimales => centavos, de mas => el Sub-total, sin Sub-total o NaN => 0',
+    FerreteriaFormato::descuentoAplicable(1000.0, -5.0) === 0.0
+    && FerreteriaFormato::descuentoAplicable(1000.0, 12.345) === 12.35
+    && FerreteriaFormato::descuentoAplicable(100.0, 150.0) === 100.0
+    && FerreteriaFormato::descuentoAplicable(0.0, 20.0) === 0.0
+    && FerreteriaFormato::descuentoAplicable(100.0, NAN) === 0.0);
+$chk('repartirDescuento: sin descuento, negativo, sin lineas o con bases en 0 => nada que repartir',
+    FerreteriaFormato::repartirDescuento([100.0, 50.0], 0.0) === [0.0, 0.0]
+    && FerreteriaFormato::repartirDescuento([100.0, 50.0], -5.0) === [0.0, 0.0]
+    && FerreteriaFormato::repartirDescuento([], 10.0) === []
+    && FerreteriaFormato::repartirDescuento([0.0, 0.0], 10.0) === [0.0, 0.0]);
+$chk('repartirDescuento: una linea se lleva todo; 1000 / 500 / 200 con 170 => 100 / 50 / 20',
+    FerreteriaFormato::repartirDescuento([59400.0], 5940.0) === [5940.0]
+    && FerreteriaFormato::repartirDescuento([1000.0, 500.0, 200.0], 170.0) === [100.0, 50.0, 20.0]);
+$chk('repartirDescuento: 10.00 entre 3 x 33.33 => 3.33 / 3.34 / 3.33 (suma 10.00)',
+    FerreteriaFormato::repartirDescuento([33.33, 33.33, 33.33], 10.0) === [3.33, 3.34, 3.33]);
+$chk('repartirDescuento: descuento = Sub-total => cada linea se lleva su base',
+    FerreteriaFormato::repartirDescuento([33.33, 20.01, 0.05], 53.39) === [33.33, 20.01, 0.05]);
+$chk('repartirDescuento: un centavo entre dos lineas iguales lo lleva la primera (0.005 sube a 0.01)',
+    FerreteriaFormato::repartirDescuento([10.0, 10.0], 0.01) === [0.01, 0.0]);
+$chk('repartirDescuento: un descuento de mas se acota al Sub-total',
+    FerreteriaFormato::repartirDescuento([60.0, 40.0], 500.0) === [60.0, 40.0]);
+
+echo "\n== FerreteriaFormato::totales con descuento ==\n";
+// Los casos fijos (la captura de la pantalla, tasas mezcladas, centavos, retencion + abono, 100% y de mas) ya
+// corrieron arriba con el fixture. Aqui: que sin descuento nada cambie, y 1,500 casos al azar contra una
+// referencia en ENTEROS (centavos; mitad hacia arriba), por si la cuenta con decimales se desviara un centavo.
+$sinD = FerreteriaFormato::totales($lineasDe($casos['pintura']), $casos['pintura']['ajustes']);
+$conCero = FerreteriaFormato::totales($lineasDe($casos['pintura']), ['descuento' => 0.0] + $casos['pintura']['ajustes']);
+$chk('descuento 0 es igual a no tenerlo, y el neto es el Sub-total', $sinD === $conCero && $sinD['descuento'] === 0.0
+    && $sinD['subtotal_neto'] === $sinD['subtotal']);
+$chk('las lineas siguen siendo el valor SIN descuento (base e ITBIS de cada una)',
+    FerreteriaFormato::totales($lineasDe($casos['descuento_mixto']), $casos['descuento_mixto']['ajustes'])['lineas']
+    === [['base' => 1000.0, 'itbis' => 180.0], ['base' => 500.0, 'itbis' => 80.0], ['base' => 200.0, 'itbis' => 0.0]]);
+$mitadArriba = static fn(int $num, int $den): int => intdiv(2 * $num + $den, 2 * $den);
+$tasaBp = [1 => 1800, 2 => 1600, 3 => 0, 4 => 0];
+$centavos = static fn(float $x): int => (int) round($x * 100);
+mt_srand(20261117);
+$casosAzar = 0;
+$malosAzar = 0;
+$primerMaloAzar = '';
+for ($i = 0; $i < 1500; $i++) {
+    $nLineas = mt_rand(1, 6);
+    $lineasAzar = [];
+    $basesAzar = [];
+    $indsAzar = [];
+    for ($k = 0; $k < $nLineas; $k++) {
+        $cantC = mt_rand(1, 5000);        // 0.01 .. 50.00
+        $precioM = mt_rand(1, 5000000);   // 0.0001 .. 500.0000
+        $ind = mt_rand(1, 4);
+        $lineasAzar[] = ['quantity' => $cantC / 100, 'amount' => $precioM / 10000, 'indicador_facturacion' => $ind];
+        $basesAzar[] = $mitadArriba($cantC * $precioM, 10000);   // centesimas x diezmilesimas / 10,000 = centavos
+        $indsAzar[] = $ind;
+    }
+    $S = array_sum($basesAzar);
+    $modoAzar = mt_rand(0, 99);
+    $D = ($S === 0 || $modoAzar < 10) ? 0 : ($modoAzar < 20 ? $S : mt_rand(1, $S));
+    // Reparto del acumulado: hasta_i = round(D x acumulado_i / S).
+    $acumAzar = 0;
+    $hechoAzar = 0;
+    $itbisAzar = 0;
+    foreach ($basesAzar as $k => $b) {
+        $acumAzar += $b;
+        $hasta = $S === 0 ? 0 : $mitadArriba($D * $acumAzar, $S);
+        $itbisAzar += $mitadArriba(($b - ($hasta - $hechoAzar)) * $tasaBp[$indsAzar[$k]], 10000);
+        $hechoAzar = $hasta;
+    }
+    $t = FerreteriaFormato::totales($lineasAzar, ['descuento' => $D / 100]);
+    $ok = $centavos($t['subtotal']) === $S && $centavos($t['descuento']) === $D && $centavos($t['subtotal_neto']) === $S - $D
+        && $centavos($t['itbis']) === $itbisAzar && $centavos($t['total']) === $S - $D + $itbisAzar;
+    $partes = FerreteriaFormato::repartirDescuento(array_map(static fn(int $b): float => $b / 100, $basesAzar), $D / 100);
+    $okPartes = array_sum(array_map($centavos, $partes)) === $D;
+    foreach ($partes as $k => $p) {
+        $okPartes = $okPartes && $centavos($p) >= 0 && $centavos($p) <= $basesAzar[$k];
+    }
+    $casosAzar++;
+    if (!$ok || !$okPartes) {
+        $malosAzar++;
+        if ($primerMaloAzar === '') {
+            $primerMaloAzar = sprintf('D=%d S=%d: total %s, itbis %s (referencia %d y %d)', $D, $S, $t['total'], $t['itbis'], $S - $D + $itbisAzar, $itbisAzar);
+        }
+    }
+}
+$chk("{$casosAzar} casos al azar: totales y reparto iguales a la referencia en enteros"
+    . ($malosAzar > 0 ? " ({$malosAzar} distintos; primero: {$primerMaloAzar})" : ''), $malosAzar === 0);
+
+echo "\n== FerreteriaFormato::errorDescuento ==\n";
+$conDescuento = static fn(float $descuento): array => FerreteriaFormato::totales(
+    $lineasDe($casos['pintura']),
+    ['descuento' => $descuento] + $casos['pintura']['ajustes']
+);
+$chk('descuento igual al Sub-total (41,860.00): sin error (un 100%)', FerreteriaFormato::errorDescuento($conDescuento(41860.0), 41860.0) === null);
+$msg = FerreteriaFormato::errorDescuento($conDescuento(50000.0), 50000.0);
+$chk('descuento 50,000.00 sobre 41,860.00: "' . $msg . '"',
+    $msg === 'El descuento (RD$ 50,000.00) no puede ser mayor que el sub-total (RD$ 41,860.00).');
+$chk('un centavo de mas ya es error (41,860.01)', FerreteriaFormato::errorDescuento($conDescuento(41860.01), 41860.01) !== null);
+$chk('menos de un centavo de mas no es error: 41,860.004 se redondea a 41,860.00', FerreteriaFormato::errorDescuento($conDescuento(41860.004), 41860.004) === null);
+$chk('totales() acota el descuento al Sub-total (por eso errorDescuento mira el pedido, no el aplicado)',
+    $conDescuento(50000.0)['descuento'] === 41860.0 && $conDescuento(50000.0)['subtotal_neto'] === 0.0 && $conDescuento(50000.0)['total'] === 0.0);
+$chk('sin descuento no hay error', FerreteriaFormato::errorDescuento($sinD, 0.0) === null);
 
 echo "\n== FerreteriaFormato::codigo / formatearRnc / fechaLarga ==\n";
 $chk('codigo(1) = COT-000001', FerreteriaFormato::codigo(1) === 'COT-000001');
@@ -348,8 +458,9 @@ $chk("línea libre: sin producto, descripción recortada, unidad '43', indicador
     'product_id' => null, 'description' => 'CORTE DE TUBO', 'quantity' => 1.0, 'amount' => 150.0,
     'unidad_medida' => '43', 'indicador_facturacion' => 1, 'indicador_bien_servicio' => 1,
 ]);
-$chk('ajustes: los 4 montos como float y la casilla como bool', ($cot['ajustes'] ?? null) === [
-    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 1500.0, 'abono' => 0.0, 'retencion_isr' => false,
+$chk('ajustes: los 5 montos como float y la casilla como bool', ($cot['ajustes'] ?? null) === [
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 1500.0, 'abono' => 0.0, 'descuento' => 0.0,
+    'retencion_isr' => false,
 ]);
 $chk("problemaCantidad recibe la unidad normalizada ('43', nunca null) y 2 decimales",
     $llamadasCantidad === [[2.0, '43', 2], [1.0, '43', 2]]);
@@ -358,13 +469,23 @@ $chk('lo validado entra directo a totales(): 2,020.00 + 363.60 + mano de obra 1,
     $t['subtotal'] === 2020.0 && $t['itbis'] === 363.6 && $t['total'] === 3883.6);
 
 $r = $validar($cuerpo(function (object $b) { unset($b->ajustes); }));
-$chk('sin ajustes = ninguno (montos 0, sin retención)', ($r['cot']['ajustes'] ?? null) === [
-    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'retencion_isr' => false,
+$chk('sin ajustes = ninguno (montos 0, sin retención ni descuento)', ($r['cot']['ajustes'] ?? null) === [
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'descuento' => 0.0,
+    'retencion_isr' => false,
 ]);
 $r = $validar($cuerpo(function (object $b) { $b->ajustes = (object) ['retencion_isr' => true, 'abono' => 10.5, 'mano_obra' => null]; }));
 $chk('retención marcada, abono 10.50 y un monto vacío (null = 0)', ($r['cot']['ajustes'] ?? null) === [
-    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 10.5, 'retencion_isr' => true,
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 10.5, 'descuento' => 0.0,
+    'retencion_isr' => true,
 ]);
+// El descuento de la fila "Descuento": un monto más, con las mismas reglas que los demás.
+$r = $validar($cuerpo(function (object $b) { $b->ajustes->descuento = 202; }));
+$chk('descuento 202: pasa como float, junto a los demás ajustes', ($r['ok'] ?? null) === true && ($r['cot']['ajustes']['descuento'] ?? null) === 202.0
+    && ($r['cot']['ajustes']['mano_obra'] ?? null) === 1500.0);
+$r = $validar($cuerpo(function (object $b) { $b->ajustes->descuento = '5940.50'; }));
+$chk("descuento '5940.50' (texto numérico): 5940.5", ($r['ok'] ?? null) === true && ($r['cot']['ajustes']['descuento'] ?? null) === 5940.5);
+$r = $validar($cuerpo(function (object $b) { $b->ajustes->descuento = null; }));
+$chk('descuento null = 0 (campo vacío)', ($r['ok'] ?? null) === true && ($r['cot']['ajustes']['descuento'] ?? null) === 0.0);
 $r = $validar($cuerpo(function (object $b) { unset($b->date); }));
 $chk('sin fecha: date null (POST = ahora, PUT = la guardada)', ($r['ok'] ?? null) === true && $r['cot']['date'] === null);
 $r = $validar($cuerpo(function (object $b) { $b->date = ''; }));
@@ -437,8 +558,14 @@ $rechaza('product_id -3', $cuerpo(function (object $b) { $b->items[0]->product_i
     'Línea 1: el producto no es válido. Búscalo de nuevo o déjala como línea libre.');
 $rechaza('ajustes que no son objeto', $cuerpo(function (object $b) { $b->ajustes = 'mucho'; }),
     'Los cargos y abonos de la cotización no son válidos. Revísalos.');
-$rechaza('concepto desconocido', $cuerpo(function (object $b) { $b->ajustes->descuento = 10; }),
-    'Los cargos y abonos traen un concepto que este formato no conoce («descuento»).');
+$rechaza('concepto desconocido', $cuerpo(function (object $b) { $b->ajustes->propina = 10; }),
+    'Los cargos y abonos traen un concepto que este formato no conoce («propina»).');
+$rechaza('descuento negativo', $cuerpo(function (object $b) { $b->ajustes->descuento = -1; }),
+    '«Descuento» no puede ser negativo.');
+$rechaza('descuento con 3 decimales', $cuerpo(function (object $b) { $b->ajustes->descuento = 10.005; }),
+    '«Descuento» admite hasta 2 decimales.');
+$rechaza('descuento "mucho"', $cuerpo(function (object $b) { $b->ajustes->descuento = 'mucho'; }),
+    '«Descuento» no es un monto válido. Revísalo.');
 $rechaza('mano de obra negativa', $cuerpo(function (object $b) { $b->ajustes->mano_obra = -1; }),
     '«Costo mano de obra» no puede ser negativo.');
 $rechaza('abono con 3 decimales', $cuerpo(function (object $b) { $b->ajustes->abono = 10.555; }),
@@ -583,6 +710,32 @@ $chk('mano de obra: Cargos 100.00, Manejos 50.00, Mano de obra 1,500.00, TOTAL 5
     && str_contains($txtMano, '(51,044.80)'));
 $chk('mano de obra: sin Restante (no hay retencion ni abono)', !str_contains($txtMano, 'Restante'));
 
+// --- descuento: la fila va entre el Sub-total y el ITBIS, con su monto en negativo ---
+$txtDesc = implode("\n", $paginasPdf($armarPdf($casosPdf['descuento_captura'], 'COT-000011', $logoPdf)->render()));
+$chk('descuento (la captura): fila "Descuento" con -5,940.00',
+    str_contains($txtDesc, '(Descuento)') && str_contains($txtDesc, '(-5,940.00)'));
+$chk('descuento (la captura): Sub-total 59,400.00 (sin descuento), ITBIS 18% 9,622.80 (sobre 53,460.00) y TOTAL 63,082.80',
+    str_contains($txtDesc, '(59,400.00)') && str_contains($txtDesc, '(ITBIS 18%)')
+    && str_contains($txtDesc, '(9,622.80)') && str_contains($txtDesc, '(63,082.80)') && !str_contains($txtDesc, '(70,092.00)'));
+$posSub = strpos($txtDesc, '(Sub-total RD$)');
+$posDesc = strpos($txtDesc, '(Descuento)');
+$posItbis = strpos($txtDesc, '(ITBIS 18%)');
+$posTotal = strpos($txtDesc, '(TOTAL RD$)');
+$chk('descuento: el orden de las filas es Sub-total, Descuento, ITBIS, TOTAL',
+    $posSub !== false && $posDesc !== false && $posItbis !== false && $posTotal !== false
+    && $posSub < $posDesc && $posDesc < $posItbis && $posItbis < $posTotal);
+$chk('sin descuento no sale la fila (pintura)', !str_contains($txtPintura, 'Descuento') && !str_contains($txtPintura, '(-'));
+$txtDescMixto = implode("\n", $paginasPdf($armarPdf($casosPdf['descuento_mixto'], 'COT-000012', $logoPdf)->render()));
+$chk('descuento con tasas mezcladas: Descuento -170.00, rotulo "ITBIS" a secas, ITBIS 234.00 y TOTAL 1,764.00',
+    str_contains($txtDescMixto, '(-170.00)') && str_contains($txtDescMixto, '(ITBIS)') && !str_contains($txtDescMixto, 'ITBIS 18%')
+    && str_contains($txtDescMixto, '(234.00)') && str_contains($txtDescMixto, '(1,764.00)'));
+$txtDescRet = implode("\n", $paginasPdf($armarPdf($casosPdf['descuento_retencion_abono'], 'COT-000014', $logoPdf)->render()));
+$chk('descuento con retencion y abono: Descuento -100.00, Retencion 45.00 (sobre el neto), Abono 500.00, Restante 517.00',
+    str_contains($txtDescRet, '(-100.00)') && str_contains($txtDescRet, '(45.00)') && str_contains($txtDescRet, '(500.00)')
+    && str_contains($txtDescRet, '(Restante \(Adeudado\))') && str_contains($txtDescRet, '(517.00)') && str_contains($txtDescRet, '(1,062.00)'));
+$chk('descuento: una cotizacion de una sola pagina sigue en una pagina (la fila no empuja nada)',
+    $contarPaginas($armarPdf($casosPdf['descuento_retencion_abono'], 'COT-000014', $logoPdf)->render()) === 1);
+
 // --- etiqueta ITBIS y precio con 4 decimales ---
 $txtMixto = implode("\n", $paginasPdf($armarPdf($casosPdf['mixto'], 'COT-000009', $logoPdf)->render()));
 $chk('mixto: rotulo "ITBIS" a secas (no todo es 18%)', str_contains($txtMixto, '(ITBIS)') && !str_contains($txtMixto, 'ITBIS 18%'));
@@ -689,6 +842,9 @@ if ($escribirPdf) {
         'largo_60' => [$largoPdf, $largoPdf['code'] ?? 'COT-000060'],
         // Extras: las filas opcionales de totales y la vista previa sin numero.
         'pintura_retencion_abono' => [$casosPdf['pintura_retencion_abono'], $casosPdf['pintura_retencion_abono']['code'] ?? 'COT-000001'],
+        // La fila "Descuento" (entre Sub-total e ITBIS), sola y con retencion y abono.
+        'descuento_captura' => [$casosPdf['descuento_captura'], $casosPdf['descuento_captura']['code'] ?? 'COT-000011'],
+        'descuento_retencion_abono' => [$casosPdf['descuento_retencion_abono'], $casosPdf['descuento_retencion_abono']['code'] ?? 'COT-000014'],
         'vista_previa' => [$casosPdf['pintura'], null],
     ];
     foreach ($salidasPdf as $idPdf => [$casoPdf, $codePdf]) {
@@ -1082,6 +1238,8 @@ $cotT7 = static fn(array $caso, ?string $fecha): array => [
         'mano_obra' => (float) $caso['ajustes']['mano_obra'],
         'abono' => (float) $caso['ajustes']['abono'],
         'retencion_isr' => (bool) $caso['ajustes']['retencion_isr'],
+        // Los casos de las hojas no lo traen (= 0).
+        'descuento' => (float) ($caso['ajustes']['descuento'] ?? 0),
     ],
 ];
 // Totales como los deja aplicarCatalogo (mismas lineas, mismas reglas).
@@ -1110,6 +1268,29 @@ $chk('crear: linea 1 con base e ITBIS de totales()', ($lin[0][':subtotal'] ?? nu
 $aju = $c->paramsDe('INSERT INTO cotizacion_ajustes');
 $chk('crear: solo ajustes no cero (abono y la retencion como monto)', array_column($aju, ':monto', ':concepto') === ['abono' => 10000.0, 'retencion_isr' => 2093.0]);
 $chk('crear: 1 commit, 0 rollback, candado tomado y soltado', $c->commits === 1 && $c->rollbacks === 0 && $c->locksTomados === 1 && $c->locksSoltados === 1);
+
+// Con descuento: la cabecera guarda el Sub-total de las lineas (SIN descuento), e itbis y total ya con el; cada
+// linea guarda su base y su ITBIS sin descuento; el descuento es un concepto mas de cotizacion_ajustes.
+$cotDesc = $cotT7($casos['descuento_mixto'], '2026-11-17 10:00:00');
+$totDesc = $totDeT7($cotDesc);
+$c = new ConexionFalsaT7();
+$r = $modeloT7($c)->crearConFormato($cotDesc, $totDesc, 'ferreteria', 5, 'X');
+$cab = $c->paramsDe('INSERT INTO cotizaciones')[0] ?? [];
+$chk('crear con descuento: la respuesta trae el TOTAL con descuento (1,764.00)', ($r[0] ?? '') === 'success' && ($r[1]['total'] ?? null) === 1764.0);
+$chk('crear con descuento: subtotal SIN descuento (1,700.00); itbis (234.00) y total (1,764.00) ya con el',
+    ($cab[':subtotal'] ?? null) === 1700.0 && ($cab[':itbis'] ?? null) === 234.0 && ($cab[':total'] ?? null) === 1764.0);
+$linDesc = $c->paramsDe('INSERT INTO cotizacion_items');
+$chk('crear con descuento: cada linea guarda su base e ITBIS sin descuento',
+    array_column($linDesc, ':subtotal') === [1000.0, 500.0, 200.0] && array_column($linDesc, ':itbis_amount') === [180.0, 80.0, 0.0]);
+$chk('crear con descuento: cotizacion_ajustes guarda el concepto descuento con su monto (170.00)',
+    array_column($c->paramsDe('INSERT INTO cotizacion_ajustes'), ':monto', ':concepto') === ['descuento' => 170.0]);
+$cotDesc2 = $cotT7($casos['descuento_retencion_abono'], '2026-11-17 10:00:00');
+$c = new ConexionFalsaT7();
+$modeloT7($c)->crearConFormato($cotDesc2, $totDeT7($cotDesc2), 'ferreteria', 5, 'X');
+$guardados = array_column($c->paramsDe('INSERT INTO cotizacion_ajustes'), ':monto', ':concepto');
+ksort($guardados);
+$chk('crear con descuento, retencion y abono: los tres se guardan; la retencion es el 5% del Sub-total neto (45.00)',
+    $guardados === ['abono' => 500.0, 'descuento' => 100.0, 'retencion_isr' => 45.0]);
 
 $c = new ConexionFalsaT7();
 $cotSinFecha = $cotT7($casos['pintura'], null);
@@ -1180,11 +1361,15 @@ $viejasT7 = FerreteriaFormato::lineasDesdeFilas([['quantity' => '2.000', 'amount
 $chk('fila sin indicador (o NULL) cuenta como 18%', $viejasT7[0]['indicador_facturacion'] === 1 && $viejasT7[1]['indicador_facturacion'] === 1);
 $aj = FerreteriaFormato::ajustesDesdeFilas((object) ['abono' => '10000.00', 'retencion_isr' => '2093.00']);
 $chk('ajustesDesdeFilas: montos a float y la retencion a casilla', $aj === [
-    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 10000.0, 'retencion_isr' => true,
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 10000.0, 'descuento' => 0.0,
+    'retencion_isr' => true,
 ]);
-$chk('ajustesDesdeFilas({}) = todo en cero, sin retencion', FerreteriaFormato::ajustesDesdeFilas((object) []) === [
-    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'retencion_isr' => false,
+$chk('ajustesDesdeFilas({}) = todo en cero, sin retencion ni descuento', FerreteriaFormato::ajustesDesdeFilas((object) []) === [
+    'cargos_bancarios' => 0.0, 'manejo_bancario' => 0.0, 'mano_obra' => 0.0, 'abono' => 0.0, 'descuento' => 0.0,
+    'retencion_isr' => false,
 ]);
+$chk("ajustesDesdeFilas: descuento '5940.00' = 5940.0 (lo que getAjustes lee de cotizacion_ajustes)",
+    FerreteriaFormato::ajustesDesdeFilas(['descuento' => '5940.00', 'mano_obra' => '20.00'])['descuento'] === 5940.0);
 $chk("ajustesDesdeFilas: retencion '0.00' = casilla apagada", FerreteriaFormato::ajustesDesdeFilas(['retencion_isr' => '0.00'])['retencion_isr'] === false);
 
 // Ida y vuelta por cada caso del fixture: lo que crearConFormato escribe
@@ -1237,6 +1422,34 @@ $cot['ajustes']['abono'] = 50000.0;
 $r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
 $chk('aplicarCatalogo: abono mayor que lo adeudado => 422 con el texto de errorAbono', ($r[0] ?? '') === 'error' && ($r[2] ?? null) === 422
     && $r[1] === 'El abono (RD$ 50,000.00) no puede ser mayor que lo adeudado (RD$ 49,394.80).');
+// Descuento (la fila "Descuento"): 10% de pintura = 4,186.00; cada linea baja su 10% y paga su tasa sobre lo que le queda.
+$cot = $cotT7($casos['pintura'], null);
+$cot['ajustes']['descuento'] = 4186.0;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: 10% de descuento: Sub-total 41,860.00, neto 37,674.00, ITBIS 6,781.32, TOTAL 44,455.32',
+    ($r[0] ?? '') === 'ok' && ($r[2]['subtotal'] ?? null) === 41860.0 && ($r[2]['descuento'] ?? null) === 4186.0
+    && ($r[2]['subtotal_neto'] ?? null) === 37674.0 && ($r[2]['itbis'] ?? null) === 6781.32 && ($r[2]['total'] ?? null) === 44455.32);
+$chk('aplicarCatalogo: el descuento viaja en cot[ajustes] para guardarse', ($r[1]['ajustes']['descuento'] ?? null) === 4186.0);
+$cot['ajustes']['descuento'] = 41860.0;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: descuento igual al Sub-total (100%) pasa, con TOTAL 0.00', ($r[0] ?? '') === 'ok' && ($r[2]['total'] ?? null) === 0.0);
+$cot['ajustes']['descuento'] = 50000.0;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: descuento mayor que el Sub-total => 422 con el texto de errorDescuento', ($r[0] ?? '') === 'error' && ($r[2] ?? null) === 422
+    && $r[1] === 'El descuento (RD$ 50,000.00) no puede ser mayor que el sub-total (RD$ 41,860.00).');
+$cot['ajustes']['abono'] = 99999.0;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: con descuento y abono de mas, el error del descuento va primero',
+    ($r[0] ?? '') === 'error' && str_starts_with((string) ($r[1] ?? ''), 'El descuento (RD$ 50,000.00)'));
+// El abono se juzga contra lo adeudado YA con el descuento: 41,860 - 4,186 = 37,674 + ITBIS 6,781.32 = 44,455.32.
+$cot = $cotT7($casos['pintura'], null);
+$cot['ajustes']['descuento'] = 4186.0;
+$cot['ajustes']['abono'] = 44455.32;
+$chk('aplicarCatalogo: abono justo sobre lo adeudado con descuento (44,455.32) pasa', (FerreteriaFormato::aplicarCatalogo($cot, $cliT7, [])[0] ?? '') === 'ok');
+$cot['ajustes']['abono'] = 44455.33;
+$r = FerreteriaFormato::aplicarCatalogo($cot, $cliT7, []);
+$chk('aplicarCatalogo: un centavo mas de abono ya es error, con lo adeudado ya rebajado',
+    ($r[0] ?? '') === 'error' && $r[1] === 'El abono (RD$ 44,455.33) no puede ser mayor que lo adeudado (RD$ 44,455.32).');
 
 echo "\n== T7: registro de formatos ==\n";
 // $modeloSinDb, $firmasDe, $contratoFormato, $conTenant y $tenantResuelto los

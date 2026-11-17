@@ -424,9 +424,14 @@ final class FerreteriaCotizacionPdf
 
     /**
      * Filas de totales en el orden de la spec 6.2. Sub-total, ITBIS y TOTAL
-     * siempre; cargos, retencion y abono solo con valor; Restante solo con
-     * retencion o abono. Lo adeudado (TOTAL - retencion) no lleva fila propia:
-     * Restante ya es TOTAL - retencion - abono.
+     * siempre; descuento, cargos, retencion y abono solo con valor; Restante
+     * solo con retencion o abono. Lo adeudado (TOTAL - retencion) no lleva fila
+     * propia: Restante ya es TOTAL - retencion - abono.
+     *
+     * El descuento va entre el Sub-total y el ITBIS (se resta antes del
+     * impuesto) y con su monto en negativo, para que ni sin el rotulo se lea
+     * como algo que se suma; el Sub-total que imprime es el de las lineas, sin
+     * descuento, y el ITBIS ya es el del Sub-total rebajado.
      *
      * @return array<int,array{0:string,1:float,2:bool}> [rotulo, valor, esTotal]
      */
@@ -437,8 +442,11 @@ final class FerreteriaCotizacionPdf
 
         $filas = [
             ['Sub-total RD$', $monto('subtotal'), false],
-            [(string) ($t['etiqueta_itbis'] ?? 'ITBIS'), $monto('itbis'), false],
         ];
+        if ($monto('descuento') > 0) {
+            $filas[] = ['Descuento', -$monto('descuento'), false];
+        }
+        $filas[] = [(string) ($t['etiqueta_itbis'] ?? 'ITBIS'), $monto('itbis'), false];
         $cargos = [
             'cargos_bancarios' => 'Cargos bancarios',
             'manejo_bancario'  => 'Manejos de operaciones bancarias',

@@ -17,6 +17,7 @@
 @productoFerreteria = <id de un producto de la DB de Ferreteria>
 @clienteGratex = <id de un cliente de la DB de Gratex>
 @cotFerreteria = <id que devolvio "F1 Crear">
+@cotDescuento = <id que devolvio "F12 Crear con DESCUENTO">
 @cotGratex = <id que devolvio "G1 Crear">
 
 ### Step 1: Login (una vez por tenant; el token va en X-API-KEY)
@@ -30,7 +31,8 @@ Content-Type: application/json
 
 ###
 
-### F0 Branding de Ferreteria -> data.cotizacion_formato = "ferreteria"
+### F0 Branding de Ferreteria -> data.cotizacion_formato = "ferreteria" y data.cotizacion_descuento = true
+### (la senal con la que el front ofrece el renglon "Descuento"; un backend anterior no trae la clave)
 GET {{base}}/api/branding
 X-API-KEY: {{tokenFerreteria}}
 
@@ -75,7 +77,9 @@ Content-Type: application/json
 ###      -> la linea del producto con el indicador_bien_servicio de products, y la libre con NULL / '43' / 1 / 1;
 ###      1870.00 / 336.60 y 150.00 / 27.00.
 ###    SELECT concepto, monto FROM cotizacion_ajustes WHERE cotizacion_id = <id>;
-###      -> solo mano_obra 1500.00 (F1). En F2: abono 10000.00 y retencion_isr 2093.00.
+###      -> solo mano_obra 1500.00 (F1). En F2: abono 10000.00 y retencion_isr 2093.00. En F12 (descuento):
+###      solo descuento 5940.00, y la cabecera subtotal 59400.00 (SIN descuento) / itbis 9622.80 / total 63082.80;
+###      despues de F12d (PUT sin descuento) ya no hay fila 'descuento' y total 70092.00.
 ### M10 Numeracion con concurrencia (GET_LOCK): cinco creaciones a la vez desde una terminal bash, con el token
 ###    de Ferreteria y el id de un cliente de esa DB:
 ###      BASE=http://localhost:8000; TOKEN='<token de Ferreteria>'; CLIENTE=<id de cliente>
@@ -231,6 +235,45 @@ X-API-KEY: {{tokenFerreteria}}
 GET {{base}}/api/cotizaciones/{{cotFerreteria}}/pdf
 X-API-KEY: {{tokenFerreteria}}
 
+### F12 Crear con DESCUENTO (el renglon "Descuento", se resta antes del ITBIS) -> 200, total 63082.8
+### 600 x 99.00 = 59,400.00; descuento 5,940.00 -> Sub-total neto 53,460.00, ITBIS 9,622.80, TOTAL 63,082.80.
+### Anotar el id como {{cotDescuento}}. Con otro cliente del tenant con "Descuento por defecto" el resultado es el
+### mismo: la cotizacion nunca aplica el del cliente (lo aplica la factura al convertir, salvo que la cotizacion
+### traiga el suyo).
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "SUMINISTRO DE MATERIALES", "quantity": 600, "amount": 99 } ],
+  "ajustes": { "descuento": 5940 }
+}
+
+### F12b Obtener la de F12 -> subtotal "59400.00" (SIN descuento), itbis "9622.80", total "63082.80",
+### ajustes {"descuento":"5940.00"}; la linea guarda subtotal "59400.00" e itbis_amount "10692.00" (sin descuento)
+GET {{base}}/api/cotizaciones?id={{cotDescuento}}
+X-API-KEY: {{tokenFerreteria}}
+
+### F12c PDF de la de F12 -> en los totales: Sub-total RD$ 59,400.00 / Descuento -5,940.00 / ITBIS 18% 9,622.80 /
+### TOTAL RD$ 63,082.80 (la fila Descuento entre el Sub-total y el ITBIS)
+GET {{base}}/api/cotizaciones/{{cotDescuento}}/pdf?format=base64
+X-API-KEY: {{tokenFerreteria}}
+
+### F12d Editar la de F12 SIN descuento (PUT reemplaza el set de ajustes) -> 200, total 70092; en cotizacion_ajustes ya no hay
+### fila 'descuento'; el PDF ya no tiene la fila
+PUT {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "id": {{cotDescuento}},
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "product_id": null, "description": "SUMINISTRO DE MATERIALES", "quantity": 600, "amount": 99 } ]
+}
+
 ### ============================================================================
 ### FERRETERIA: 422 (status:false con el texto para el usuario)
 ### ============================================================================
@@ -335,7 +378,7 @@ Content-Type: application/json
   "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150, "indicador_facturacion": 5 } ]
 }
 
-### E10 Concepto de ajuste desconocido -> 422 "Los cargos y abonos traen un concepto que este formato no conoce («descuento»)."
+### E10 Concepto de ajuste desconocido -> 422 "Los cargos y abonos traen un concepto que este formato no conoce («propina»)."
 POST {{base}}/api/cotizaciones
 X-API-KEY: {{tokenFerreteria}}
 Content-Type: application/json
@@ -344,7 +387,7 @@ Content-Type: application/json
   "formato": "ferreteria",
   "client_id": {{clienteFerreteria}},
   "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
-  "ajustes": { "descuento": 10 }
+  "ajustes": { "propina": 10 }
 }
 
 ### E11 Retencion que no es booleano -> 422 "La casilla «Retención Renta por Tercero 5%» no es válida: tiene que ser sí o no."
@@ -394,6 +437,31 @@ Content-Type: application/json
   "client_id": {{clienteFerreteria}},
   "items": [ { "description": "PRUEBA FLOTANTE", "quantity": 1, "amount": 13.70 } ],
   "ajustes": { "abono": 15.48, "retencion_isr": true }
+}
+
+### E15 Descuento mayor que el sub-total -> 422 "El descuento (RD$ 200.00) no puede ser mayor que el sub-total (RD$ 150.00)."
+### (se juzga antes que el abono; la vista previa responde el mismo 422). Igual al sub-total (150) es valido: un 100%.
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "descuento": 200 }
+}
+
+### E16 Descuento negativo -> 422 "«Descuento» no puede ser negativo."; con 3 decimales (10.005) -> "«Descuento» admite hasta 2 decimales."
+POST {{base}}/api/cotizaciones
+X-API-KEY: {{tokenFerreteria}}
+Content-Type: application/json
+
+{
+  "formato": "ferreteria",
+  "client_id": {{clienteFerreteria}},
+  "items": [ { "description": "CORTE DE TUBO", "quantity": 1, "amount": 150 } ],
+  "ajustes": { "descuento": -1 }
 }
 
 ### ============================================================================

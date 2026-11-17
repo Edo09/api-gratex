@@ -771,7 +771,12 @@ $chk("conduce, cortes 1..60: algun largo empuja el cierre solo a una pagina nuev
 // sha1 del contenido de las paginas (streams inflados) de cada caso del
 // fixture, con su code y el logo, tomado con el renderizador de ANTES del modo
 // conduce (feat/conduces en 6a1e310) y este mismo armado. Si el fixture cambia
-// a proposito, se recalculan con ese commit.
+// a proposito, se recalculan con ese commit. Los seis casos descuento_* son
+// posteriores (la fila "Descuento" de la cotizacion): no existian antes del modo
+// conduce, asi que su huella es la del renderizador con el descuento, y lo que
+// prueban es que el modo conduce no los cambia. Que los diez de antes sigan
+// dando la misma huella prueba que el descuento no toco ni un byte de lo que ya
+// se imprimia.
 $t4Huellas = [
     'pintura' => 'e234b5f28bc6578c4b63b22f8b3e39fead8163e8',
     'pintura_retencion_abono' => 'bfb56fd8d544c935d93261612fdc7508898fb879',
@@ -783,6 +788,12 @@ $t4Huellas = [
     'mixto' => '66f26cdfe18144fe5312a9380e18c41d17e4a708',
     'exento' => '0cc69a49896cda15b776c6e618727d8f77a66e95',
     'largo_60' => 'ecba6baaf3f69307eed42b9fd8279499c965f021',
+    'descuento_captura' => 'ac5edb4bf01f3b64879b5265abc5eb290f56cab8',
+    'descuento_mixto' => '8c93b7f954770e8ebeb5ce31e7338b30b66ac0a4',
+    'descuento_centavos' => '7af0d30df6a61a2aaa6af3ead7d5b8385b7913ee',
+    'descuento_retencion_abono' => '42a69d5ebac3da90b6f52b669e12e94e2b68f0ad',
+    'descuento_total' => '10e984cca017fa66ae4306c9c7287e05a78e7c9d',
+    'descuento_excesivo' => '78a84d4dd8fbbfd6066068e01887fcd0f160f3fd',
 ];
 $chk('huellas: una por cada caso del fixture, en su orden', array_keys($t4Huellas) === array_keys($t4Casos));
 // La cotizacion como se la pasa FerreteriaFormato::pdf(): items + totales ya calculados.
