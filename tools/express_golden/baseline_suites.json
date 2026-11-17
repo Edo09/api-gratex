@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "78167e1819c701de5219e5c4dd9351853238b302",
+    "git_sha": "90ab0ca1ccc3ffb23e17dfcf55423b59ba7340f1",
     "php": "8.5",
-    "capturado": "2026-11-16T19:47:48-04:00",
+    "capturado": "2026-11-17T16:57:16-04:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 379,
@@ -82,14 +82,14 @@
             "estado": "OK"
         },
         "test_conduces.php": {
-            "total": 413,
+            "total": 425,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
             "estado": "OK"
         },
         "test_cotizacion_ferreteria.php": {
-            "total": 474,
+            "total": 595,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
