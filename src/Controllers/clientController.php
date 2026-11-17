@@ -45,7 +45,7 @@ const CLIENTE_CORREO_INVALIDO = 'El correo no es válido. Revísalo.';
 const CLIENTE_CORREO_LARGO = 'El correo puede tener como máximo 100 caracteres.';
 const CLIENTE_CONTACTO_VACIO = 'Escribe el nombre de contacto.';
 const CLIENTE_CONTACTO_LARGO = 'El nombre de contacto puede tener como máximo 100 caracteres.';
-const CLIENTE_EMPRESA_VACIA = 'Escribe el nombre de la empresa o razón social.';
+// La empresa es OPCIONAL (ver el POST): no hay mensaje de "vacia", solo el de largo.
 const CLIENTE_EMPRESA_LARGA = 'El nombre de la empresa puede tener como máximo 100 caracteres.';
 const CLIENTE_TELEFONO_LARGO = 'El teléfono puede tener como máximo 20 caracteres.';
 
@@ -102,15 +102,21 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'POST':
         $_POST= InputSanitizer::jsonInput(false);
-        // Correo y telefono son OPCIONALES: muchos clientes (los de mostrador,
-        // sobre todo) no tienen, y exigirlos obligaba a inventarlos. Con la
-        // consulta de RNC el alta puede quedar en el RNC y los nombres. Ausentes o
-        // vacios se guardan como '': las columnas son NOT NULL y asi quedaron los
-        // clientes migrados, y ni el e-CF (CorreoComprador) ni el envio de
-        // cotizaciones usan un correo vacio. El correo, si viene, tiene que ser valido.
+        // Correo, telefono y empresa son OPCIONALES: muchos clientes (los de mostrador,
+        // sobre todo) no tienen, y exigirlos obligaba a inventarlos (el front mandaba
+        // el nombre como empresa). Con la consulta de RNC el alta puede quedar en el
+        // RNC y los nombres. Ausentes o vacios se guardan como '': las columnas son
+        // NOT NULL y asi quedaron los clientes migrados. Ni el e-CF (CorreoComprador)
+        // ni el envio de cotizaciones usan un correo vacio. El correo, si viene, tiene
+        // que ser valido.
+        //
+        // Sin empresa, los documentos usan el contacto: el comprador del e-CF toma el
+        // primero con texto de razon_social, empresa y contacto (facturaController y
+        // PosCliente::comprador), y los PDF y reportes hacen lo mismo.
         if (is_object($_POST)) {
             $_POST->email = trim((string) ($_POST->email ?? ''));
             $_POST->phone_number = trim((string) ($_POST->phone_number ?? ''));
+            $_POST->company_name = trim((string) ($_POST->company_name ?? ''));
         }
         // Las mismas condiciones de siempre, pero con un texto por cada motivo
         // (vacio / muy largo / mal escrito): el cajero tiene que saber que corregir.
@@ -125,9 +131,6 @@ switch($_SERVER['REQUEST_METHOD']){
         }
         else if(strlen($_POST->client_name) > 100){
             $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_LARGO];
-        }
-        else if(!isset($_POST->company_name) || is_null($_POST->company_name) || empty(trim($_POST->company_name))){
-            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_VACIA];
         }
         else if(strlen($_POST->company_name) > 100){
             $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_LARGA];
@@ -172,6 +175,12 @@ switch($_SERVER['REQUEST_METHOD']){
 
     case 'PUT':
         $_PUT= InputSanitizer::jsonInput(false);
+        // Empresa en blanco vale (es opcional): se guarda '' y el modelo no toca la
+        // razon social. Recortada igual que en el alta; ausente = el COALESCE del
+        // modelo conserva la guardada.
+        if (is_object($_PUT) && isset($_PUT->company_name)) {
+            $_PUT->company_name = trim((string) $_PUT->company_name);
+        }
         if(!isset($_PUT->id) || is_null($_PUT->id) || empty(trim($_PUT->id))){
             $respuesta= ['status' => false, 'error' => 'No se pudo identificar el cliente que quieres modificar. Ábrelo de nuevo desde el listado.'];
         }
@@ -191,9 +200,6 @@ switch($_SERVER['REQUEST_METHOD']){
         }
         else if(isset($_PUT->client_name) && strlen($_PUT->client_name) > 100){
             $respuesta= ['status' => false, 'error' => CLIENTE_CONTACTO_LARGO];
-        }
-        else if(isset($_PUT->company_name) && empty(trim((string) $_PUT->company_name))){
-            $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_VACIA];
         }
         else if(isset($_PUT->company_name) && strlen($_PUT->company_name) > 100){
             $respuesta= ['status' => false, 'error' => CLIENTE_EMPRESA_LARGA];

@@ -56,6 +56,9 @@ class clientModel
      * arreglo, agregar una columna es tocar CAMPOS_TEXTO o el SQL, no encajar
      * un argumento mas en el orden correcto de doce.
      *
+     * company_name es opcional: ausente o vacio se guarda '' (la columna es NOT
+     * NULL), y los documentos usan el contacto cuando no hay empresa.
+     *
      * @param array $d email, client_name, company_name, phone_number, rnc,
      *                 razon_social, direccion, municipio, provincia, descuento,
      *                 permitir_credito
@@ -82,13 +85,17 @@ class clientModel
                 $stmt->execute([
                     ':email' => $d['email'] ?? null,
                     ':client_name' => $d['client_name'] ?? null,
-                    ':company_name' => $d['company_name'] ?? null,
+                    // NOT NULL: sin empresa se guarda '', no NULL.
+                    ':company_name' => $d['company_name'] ?? '',
                     ':phone_number' => $d['phone_number'] ?? null,
                     ':rnc' => $this->normalizeRnc($d['rnc'] ?? null),
                     // razon_social cae a company_name cuando no viene: los
                     // clientes de la API que solo mandan empresa siguen igual.
+                    // Nunca se escribe "": es RazonSocialComprador en el e-CF y
+                    // la DGII lo exige con contenido. Sin razon social ni empresa
+                    // queda NULL y el e-CF usa el contacto (facturaController).
                     ':razon_social' => $this->normalizeTexto($d['razon_social'] ?? null)
-                        ?? ($d['company_name'] ?? null),
+                        ?? $this->normalizeTexto($d['company_name'] ?? null),
                     ':direccion' => $this->normalizeTexto($d['direccion'] ?? null),
                     ':municipio' => $this->normalizeTexto($d['municipio'] ?? null),
                     ':provincia' => $this->normalizeTexto($d['provincia'] ?? null),

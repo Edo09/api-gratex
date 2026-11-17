@@ -729,10 +729,10 @@ Header: Authorization: Bearer your-token</code></pre>
 }</code></pre>
                     <table>
                         <tr><th>Parameter</th><th>Type</th><th>Description</th></tr>
-                        <tr><td><code>email</code> <span class="required">*</span></td><td>string</td><td>Valid email, max 100 characters</td></tr>
+                        <tr><td><code>email</code></td><td>string</td><td>Optional. Valid email if sent, max 100 characters</td></tr>
                         <tr><td><code>client_name</code> <span class="required">*</span></td><td>string</td><td>Max 100 characters</td></tr>
-                        <tr><td><code>company_name</code> <span class="required">*</span></td><td>string</td><td>Max 100 characters</td></tr>
-                        <tr><td><code>phone_number</code> <span class="required">*</span></td><td>string</td><td>Max 20 characters</td></tr>
+                        <tr><td><code>company_name</code></td><td>string</td><td>Optional. Max 100 characters. Blank is stored as an empty string, and documents use the contact name instead</td></tr>
+                        <tr><td><code>phone_number</code></td><td>string</td><td>Optional. Max 20 characters</td></tr>
                     </table>
                 </div>
             </div>

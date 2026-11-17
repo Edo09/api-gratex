@@ -97,7 +97,17 @@ function fsResolveClientName(array $body, clientModel $clientModel): array
     if (!empty($body['client_id']) && empty($body['client_name'])) {
         $clients = $clientModel->getClients($body['client_id']);
         if (!empty($clients)) {
-            $body['client_name'] = $clients[0]['company_name'] ?? $clients[0]['client_name'] ?? '';
+            // La empresa es opcional (se guarda ''): el `??` no la saltaba y la
+            // factura quedaba sin nombre de cliente. Primero la empresa; si no
+            // hay, el contacto.
+            $nombre = '';
+            foreach ([$clients[0]['company_name'] ?? null, $clients[0]['client_name'] ?? null] as $candidato) {
+                if (trim((string) $candidato) !== '') {
+                    $nombre = (string) $candidato;
+                    break;
+                }
+            }
+            $body['client_name'] = $nombre;
         }
     }
     return $body;

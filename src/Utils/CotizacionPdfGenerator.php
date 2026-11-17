@@ -447,7 +447,8 @@ class CotizacionPdfGenerator extends FPDF
                     $contacto = $clientRow['client_name'];
                     $email = $clientRow['email'];
                     $telefono = $clientRow['phone_number'];
-                    $cliente = $clientRow['company_name'];
+                    // La empresa es opcional (se guarda ''): sin ella, la franja lleva el contacto y no un hueco.
+                    $cliente = trim((string) $clientRow['company_name']) !== '' ? $clientRow['company_name'] : $clientRow['client_name'];
                 }
             } catch (\Exception $e) {
                 // fallback to whatever is in cotizacion
