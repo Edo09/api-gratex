@@ -24,9 +24,10 @@ require_once __DIR__ . '/../Models/ncfModel.php';
  * completo; ver PosCliente). Con cliente se aplica su descuento (V5).
  *
  * Reglas que no se negocian:
- *  - El navegador no manda precios: las lineas se arman aqui desde product_id
- *    con PosPrecio (el mismo calculo del catalogo). El total que vio el cajero
- *    viaja solo para comparar: si no coincide, no se emite (TOTAL_DISTINTO).
+ *  - El navegador no manda precios: las lineas se arman aqui desde product_id y
+ *    su lista de precio (un indice de 1 a 4, nunca un monto) con PosPrecio (el
+ *    mismo calculo del catalogo). El total que vio el cajero viaja solo para
+ *    comparar: si no coincide, no se emite (TOTAL_DISTINTO).
  *  - Una clave por intento de venta (idempotencia): la misma clave nunca saca
  *    otro e-NCF. Un candado de MySQL cubre el doble toque concurrente.
  *  - La factura se guarda ANTES de enviarse (gancho write-ahead de emitir). Desde
@@ -241,6 +242,12 @@ final class PosVenta
             'pos_empleado_id' => $empleado['id'], 'empleado' => $empleado['nombre'],
             'caja_id' => $caja['id'], 'turno_id' => $turno['id'], 'total' => $total, 'forma_pago' => $formaPago,
         ];
+        // Las listas de precio mayores que la 1 quedan en la bitacora: explican un precio distinto del de gondola.
+        // armarLineas ya garantizo una sola lista por producto, asi que la primera linea de cada uno es la que cuenta.
+        $usadas = PosPrecio::listasUsadas($body['lineas'] ?? []);
+        if ($usadas !== []) {
+            $auditBase['listas'] = $usadas;
+        }
 
         // Write-ahead: la factura se arma ANTES de emitir y el servicio la guarda
         // (gancho 'reservar') antes de mandar nada a la DGII. Sin 'no_factura': la
@@ -462,7 +469,8 @@ final class PosVenta
     /**
      * Lineas para EcfItemMapper desde el catalogo, y el total en centavos.
      * Cantidades con 2 decimales como maximo, y enteras si la unidad no admite
-     * fracciones. Un producto repetido se suma en una sola linea.
+     * fracciones. Un producto repetido se suma en una sola linea, siempre que
+     * todas sus lineas vayan en la misma lista de precio (sin `lista` es la 1).
      *
      * @return array{0: array, 1: int}
      */
@@ -475,15 +483,21 @@ final class PosVenta
             throw new PosError('La venta no tiene productos.', 422, 'VENTA_VACIA');
         }
         $cantidades = [];
+        $listas = [];
         foreach ($lineas as $l) {
             $id = is_array($l) ? ($l['product_id'] ?? null) : null;
             $cant = is_array($l) ? ($l['cantidad'] ?? null) : null;
-            if (!is_int($id) || $id <= 0 || !(is_int($cant) || is_float($cant)) || !is_finite((float) $cant)) {
+            // La lista es un indice entero de 1 a 4 (nunca un monto); sin `lista` es la 1. Un producto
+            // va en una sola lista por venta: en dos distintas no se sabe a cual cobrarlo.
+            $lista = is_array($l) ? ($l['lista'] ?? 1) : 1;
+            if (!is_int($id) || $id <= 0 || !(is_int($cant) || is_float($cant)) || !is_finite((float) $cant)
+                || !is_int($lista) || $lista < 1 || $lista > 4 || ($listas[$id] ?? $lista) !== $lista) {
                 throw new PosError('Una línea de la venta no es válida. Quítala y agrégala de nuevo.', 422, 'LINEA_INVALIDA');
             }
             // Sin redondear: la cantidad se juzga tal como llego (1.255 libras
             // no pasa calladamente a 1.26). problemaCantidad tolera el ruido binario.
             $cantidades[$id] = ($cantidades[$id] ?? 0) + (float) $cant;
+            $listas[$id] = $lista;
         }
         $productos = $pos->productosPorId(array_keys($cantidades));
         $unidades = new unidadMedidaModel();
@@ -502,10 +516,20 @@ final class PosVenta
                     422, 'CANTIDAD_INVALIDA', ['product_id' => $id]);
             }
             $cantidad = round($cantidad, EcfItemMapper::DECIMALES_CANTIDAD);
-            $centavos = PosPrecio::finalCentavos((string) $p['precio'], $indicador);
-            if ($centavos <= 0) {
-                throw new PosError($p['nombre'] . ' no tiene precio. Corrígelo en FiscalPoint antes de venderlo.', 422, 'PRECIO_CERO',
-                    ['product_id' => $id]);
+            $lista = $listas[$id];
+            if ($lista === 1) {
+                $centavos = PosPrecio::finalCentavos((string) $p['precio'], $indicador);
+                if ($centavos <= 0) {
+                    throw new PosError($p['nombre'] . ' no tiene precio. Corrígelo en FiscalPoint antes de venderlo.', 422, 'PRECIO_CERO',
+                        ['product_id' => $id]);
+                }
+            } else {
+                // NULL, 0 o un precio ilegible: el cajero eligio una lista que el producto ya no tiene.
+                $centavos = PosPrecio::centavosDeLista($p, $lista, $indicador);
+                if ($centavos === null) {
+                    throw new PosError($p['nombre'] . ': el precio ' . $lista . ' ya no está disponible. Quítalo de la venta y agrégalo de nuevo.',
+                        409, 'PRECIO_NO_DISPONIBLE', ['product_id' => $id, 'lista' => $lista]);
+                }
             }
             // round(precio x cantidad, 2) en enteros: lo mismo que el carrito y que el mapper.
             $centesimas = (int) round($cantidad * 100);

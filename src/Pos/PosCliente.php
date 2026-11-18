@@ -61,7 +61,11 @@ final class PosCliente
         return ['cliente' => self::forma($cliente ?? []), 'nuevo' => true, 'estado_dgii' => $d['estado'] ?: null];
     }
 
-    /** Lo que el POS necesita del cliente. */
+    /**
+     * Lo que el POS necesita del cliente. `lista_precio` es su lista por defecto (1 a 4)
+     * o null: solo el valor con el que arranca la pantalla, que sigue mandando `lista` en
+     * cada linea de la venta. Una base que todavia no corrio la 039 no trae la columna: null.
+     */
     public static function forma(array $c): array
     {
         return [
@@ -69,6 +73,7 @@ final class PosCliente
             'nombre' => self::primero([$c['razon_social'] ?? null, $c['company_name'] ?? null, $c['client_name'] ?? null]) ?? '',
             'rnc' => (string) ($c['rnc'] ?? ''),
             'descuento' => round((float) ($c['descuento'] ?? 0), 2),
+            'lista_precio' => clientModel::listaPrecioDe($c['lista_precio'] ?? null)[1],
         ];
     }
 

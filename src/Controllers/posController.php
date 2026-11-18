@@ -69,6 +69,9 @@ function posCajaDelEquipo(posModel $pos, array $equipo): array
  * productos: va completo y el POS busca en memoria.
  *
  * - precio_centavos: precio final con ITBIS (PosPrecio, C2). Siempre precio 1.
+ * - listas: las listas de precio 2 a 4 con un precio vendible, [{lista, precio_centavos}], con
+ *   ITBIS y por el mismo calculo que precio_centavos; [] si el producto no tiene ninguna. Una
+ *   lista con un precio que no se puede leer se omite y queda en el log, sin tumbar el producto.
  * - Una categoria inactiva no sale como chip; sus productos quedan en "Todos"
  *   (category_id null). Solo salen las categorias con algun producto.
  * - stock null = servicio (sin semaforo, C4).
@@ -99,6 +102,10 @@ function posCatalogo(posModel $pos): array
             'sku' => $p['sku'],
             'category_id' => $categoria,
             'precio_centavos' => $centavos,
+            // Listas 2-4 (products.precio_2..4) con precio vendible; una mal cargada se omite y queda en el log.
+            'listas' => PosPrecio::listasOfrecidas($p, $indicador, static function (int $lista, string $crudo) use ($p): void {
+                error_log('[pos] catalogo: producto ' . $p['id'] . ': la lista ' . $lista . ' (' . $crudo . ') no se ofrece');
+            }),
             'tasa' => PosPrecio::tasa($indicador),
             'indicador_facturacion' => $indicador,
             'stock' => $p['stock'] !== null ? (float) $p['stock'] : null,

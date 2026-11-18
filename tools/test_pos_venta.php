@@ -65,7 +65,8 @@ $api = function (string $metodo, string $ruta, ?array $body = null, array $heade
     }
     curl_setopt_array($ch, [CURLOPT_CUSTOMREQUEST => $metodo, CURLOPT_RETURNTRANSFER => true, CURLOPT_HTTPHEADER => $h, CURLOPT_TIMEOUT => 60]);
     if ($body !== null) {
-        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body));
+        // Con la bandera un 2.0 viaja como 2.0; sin ella PHP lo manda como 2 (un entero) y la prueba de "lista como decimal" no probaria nada.
+        curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_PRESERVE_ZERO_FRACTION));
     }
     $raw = curl_exec($ch);
     $http = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -121,6 +122,9 @@ $agua = $producto('VTATEST-1', 'Agua 500 ml', 1, '21.1864', '43', '50');      //
 $arroz = $producto('VTATEST-2', 'Arroz (libra)', 4, '38.0000', '21', '100');  // 38.00 exento, por libra
 $viejo = $producto('VTATEST-3', 'Descontinuado', 1, '10.0000', '43', '5', 0);
 $caro = $producto('VTATEST-4', 'Planta electrica', 4, '300000.0000', '43', '2');
+$mayor = $producto('VTATEST-5', 'Cemento (varias listas)', 1, '21.1864', '43', '50');   // lista 1: 25.00 con ITBIS
+$pdo->exec("UPDATE `{$dbA}`.products SET precio_2 = '19.0000', precio_4 = '0.0040' WHERE id = {$mayor}"); // lista 2: 22.42; la 3, NULL; la 4, 0.0040 (da 0 centavos)
+$unaLinea = fn($lista, int $cant = 1, ?int $id = null) => [['product_id' => $id ?? $mayor, 'cantidad' => $cant, 'lista' => $lista]];
 $stock = fn(int $id) => (float) $pdo->query("SELECT stock FROM `{$dbA}`.products WHERE id = {$id}")->fetchColumn();
 
 // --- Caja, empleados, equipo y sesion ----------------------------------------
@@ -196,6 +200,37 @@ foreach ($casos as [$desc, $body, $http, $codigo]) {
 }
 $encfDespues = (int) $pdo->query("SELECT current_value FROM `{$dbA}`.ncf_sequences WHERE type = 'E32' AND ambiente = 'testecf'")->fetchColumn();
 $chk('ninguna validacion gasto un e-NCF', $encfAntes === $encfDespues, [$encfAntes, $encfDespues]);
+
+echo "\n2b. Listas de precio: lo que se rechaza antes de emitir\n";
+$casosListas = [
+    ['lista 3 sin precio (NULL)', $venta($unaLinea(3), 2500, 1, 2500), 409, 'PRECIO_NO_DISPONIBLE', 3],
+    ['lista 4 con un precio que da 0 centavos (0.0040)', $venta($unaLinea(4), 2500, 1, 2500), 409, 'PRECIO_NO_DISPONIBLE', 4],
+    ['producto sin listas pedido en la lista 2', $venta($unaLinea(2, 1, $agua), 2500, 1, 2500), 409, 'PRECIO_NO_DISPONIBLE', 2],
+    ['lista 5', $venta($unaLinea(5), 2500, 1, 2500), 422, 'LINEA_INVALIDA', null],
+    ['lista 0', $venta($unaLinea(0), 2500, 1, 2500), 422, 'LINEA_INVALIDA', null],
+    ['lista como texto ("2")', $venta($unaLinea('2'), 2242, 1, 2242), 422, 'LINEA_INVALIDA', null],
+    ['lista como decimal (2.0)', $venta($unaLinea(2.0), 2242, 1, 2242), 422, 'LINEA_INVALIDA', null],
+    ['dos listas para un mismo producto', $venta(array_merge($unaLinea(1), $unaLinea(2)), 4742, 1, 5000), 422, 'LINEA_INVALIDA', null],
+    ['el mismo producto sin lista (vale la 1) y con la lista 2', $venta(array_merge([['product_id' => $mayor, 'cantidad' => 1]], $unaLinea(2)), 4742, 1, 5000), 422, 'LINEA_INVALIDA', null],
+];
+foreach ($casosListas as [$desc, $body, $http, $codigo, $lista]) {
+    [$h, $r] = $api('POST', '/pos/ventas', $body, $ana);
+    $ok = $h === $http && ($r['codigo'] ?? '') === $codigo;
+    if ($codigo === 'PRECIO_NO_DISPONIBLE') {
+        $ok = $ok && ($r['lista'] ?? null) === $lista && isset($r['product_id']);
+    }
+    $chk("{$desc}: {$http} {$codigo}", $ok, [$h, $r]);
+}
+foreach ([null, 1] as $listaUno) {
+    [$h, $r] = $api('POST', '/pos/ventas', $venta($unaLinea($listaUno), 9999, 1, 9999), $ana);
+    $chk('lista ' . var_export($listaUno, true) . ' vale lo mismo que la lista 1: el servidor cobra 25.00',
+        $h === 409 && ($r['codigo'] ?? '') === 'TOTAL_DISTINTO' && ($r['total_centavos'] ?? 0) === 2500, [$h, $r]);
+}
+[$h, $r] = $api('POST', '/pos/ventas', $venta($unaLinea(2, 2), 5000, 1, 5000), $ana);
+$chk('dos unidades en la lista 2 con el total de la lista 1: TOTAL_DISTINTO con el del servidor (44.84)',
+    $h === 409 && ($r['codigo'] ?? '') === 'TOTAL_DISTINTO' && ($r['total_centavos'] ?? 0) === 4484, [$h, $r]);
+$chk('ninguna de estas gasto un e-NCF',
+    (int) $pdo->query("SELECT current_value FROM `{$dbA}`.ncf_sequences WHERE type = 'E32' AND ambiente = 'testecf'")->fetchColumn() === $encfDespues);
 
 // ---------------------------------------------------------------------------
 echo "\n3. Venta en efectivo aceptada (F1, F4, P2)\n";
@@ -347,6 +382,26 @@ $envejecer();
 $chk('volvio: la consulta no la encuentra, se reenvia el RFCE guardado y queda aceptada', $h === 200 && ($r['data']['aceptadas'] ?? 0) === 1
     && ($r['data']['pendientes'] ?? -1) === 0
     && $pdo->query("SELECT estado_dgii FROM `{$dbA}`.facturas WHERE e_ncf = " . $pdo->quote($encfCaido))->fetchColumn() === 'RFCE_ACEPTADO', [$h, $r]);
+
+// ---------------------------------------------------------------------------
+echo "\n7b. Venta en la lista 2\n";
+$stockMayor = $stock($mayor);
+$cuerpoL = $venta(array_merge($unaLinea(2), $unaLinea(2)), 4484, 1, 5000); // dos lineas del mismo producto y la misma lista: se suman
+[$h, $r] = $api('POST', '/pos/ventas', $cuerpoL, $ana);
+$encfL = (string) ($r['data']['venta']['e_ncf'] ?? '');
+$chk('201: 2 x 22.42 = 44.84 con la lista 2', $h === 201 && ($r['data']['venta']['total_centavos'] ?? 0) === 4484, [$h, $r]);
+$facturaL = (int) $pdo->query("SELECT id FROM `{$dbA}`.facturas WHERE pos_idempotency_key = " . $pdo->quote($cuerpoL['clave']))->fetchColumn(); // 0 si no hay venta: las verificaciones fallan, la suite no se cae
+$itemsL = $pdo->query("SELECT product_id, quantity, subtotal, itbis_amount FROM `{$dbA}`.factura_items WHERE factura_id = {$facturaL}")->fetchAll();
+$chk('la linea: 2 unidades, 38.00 + 6.84 de ITBIS (22.42 / 1.18 = 19.00)', count($itemsL) === 1 && (int) $itemsL[0]['product_id'] === $mayor
+    && (float) $itemsL[0]['quantity'] === 2.0 && (float) $itemsL[0]['subtotal'] === 38.0 && (float) $itemsL[0]['itbis_amount'] === 6.84, $itemsL);
+$chk('inventario: salieron 2', $stock($mayor) === $stockMayor - 2, [$stockMayor, $stock($mayor)]);
+$valoresL = json_decode((string) $pdo->query("SELECT new_values FROM `{$master}`.audit_logs WHERE id > {$inicioAudit} AND module = 'pos' AND action = 'POS_VENTA' ORDER BY id DESC LIMIT 1")->fetchColumn(), true) ?: [];
+$chk('la bitacora nombra la lista usada', ($valoresL['listas'] ?? null) === [['product_id' => $mayor, 'lista' => 2]], $valoresL);
+$primeraL = json_decode((string) $pdo->query("SELECT new_values FROM `{$master}`.audit_logs WHERE id > {$inicioAudit} AND module = 'pos' AND action = 'POS_VENTA' ORDER BY id ASC LIMIT 1")->fetchColumn(), true) ?: [];
+$chk('una venta sin listas no lleva "listas" en la bitacora', !array_key_exists('listas', $primeraL), $primeraL);
+[$h, $r] = $api('POST', '/pos/ventas', $cuerpoL, $ana);
+$chk('la misma clave otra vez: la misma venta, sin otro e-NCF', $h === 201 && ($r['data']['repetida'] ?? false) === true
+    && ($r['data']['venta']['e_ncf'] ?? '') === $encfL, [$h, $r]);
 
 // ---------------------------------------------------------------------------
 echo "\n8. Recibo, turno ajeno y bitacora\n";

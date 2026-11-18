@@ -30,6 +30,7 @@ function clientCampos(?object $body): array
     $permitidos = [
         'email', 'client_name', 'company_name', 'razon_social', 'phone_number',
         'rnc', 'direccion', 'municipio', 'provincia', 'descuento', 'permitir_credito',
+        'lista_precio',
     ];
     $campos = [];
     foreach ($permitidos as $k) {
@@ -48,6 +49,8 @@ const CLIENTE_CONTACTO_LARGO = 'El nombre de contacto puede tener como máximo 1
 // La empresa es OPCIONAL (ver el POST): no hay mensaje de "vacia", solo el de largo.
 const CLIENTE_EMPRESA_LARGA = 'El nombre de la empresa puede tener como máximo 100 caracteres.';
 const CLIENTE_TELEFONO_LARGO = 'El teléfono puede tener como máximo 20 caracteres.';
+// Lista de precio por defecto (clients.lista_precio, 039): 1 a 4, o null para quitarla.
+const CLIENTE_LISTA_PRECIO_INVALIDA = 'La lista de precio del cliente tiene que ser 1, 2, 3 o 4 (o ninguna).';
 
 // Validate token for all requests except OPTIONS
 if ($_SERVER['REQUEST_METHOD'] !== 'OPTIONS') {
@@ -138,6 +141,11 @@ switch($_SERVER['REQUEST_METHOD']){
         else if(strlen($_POST->phone_number) > 20){
             $respuesta= ['status' => false, 'error' => CLIENTE_TELEFONO_LARGO];
         }
+        // Presente y con algo que no es 1 a 4 ni null/vacio: no se guarda nada. Ausente
+        // no se valida: el alta la deja en NULL.
+        else if(property_exists($_POST, 'lista_precio') && !clientModel::listaPrecioDe($_POST->lista_precio)[0]){
+            $respuesta= ['status' => false, 'error' => CLIENTE_LISTA_PRECIO_INVALIDA];
+        }
         else{
             // Se pasa el cuerpo completo filtrado por clientCampos(): asi un
             // campo nuevo del formulario llega al modelo sin tener que anadir
@@ -206,6 +214,11 @@ switch($_SERVER['REQUEST_METHOD']){
         }
         else if(isset($_PUT->phone_number) && strlen((string) $_PUT->phone_number) > 20){
             $respuesta= ['status' => false, 'error' => CLIENTE_TELEFONO_LARGO];
+        }
+        // Presente y con algo que no es 1 a 4 ni null/vacio: no se cambia nada. property_exists
+        // y no isset: un null explicito es valido (quita la lista), y ausente conserva la guardada.
+        else if(property_exists($_PUT, 'lista_precio') && !clientModel::listaPrecioDe($_PUT->lista_precio)[0]){
+            $respuesta= ['status' => false, 'error' => CLIENTE_LISTA_PRECIO_INVALIDA];
         }
         else{
             $oldClient = $clientModel->getClients($_PUT->id)[0] ?? null;

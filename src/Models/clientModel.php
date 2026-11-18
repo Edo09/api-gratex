@@ -28,6 +28,56 @@ class clientModel
             . 'Cambia la forma de pago y vuelve a intentarlo.';
     }
 
+    /**
+     * Lista de precio por defecto del cliente (clients.lista_precio, migracion 039):
+     * 1 a 4, o NULL = sin lista, y la pantalla pregunta cual cada vez. Es solo el valor
+     * con el que arranca la pantalla; el precio de cada linea sigue dependiendo de la
+     * lista de ESA linea.
+     *
+     * Vale un entero de 1 a 4 o un texto que lo trae solo (" 3 " tambien), y null o ''
+     * para quitarla: solo esos dos la quitan. Todo lo demas no vale: 0, 5, un texto
+     * cualquiera o de puros espacios, un decimal (2.0 incluido), un booleano, un
+     * arreglo, un objeto. Con un cast a int, `true` pasaria por la lista 1 y 2.5 por la 2.
+     *
+     * @param mixed $valor lo que vino en el cuerpo, o lo que trae la fila de la base
+     * @return array{0: bool, 1: ?int} [vale, la lista]; si no vale, la lista es null
+     */
+    public static function listaPrecioDe($valor): array
+    {
+        if ($valor === null || $valor === '') {
+            return [true, null];
+        }
+        if (is_string($valor)) {
+            $texto = trim($valor);
+            return in_array($texto, ['1', '2', '3', '4'], true) ? [true, (int) $texto] : [false, null];
+        }
+        return is_int($valor) && $valor >= 1 && $valor <= 4 ? [true, $valor] : [false, null];
+    }
+
+    /**
+     * El pedazo del UPDATE de updateClient que cambia la lista de precio por defecto, segun lo
+     * que vino en el cuerpo: [fragmento del SET, parametros que agrega]. Pura: no toca la base.
+     *
+     * - Sin la clave: ['', []]. El UPDATE ni nombra la columna, asi que conserva la guardada y
+     *   funciona en una base que todavia no corrio la 039.
+     * - Con un valor que vale (listaPrecioDe): `, lista_precio = :lista_precio` con la lista de
+     *   1 a 4, o con null: null y '' la quitan.
+     * - Con un valor que NO vale: ['', []], se ignora igual que en saveClient. El controller lo
+     *   rechaza antes de llegar aqui; esta es la red de seguridad, y nunca quita la lista
+     *   guardada (un 9 o un 'x' no quiere decir "sin lista").
+     *
+     * @param array $d lo mismo que recibe updateClient
+     * @return array{0: string, 1: array<string, ?int>}
+     */
+    public static function cambioDeLista(array $d): array
+    {
+        if (!array_key_exists('lista_precio', $d)) {
+            return ['', []];
+        }
+        [$vale, $lista] = self::listaPrecioDe($d['lista_precio']);
+        return $vale ? [', lista_precio = :lista_precio', [':lista_precio' => $lista]] : ['', []];
+    }
+
     public function getClients($id = null)
     {
         try {
@@ -61,7 +111,7 @@ class clientModel
      *
      * @param array $d email, client_name, company_name, phone_number, rnc,
      *                 razon_social, direccion, municipio, provincia, descuento,
-     *                 permitir_credito
+     *                 permitir_credito, lista_precio
      * @return array ['success', fila creada (misma forma que getClients), id] | ['error', mensaje]
      */
     public function saveClient(array $d)
@@ -75,14 +125,7 @@ class clientModel
             );
             $resultado = ['error', 'Ya tienes un cliente con el mismo nombre de contacto, correo y teléfono. Búscalo en la lista en vez de crearlo otra vez.'];
             if (count($valida) == 0) {
-                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc,
-                                            razon_social, direccion, municipio, provincia,
-                                            descuento, permitir_credito)
-                    VALUES(:email, :client_name, :company_name, :phone_number, :rnc,
-                           :razon_social, :direccion, :municipio, :provincia,
-                           :descuento, :permitir_credito)";
-                $stmt = $this->conexion->prepare($sql);
-                $stmt->execute([
+                $params = [
                     ':email' => $d['email'] ?? null,
                     ':client_name' => $d['client_name'] ?? null,
                     // NOT NULL: sin empresa se guarda '', no NULL.
@@ -103,7 +146,27 @@ class clientModel
                     // y CON credito (migracion 035: el credito se quita editando el cliente).
                     ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null) ?? 0.0,
                     ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null) ?? 1
-                ]);
+                ];
+                // Lista de precio por defecto (039). La columna entra al INSERT solo
+                // cuando el alta trae una lista: sin ella queda en NULL (su DEFAULT) y
+                // el INSERT ni la nombra, asi que una empresa que todavia no corrio la
+                // 039 sigue pudiendo dar de alta clientes.
+                $columnaLista = '';
+                $marcaLista = '';
+                $lista = self::listaPrecioDe($d['lista_precio'] ?? null)[1];
+                if ($lista !== null) {
+                    $columnaLista = ', lista_precio';
+                    $marcaLista = ', :lista_precio';
+                    $params[':lista_precio'] = $lista;
+                }
+                $sql = "INSERT INTO clients(email, client_name, company_name, phone_number, rnc,
+                                            razon_social, direccion, municipio, provincia,
+                                            descuento, permitir_credito{$columnaLista})
+                    VALUES(:email, :client_name, :company_name, :phone_number, :rnc,
+                           :razon_social, :direccion, :municipio, :provincia,
+                           :descuento, :permitir_credito{$marcaLista})";
+                $stmt = $this->conexion->prepare($sql);
+                $stmt->execute($params);
                 $id = (int) $this->conexion->lastInsertId();
                 // Se devuelve la fila recien creada, no un texto: el front la usa
                 // como cliente elegido (id incluido) en la factura o cotizacion
@@ -132,6 +195,12 @@ class clientModel
      * "Presente con cadena vacia" SI escribe: es como se vacia una direccion.
      * Solo la ausencia de la clave conserva.
      *
+     * lista_precio es la excepcion al COALESCE: acepta NULL, asi que su clave
+     * presente con null (o '') la quita, y ausente ni se nombra en el UPDATE.
+     * El controller rechaza primero un valor que no vale (1 a 4, null o ''); si
+     * uno llegara aqui, el modelo lo ignora en vez de quitar la lista, igual que
+     * saveClient (ver cambioDeLista).
+     *
      * @param array $d mismas claves que saveClient (sin id)
      */
     public function updateClient($id, array $d)
@@ -149,20 +218,7 @@ class clientModel
                 );
                 $resultado = ['error', 'Ya hay otro cliente con el mismo nombre de contacto, correo y teléfono. Cambia alguno de esos datos.'];
                 if (count($valida) == 0) {
-                    $sql = "UPDATE clients SET
-                        email = COALESCE(:email, email),
-                        client_name = COALESCE(:client_name, client_name),
-                        company_name = COALESCE(:company_name, company_name),
-                        phone_number = COALESCE(:phone_number, phone_number),
-                        rnc = COALESCE(:rnc, rnc),
-                        razon_social = COALESCE(:razon_social, razon_social),
-                        direccion = COALESCE(:direccion, direccion),
-                        municipio = COALESCE(:municipio, municipio),
-                        provincia = COALESCE(:provincia, provincia),
-                        descuento = COALESCE(:descuento, descuento),
-                        permitir_credito = COALESCE(:permitir_credito, permitir_credito) WHERE id = :id";
-                    $stmt = $this->conexion->prepare($sql);
-                    $stmt->execute([
+                    $params = [
                         ':id' => $id,
                         ':email' => $d['email'] ?? null,
                         ':client_name' => $d['client_name'] ?? null,
@@ -192,7 +248,30 @@ class clientModel
                         // API no pierde su descuento ni su credito al editarlo.
                         ':descuento' => $this->normalizeDescuento($d['descuento'] ?? null),
                         ':permitir_credito' => $this->normalizeCredito($d['permitir_credito'] ?? null)
-                    ]);
+                    ];
+                    // Lista de precio por defecto (039). A diferencia de las demas
+                    // columnas, NULL es un valor real (quita la lista), asi que no usa
+                    // COALESCE: cambioDeLista la agrega al SET solo cuando la clave vino
+                    // en el cuerpo (clientCampos copia solo las presentes) con un valor
+                    // que vale, y un null la quita. Ausente o con un valor que no vale,
+                    // el UPDATE ni la nombra: conserva la guardada y funciona en una base
+                    // que todavia no tiene la columna.
+                    [$setLista, $paramsLista] = self::cambioDeLista($d);
+                    $params = array_merge($params, $paramsLista);
+                    $sql = "UPDATE clients SET
+                        email = COALESCE(:email, email),
+                        client_name = COALESCE(:client_name, client_name),
+                        company_name = COALESCE(:company_name, company_name),
+                        phone_number = COALESCE(:phone_number, phone_number),
+                        rnc = COALESCE(:rnc, rnc),
+                        razon_social = COALESCE(:razon_social, razon_social),
+                        direccion = COALESCE(:direccion, direccion),
+                        municipio = COALESCE(:municipio, municipio),
+                        provincia = COALESCE(:provincia, provincia),
+                        descuento = COALESCE(:descuento, descuento),
+                        permitir_credito = COALESCE(:permitir_credito, permitir_credito){$setLista} WHERE id = :id";
+                    $stmt = $this->conexion->prepare($sql);
+                    $stmt->execute($params);
                     $resultado = ['success', 'Client updated'];
                 }
             }

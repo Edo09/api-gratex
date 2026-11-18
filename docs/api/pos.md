@@ -46,7 +46,7 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `RNC_NO_ENCONTRADO`, `RNC_NO_DISPONIBLE` | 404 / 502 | No inscrito, o la consulta de RNC caída: sin crédito fiscal (la venta puede salir como consumo) |
 | `CLIENTE_NO_CREADO` | 500 | No se pudo crear el cliente: reintentar |
 | `TIPO_INVALIDO`, `CLIENTE_REQUERIDO`, `CLIENTE_NO_EXISTE`, `CLIENTE_SIN_RNC`, `AUTOFACTURA` | 422 / 404 | Crédito fiscal: buscar el RNC de nuevo o quitar el cliente (nunca se cambia solo a consumo) |
-| `PRODUCTO_NO_DISPONIBLE`, `PRECIO_CERO`, `CANTIDAD_INVALIDA`, `LINEA_INVALIDA`, `VENTA_VACIA` | 409 / 422 | Corregir la venta (traen `product_id` cuando aplica) |
+| `PRODUCTO_NO_DISPONIBLE`, `PRECIO_CERO`, `PRECIO_NO_DISPONIBLE`, `CANTIDAD_INVALIDA`, `LINEA_INVALIDA`, `VENTA_VACIA` | 409 / 422 | Corregir la venta (traen `product_id` cuando aplica). `PRECIO_NO_DISPONIBLE` (409) trae también `lista`: el producto ya no tiene precio en la lista elegida; refrescar el catálogo y volver a elegir el precio |
 | `FORMA_PAGO_INVALIDA`, `RECIBIDO_INSUFICIENTE`, `COMPRADOR_REQUERIDO` | 422 | Corregir el cobro |
 | `VENTA_EN_PROCESO` | 409 | Otra petición con la misma clave está emitiendo: reintentar con la MISMA clave |
 | `VENTA_NO_GUARDADA` | 500 | No se pudo guardar la venta, ni siquiera como factura simple (la base no responde): reintentar con la MISMA clave |
@@ -141,7 +141,8 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 {
   "productos": [
     { "id": 12, "nombre": "Agua 500 ml", "sku": "AG-500", "category_id": 3,
-      "precio_centavos": 2500, "tasa": 18, "indicador_facturacion": 1,
+      "precio_centavos": 2500, "listas": [{ "lista": 2, "precio_centavos": 2242 }],
+      "tasa": 18, "indicador_facturacion": 1,
       "stock": 10, "stock_minimo": 3, "unidad_medida": "43", "decimales": false,
       "imagen": "public/uploads/productos/1/0123456789abcdef0123456789abcdef.jpg" }
   ],
@@ -154,6 +155,10 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 - `precio_centavos`: **precio final con ITBIS**, `round(precio × (1 + tasa), 2)` en
   centavos, calculado en el servidor con aritmética entera (`src/Pos/PosPrecio.php`).
   Siempre la lista 1. El precio sin ITBIS no se manda.
+- `listas`: las listas de precio 2 a 4 que tienen un precio vendible, en centavos con ITBIS y
+  por el mismo cálculo que `precio_centavos`, en orden (`[{ "lista": 2, "precio_centavos": 2242 }]`).
+  `[]` cuando el producto no tiene ninguna: una lista en `NULL` o en 0 no aplica. Una lista que
+  no se puede leer se deja fuera y queda en el log; el producto sigue en el catálogo.
 - `tasa`: 18, 16 o 0 (tasa cero y exento).
 - `imagen`: la foto del producto (migración 032), ruta relativa al API: se pinta con
   `<base del API>/api/<imagen>`. `null` = sin foto (el POS muestra las iniciales). Ver
@@ -178,9 +183,16 @@ social (contacto = nombre comercial si tiene; correo y teléfono vacíos; bitác
 `POS_CLIENTE_CREADO`).
 
 ```json
-{ "cliente": { "id": 14, "nombre": "COMERCIAL PRUEBA SRL", "rnc": "131000001", "descuento": 0 },
-  "nuevo": true, "estado_dgii": "ACTIVO" }
+{ "cliente": { "id": 14, "nombre": "COMERCIAL PRUEBA SRL", "rnc": "131000001", "descuento": 0,
+               "lista_precio": 2 },
+  "nuevo": false, "estado_dgii": null }
 ```
+
+- `lista_precio`: la lista de precio por defecto del cliente, un entero de 1 a 4, o `null` si no
+  tiene (se guarda con `lista_precio` en `POST`/`PUT /api/clients`; un cliente que esta llamada
+  acaba de crear viene con `null`). El POS la usa solo como valor por defecto de la pantalla y
+  **sigue mandando `lista` en cada línea** de la venta: el servidor cobra la lista de la línea,
+  nunca la del cliente. Una empresa que todavía no corrió la migración 039 recibe siempre `null`.
 
 `estado_dgii` solo viene en un cliente nuevo (lo que dijo el registro); el POS avisa si no
 es `ACTIVO`. No inscrito → `404 RNC_NO_ENCONTRADO`; consulta caída → `502
@@ -195,8 +207,8 @@ cédula** (e-CF completo).
   "tipo_ecf": "32",
   "client_id": null,
   "clave": "8d0c6c1e-3f0a-4b2e-9a51-0e6f3b7c9d12",
-  "lineas": [{ "product_id": 12, "cantidad": 3 }, { "product_id": 18, "cantidad": 2.75 }],
-  "total_centavos": 17950,
+  "lineas": [{ "product_id": 12, "cantidad": 3, "lista": 2 }, { "product_id": 18, "cantidad": 2.75 }],
+  "total_centavos": 17176,
   "forma_pago": 1,
   "recibido_centavos": 20000,
   "ancho": 80,
@@ -207,6 +219,19 @@ cédula** (e-CF completo).
 - **No lleva precios:** el servidor arma cada línea desde `product_id` con el mismo
   cálculo del catálogo (`PosPrecio`). `total_centavos` es el que vio el cajero: si no
   coincide con el del servidor, `409 TOTAL_DISTINTO` y no se emite nada.
+- **`lista`** (opcional, en cada línea): la lista de precio, un entero de 1 a 4. Sin `lista`, o
+  con `null`, es la 1 (`precio_centavos` del catálogo). El POS manda un índice, nunca un monto:
+  el servidor cobra el precio de esa lista (`precio_2` .. `precio_4`, con el mismo cálculo y
+  redondeo del catálogo), y en el ejemplo el producto 12 va en su lista 2 (22.42: 3 × 22.42 +
+  2.75 × 38.00 = 171.76). Un producto va en **una** lista por venta: dos líneas del mismo
+  `product_id` se suman solo si traen la misma lista (sin `lista` cuenta como la 1).
+  - `lista` que no es un entero de 1 a 4 (texto, decimal, 0, 5) o un producto con dos listas
+    distintas: `422 LINEA_INVALIDA`.
+  - El producto no tiene precio en esa lista (`NULL`, 0 o un precio que da 0 centavos):
+    `409 PRECIO_NO_DISPONIBLE` con `product_id` y `lista`. No se emite nada; el POS refresca
+    el catálogo y el cajero elige de nuevo.
+  - La bitácora (`POS_VENTA`) guarda `listas: [{product_id, lista}]` cuando alguna línea se cobró
+    en la lista 2, 3 o 4. Una venta sin listas no lleva la clave.
 - **`clave`** (UUID): una por intento de venta. La misma clave devuelve **la misma
   venta** (`repetida: true`), nunca otro e-NCF; un candado de MySQL cubre el doble toque.
   El POS la conserva mientras no sabe cómo terminó el cobro (red caída) y reintenta con
@@ -391,21 +416,23 @@ valores. **Nunca se registra un PIN ni un token.**
 
 ## Pruebas
 
-`tools/test_pos_backend.php`: 100 verificaciones contra un API local con dos tenants de
+`tools/test_pos_backend.php`: 103 verificaciones contra un API local con dos tenants de
 prueba (traspaso, administración, bloqueo por PIN, sesiones, catálogo y precio final,
 aislamiento entre empresas, bitácora sin PIN). Pasa con el gate en `enforce` y en sombra. Ver su cabecera
 para armar el entorno (MySQL 8 en Docker); **nunca contra producción**.
 
-`tools/test_pos_venta.php`: 49 verificaciones del cobro (turno, validaciones sin gastar
-e-NCF, venta en efectivo, idempotencia y candado, rechazo entregado igual, DGII lenta y caída con
-su reenvío, recibo, bitácora). `tools/test_pos_cierre.php`: 50 verificaciones del cierre
+`tools/test_pos_venta.php`: 68 verificaciones del cobro (turno, validaciones sin gastar
+e-NCF, listas de precio rechazadas y vendidas, venta en efectivo, idempotencia y candado,
+rechazo entregado igual, DGII lenta y caída con su reenvío, recibo, bitácora).
+`tools/test_pos_cierre.php`: 50 verificaciones del cierre
 (esperado y diferencia, permiso de supervisor, PIN de cajero, conteo inválido, nota, ventas
-del turno y del día, eventos V4, candado, lista de app.\*). `tools/test_pos_e31.php`: 36
+del turno y del día, eventos V4, candado, lista de app.\*). `tools/test_pos_e31.php`: 50
 verificaciones del crédito fiscal (cliente nuevo, existente, no inscrito y consulta caída;
 validaciones; E31 aceptado por `ConsultaResultado`; descuento del cliente; rechazo al
-recibir y después; DGII lenta y caída sin duplicar el envío; necesita además
-`RNC_CONSULTA_URL` local). Las tres emiten de verdad, así que corren contra la DGII simulada
-`tools/mock_dgii_local.php` con un certificado autofirmado y se niegan a correr si
+recibir y después; DGII lenta y caída sin duplicar el envío; lista de precio por defecto del
+cliente en `/api/clients` y en el cliente del POS, también sin la columna de la 039; necesita
+además `RNC_CONSULTA_URL` local). Las tres emiten de verdad, así que corren contra la DGII
+simulada `tools/mock_dgii_local.php` con un certificado autofirmado y se niegan a correr si
 `DGII_ECF_BASE_URL` / `DGII_FC_BASE_URL` no son locales.
 
 `tools/test_pos_write_ahead.php`: 30 verificaciones de la venta sobre el write-ahead (la misma clave

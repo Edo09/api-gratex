@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..038  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
+--   - 012..039  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
 --               la 036 y la 037 estan reservadas y no tienen archivo: ver el README).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS clients (
                   COMMENT 'Descuento fijo del cliente en % (0 = sin descuento)',
   permitir_credito TINYINT(1) NOT NULL DEFAULT 1
                   COMMENT '1 = se le puede facturar a credito; 0 = solo contado',
+  lista_precio  TINYINT      NULL DEFAULT NULL
+                  COMMENT 'Lista de precio por defecto del cliente (1-4); NULL = preguntar cada vez',
   phone_number  VARCHAR(20)  NOT NULL,
   PRIMARY KEY (id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

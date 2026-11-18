@@ -610,7 +610,7 @@ class posModel
         }
         $marcas = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->conexion->prepare(
-            "SELECT id, sku, nombre, indicador_facturacion, indicador_bien_servicio, precio, unidad_medida, activo
+            "SELECT id, sku, nombre, indicador_facturacion, indicador_bien_servicio, precio, precio_2, precio_3, precio_4, unidad_medida, activo
              FROM products WHERE id IN ({$marcas})"
         );
         $stmt->execute($ids);

@@ -3,8 +3,10 @@
  * test_pos_e31.php — prueba de integracion del credito fiscal (E31) en el POS
  * (docs/specs/pos.md F2, V5, F6, F7): cliente por RNC (existente, nuevo desde
  * el registro de contribuyentes, no inscrito, servicio caido), descuento del
- * cliente, e-CF completo con trackId, rechazo al recibir y despues, y la DGII
- * lenta o caida (ConsultaTrackIds antes de reenviar).
+ * cliente, e-CF completo con trackId, rechazo al recibir y despues, la DGII
+ * lenta o caida (ConsultaTrackIds antes de reenviar) y la lista de precio por
+ * defecto del cliente (POST/PUT /clients y el cliente del POS, tambien sin la
+ * columna de la migracion 039).
  *
  * Mismo entorno que tools/test_pos_venta.php, mas RNC_CONSULTA_URL apuntando
  * al simulador (tools/mock_dgii_local.php). Emite: se niega a correr si la
@@ -128,6 +130,7 @@ $cliente = function (string $nombre, ?string $rnc, float $descuento) use ($pdo, 
 $conDescuento = $cliente('CLIENTE CON DESCUENTO SRL', '101010101', 10.0);
 $sinRnc = $cliente('E31TEST sin RNC', null, 0.0);
 $mismaEmpresa = $cliente('E31TEST sin RNC', $rncEmisor, 0.0);
+$pdo->exec("UPDATE `{$dbA}`.clients SET lista_precio = 2 WHERE id = {$conDescuento}");
 
 [, $r] = $api('POST', '/auth/login', ['emailOrUsername' => getenv('POS_TEST_ADMIN_A'), 'password' => getenv('POS_TEST_PASS')]);
 $admin = ['Authorization' => 'Bearer ' . ($r['data']['token'] ?? '')];
@@ -153,12 +156,14 @@ echo "1. Cliente por RNC (F2)\n";
 $chk('RNC de 5 digitos: 422 RNC_FORMATO', $h === 422 && ($r['codigo'] ?? '') === 'RNC_FORMATO', [$h, $r]);
 [$h, $r] = $api('POST', '/pos/clientes/rnc', ['rnc' => '101-01010-1'], $ana);
 $chk('cliente que ya existe (con guiones): se usa, con su descuento del 10%', $h === 200 && ($r['data']['nuevo'] ?? true) === false
-    && ($r['data']['cliente']['id'] ?? 0) === $conDescuento && $r['data']['cliente']['descuento'] === 10 , [$h, $r]);
+    && ($r['data']['cliente']['id'] ?? 0) === $conDescuento && $r['data']['cliente']['descuento'] === 10
+    && ($r['data']['cliente']['lista_precio'] ?? null) === 2, [$h, $r]);
 $antes = (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.clients")->fetchColumn();
 [$h, $r] = $api('POST', '/pos/clientes/rnc', ['rnc' => '131000001'], $ana);
 $nuevo = (int) ($r['data']['cliente']['id'] ?? 0);
 $chk('RNC nuevo e inscrito: se crea el cliente con la razon social del registro', $h === 200 && ($r['data']['nuevo'] ?? false) === true
-    && ($r['data']['cliente']['nombre'] ?? '') === 'COMERCIAL PRUEBA SRL' && ($r['data']['estado_dgii'] ?? '') === 'ACTIVO', [$h, $r]);
+    && ($r['data']['cliente']['nombre'] ?? '') === 'COMERCIAL PRUEBA SRL' && ($r['data']['estado_dgii'] ?? '') === 'ACTIVO'
+    && array_key_exists('lista_precio', $r['data']['cliente']) && $r['data']['cliente']['lista_precio'] === null, [$h, $r]);
 $fila = $pdo->query("SELECT client_name, company_name, razon_social, rnc, email, phone_number FROM `{$dbA}`.clients WHERE id = {$nuevo}")->fetch();
 $chk('en la base: contacto = nombre comercial, sin correo ni telefono', $fila && $fila['client_name'] === 'COMERCIAL PRUEBA'
     && $fila['razon_social'] === 'COMERCIAL PRUEBA SRL' && $fila['rnc'] === '131000001' && $fila['email'] === '' && $fila['phone_number'] === ''
@@ -301,6 +306,52 @@ echo "\n8. Bitacora\n";
 $acciones = array_count_values(array_column($pdo->query("SELECT action FROM `{$master}`.audit_logs WHERE id > {$inicioAudit} AND module = 'pos'")->fetchAll(), 'action'));
 foreach (['POS_CLIENTE_CREADO', 'POS_VENTA', 'POS_VENTA_RECHAZADA', 'POS_VENTA_ENVIADA'] as $a) {
     $chk("registra {$a}", ($acciones[$a] ?? 0) > 0, $acciones);
+}
+
+// ---------------------------------------------------------------------------
+echo "\nLista de precio por defecto del cliente\n";
+$lista = fn(int $id) => $pdo->query("SELECT lista_precio FROM `{$dbA}`.clients WHERE id = {$id}")->fetchColumn();
+// El texto de CLIENTE_LISTA_PRECIO_INVALIDA (src/Controllers/clientController.php): con el que el alta y la
+// edicion rechazan una lista que no es 1 a 4.
+$listaInvalida = 'La lista de precio del cliente tiene que ser 1, 2, 3 o 4 (o ninguna).';
+[, $r] = $api('POST', '/clients', ['client_name' => 'E31TEST sin RNC', 'company_name' => 'E31TEST sin RNC', 'lista_precio' => 3], $admin);
+$idL = (int) ($r['data']['id'] ?? 0);
+$chk('crear con lista_precio 3: se guarda y vuelve en la fila creada', ($r['status'] ?? false) === true && (int) ($r['data']['lista_precio'] ?? 0) === 3 && (int) $lista($idL) === 3, $r);
+[, $r] = $api('PUT', '/clients', ['id' => $idL, 'descuento' => 5], $admin);
+$chk('editar sin la clave: la conserva', ($r['status'] ?? false) === true && (int) $lista($idL) === 3, $r);
+foreach ([0, 5, 'x', 2.5, true] as $malo) {
+    [, $r] = $api('PUT', '/clients', ['id' => $idL, 'lista_precio' => $malo], $admin);
+    $chk('lista_precio ' . json_encode($malo) . ': se rechaza con su mensaje y no cambia nada', ($r['status'] ?? true) === false
+        && ($r['error'] ?? '') === $listaInvalida && (int) $lista($idL) === 3, $r);
+}
+// El alta tambien la rechaza, y no crea al cliente. Sin esa rama del controller el alta contestaria status:true: el
+// modelo ignora una lista que no vale y guardaria al cliente sin lista, sin avisar.
+$clientesAntes = (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.clients")->fetchColumn();
+[, $r] = $api('POST', '/clients', ['client_name' => 'E31TEST sin RNC', 'company_name' => 'E31TEST sin RNC', 'lista_precio' => 7], $admin);
+$clientesDespues = (int) $pdo->query("SELECT COUNT(*) FROM `{$dbA}`.clients")->fetchColumn();
+$chk('crear con lista_precio 7: se rechaza con su mensaje y no crea ningun cliente', ($r['status'] ?? true) === false
+    && ($r['error'] ?? '') === $listaInvalida && $clientesDespues === $clientesAntes, [$r, $clientesAntes, $clientesDespues]);
+[, $r] = $api('PUT', '/clients', ['id' => $idL, 'lista_precio' => '4'], $admin);
+$chk('"4" como texto: vale', ($r['status'] ?? false) === true && (int) $lista($idL) === 4, $r);
+[, $r] = $api('PUT', '/clients', ['id' => $idL, 'lista_precio' => null], $admin);
+$chk('null la quita', ($r['status'] ?? false) === true && $lista($idL) === null, $r);
+[, $r] = $api('POST', '/clients', ['client_name' => 'E31TEST sin RNC', 'company_name' => 'E31TEST sin RNC'], $admin);
+$chk('crear sin la clave: queda en NULL', ($r['status'] ?? false) === true && $lista((int) ($r['data']['id'] ?? 0)) === null, $r);
+
+// Una empresa que todavia no corrio la 039: todo sigue funcionando, y la lista es null.
+// Quita la columna de la base del tenant A y el finally la vuelve a poner; si la corrida muere entre
+// los dos, php -d extension=pdo_mysql tools/aplicar_migracion_scratch.php --tenant-db=wa_scratch --migraciones=039
+$pdo->exec("ALTER TABLE `{$dbA}`.clients DROP COLUMN lista_precio");
+try {
+    [, $r] = $api('PUT', '/clients', ['id' => $idL, 'descuento' => 6], $admin);
+    $chk('sin la columna: editar un cliente sin tocar la lista funciona', ($r['status'] ?? false) === true, $r);
+    [, $r] = $api('POST', '/clients', ['client_name' => 'E31TEST sin RNC', 'company_name' => 'E31TEST sin RNC'], $admin);
+    $chk('sin la columna: crear un cliente sin la clave funciona (el INSERT no nombra la lista)', ($r['status'] ?? false) === true && (int) ($r['data']['id'] ?? 0) > 0, $r);
+    [, $r] = $api('POST', '/pos/clientes/rnc', ['rnc' => '101-01010-1'], $ana);
+    $chk('sin la columna: el cliente del POS trae lista_precio null', ($r['data']['cliente']['id'] ?? 0) === $conDescuento
+        && array_key_exists('lista_precio', $r['data']['cliente']) && $r['data']['cliente']['lista_precio'] === null, $r);
+} finally {
+    $pdo->exec("ALTER TABLE `{$dbA}`.clients ADD COLUMN lista_precio TINYINT NULL DEFAULT NULL COMMENT 'Lista de precio por defecto del cliente (1-4); NULL = preguntar cada vez' AFTER permitir_credito");
 }
 
 $api('POST', '/auth/signout', [], $admin);

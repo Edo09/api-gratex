@@ -424,6 +424,9 @@ $producto('POSTEST-3', 'Recarga', $catViejos, 1, '8.4746', '43', null, null);
 $producto('POSTEST-4', 'Bolsa (no facturable)', $catBebidas, 0, '5.0000', '43', '100', null);
 $producto('POSTEST-5', 'Refresco descontinuado', $catBebidas, 1, '50.0000', '43', '4', null, 0);
 $producto('POSTEST-6', 'Precio mal cargado', $catBebidas, 1, '-1.0000', '43', '1', null);
+// Listas 2-4: el agua con la 2 y la 4 vendibles y la 3 en 0 (no aplica); la recarga con la 2 mal cargada.
+$pdo->exec("UPDATE `{$dbA}`.products SET precio_2 = '19.0000', precio_3 = '0.0000', precio_4 = '8.4746' WHERE sku = 'POSTEST-1'");
+$pdo->exec("UPDATE `{$dbA}`.products SET precio_2 = '-1.0000' WHERE sku = 'POSTEST-3'");
 
 $eqLuis = $eq + ['X-POS-SESION' => $sesLuis];
 [$h, $r] = $api('GET', '/pos/catalogo', null, $eq);
@@ -449,6 +452,11 @@ $chk('queso: exento (150.00), por kilo admite decimales, agotado',
 $recarga = $dePrueba['POSTEST-3'] ?? [];
 $chk('recarga: 10.00, servicio (stock null) y su categoria inactiva queda en "Todos"',
     ($recarga['precio_centavos'] ?? 0) === 1000 && $recarga['stock'] === null && $recarga['category_id'] === null, $recarga);
+$chk('agua: lista 2 (19.00 = 22.42) y lista 4 (8.4746 = 10.00); la 3, en 0, no se ofrece; precio_centavos sigue siendo el de la lista 1',
+    ($agua['listas'] ?? null) === [['lista' => 2, 'precio_centavos' => 2242], ['lista' => 4, 'precio_centavos' => 1000]]
+    && ($agua['precio_centavos'] ?? 0) === 2500, $agua);
+$chk('sin listas 2-4: listas es []', ($queso['listas'] ?? null) === [], $queso);
+$chk('una lista mal cargada se omite y el producto sigue en la caja', ($recarga['listas'] ?? null) === [], $recarga);
 $chips = array_column($r['data']['categorias'] ?? [], 'productos', 'nombre');
 $chk('categorias: solo las activas con productos, con su conteo', ($chips['POS Test Bebidas'] ?? 0) === 1
     && !isset($chips['POS Test Viejos']), $chips);

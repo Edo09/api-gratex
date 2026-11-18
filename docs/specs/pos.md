@@ -50,7 +50,6 @@ las metas de [§10](#10-métricas-de-éxito) son hipótesis y se ajustan tras el
 | Órdenes en espera (C001/C002) | No es crítico para el piloto | Fase 2 |
 | Pago mixto (efectivo + tarjeta) | Una forma de pago por venta cubre el piloto | Fase 2 |
 | Retiros / entradas de efectivo | Decisión de producto: en v1 todo efectivo que sale aparece como faltante | Fase 2 |
-| Listas de precio 2–4 | Decisión de producto: siempre precio 1 + descuento del cliente | Fase 2 |
 | Asignar códigos de barras desde el POS | Decisión: los códigos se cargan en la ficha del producto | Fase 2 |
 | Imágenes de producto | Iniciales + color de categoría | Fase 2 |
 | Integración con datafono (Azul, CardNet) | Requiere acuerdos con el adquirente | Posterior |
@@ -171,7 +170,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **C2 · Precio final** — `Piloto`
 - [x] Precio mostrado = `round(precio × (1 + tasa), 2)`, con tasa según `indicador_facturacion`: 1 → 18 %, 2 → 16 %, 3 y 4 → 0 %. Lo calcula **el servidor**, no el navegador.
-- [x] Siempre precio 1 (`products.precio`). Sin listas 2–4 en v1.
+- [x] El catálogo trae el precio de la lista 1 (`products.precio`) y las listas 2 a 4 que tengan un precio vendible (`listas`, con el mismo cálculo). La línea de la venta lleva `lista` (un índice de 1 a 4, nunca un monto) y el servidor la cobra (2026-11-18).
 - [ ] Con el neto a 4 decimales (C7), el precio final es exactamente el que escribió el dueño.
 
 **C3 · Grilla táctil** — `Piloto`
@@ -451,7 +450,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | Fiado y abonos | `tipo` de `pos_caja_movimientos` es extensible (`ABONO`); `clients.permitir_credito` ya existe |
 | Retiros y entradas | Mismo `tipo` extensible (`RETIRO`, `ENTRADA`); el esperado ya se calcula por movimientos |
 | Órdenes en espera | El carrito vive en el cliente; guardar varios es un cambio local |
-| Listas de precio | El catálogo del POS ya trae `precio_2..4`; falta `clients.lista_precio` |
+| Listas de precio | El catálogo del POS ya trae `listas` (los precios 2 a 4), la venta cobra la `lista` de cada línea y `clients.lista_precio` (migración 039) es la lista por defecto de cada cliente: el POS la usa al tocar un producto que la ofrece |
 | Asignar códigos desde el POS | `product_barcodes` ya es una tabla aparte |
 | Pasar un E32 a E31 (código de modificación 5) | La E34 del POS ya referencia ventas por e-NCF |
 | 58 mm, tablet, imágenes, sucursales | Ver §3 |
@@ -473,7 +472,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 9 | Precio en pantalla | Final, con ITBIS |
 | 10 | Códigos de barras | Varios por producto, en tabla aparte. Un código desconocido **solo avisa** |
 | 11 | En v1 | Descuentos, cliente (su descuento), devoluciones |
-| 12 | Fase 2 | Fiado, órdenes en espera, pago mixto, retiros, listas de precio |
+| 12 | Fase 2 | Fiado, órdenes en espera, pago mixto, retiros (las listas de precio, con la lista por defecto de cada cliente, ya están: decisión 22) |
 | 13 | Roles | Cajero y supervisor; el supervisor autoriza con PIN |
 | 14 | Cobro | Una forma de pago por venta + devuelta. Sin referencia de tarjeta |
 | 15 | Lanzamiento | `pos_enabled` por tenant; piloto con Gratex |
@@ -483,7 +482,7 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 19 | RNC nuevo | Se crea el cliente con los datos de la DGII |
 | 20 | Plazo de devolución | 30 días |
 | 21 | Reembolso | Por la misma vía; solo el efectivo sale de la caja |
-| 22 | Listas de precio | No en v1 (siempre precio 1) |
+| 22 | Listas de precio | Sí (2026-11-18): el cajero elige la lista al tocar un producto con varias; una lista por producto por venta; sin PIN; la lista usada queda en la bitácora. El cliente puede traer su lista por defecto (`clients.lista_precio`): al tocar un producto que la ofrece entra directo en ella, y al elegir al cliente en una venta con productos el POS pregunta si pasa a esa lista los que la ofrecen; una línea se puede cambiar de lista a mano |
 | 23 | Cambio de precio | Permitido, con PIN de supervisor |
 | 24 | "Varios" | Sí, con PIN de supervisor |
 | 25 | Descuentos | Con PIN de supervisor |
@@ -615,7 +614,7 @@ El recibo sale de los endpoints que ya existen: `GET /api/facturas/{id}/pdf?form
 
 1. Valida equipo, sesión, turno propio abierto y conexión.
 2. **Idempotencia:** si `pos_idempotency_key` ya existe, devuelve esa factura tal cual.
-3. Arma las líneas **en el servidor** desde `product_id`, porque el navegador no manda precios. La excepción son V7 y V9, que llegan con su permiso de supervisor de un solo uso.
+3. Arma las líneas **en el servidor** desde `product_id` (el POS manda también `lista`, un índice de 1 a 4, nunca un monto), porque el navegador no manda precios. La excepción son V7 y V9, que llegan con su permiso de supervisor de un solo uso.
 4. Precio unitario = precio final. Con `IndicadorMontoGravado = 1`:
    - `MontoItem = round(cant × precio_final, 2) − descuento`;
    - por tasa: `gravado = round(Σ MontoItem / (1 + tasa), 2)` e `ITBIS = Σ MontoItem − gravado`;

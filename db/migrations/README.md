@@ -4,8 +4,8 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
   `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
-  migraciones ya incluidas, hasta la 038: la 036 y la 037 están reservadas, ver más abajo).
-  Las migraciones sueltas activas (012–035 y 038) son solo para DBs de tenant **ya desplegados**.
+  migraciones ya incluidas, hasta la 039: la 036 y la 037 están reservadas, ver más abajo).
+  Las migraciones sueltas activas (012–035, 038 y 039) son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
      tenant existentes (Gratex, etc.).
@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035 y 038; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020 y 021).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 038 y 039; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020 y 021).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -27,7 +27,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
   para el final. Ver 028 y 031 (la 031 también nombra con `@db` las tablas de
   sus `REFERENCES`, y lee con SQL armado la fila que muestra al final: una
   tabla que quizá no se creó no se puede nombrar en el `SELECT` final).
-- Desde la 029/030/031/032/033/034/035/038 (y la master 012) la segunda sentencia es una **guardia**: si
+- Desde la 029/030/031/032/033/034/035/038/039 (y la master 012) la segunda sentencia es una **guardia**: si
   `@db` es `information_schema` u otra base de sistema, o no tiene la tabla que
   la migracion espera, falla con `#1049 Unknown database 'ALTO_elige_la_base_...'`
   o `#1146 Table '<base>.<tabla>' doesn't exist` ANTES de tocar nada. Paso el
@@ -91,8 +91,13 @@ que ningún otro plan los tome:
   `cobros`, `cobro_pagos`, `cobro_recordatorios`), pero en la master y con FK a `tenants` (el
   cliente es un tenant). Solo las usa la cuenta de soporte (acceso global) por
   `/api/cobros-tenants`; no hay migracion de tenant. Va ANTES de subir el codigo que la usa.
-- Los encabezados que dicen "hasta la 038" (este README, `db/tenant_schema.sql`,
-  `tools/verificar_migraciones_tenant.sql`) cuentan la 038, que sí tiene archivo;
+- **Tenant 039**: `db/migrations/039_clients_lista_precio.sql` (2026-11-18). Agrega la
+  columna `clients.lista_precio` (la lista de precio por defecto del cliente, 1 a 4;
+  NULL = preguntar cada vez). Toma la 039 porque la 036 es de Express, la 037 del plan
+  ITBIS y la 038 de Cobros. Va en la base de CADA empresa antes de subir el API que
+  guarda la lista.
+- Los encabezados que dicen "hasta la 039" (este README, `db/tenant_schema.sql`,
+  `tools/verificar_migraciones_tenant.sql`) cuentan la 038 y la 039, que sí tienen archivo;
   siguen sin nombrar la 036 ni la 037: un snapshot o un verificador no debe nombrar
   una migración cuyo archivo no existe. Los planes de Express que crean la master
   015 y la tenant 036 los suben junto con el SQL; mientras tanto, este bloque y
