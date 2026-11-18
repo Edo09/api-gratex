@@ -293,3 +293,15 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
 5. **Permiso aparte para anular y cancelar.** Hoy quien tiene el módulo `cobros` puede registrar pagos, anularlos,
    cancelar cobros y cambiar el cobro mensual de un cliente. Si se quiere que anular y cancelar sean solo de un
    encargado, el RBAC admite un submódulo (`cobros.anular`) sin tocar las tablas.
+
+## Registro de aplicación en producción
+
+- **2026-11-17 · migración de tenant 038.** Aplicada con `mysql.exe` a las **cinco** bases de tenant app, primero a Demo
+  Fiscalo (`smhynzte_003`) y después a `smhynzte_new_gratexdb`, `smhynzte_002`, `smhynzte_004` y `smhynzte_005`. Las cinco
+  devolvieron `todo_ok = SI` (4 tablas InnoDB, 8 índices, 5 FK y 5 CHECK) y `tools/verificar_migraciones_tenant.sql` muestra
+  en cada una las migraciones 027, 028, 030 y 038 como `APLICADA`. Las empresas de tipo `integracion` no tienen base de negocio
+  (se crearon solo para certificar) y no entran.
+- **2026-11-17 · master 020** en `smhynzte_master_gratex`: 6 roles `user` de empresas app, 6 con `cobros`, 0 faltan.
+- El código está en `master` (commits `9732e85` y `3006c1e`). El despliegue al servidor **no es automático** (hosting
+  compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
+
