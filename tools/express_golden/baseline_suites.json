@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "90ab0ca1ccc3ffb23e17dfcf55423b59ba7340f1",
+    "git_sha": "9732e85e28ad73daebed9e720d280a1824c2071e",
     "php": "8.5",
-    "capturado": "2026-11-17T16:57:16-04:00",
+    "capturado": "2026-11-17T20:55:52-04:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 379,
@@ -118,6 +118,13 @@
         },
         "test_acceso_global.php": {
             "total": 124,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_cobros.php": {
+            "total": 384,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
