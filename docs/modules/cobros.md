@@ -362,6 +362,12 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   CHECK; `tenants.id` es `int`) y `tools/verificar_migraciones_master.sql` la muestra `APLICADA`. Con solo `SELECT` se comprobó el
   modelo en ámbito de tenants contra el MySQL real (8.0, con `ONLY_FULL_GROUP_BY`): buscador (19 tenants, 6 con correo de admin), lista,
   filtros por estado, dashboard, recordatorios y panel, sin errores; las cuatro tablas quedaron vacías.
+- **2026-11-17 · verificación en vivo de Cobros de tenants** (sesión de soporte en `app.fiscalpoint.com.do`, todo 200): menú,
+  dashboard, buscador (19 tenants), panel y, con escrituras, **un cobro de prueba**: `cobros.id = 1`, tenant 5 (Demo Fiscalo),
+  periodo 2026-11, RD$ 1.00, vencimiento 2026-11-01, creado y **cancelado** ese mismo día (motivo "Prueba de Cobros de tenants").
+  Sigue en la tabla (un cobro no se borra) y no cuenta en ningún total. La bitácora quedó con dos filas (`audit_logs` 4483 y 4484:
+  módulo `cobros-tenants`, `tenant_id` 0, CREATE y CANCEL). No se probaron en vivo la configuración mensual, los pagos, anular un
+  pago ni los recordatorios: usan el mismo modelo y el mismo SQL que el módulo de las empresas, ya verificado en Demo Fiscalo.
 - El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
