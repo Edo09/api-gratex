@@ -31,7 +31,7 @@ módulo = acceso completo a ese módulo; no tenerlo = no se ve.
 - Qué módulos tiene cada rol es **per-tenant** (en la DB).
 
 Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`, `gastos`,
-`clients`, `products`, `proveedores`, `cotizaciones`, `aprobaciones`, `reportes`, `ncf`,
+`clients`, `cobros`, `products`, `proveedores`, `cotizaciones`, `aprobaciones`, `reportes`, `ncf`,
 `unidades`, `categories`, `warehouses`. **Solo admin** (excluidos de `user`): `emisor`, `branding`, `landing`,
 `users`, `roles`. (Si un `user` necesita un módulo admin, crear/ajustar un rol con `/api/roles`.)
 

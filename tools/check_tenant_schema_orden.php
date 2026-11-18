@@ -567,5 +567,128 @@ $chk('verificador del master: la fila 012 (POS) pide tenants.pos_enabled, pos_eq
         . "AND \(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+"
         . "AND TABLE_NAME IN \('pos_handoff_codes', 'pos_equipos'\)\) = 2/", $verificadorMaster) === 1);
 
+echo "\n== Migracion 038 (Cobros) ==\n";
+$ruta038 = $raiz . '/db/migrations/038_cobros.sql';
+$hay038 = is_file($ruta038);
+$chk('existe db/migrations/038_cobros.sql', $hay038);
+$mig038 = $hay038 ? sinComentarios((string) file_get_contents($ruta038)) : '';
+$plano038 = (string) preg_replace('/\s+/', ' ', $mig038);
+foreach (['uk_cobros_cliente_periodo', 'idx_cobros_vencimiento', 'idx_cobros_origen', 'uk_cobro_pagos_idem',
+          'idx_cobro_pagos_cobro', 'idx_cobro_pagos_fecha', 'idx_cobro_recordatorios_cobro',
+          'cobro_config_client_fk', 'cobros_client_fk', 'cobros_origen_fk', 'cobro_pagos_cobro_fk',
+          'cobro_recordatorios_cobro_fk', 'cobro_config_monto_ck', 'cobro_config_dia_ck', 'cobros_monto_ck',
+          'cobros_pagado_ck', 'cobro_pagos_monto_ck'] as $nombre) {
+    $chk("038 nombra {$nombre}", $mig038 !== '' && preg_match('/\b' . $nombre . '\b/', $mig038) === 1);
+}
+
+// La misma regla de phpMyAdmin que la 031: la base se fija en @db en la PRIMERA sentencia, la
+// segunda es la guardia y el unico SELECT de nivel superior es el resultado final.
+$sent038 = sentencias($mig038);
+$chk('038: la primera sentencia fija la base en @db', ($sent038[0] ?? '') === 'SET @db := DATABASE()');
+$guardia038 = "SET @guardia := IF(@db IS NULL OR @db IN ('information_schema', 'mysql', 'performance_schema', 'sys'), "
+    . "'DO (SELECT 1 FROM `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x` LIMIT 1)', "
+    . "CONCAT('DO (SELECT 1 FROM `', @db, '`.clients LIMIT 1)'))";
+$chk('038: la segunda sentencia es la guardia (#1049 sin base de empresa, #1146 sin clients) y su PREPARE/EXECUTE/DEALLOCATE van enseguida',
+    preg_replace('/\s+/', ' ', $sent038[1] ?? '') === $guardia038
+    && array_slice($sent038, 2, 3) === ['PREPARE s_guardia FROM @guardia', 'EXECUTE s_guardia', 'DEALLOCATE PREPARE s_guardia']);
+$chk('038: DATABASE() aparece una sola vez', substr_count($mig038, 'DATABASE()') === 1);
+$usosIs038 = preg_match_all('/\binformation_schema\./i', $mig038);
+$filtrosDb038 = preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $mig038);
+$chk("038: cada consulta a information_schema filtra por @db ({$usosIs038} consultas, {$filtrosDb038} filtros)",
+    $usosIs038 > 0 && $usosIs038 === $filtrosDb038);
+$selects038 = array_keys(array_filter($sent038, fn($s) => stripos($s, 'SELECT') === 0));
+$chk('038: el unico SELECT de nivel superior es la ultima sentencia', $sent038 !== [] && $selects038 === [count($sent038) - 1]);
+$final038 = $sent038 !== [] ? $sent038[count($sent038) - 1] : '';
+$chk('038: el resultado muestra la base, los motores, indices, FK, CHECK y todo_ok',
+    str_contains($final038, '@db AS base') && str_contains($final038, 'AS indices') && str_contains($final038, 'AS fks')
+    && str_contains($final038, 'AS checks') && str_contains($final038, 'AS todo_ok'));
+$chk('038: copia el tipo de clients.id y exige que clients sea InnoDB',
+    str_contains($plano038, "SET @tipo_client_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'id' );")
+    && str_contains($plano038, "SET @motor_innodb := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'clients' AND ENGINE = 'InnoDB' );")
+    && str_contains($plano038, 'SET @listo := (@motor_innodb = 1 AND @tipo_client_id IS NOT NULL);'));
+foreach (['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios'] as $tabla) {
+    $chk("038: @crear_{$tabla} exige que falte la tabla y que clients este listo",
+        str_contains($plano038, "SET @has_{$tabla} := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = '{$tabla}' );")
+        && str_contains($plano038, "SET @crear_{$tabla} := (@listo = 1 AND "));
+}
+$chk('038: pagos y recordatorios solo se crean si cobros existe (su FK lo necesita)',
+    str_contains($plano038, 'SET @crear_cobro_pagos := (@listo = 1 AND @hay_cobros = 1 AND @has_cobro_pagos = 0);')
+    && str_contains($plano038, 'SET @crear_cobro_recordatorios := (@listo = 1 AND @hay_cobros = 1 AND @has_cobro_recordatorios = 0);'));
+preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $mig038, $prep038);
+preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $mig038, $exec038);
+preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $mig038, $deal038);
+$chk('038: cada PREPARE tiene su EXECUTE y su DEALLOCATE (' . count($prep038[1]) . ' sentencias)',
+    $prep038[1] !== [] && $prep038[1] === $exec038[1] && $prep038[1] === $deal038[1]);
+$chk('038: ningun nombre de sentencia preparada se repite', count($prep038[1]) === count(array_unique($prep038[1])));
+
+// El SQL armado (base 'tenant', clients.id como en una DB del repo, cada guarda en 1) solo puede
+// crear las cuatro tablas, y toda REFERENCES nombra la base.
+$ejemplo038 = [
+    '@db'                        => 'tenant',
+    '@tipo_client_id'            => 'int(11)',
+    '@crear_cobro_config'        => '1',
+    '@crear_cobros'              => '1',
+    '@crear_cobro_pagos'         => '1',
+    '@crear_cobro_recordatorios' => '1',
+];
+$dinamicos038 = armarDinamicos($mig038, $ejemplo038);
+$chk('038: cada @sql_* se prepara una vez (' . count($dinamicos038) . ' sentencias dinamicas, mas la guardia)',
+    $dinamicos038 !== [] && array_column($dinamicos038, 'variable') === array_values(array_diff($prep038[2], ['@guardia'])));
+$tablas038 = [];
+foreach ($dinamicos038 as $d) {
+    $ok = $d['desconocida'] === null
+        && ($ejemplo038[$d['guarda']] ?? null) === $d['valor']
+        && preg_match('/^CREATE TABLE IF NOT EXISTS `tenant`\.(cobro_config|cobros|cobro_pagos|cobro_recordatorios) \(/', $d['sql']) === 1
+        && preg_match('/REFERENCES (?!`tenant`\.)/', $d['sql']) === 0
+        && balanceado($d['sql']);
+    $chk("038: {$d['variable']} arma un CREATE TABLE valido (guarda {$d['guarda']} = {$d['valor']})"
+        . ($d['desconocida'] !== null ? " (variable sin ejemplo: {$d['desconocida']})" : ''), $ok);
+    if ($mostrar) {
+        echo "         {$d['sql']}\n";
+    }
+    foreach (tablas(str_replace('`tenant`.', '', $d['sql'])) as $t) {
+        $tablas038[$t['nombre']] = $t['elementos'];
+    }
+}
+// Lo que crea la 038 y lo que crea el snapshot deben ser la misma tabla (columnas en el mismo
+// orden, tipos, defaults, COMMENT, indices, FK y CHECK): un tenant nuevo y uno migrado quedan igual.
+foreach (['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios'] as $tabla) {
+    $de038 = array_map('strtoupper', $tablas038[$tabla] ?? []);
+    $deSnapshot = array_map('strtoupper', $porNombre[$tabla] ?? []);
+    $distinto = '';
+    foreach (array_keys($de038 + $deSnapshot) as $i) {
+        if (($de038[$i] ?? '') !== ($deSnapshot[$i] ?? '')) {
+            $distinto = ' (038: ' . ($de038[$i] ?? 'nada') . ' | snapshot: ' . ($deSnapshot[$i] ?? 'nada') . ')';
+            break;
+        }
+    }
+    $chk("038: {$tabla} queda igual que en el snapshot{$distinto}", $de038 !== [] && $distinto === '');
+}
+$chk('snapshot: cobros cuelga de clients con ON DELETE RESTRICT y la UNIQUE (client_id, periodo)',
+    tieneElemento($porNombre['cobros'] ?? [], 'CONSTRAINT cobros_client_fk FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE RESTRICT')
+    && tieneElemento($porNombre['cobros'] ?? [], 'UNIQUE KEY uk_cobros_cliente_periodo (client_id, periodo)'));
+$chk('verificador: la fila 038 pide las cuatro tablas y la UNIQUE uk_cobros_cliente_periodo',
+    preg_match("/SELECT '038', '038_cobros\.sql',\s*'[^']*',\s*"
+        . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\)\s+"
+        . "AND TABLE_NAME IN \('cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios'\)\) = 4\s+"
+        . "AND \(SELECT COUNT\(\*\) FROM information_schema\.STATISTICS\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'cobros'\s+"
+        . "AND INDEX_NAME = 'uk_cobros_cliente_periodo'\) > 0/", $verificador) === 1);
+
+echo "\n== Master 020 (permiso cobros) ==\n";
+$rutaM020 = $raiz . '/db/master_migrations/020_cobros_permiso.sql';
+$chk('existe db/master_migrations/020_cobros_permiso.sql', is_file($rutaM020));
+$m020 = is_file($rutaM020) ? sinComentarios((string) file_get_contents($rutaM020)) : '';
+$sentM020 = sentencias($m020);
+$chk('master 020: la primera sentencia fija la base en @db y la segunda es la guardia (#1049 / #1146 sin tenants), sin USE',
+    ($sentM020[0] ?? '') === 'SET @db := DATABASE()'
+    && str_contains(preg_replace('/\s+/', ' ', $sentM020[1] ?? ''), "CONCAT('DO (SELECT 1 FROM `', @db, '`.tenants LIMIT 1)')")
+    && stripos($m020, 'USE ') === false);
+$chk("master 020: da 'cobros' solo al rol 'user' de las empresas app, sin duplicar",
+    str_contains($m020, "''cobros''") && str_contains($m020, "t.tipo = ''app'' AND r.name = ''user''") && str_contains($m020, 'NOT EXISTS'));
+$permisos = (static fn(): array => require __DIR__ . '/../config/permissions.php')();
+$chk("config/permissions.php: 'cobros' en el catalogo, en el rol user y en las rutas",
+    in_array('cobros', $permisos['catalog'], true) && in_array('cobros', $permisos['defaults']['user'], true)
+    && ($permisos['routes']['cobros'] ?? null) === 'cobros');
+
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);

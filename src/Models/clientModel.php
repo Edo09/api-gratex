@@ -216,6 +216,14 @@ class clientModel
             }
             return $resultado;
         } catch (PDOException $e) {
+            // Un cliente con cobros no se borra: cobros.client_id es RESTRICT (migracion 038) para
+            // que su historial de cobros y pagos se conserve, aunque esten pagados o cancelados.
+            // MySQL (1451) nombra la tabla; SQLite (las pruebas) solo dice "FOREIGN KEY constraint failed".
+            $codigo = (int) ($e->errorInfo[1] ?? 0);
+            $detalle = (string) ($e->errorInfo[2] ?? $e->getMessage());
+            if (($codigo === 1451 && stripos($detalle, 'cobros') !== false) || stripos($detalle, 'FOREIGN KEY constraint failed') !== false) {
+                return ['error', 'Este cliente tiene cobros registrados (pagados, pendientes o cancelados) y su historial se conserva, así que no se puede eliminar.'];
+            }
             error_log('[clients] no se pudo eliminar el cliente ' . $id . ': ' . $e->getMessage());
             return ['error', 'No se pudo eliminar el cliente. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.'];
         }

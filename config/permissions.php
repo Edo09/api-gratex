@@ -34,6 +34,9 @@ $USER_MODULES = [
     'facturas-simples',
     'gastos',
     'clients',
+    // Cobros (docs/modules/cobros.md): cuentas por cobrar por cliente, pagos y
+    // recordatorios. Operativo, como facturas: lo usa quien registra los pagos.
+    'cobros',
     'products',
     'proveedores',
     'cotizaciones',
@@ -71,6 +74,10 @@ return [
         'landing'                  => ['GET' => 'public', '*' => 'landing'],
 
         'clients'                  => 'clients',
+        // Cobros por cliente (configuracion mensual, cobros, pagos, recordatorios).
+        // Modulo propio: sin esta entrada la ruta quedaria sin RBAC y el gate no
+        // resolveria el tenant antes del controller.
+        'cobros'                   => 'cobros',
         'products'                 => 'products',
         'proveedores'              => 'proveedores',
         'unidades-medida'          => 'unidades',

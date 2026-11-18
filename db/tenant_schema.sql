@@ -5,7 +5,8 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..035  en db/migrations/ (activas solo para DBs de tenant ya desplegados).
+--   - 012..038  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
+--               la 036 y la 037 estan reservadas y no tienen archivo: ver el README).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
 -- ya no se reproducen las migraciones una por una.
@@ -1055,4 +1056,89 @@ CREATE TABLE IF NOT EXISTS product_barcodes (
   UNIQUE KEY uk_product_barcode (codigo),
   KEY idx_product_barcode_product (product_id),
   CONSTRAINT fk_product_barcode_product FOREIGN KEY (product_id) REFERENCES products (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ----------------------------------------------------------------------------
+-- 8) Cobros (cuentas por cobrar por cliente). Van al final: todas cuelgan de
+--    clients (que se crea primero) y entre si (cobro_pagos y cobro_recordatorios
+--    despues de cobros). Nada se borra: un cobro se CANCELA (cancelado_at), un
+--    pago se ANULA (anulado_at) y por eso las FK hacia cobros son RESTRICT; un
+--    cliente con cobros no se puede borrar (cobros_client_fk RESTRICT), pero su
+--    configuracion si cae con el (cobro_config_client_fk CASCADE). El estado
+--    (Pendiente, Pagado, Vencido, Parcial, Cancelado) no se guarda: se deriva.
+--    monto_pagado es una cache que el modelo recalcula desde los pagos vigentes
+--    en la misma transaccion. Ver db/migrations/038_cobros.sql y
+--    docs/modules/cobros.md.
+-- ----------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS cobro_config (
+  client_id        INT(11)          NOT NULL,
+  monto_mensual    DECIMAL(12,2)    NOT NULL COMMENT 'Monto del cobro de cada mes (DOP)',
+  dia_vencimiento  TINYINT UNSIGNED NOT NULL COMMENT 'Dia del mes en que vence (1-31); en un mes mas corto, el ultimo dia',
+  descripcion      VARCHAR(150)     NULL COMMENT 'Concepto de cada cobro mensual',
+  activo           TINYINT(1)       NOT NULL DEFAULT 1 COMMENT '1 = al pagarse un cobro se genera el del mes siguiente',
+  user_id          INT(11)          NULL COMMENT 'master users.id del ultimo cambio (sin FK cross-DB)',
+  created_at       DATETIME         NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       DATETIME         NULL DEFAULT NULL,
+  PRIMARY KEY (client_id),
+  CONSTRAINT cobro_config_client_fk FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE CASCADE,
+  CONSTRAINT cobro_config_monto_ck CHECK (monto_mensual > 0),
+  CONSTRAINT cobro_config_dia_ck CHECK (dia_vencimiento BETWEEN 1 AND 31)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cobros (
+  id                    INT(11)       NOT NULL AUTO_INCREMENT,
+  client_id             INT(11)       NOT NULL,
+  periodo               CHAR(7)       NOT NULL COMMENT 'Mes del cobro, AAAA-MM',
+  descripcion           VARCHAR(150)  NULL,
+  monto                 DECIMAL(12,2) NOT NULL COMMENT 'Monto original de ESTE cobro (DOP)',
+  monto_pagado          DECIMAL(12,2) NOT NULL DEFAULT 0.00 COMMENT 'Suma de los pagos vigentes (cache recalculada en cada pago)',
+  fecha_vencimiento     DATE          NOT NULL,
+  cancelado_at          DATETIME      NULL DEFAULT NULL COMMENT 'NULL = activo; un cobro nunca se borra',
+  motivo_cancelacion    VARCHAR(255)  NULL,
+  generado_de_cobro_id  INT(11)       NULL COMMENT 'Cobro cuyo pago genero este (NULL = creado a mano)',
+  user_id               INT(11)       NULL COMMENT 'master users.id que lo creo o lo genero con su pago (sin FK cross-DB)',
+  created_at            DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at            DATETIME      NULL DEFAULT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cobros_cliente_periodo (client_id, periodo),
+  KEY idx_cobros_vencimiento (fecha_vencimiento),
+  KEY idx_cobros_origen (generado_de_cobro_id),
+  CONSTRAINT cobros_client_fk FOREIGN KEY (client_id) REFERENCES clients (id) ON DELETE RESTRICT,
+  CONSTRAINT cobros_origen_fk FOREIGN KEY (generado_de_cobro_id) REFERENCES cobros (id) ON DELETE SET NULL,
+  CONSTRAINT cobros_monto_ck CHECK (monto > 0),
+  CONSTRAINT cobros_pagado_ck CHECK (monto_pagado >= 0 AND monto_pagado <= monto)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cobro_pagos (
+  id                INT(11)       NOT NULL AUTO_INCREMENT,
+  cobro_id          INT(11)       NOT NULL,
+  monto             DECIMAL(12,2) NOT NULL COMMENT 'Monto del pago (DOP)',
+  fecha_pago        DATE          NOT NULL,
+  metodo            ENUM('efectivo','transferencia') NOT NULL,
+  observaciones     VARCHAR(255)  NULL,
+  idempotency_key   CHAR(36)      NULL COMMENT 'UUID del formulario: repetir la peticion no duplica el pago',
+  anulado_at        DATETIME      NULL DEFAULT NULL COMMENT 'NULL = vigente; un pago nunca se borra',
+  motivo_anulacion  VARCHAR(255)  NULL,
+  user_id           INT(11)       NULL COMMENT 'master users.id que lo registro (sin FK cross-DB)',
+  created_at        DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_cobro_pagos_idem (idempotency_key),
+  KEY idx_cobro_pagos_cobro (cobro_id, anulado_at),
+  KEY idx_cobro_pagos_fecha (fecha_pago),
+  CONSTRAINT cobro_pagos_cobro_fk FOREIGN KEY (cobro_id) REFERENCES cobros (id) ON DELETE RESTRICT,
+  CONSTRAINT cobro_pagos_monto_ck CHECK (monto > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS cobro_recordatorios (
+  id          INT(11)      NOT NULL AUTO_INCREMENT,
+  cobro_id    INT(11)      NOT NULL,
+  fecha_hora  DATETIME     NOT NULL COMMENT 'Cuando se hizo el recordatorio',
+  canal       VARCHAR(15)  NOT NULL DEFAULT 'otro' COMMENT 'llamada | mensaje | correo | visita | otro',
+  nota        VARCHAR(255) NULL,
+  user_id     INT(11)      NULL COMMENT 'master users.id que lo registro (sin FK cross-DB)',
+  user_name   VARCHAR(100) NULL COMMENT 'Nombre guardado de quien lo registro',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_cobro_recordatorios_cobro (cobro_id, fecha_hora),
+  CONSTRAINT cobro_recordatorios_cobro_fk FOREIGN KEY (cobro_id) REFERENCES cobros (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

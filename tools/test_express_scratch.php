@@ -1199,12 +1199,14 @@ if (!Database::hasCredentials()) {
 }
 
 // --- express_plan: la baja de clientes de prueba contra el esquema real de A (sin llaves foraneas hacia clients), en una transaccion que se deshace ----
-// Ninguna tabla declara una llave foranea hacia clients (cotizaciones, conduces y facturas guardan client_id sin FK: borrar un cliente desde la app tampoco
-// mira esas tablas), asi que el DELETE del plan no puede chocar con una. Aqui se corre el SQL exacto del plan, con sus parametros, y se ve que borra y que no.
+// Solo las dos tablas de Cobros (migracion 038) declaran una llave foranea hacia clients: cobros (RESTRICT) y cobro_config (CASCADE). Cotizaciones, conduces y
+// facturas guardan client_id sin FK (borrar un cliente desde la app tampoco mira esas tablas). El DELETE del plan solo corre para una empresa nueva, que no
+// tiene cobros, asi que no puede chocar con ellas. Aqui se corre el SQL exacto del plan, con sus parametros, y se ve que borra y que no.
 $s4Fk = $s4Pdo->query("SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE REFERENCED_TABLE_SCHEMA = DATABASE() AND REFERENCED_TABLE_NAME = 'clients'")->fetchAll();
 $s4ConClientId = array_column($s4Pdo->query("SELECT TABLE_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND COLUMN_NAME = 'client_id' ORDER BY TABLE_NAME")->fetchAll(), 'TABLE_NAME');
-wa_chk('esquema real de A: ninguna llave foranea apunta a clients, y client_id solo esta en cotizaciones, conduces, facturas y el respaldo de la migracion 035 (una tabla nueva con client_id obliga a revisar el DELETE del plan)',
-    $s4Fk === [] && array_diff($s4ConClientId, ['clients_credito_respaldo_035', 'conduces', 'cotizaciones', 'facturas']) === [], [$s4Fk, $s4ConClientId]);
+wa_chk('esquema real de A: solo las llaves foraneas de Cobros (cobro_config y cobros) apuntan a clients, y client_id solo esta en cobro_config, cobros, cotizaciones, conduces, facturas y el respaldo de la migracion 035 (una tabla nueva con client_id obliga a revisar el DELETE del plan)',
+    array_diff(array_column($s4Fk, 'TABLE_NAME'), ['cobro_config', 'cobros']) === []
+    && array_diff($s4ConClientId, ['clients_credito_respaldo_035', 'cobro_config', 'cobros', 'conduces', 'cotizaciones', 'facturas']) === [], [$s4Fk, $s4ConClientId]);
 $s4Motores = (int) $s4Uno("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND ENGINE = 'InnoDB'
                            AND TABLE_NAME IN ('clients', 'facturas', 'cotizaciones', 'conduces', 'ncf_sequences')");
 wa_chk('precondicion: clients, facturas, cotizaciones, conduces y ncf_sequences son InnoDB en A (la prueba corre en una transaccion que se deshace)', $s4Motores === 5, $s4Motores);

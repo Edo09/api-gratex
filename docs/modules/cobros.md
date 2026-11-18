@@ -1,0 +1,295 @@
+# Módulo de Cobros (cuentas por cobrar por cliente)
+
+Lleva lo que cada cliente le debe a la empresa: un **cobro mensual** por cliente (con el monto y el
+día de vencimiento propios de cada uno), pagos completos o parciales (efectivo o transferencia) y los
+recordatorios que alguien hizo a mano. Los clientes son los de siempre (tabla `clients`): no hay un
+módulo de clientes nuevo. Todo en **RD$ (DOP)**.
+
+- Ruta: `/api/cobros` · módulo RBAC: **`cobros`** (operativo; `admin` lo tiene por `*`).
+- Código: `src/Controllers/cobroController.php`, `src/Models/cobroModel.php` (SQL y transacciones) y
+  `src/Utils/Cobros/CobroReglas.php` (las reglas, puras, sin base de datos).
+- Base de datos: migración de tenant **038** (`db/migrations/038_cobros.sql`, reflejada en
+  `db/tenant_schema.sql`); permisos de los roles existentes: master **020**
+  (`db/master_migrations/020_cobros_permiso.sql`).
+- Web (fiscalo-react): `src/features/cobros/` (pantalla), `src/api/cobros.ts` (servicio) y
+  `src/api/schemas/cobros.ts` (esquemas Zod).
+
+## Modelo de datos
+
+| Tabla | Qué guarda | Claves e integridad |
+|---|---|---|
+| `cobro_config` | La configuración mensual de un cliente: `monto_mensual`, `dia_vencimiento` (1–31), `descripcion`, `activo` | PK `client_id` (un registro por cliente). FK a `clients` **ON DELETE CASCADE**. CHECK `monto_mensual > 0` y día entre 1 y 31 |
+| `cobros` | Un cobro por cliente y mes: `periodo` (`AAAA-MM`), `descripcion`, `monto`, `monto_pagado`, `fecha_vencimiento`, `cancelado_at`, `generado_de_cobro_id` | **UNIQUE `(client_id, periodo)`** (`uk_cobros_cliente_periodo`). FK a `clients` **RESTRICT**; FK a sí misma (`generado_de_cobro_id`) SET NULL. CHECK `monto > 0` y `0 <= monto_pagado <= monto` |
+| `cobro_pagos` | Los pagos de un cobro: `monto`, `fecha_pago`, `metodo` (`efectivo`/`transferencia`), `observaciones`, `idempotency_key`, `anulado_at` | FK a `cobros` RESTRICT. **UNIQUE `idempotency_key`**. CHECK `monto > 0` |
+| `cobro_recordatorios` | Los recordatorios hechos a mano: `fecha_hora`, `canal`, `nota`, `user_name` | FK a `cobros` RESTRICT |
+
+Todos los montos son `DECIMAL(12,2)` (hasta 9,999,999,999.99). Nunca float: dentro del código el dinero
+se maneja en **centavos enteros** y solo al responder vuelve a número.
+
+**Nada del historial se sobrescribe ni se borra:**
+
+- Cambiar el monto mensual de un cliente **no toca los cobros ya generados**: cada cobro guarda su
+  propio `monto`.
+- Un cobro **no se borra**: se *cancela* (`cancelado_at`) y se puede reabrir.
+- Un pago **no se edita ni se borra**: se *anula* (`anulado_at`, con su motivo) y se queda a la vista,
+  tachado. Un cliente con cobros no se puede eliminar (FK RESTRICT); `clientModel::deleteClient`
+  lo explica en pantalla.
+
+### Saldo y estado
+
+`cobros.monto_pagado` es una **caché que se recalcula siempre desde los pagos vigentes** (la suma de
+los que no están anulados) en la misma transacción que cada pago o anulación y con la fila del cobro
+bloqueada (`SELECT … FOR UPDATE`): dos pagos a la vez se esperan uno al otro y ninguno pisa el saldo del
+otro. No suma ni resta: recalcula, así que un valor desviado se corrige solo.
+
+El **estado no se guarda**: se deriva en cada lectura de `monto`, `monto_pagado`, `fecha_vencimiento`,
+`cancelado_at` y *hoy* (hora de RD, `src/ZonaHoraria.php`), porque un estado guardado caducaría solo (un
+cobro "Pendiente" amanece "Vencido" sin que nadie lo toque). Precedencia:
+
+| Estado | Cuándo |
+|---|---|
+| **Cancelado** | `cancelado_at` tiene fecha (manda sobre todo lo demás) |
+| **Pagado** | el saldo (`monto - monto_pagado`) es 0 |
+| **Vencido** | queda saldo y la fecha de vencimiento es **anterior** a hoy |
+| **Parcial** | queda saldo, ya tiene pagos y todavía no venció |
+| **Pendiente** | queda saldo, sin pagos y todavía no venció |
+
+Un cobro que vence **hoy** todavía no está vencido. Un cobro vencido **con abonos sigue "Vencido"** (es lo
+urgente), pero la respuesta trae `con_abonos: true` (tiene pagos vigentes y todavía debe algo) y la pantalla le
+pone además una pastilla "Parcial". Por eso el filtro **`estado=Parcial` lista todo lo que tiene abonos y todavía
+debe, venza o no**: un vencido con abonos sale en `Vencido` y también en `Parcial`. Los demás valores del filtro
+usan exactamente las reglas de la tabla en SQL, y `tools/test_cobros.php` comprueba que SQL y PHP coinciden para
+cada uno.
+
+## Reglas y valores por defecto
+
+Decisiones de producto tomadas con un valor por defecto (cámbialas aquí y en `CobroReglas` si el negocio
+pide otra cosa):
+
+1. **Día que el mes no tiene** (31 en abril, 30 en febrero): el cobro vence el **último día de ese mes**.
+   El mes siguiente vuelve al día configurado, porque el vencimiento siempre se calcula desde la
+   configuración y no desde el vencimiento anterior (día 31: ene 31, feb 28, mar 31, abr 30…).
+2. **Recurrencia mensual.** Cuando un cobro **queda pagado completo** (por un pago o porque una
+   edición del monto lo iguala a lo ya pagado) se genera el del mes siguiente, dentro de la misma
+   transacción:
+   - periodo = el del cobro pagado **+ 1 mes** (no depende de cuándo se pagó);
+   - monto = el `monto_mensual` **actual** del cliente; vencimiento = su `dia_vencimiento` actual;
+     descripción = la de la configuración;
+   - solo si el cliente tiene configuración **activa** (`activo = 1`);
+   - **un cobro Parcial o Cancelado no genera nada**;
+   - si ese (cliente, periodo) ya existe (creado a mano, o generado por una petición anterior) no se
+     hace nada: la UNIQUE lo impide, así que repetir la petición **no duplica** (idempotente);
+   - el cobro nuevo guarda `generado_de_cobro_id` (se puede seguir la cadena).
+   - Editar solo la descripción de un cobro que ya estaba pagado **no** genera nada: solo cuenta la
+     transición a pagado.
+3. **Un cobro cancelado corta la cadena**: no se genera el siguiente (decisión del pedido). Se crea a
+   mano, o se reabre el cancelado.
+4. **Sobrepago**: se rechaza (`EXCEDE_SALDO`, 422). No hay pagos por adelantado: se crea el cobro del
+   mes siguiente y se paga.
+5. **Fecha del pago**: no puede ser posterior a hoy. Puede ser anterior (para registrar un pago tardío).
+6. **Cancelar** exige que no haya pagos vigentes (`TIENE_PAGOS`, 409): si la plata ya entró, primero
+   se anula el pago. Cancelar o reabrir dos veces es lo mismo que una.
+7. **Anular un pago** devuelve el cobro a su saldo real; el cobro del mes siguiente que ya se haya
+   generado **se queda** (ya existe como cobro). Volver a pagar no lo genera otra vez.
+8. **Editar un cobro**: monto, vencimiento y descripción; el **periodo no cambia**. El monto no puede
+   quedar por debajo de lo ya pagado (`MONTO_MENOR_PAGADO`). Un cobro cancelado no se edita.
+9. **Un cobro por cliente y mes** (UNIQUE). Crear a mano uno que ya existe da `COBRO_DUPLICADO` (409) con
+   el id del existente; si el existente está cancelado, el texto manda a reabrirlo.
+10. **Periodo sugerido** al crear a mano (sin periodo ni fecha): el mes que sigue al último cobro del
+    cliente, y nunca uno anterior al mes de hoy. Con configuración, el monto, el vencimiento y la
+    descripción salen de ella; lo que se escriba manda sobre la configuración.
+11. **Enlace con facturas: fuera de esta primera versión.** Un cobro es una cuenta por cobrar propia (la
+    mensualidad), no está atado a un e-CF. Si más adelante hace falta, se agrega `cobros.factura_id`
+    (NULL, FK a `facturas` SET NULL) sin tocar lo existente.
+12. **Recordatorios**: informativos. La app **no envía** WhatsApp ni correos; el canal
+    (`llamada`, `mensaje`, `correo`, `visita`, `otro`) solo dice cómo lo hizo la persona. Un cobro pagado o
+    cancelado no admite recordatorio.
+    - La unidad es el **cliente**: una llamada cubre todo lo que debe, aunque el recordatorio se anote en un
+      solo cobro (la pantalla lo anota en su cobro más urgente). El "último recordatorio" de un cliente es el más
+      nuevo de **todos sus cobros**, también de los ya pagados o cancelados: pagar el cobro donde se anotó no deja
+      al cliente "sin recordar".
+    - "Por recordar" = el cliente tiene algo vencido o que vence en los próximos `dias` (7 por defecto) **y**
+      (nunca se le recordó, o su último recordatorio tiene `cada` días o más — 7 por defecto —, o le venció un
+      cobro *después* de ese último recordatorio: el aviso de "vence pronto" no cubre un "ya venció").
+    - Tope por cobro: 200 recordatorios (`LIMITE_RECORDATORIOS`, 409).
+
+### Idempotencia y repeticiones
+
+- **Pagos**: el formulario manda un `idempotency_key` (UUID). Con la misma clave **y los mismos datos** (monto,
+  fecha, método y observaciones) la API devuelve el pago ya registrado (`repetido: true`) en vez de registrar
+  otro, y con el mismo siguiente cobro. Una repetición de verdad no cambia de datos, y contestarle "ya estaba
+  registrado" a otra operación engañaría a quien la mandó, así que eso da **409**: `CLAVE_REPETIDA` (la clave es
+  de otro cobro), `CLAVE_CON_OTROS_DATOS` (llegó con otro monto, fecha, método u observaciones) o `PAGO_ANULADO`
+  (el pago de esa clave ya se anuló). La web cambia de clave después de cualquiera de los tres.
+- **Tope de pagos**: 500 por cobro, contando los anulados (el historial no se borra): el 501 da `LIMITE_PAGOS` (409).
+- **`siguiente_motivo`**: cuando un pago (o una edición del monto) deja el cobro pagado completo, la respuesta dice
+  qué pasó con el cobro del mes siguiente: `generado`, `sin_config` (el cliente no tiene cobro mensual), `inactivo`
+  (lo tiene apagado) o `ya_existia` (ese periodo ya tenía cobro). `null` si no lo completó, o si es una repetición.
+- **Cancelar, reabrir y anular** repetidos devuelven el estado actual (`repetido: true`), sin error.
+- **Siguiente cobro**: ver el punto 2 (la UNIQUE).
+
+## API
+
+Todas las rutas exigen token (`Authorization: Bearer <token>`) y el módulo `cobros`. Las respuestas van en el
+sobre `{ "status": true, "data": … }`; un error, `{ "status": false, "error": "texto para la persona", "codigo"?: …, "data"?: … }`.
+Los montos son números con 2 decimales. Las fechas, `AAAA-MM-DD`; las fechas y horas, `AAAA-MM-DD HH:MM:SS` (hora de RD).
+
+| Método | Ruta | Qué hace |
+|---|---|---|
+| GET | `/api/cobros` | Lista paginada. Filtros: `query` (nombre del cliente o RNC), `client_id`, `estado`, `periodo` (`AAAA-MM`), `vence_desde`, `vence_hasta`, `orden` (`urgencia` por defecto, `vencimiento_asc`, `vencimiento_desc`, `saldo_desc`), `page`, `pageSize` (tope 100). Un filtro con un valor que no existe da 422 (no se ignora en silencio) |
+| POST | `/api/cobros` | Crea un cobro a mano: `client_id` y, opcionales, `periodo`, `fecha_vencimiento`, `monto`, `descripcion` (lo que falta sale de la configuración del cliente) |
+| GET | `/api/cobros/resumen?dias=7` | El dashboard: totales, antigüedad, próximos vencimientos y clientes con atraso |
+| GET | `/api/cobros/recordatorios?dias=7&cada=7` | A qué **clientes** recordarles un pago (informativo), con sus cobros vencidos o por vencer: ver "Recordatorios" |
+| GET | `/api/cobros/clientes/{id}` | Panel del cliente: datos, configuración, resumen, **todos** sus cobros con sus pagos, sus recordatorios y lo sugerido para su próximo cobro |
+| PUT | `/api/cobros/clientes/{id}/config` | Configuración mensual: `monto_mensual`, `dia_vencimiento`, `descripcion?`, `activo?` (crea o reemplaza). **No toca ningún cobro existente** |
+| GET | `/api/cobros/{id}` | Un cobro con sus pagos (`pagos`, vigentes y anulados), sus recordatorios (`recordatorios_lista`) y los cobros que generó (`genero`) |
+| PUT | `/api/cobros/{id}` | Cambia `monto`, `fecha_vencimiento` o `descripcion` → `data: { cobro, siguiente, siguiente_motivo }` |
+| POST | `/api/cobros/{id}/pagos` | Registra un pago: `monto`, `metodo`, `fecha_pago?`, `observaciones?`, `idempotency_key?` → `data: { pago, cobro, siguiente, siguiente_nuevo, siguiente_motivo, repetido }` |
+| POST | `/api/cobros/{id}/cancelar` | Cancela (`motivo?`) |
+| POST | `/api/cobros/{id}/reabrir` | Reabre uno cancelado |
+| POST | `/api/cobros/{id}/recordatorios` | Anota un recordatorio hecho a mano: `canal`, `nota?`, `fecha_hora?` |
+| POST | `/api/cobros/pagos/{pagoId}/anular` | Anula un pago (`motivo?`) → `data: { pago, cobro }` |
+
+Un método que la ruta no admite da 405; una ruta que no existe, 404.
+
+### Un cobro en la lista
+
+```json
+{
+  "id": 2, "client_id": 1,
+  "cliente": { "id": 1, "nombre": "ACME SRL", "contacto": "Ana Gómez", "empresa": "ACME", "rnc": "131256432", "email": "a@x.do", "telefono": "809-555-0001" },
+  "periodo": "2026-11", "descripcion": "Mensualidad",
+  "monto": 6000.0, "monto_pagado": 0.0, "saldo": 6000.0,
+  "fecha_vencimiento": "2026-11-30", "estado": "Pendiente",
+  "dias_atraso": 0, "dias_para_vencer": 14, "con_abonos": false,
+  "cancelado_at": null, "motivo_cancelacion": null, "generado_de_cobro_id": 1,
+  "ultimo_pago": null, "ultimo_recordatorio": null, "recordatorios": 0,
+  "created_at": "2026-11-16 10:00:00", "updated_at": null
+}
+```
+
+`saldo` es 0 en un cobro cancelado. `dias_atraso` solo es mayor que 0 en un cobro Vencido; `dias_para_vencer`
+solo viene en uno abierto que aún no vence (0 = vence hoy).
+
+### Códigos de error (`codigo`)
+
+| Código | HTTP | Cuándo |
+|---|---|---|
+| `COBRO_DUPLICADO` | 409 | Ya hay un cobro de ese cliente en ese periodo (`data`: `cobro_id`, `estado`, `periodo`) |
+| `COBRO_CANCELADO` | 409 | El cobro está cancelado: no admite pagos, cambios ni recordatorios |
+| `YA_PAGADO` | 409 | El cobro ya está pagado completo |
+| `TIENE_PAGOS` | 409 | No se cancela un cobro con pagos vigentes |
+| `CLAVE_REPETIDA` | 409 | La clave de idempotencia ya es de otro cobro |
+| `CLAVE_CON_OTROS_DATOS` | 409 | La clave ya se usó con otro monto, fecha, método u observaciones: no es una repetición |
+| `PAGO_ANULADO` | 409 | El pago de esa clave ya se anuló: registra uno nuevo |
+| `LIMITE_PAGOS` | 409 | El cobro ya tiene 500 pagos (los anulados cuentan) |
+| `LIMITE_RECORDATORIOS` | 409 | El cobro ya tiene 200 recordatorios |
+| `EXCEDE_SALDO` | 422 | El pago es mayor que el saldo (`data.saldo`) |
+| `MONTO_MENOR_PAGADO` | 422 | El monto nuevo es menor que lo ya pagado |
+
+El resto de los 422 llevan solo el texto (campo faltante, fecha imposible, monto fuera de rango…). Un
+fallo de la base de datos es un 500 con un texto neutro (el detalle va al `error_log`).
+
+## Dashboard (`GET /api/cobros/resumen`)
+
+| Cifra | Definición |
+|---|---|
+| `pendiente` | saldo de todo lo abierto (no cancelado y con saldo) |
+| `vencido` | lo abierto cuyo vencimiento es anterior a hoy |
+| `por_vencer` | lo abierto que vence entre hoy y dentro de `dias` días |
+| `cobrado_mes` | pagos **vigentes** con `fecha_pago` dentro del mes de hoy (cuenten para el cobro que cuenten) |
+| `por_cobrar_mes` | saldo de lo abierto que vence dentro del mes de hoy |
+| `facturado_mes` | monto de los cobros no cancelados que vencen en el mes (pagados o no) |
+| `antiguedad` | lo abierto por tramos: `vigente`, `1-30`, `31-60`, `61-90`, `90+` días de atraso (monto y cobros) |
+| `proximos` | hasta 8 cobros abiertos que vencen en la ventana, el más cercano primero |
+| `atrasados` | hasta 8 clientes con cobros vencidos, el que más debe primero (cobros, saldo vencido, el más viejo y sus días) |
+
+La respuesta trae también `hoy` (fecha de RD del servidor) y `ahora` (fecha y hora de RD): la web las usa para
+la fecha de un pago o de un recordatorio, porque el navegador puede estar en otra zona horaria (soporte entra a
+las empresas desde donde esté).
+
+## Recordatorios (`GET /api/cobros/recordatorios`)
+
+Informativo: la app no envía nada. Mira los cobros abiertos que ya vencieron o vencen en los próximos `dias`
+(7 por defecto, máximo 90), los más atrasados primero y **hasta 500**: si hay más, `truncado` es `true` y los totales
+son solo de los que se miran.
+
+| Clave | Qué trae |
+|---|---|
+| `hoy`, `ahora`, `dias`, `cada`, `truncado` | Fecha y hora de RD del servidor, la ventana, cada cuántos días se vuelve a recordar y si la lista se cortó |
+| `resumen` | Por cliente: `clientes`, `clientes_por_recordar`, `clientes_recordados`. Por cobro: `por_recordar`, `recordados`, `vencidos`, `por_vencer` |
+| `clientes` | Una fila por cliente: `cobros_vencidos`, `cobros_por_vencer`, `saldo_vencido`, `saldo_por_vencer`, `mas_antiguo`, `proximo_vencimiento`, `dias_atraso`, `recordatorios` (los del cliente en todos sus cobros), `ultimo` (el más nuevo), `requiere_recordatorio` y `cobro_id`/`periodo` del cobro más urgente (donde se anota). Primero los que requieren recordatorio y, dentro de cada grupo, el más atrasado |
+| `items` | Los cobros de esos clientes. Cada uno trae sus propios `recordatorios` y `ultimo_recordatorio`, el `motivo` (`vencido` o `por_vencer`), `ultimo` (el del **cliente**) y `requiere_recordatorio`, calculado con el último recordatorio del cliente: un cliente "recordado" no tiene cobros que digan "por recordar" |
+
+## Bitácora
+
+Cada acción deja su fila en `audit_logs` (módulo `cobros`): `CREATE` (cobro creado o generado solo, con la
+descripción de cuál lo generó), `UPDATE`, `PAYMENT`, `VOID_PAYMENT`, `CANCEL`, `REOPEN`, `REMINDER` y `CONFIG`
+(con el valor anterior y el nuevo de la configuración). Una repetición (misma clave, cancelar de nuevo…) no
+repite la fila.
+
+## Permisos
+
+El módulo `cobros` es operativo: está en `$USER_MODULES` de `config/permissions.php` (el rol `user` de las
+empresas **nuevas** lo recibe al crearse) y la ruta está mapeada (`'cobros' => 'cobros'`: sin el mapeo el gate no
+resolvería el tenant y el 500 saldría vacío).
+
+**El controlador exige el módulo siempre**, aunque `PERMISSIONS_ENFORCE` esté en modo sombra (como
+`posAdminController`): son las cuentas por cobrar de la empresa, el panel de un cliente trae sus datos de contacto
+(correo, teléfono) y, en sombra, el gate solo avisa. Un principal máquina (sin rol) o un rol sin el módulo reciben
+403 y queda una fila de acceso denegado en la bitácora. Por eso la **master 020** no es opcional para los roles
+`user` de las empresas **ya creadas** (idempotente; solo datos): sin ella esos usuarios reciben 403 en
+`/api/cobros` y la web les oculta Cobros, hasta que un admin les dé el módulo en *Usuarios y roles*. `admin` lo
+tiene por `*`; los roles personalizados no se tocan.
+
+## Despliegue
+
+El orden importa (regla del proyecto: **las migraciones de tenant van primero**):
+
+1. `tools/verificar_migraciones_tenant.sql` en cada base de tenant app (fila `038`).
+2. `db/migrations/038_cobros.sql` en la base de **cada** empresa (Gratex y las demás, use o no Cobros: así
+   quedan todas iguales). Es idempotente; se puede repetir.
+3. `db/master_migrations/020_cobros_permiso.sql` en la base master (una vez).
+4. Subir el código de la API y, después, la web.
+
+Registro de aplicación en producción: ver el final de este archivo.
+
+## Pruebas
+
+- `php tools/test_cobros.php`: las reglas puras y **el modelo real contra SQLite en memoria**, cuyas tablas se
+  traducen del DDL de `db/tenant_schema.sql` (UNIQUE, CHECK, FK y ENUM incluidos). Está en la línea base
+  (`tools/express_baseline.php`, `BASELINE_SUITES`).
+- `php tools/check_tenant_schema_orden.php`: la migración 038 y el esquema consolidado crean **las mismas**
+  tablas, columnas, índices, FK y CHECK; la migración sigue la regla de phpMyAdmin (`@db`, guardia, un solo
+  `SELECT` final).
+- Para la web: `php tools/test_cobros.php --fixtures=<carpeta>` vuelca las respuestas reales del modelo, que
+  `fiscalo-react/scripts/test-cobros.ts` valida contra los esquemas Zod.
+
+## Límites conocidos
+
+- Un cobro por cliente y mes: no hay cobros "extra" del mismo mes (se crea con otro periodo o se edita el existente).
+- Sin pagos por adelantado ni sobrepagos (ver arriba).
+- Topes por cobro: 500 pagos y 200 recordatorios (los anulados cuentan). El panel de un cliente trae sus últimos 240
+  cobros y la lista de recordatorios mira hasta 500 cobros (`truncado` avisa).
+- Un recordatorio se anota en un solo cobro (aunque cuenta para el cliente entero): no se puede anotar a varios a la vez.
+- Sin enlace con facturas (ver arriba) ni envío de recordatorios.
+- La generación del cobro siguiente ocurre al **pagarse** el anterior, no por calendario: un cliente que no
+  paga acumula un solo cobro vencido, no uno por mes.
+
+## Decisiones abiertas del negocio
+
+Valores por defecto con los que salió la primera versión; conviene confirmarlos con quien lleva la cartera:
+
+1. **Meses sin cobrar.** La cadena sigue al **pagarse** un cobro (genera solo el mes siguiente). Si un cliente no
+   paga durante tres meses, tiene un solo cobro vencido, no tres. ¿Se quieren generar los meses atrasados (con el
+   monto de cada mes) o ponerse al día de golpe?
+2. **Condonar o perdonar.** Hoy un cobro se *cancela* (si no tiene pagos) o se baja su monto a lo ya pagado (queda
+   Pagado y genera el siguiente). No hay un estado "condonado" ni una nota de crédito.
+3. **Parcial estando vencido.** Un cobro vencido con abonos sigue "Vencido" (con una pastilla "Parcial" al lado)
+   porque es lo urgente. Si el negocio prefiere "Parcial" como estado principal, se cambia el orden en
+   `CobroReglas::estado`.
+4. **Pagos por adelantado y sobrepagos.** Se rechazan. Si un cliente paga varios meses juntos, se registra el pago de
+   cada cobro (el siguiente se genera al pagar el anterior).
+5. **Permiso aparte para anular y cancelar.** Hoy quien tiene el módulo `cobros` puede registrar pagos, anularlos,
+   cancelar cobros y cambiar el cobro mensual de un cliente. Si se quiere que anular y cancelar sean solo de un
+   encargado, el RBAC admite un submódulo (`cobros.anular`) sin tocar las tablas.

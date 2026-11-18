@@ -63,6 +63,7 @@ const BASELINE_SUITES = [
     ['archivo' => 'test_grupo_multiempresa.php', 'pinned' => false],
     ['archivo' => 'test_integracion_request_log.php', 'pinned' => false],
     ['archivo' => 'test_acceso_global.php', 'pinned' => false],
+    ['archivo' => 'test_cobros.php', 'pinned' => false],
 ];
 
 /**

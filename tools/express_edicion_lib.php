@@ -585,10 +585,13 @@ function express_preflight_evaluar(array $hechos): array
  * de PHP, que es como la lee TenantEntitlements::estadoCertificado (el bloque certificado de GET /api/emisor), que cuenta los dias contra
  * date('Y-m-d') de esa misma zona. NULL si no se sabe el notAfter. Una fecha vieja no bloquea nada: la emision abre el certificado de verdad.
  *
- * La baja de clientes de prueba no puede chocar con una llave foranea: ninguna tabla de la base de la empresa apunta a clients (cotizaciones,
- * conduces y facturas guardan client_id sin FK, y borrar un cliente desde la app tampoco mira esas tablas). Solo se protegen los que usa una
- * factura, que es el dato fiscal; una cotizacion o un conduce que cite a un cliente de prueba conserva su client_name y queda con un client_id
- * que ya no existe, igual que al borrar ese cliente desde la app. La suite scratch corre estas dos sentencias contra el esquema real.
+ * La baja de clientes de prueba no puede chocar con una llave foranea: solo dos tablas de la base de la empresa apuntan a clients, las de Cobros
+ * (migracion 038): cobros (RESTRICT) y cobro_config (CASCADE). Cotizaciones, conduces y facturas guardan client_id sin FK, y borrar un cliente
+ * desde la app tampoco mira esas tablas. Solo se protegen los que usa una factura, que es el dato fiscal; una cotizacion o un conduce que cite
+ * a un cliente de prueba conserva su client_name y queda con un client_id que ya no existe, igual que al borrar ese cliente desde la app.
+ * Cobros no hace falta protegerlo en el WHERE: el DELETE solo corre para una empresa nueva, que no tiene cobros, y si un cliente de prueba
+ * los tuviera el RESTRICT frena el DELETE (error de MySQL) en vez de borrar cuentas por cobrar; la configuracion mensual cae con el cliente.
+ * La suite scratch corre estas dos sentencias contra el esquema real.
  *
  * @return list<array{donde:string,que:string,sql:string,params:array<string,mixed>}>
  */

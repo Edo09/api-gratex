@@ -137,6 +137,13 @@ switch ($route) {
         require_once 'src/Controllers/clientController.php';
         break;
 
+    case 'cobros':
+        // Cobros (cuentas por cobrar por cliente) - token required (modulo 'cobros')
+        //   /cobros · /cobros/resumen · /cobros/recordatorios · /cobros/clientes/{id}
+        //   /cobros/{id}/pagos · /cobros/{id}/cancelar · /cobros/pagos/{id}/anular ...
+        require_once 'src/Controllers/cobroController.php';
+        break;
+
     case 'products':
         // Product catalog CRUD endpoints - token required
         require_once 'src/Controllers/productController.php';

@@ -320,8 +320,8 @@ wa_chk('verificador del master: la cabecera menciona la 015',
 // La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
 // lo ejecutan con PREPARE/EXECUTE (007, 008, 010 a 015, 017, 018 y 019; la lista del tenant, 018 y 026 a 035, ya
 // era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
-wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018 y 019 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018 y 019'));
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019 y 020 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019 y 020'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
@@ -3048,10 +3048,26 @@ wa_chk('el detector de llaves foraneas hacia clients ve la forma directa, la que
     && !$s8ApuntaAClients("-- REFERENCES clients (id)\nFOREIGN KEY (a) REFERENCES conduces (id)")
     && !$s8ApuntaAClients('/* REFERENCES clients */ FOREIGN KEY (a) REFERENCES cotizaciones (id)')
     && !$s8ApuntaAClients("client_id INT(11) NULL COMMENT 'el cliente se puede borrar y client_name guarda su nombre'"));
+$s8ContarFkAClients = static function (string $sql): int {
+    $sql = (string) preg_replace(['~/\*.*?\*/~s', '~^\s*--.*$~m'], ' ', $sql);
+    $sql = (string) preg_replace('~[`\'",]|@db\b~', ' ', $sql);
+    return (int) preg_match_all('~\bREFERENCES[\s.]*clients\b~i', $sql);
+};
 $s8SqlTenant = array_merge([__DIR__ . '/../db/tenant_schema.sql'], glob(__DIR__ . '/../db/migrations/*.sql') ?: []);
-$s8ConFk = array_values(array_map('basename', array_filter($s8SqlTenant, static fn (string $f): bool => $s8ApuntaAClients((string) file_get_contents($f)))));
-wa_chk('ninguna tabla de la base de la empresa (esquema y migraciones de tenant) declara una llave foranea hacia clients: el DELETE de clientes de prueba del plan no puede chocar con una (cotizaciones, conduces y facturas guardan client_id sin FK)',
-    count($s8SqlTenant) > 20 && $s8ConFk === [], $s8ConFk);
+$s8FkPorArchivo = [];
+foreach ($s8SqlTenant as $s8Archivo) {
+    $s8N = $s8ContarFkAClients((string) file_get_contents($s8Archivo));
+    if ($s8N > 0) {
+        $s8FkPorArchivo[basename($s8Archivo)] = $s8N;
+    }
+}
+// Cobros (migracion tenant 038, docs/modules/cobros.md) es la UNICA excepcion, revisada contra el DELETE del plan: cobros.client_id es
+// RESTRICT (un cliente con cobros no se borra: su historial de cuentas por cobrar se conserva) y cobro_config.client_id es CASCADE (su
+// configuracion mensual cae con el cliente). El DELETE de abajo solo corre para una empresa NUEVA (sin facturas ecf), que no tiene cobros;
+// si un cliente de prueba los tuviera, el RESTRICT frena el DELETE con un error de MySQL en vez de borrar cuentas por cobrar sin avisar.
+// Una tercera FK hacia clients (de cualquier tabla) cambia estos conteos y obliga a revisar el plan otra vez.
+wa_chk('la base de la empresa (esquema y migraciones de tenant) solo declara las dos llaves foraneas hacia clients de Cobros (cobros y cobro_config, en el esquema y en la 038): el DELETE de clientes de prueba del plan no puede chocar con otra (cotizaciones, conduces y facturas guardan client_id sin FK)',
+    count($s8SqlTenant) > 20 && $s8FkPorArchivo === ['tenant_schema.sql' => 2, '038_cobros.sql' => 2], $s8FkPorArchivo);
 
 $s8Rechazo = $s8Con(['m036' => false]);
 wa_chk('express_plan: es [] cuando la evaluacion trae algun rechazo, aunque lo demas se pueda corregir',
