@@ -144,6 +144,13 @@ switch ($route) {
         require_once 'src/Controllers/cobroController.php';
         break;
 
+    case 'cobros-tenants':
+        // Cobros de la PLATAFORMA a sus tenants (las mismas rutas que /cobros, base master): token de un
+        // usuario con acceso global (soporte); el controlador lo exige. Ver docs/modules/cobros.md.
+        define('COBROS_AMBITO', 'tenants');
+        require_once 'src/Controllers/cobroController.php';
+        break;
+
     case 'products':
         // Product catalog CRUD endpoints - token required
         require_once 'src/Controllers/productController.php';

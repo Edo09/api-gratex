@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . '/../Database.php');
+require_once(__DIR__ . '/../MasterDatabase.php');
 require_once(__DIR__ . '/../Utils/Cobros/CobroReglas.php');
 
 /**
@@ -21,6 +22,13 @@ require_once(__DIR__ . '/../Utils/Cobros/CobroReglas.php');
  *   - Nada se borra: un cobro se cancela, un pago se anula, y todo queda a la vista.
  *   - El estado no se guarda: se deriva en cada lectura (CobroReglas::estado).
  *
+ * DOS ambitos con el mismo modelo y las mismas reglas (el ambito decide quien es "el cliente" de un cobro):
+ *   - AMBITO_EMPRESA (por defecto): una empresa cobra a SUS clientes; las tablas estan en la base de la
+ *     empresa (migracion de tenant 038) y el cliente es una fila de su tabla clients.
+ *   - AMBITO_TENANTS: la PLATAFORMA cobra a sus tenants (las empresas que usan Fiscalpoint); las mismas
+ *     cuatro tablas estan en la base MASTER (migracion master 021, con FK a tenants) y el cliente es una
+ *     fila de tenants. Solo lo usa la cuenta de soporte (acceso global): cobroController lo exige.
+ *
  * El PDO se puede inyectar (y el reloj): las pruebas lo corren con SQLite en memoria. El
  * unico SQL que no es igual en MySQL y SQLite es el bloqueo de fila (FOR UPDATE), que se
  * agrega solo en MySQL.
@@ -41,6 +49,22 @@ class cobroModel
     public const MSG_LIMITE_PAGOS = 'Este cobro ya tiene el máximo de pagos registrados (500, contando los anulados). Avisa a soporte.';
     public const MSG_LIMITE_RECORDATORIOS = 'Este cobro ya tiene el máximo de recordatorios anotados (200). Avisa a soporte.';
 
+    /** El cliente de un cobro es una fila de clients de la empresa... */
+    public const AMBITO_EMPRESA = 'empresa';
+    /** ...o un tenant de la plataforma (base master). */
+    public const AMBITO_TENANTS = 'tenants';
+
+    /**
+     * De donde sale "el cliente" de cada ambito, con los mismos nombres de columna que usa CLIENTE (client_name,
+     * company_name, razon_social, rnc, email, phone_number). Un tenant solo tiene nombre y RNC: el nombre hace de
+     * razon social, empresa y contacto, y el correo es el del primer usuario admin de esa empresa (para saber a quien
+     * escribirle). tipo, ambiente, activo y edicion sirven al buscador de tenants.
+     */
+    private const ORIGEN_EMPRESA = 'clients';
+    private const ORIGEN_TENANTS = "(SELECT t.id AS id, t.nombre AS client_name, t.nombre AS company_name, t.nombre AS razon_social,
+        t.rnc AS rnc, COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id AND u.role = 'admin' ORDER BY u.id LIMIT 1), '') AS email,
+        '' AS phone_number, t.tipo AS tipo, t.ambiente AS ambiente, t.activo AS activo, t.edicion AS edicion FROM tenants t)";
+
     /** Los datos del cliente que viajan con un cobro (alias cl_* para no chocar con las columnas de cobros). */
     private const CLIENTE = 'cl.id AS cl_id, cl.client_name AS cl_contacto, cl.company_name AS cl_empresa,
         cl.razon_social AS cl_razon, cl.rnc AS cl_rnc, cl.email AS cl_email, cl.phone_number AS cl_tel';
@@ -51,16 +75,28 @@ class cobroModel
 
     private PDO $db;
     private bool $mysql;
+    private string $ambito;
+    /** La tabla (o subconsulta) que hace de clientes en este ambito: ORIGEN_EMPRESA u ORIGEN_TENANTS. */
+    private string $origen;
     /** @var callable(): string */
     private $reloj;
 
     /**
-     * @param PDO|null $conexion la de la peticion (Database) si no se pasa
+     * @param PDO|null $conexion la de la peticion si no se pasa: la base de la empresa (Database) en el ambito
+     *        de empresa, la master (MasterDatabase) en el de tenants
      * @param callable|null $reloj devuelve 'AAAA-MM-DD HH:MM:SS' en hora de RD; el de PHP si no se pasa
+     * @param string $ambito AMBITO_EMPRESA (por defecto) o AMBITO_TENANTS
      */
-    public function __construct(?PDO $conexion = null, ?callable $reloj = null)
+    public function __construct(?PDO $conexion = null, ?callable $reloj = null, string $ambito = self::AMBITO_EMPRESA)
     {
-        $this->db = $conexion ?? Database::getInstance()->getConnection();
+        if ($ambito !== self::AMBITO_EMPRESA && $ambito !== self::AMBITO_TENANTS) {
+            throw new InvalidArgumentException('Ambito de cobros desconocido: ' . $ambito);
+        }
+        $this->ambito = $ambito;
+        $this->origen = $ambito === self::AMBITO_TENANTS ? self::ORIGEN_TENANTS : self::ORIGEN_EMPRESA;
+        $this->db = $conexion ?? ($ambito === self::AMBITO_TENANTS
+            ? MasterDatabase::getInstance()->getConnection()
+            : Database::getInstance()->getConnection());
         $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->mysql = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql';
         $this->reloj = $reloj ?? static fn(): string => date('Y-m-d H:i:s');
@@ -85,10 +121,45 @@ class cobroModel
     /** El cliente (los datos que se muestran junto a un cobro), o null si no existe. */
     public function cliente(int $id): ?array
     {
-        $s = $this->db->prepare('SELECT ' . self::CLIENTE . ' FROM clients cl WHERE cl.id = :id');
+        $s = $this->db->prepare('SELECT ' . self::CLIENTE . ' FROM ' . $this->origen . ' cl WHERE cl.id = :id');
         $s->execute([':id' => $id]);
         $f = $s->fetch();
         return $f ? self::clienteJson($f) : null;
+    }
+
+    /**
+     * Los clientes entre los que se elige al configurar o crear un cobro, para el buscador de la pantalla. Solo existe en
+     * el ambito de tenants (en el de una empresa el buscador es el de Clientes de siempre): ahi devuelve [] . Busca por
+     * nombre o RNC; los activos primero. Cada uno trae lo de un cliente y ademas que es (tipo, ambiente, activo) y si ya
+     * tiene su cobro mensual configurado (con_config).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function buscarClientes(string $texto, int $limite = 20): array
+    {
+        if ($this->ambito !== self::AMBITO_TENANTS) {
+            return [];
+        }
+        $limite = max(1, min($limite, 50));
+        $donde = '1 = 1';
+        $params = [];
+        $texto = trim($texto);
+        if ($texto !== '') {
+            $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $texto) . '%';
+            $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!')";
+            $params = [':q1' => $like, ':q2' => $like];
+        }
+        $s = $this->db->prepare(
+            'SELECT ' . self::CLIENTE . ', cl.tipo AS cl_tipo, cl.ambiente AS cl_ambiente, cl.activo AS cl_activo,
+                    (SELECT COUNT(*) FROM cobro_config cc WHERE cc.client_id = cl.id) AS con_config
+               FROM ' . $this->origen . ' cl WHERE ' . $donde . '
+              ORDER BY cl.activo DESC, cl.client_name ASC, cl.id ASC LIMIT ' . $limite
+        );
+        $s->execute($params);
+        return array_map(static fn(array $r): array => self::clienteJson($r) + [
+            'tipo' => (string) $r['cl_tipo'], 'ambiente' => (string) $r['cl_ambiente'],
+            'activo' => (int) $r['cl_activo'] === 1, 'con_config' => (int) $r['con_config'] > 0,
+        ], $s->fetchAll());
     }
 
     /** La configuracion mensual del cliente, tal cual la ve la API; null si no tiene. */
@@ -155,7 +226,7 @@ class cobroModel
                     (SELECT MAX(p.fecha_pago) FROM cobro_pagos p WHERE p.cobro_id = c.id AND p.anulado_at IS NULL) AS ultimo_pago,
                     (SELECT MAX(r.fecha_hora) FROM cobro_recordatorios r WHERE r.cobro_id = c.id) AS ultimo_recordatorio,
                     (SELECT COUNT(*) FROM cobro_recordatorios r WHERE r.cobro_id = c.id) AS recordatorios
-                  FROM cobros c JOIN clients cl ON cl.id = c.client_id
+                  FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id
                  WHERE ' . $where . '
                  ORDER BY ' . self::orden($f['orden'] ?? 'urgencia') . '
                  LIMIT :limite OFFSET :desplazamiento';
@@ -174,7 +245,7 @@ class cobroModel
     {
         $params = [];
         $where = $this->filtrar($f, $this->hoy(), $params);
-        $s = $this->db->prepare('SELECT COUNT(*) FROM cobros c JOIN clients cl ON cl.id = c.client_id WHERE ' . $where);
+        $s = $this->db->prepare('SELECT COUNT(*) FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id WHERE ' . $where);
         $s->execute($params);
         return (int) $s->fetchColumn();
     }
@@ -212,7 +283,7 @@ class cobroModel
         }
         $hoy = $this->hoy();
         $s = $this->db->prepare(
-            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN clients cl ON cl.id = c.client_id
+            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id
               WHERE c.client_id = :cid ORDER BY c.periodo DESC, c.id DESC LIMIT 240'
         );
         $s->execute([':cid' => $clientId]);
@@ -376,7 +447,7 @@ class cobroModel
         $params = [];
         $where = $this->filtrar(['estado' => null, 'client_id' => null, 'periodo' => null, 'desde' => $hoy, 'hasta' => $hasta, 'query' => null], $hoy, $params, true);
         $s = $this->db->prepare(
-            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN clients cl ON cl.id = c.client_id
+            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id
               WHERE ' . $where . ' ORDER BY c.fecha_vencimiento ASC, c.id ASC LIMIT 8'
         );
         $s->execute($params);
@@ -388,7 +459,7 @@ class cobroModel
                     cl.rnc AS cl_rnc, cl.email AS cl_email, cl.phone_number AS cl_tel, cl.id AS cl_id,
                     COUNT(*) AS cobros_vencidos, COALESCE(SUM({$saldo}), 0) AS saldo_vencido,
                     MIN(c.fecha_vencimiento) AS mas_antiguo
-               FROM cobros c JOIN clients cl ON cl.id = c.client_id
+               FROM cobros c JOIN {$this->origen} cl ON cl.id = c.client_id
               WHERE {$a} AND c.fecha_vencimiento < :hoy
               GROUP BY c.client_id, cl.id, cl.client_name, cl.company_name, cl.razon_social, cl.rnc, cl.email, cl.phone_number
               ORDER BY saldo_vencido DESC, mas_antiguo ASC
@@ -434,7 +505,7 @@ class cobroModel
         $hasta = CobroReglas::sumarDias($hoy, $dias);
         $tope = CobroReglas::MAX_FILAS_RECORDATORIOS;
         $s = $this->db->prepare(
-            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN clients cl ON cl.id = c.client_id
+            'SELECT c.*, ' . self::CLIENTE . ' FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id
               WHERE ' . self::ABIERTO . ' AND c.fecha_vencimiento <= :hasta
               ORDER BY c.fecha_vencimiento ASC, c.id ASC LIMIT ' . ($tope + 1)
         );
@@ -1012,7 +1083,7 @@ class cobroModel
                     (SELECT MAX(p.fecha_pago) FROM cobro_pagos p WHERE p.cobro_id = c.id AND p.anulado_at IS NULL) AS ultimo_pago,
                     (SELECT MAX(r.fecha_hora) FROM cobro_recordatorios r WHERE r.cobro_id = c.id) AS ultimo_recordatorio,
                     (SELECT COUNT(*) FROM cobro_recordatorios r WHERE r.cobro_id = c.id) AS recordatorios
-               FROM cobros c JOIN clients cl ON cl.id = c.client_id WHERE c.id = :id'
+               FROM cobros c JOIN ' . $this->origen . ' cl ON cl.id = c.client_id WHERE c.id = :id'
         );
         $s->execute([':id' => $id]);
         $f = $s->fetch();

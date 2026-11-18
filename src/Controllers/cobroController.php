@@ -10,6 +10,8 @@ require_once(__DIR__ . '/../Utils/InputSanitizer.php');
 require_once(__DIR__ . '/../RequestContext.php');
 require_once(__DIR__ . '/../Models/RoleModel.php');
 require_once(__DIR__ . '/../PermissionGate.php');
+require_once(__DIR__ . '/../MasterDatabase.php');
+require_once(__DIR__ . '/../AccesoGlobal.php');
 
 /*
  * /api/cobros: cuentas por cobrar por cliente (modulo RBAC 'cobros'; docs/modules/cobros.md).
@@ -36,6 +38,12 @@ require_once(__DIR__ . '/../PermissionGate.php');
  * Orden de las revisiones: el token primero (401; de paso resuelve el tenant); despues el
  * modulo 'cobros' del rol (403); despues la ruta (404 / 405); recien entonces se abre el
  * modelo (la DB del tenant).
+ *
+ * DOS ambitos con este mismo controlador (el Router define COBROS_AMBITO antes de incluirlo):
+ *   - /api/cobros          (por defecto) cada empresa cobra a SUS clientes, en su base; exige el modulo 'cobros'.
+ *   - /api/cobros-tenants  la PLATAFORMA cobra a sus tenants, en la base master; exige que el usuario tenga acceso
+ *                          global (master.users.acceso_global = 1: soporte). Mismas rutas, mismas reglas, mismas
+ *                          respuestas, mas GET /api/cobros-tenants/clientes?query= (el buscador de tenants).
  *
  * El modulo se exige SIEMPRE, aunque PERMISSIONS_ENFORCE este en modo sombra (como
  * posAdminController): son cuentas por cobrar de la empresa, con datos de contacto de sus
@@ -76,11 +84,27 @@ function cobrosResumenAuditoria(?array $c): ?array
     ])) + ['cliente' => $c['cliente']['nombre'] ?? null];
 }
 
+/** ¿Esta peticion es del ambito de la plataforma (/api/cobros-tenants)? */
+function cobrosEsPlataforma(): bool
+{
+    return defined('COBROS_AMBITO') && COBROS_AMBITO === 'tenants';
+}
+
+/**
+ * Anota en la bitacora. En la plataforma el modulo es 'cobros-tenants' y la fila va con tenant_id = 0: la bitacora de
+ * cada empresa filtra por su tenant_id, asi que ningun tenant ve en la suya lo que la plataforma le cobra a otro (la
+ * sesion de soporte puede estar dentro de CUALQUIER empresa cuando cobra).
+ */
+function cobrosAuditar(array $evento): void
+{
+    AuditLogger::log($evento + (cobrosEsPlataforma() ? ['module' => 'cobros-tenants', 'tenant_id' => 0] : ['module' => 'cobros']));
+}
+
 /** Anota en la bitacora el cobro que se genero solo al quedar pagado el anterior. */
 function cobrosAuditarGenerado(array $nuevo, array $origen): void
 {
-    AuditLogger::log([
-        'module' => 'cobros', 'action' => 'CREATE',
+    cobrosAuditar([
+        'action' => 'CREATE',
         'entity_type' => 'cobro', 'entity_id' => $nuevo['id'],
         'new_values' => cobrosResumenAuditoria($nuevo),
         'description' => 'Cobro del periodo ' . $nuevo['periodo'] . ' generado al quedar pagado el del periodo ' . $origen['periodo'] . '.',
@@ -100,24 +124,42 @@ if (!$validation['valid']) {
     $auth->sendUnauthorized($validation['message']);
 }
 
-// Solo un USUARIO de la app con el modulo 'cobros' (un principal maquina no tiene rol; sin permisos
-// legibles, el RoleModel devuelve [] y se niega: falla cerrado).
-$permisos = ($validation['user_id'] ?? null) === null
-    ? []
-    : (new RoleModel())->getPermissionsForRole($validation['tenant_id'] ?? null, (string) ($validation['role'] ?? ''));
-if (!PermissionGate::permMatches($permisos, 'cobros')) {
-    AuditMiddleware::logAccessDenied(
-        'cobros',
-        'rol sin permiso',
-        ['permiso_requerido' => 'cobros', 'metodo' => $_SERVER['REQUEST_METHOD']],
-        'Acceso denegado: el rol no tiene el modulo cobros.'
-    );
-    cobrosResponderError(['error', CobroReglas::MSG_SIN_PERMISO, 403]);
-    return;
+$ambitoTenants = cobrosEsPlataforma();
+if ($ambitoTenants) {
+    // Cobros de la PLATAFORMA: solo un usuario de soporte (master.users.acceso_global = 1). Un principal maquina no
+    // tiene usuario, y si la columna no se puede leer nadie tiene el acceso: falla cerrado.
+    $permitido = ($validation['user_id'] ?? null) !== null
+        && AccesoGlobal::tieneAcceso(MasterDatabase::getInstance()->getConnection(), (int) $validation['user_id']);
+    if (!$permitido) {
+        AuditMiddleware::logAccessDenied(
+            'cobros-tenants',
+            'sin acceso global',
+            ['permiso_requerido' => 'acceso_global', 'metodo' => $_SERVER['REQUEST_METHOD']],
+            'Acceso denegado: los cobros a los tenants son de soporte (acceso global).'
+        );
+        cobrosResponderError(['error', CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 403]);
+        return;
+    }
+} else {
+    // Solo un USUARIO de la app con el modulo 'cobros' (un principal maquina no tiene rol; sin permisos
+    // legibles, el RoleModel devuelve [] y se niega: falla cerrado).
+    $permisos = ($validation['user_id'] ?? null) === null
+        ? []
+        : (new RoleModel())->getPermissionsForRole($validation['tenant_id'] ?? null, (string) ($validation['role'] ?? ''));
+    if (!PermissionGate::permMatches($permisos, 'cobros')) {
+        AuditMiddleware::logAccessDenied(
+            'cobros',
+            'rol sin permiso',
+            ['permiso_requerido' => 'cobros', 'metodo' => $_SERVER['REQUEST_METHOD']],
+            'Acceso denegado: el rol no tiene el modulo cobros.'
+        );
+        cobrosResponderError(['error', CobroReglas::MSG_SIN_PERMISO, 403]);
+        return;
+    }
 }
 
 $metodo = $_SERVER['REQUEST_METHOD'];
-$ruta = CobroReglas::ruta($metodo, (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH));
+$ruta = CobroReglas::ruta($metodo, (string) parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), $ambitoTenants ? 'cobros-tenants' : 'cobros');
 if ($ruta['accion'] === 'desconocida') {
     cobrosResponderError(['error', CobroReglas::MSG_RUTA, 404]);
     return;
@@ -135,7 +177,7 @@ if (!is_object($body)) {
 }
 
 try {
-    $modelo = new cobroModel();
+    $modelo = new cobroModel(null, null, $ambitoTenants ? cobroModel::AMBITO_TENANTS : cobroModel::AMBITO_EMPRESA);
     $usuarioId = RequestContext::userId();
     $usuarioNombre = RequestContext::username() ?? RequestContext::email();
 
@@ -170,6 +212,18 @@ try {
             ));
             break;
 
+        case 'buscar':
+            // El buscador de tenants: solo existe en el ambito de la plataforma (en una empresa el buscador es el de Clientes).
+            if (!$ambitoTenants) {
+                cobrosResponderError(['error', CobroReglas::MSG_RUTA, 404]);
+                break;
+            }
+            cobrosResponder($modelo->buscarClientes(
+                is_string($_GET['query'] ?? null) ? $_GET['query'] : '',
+                CobroReglas::enteroDe($_GET, 'limite', 20, 50)
+            ));
+            break;
+
         case 'panel':
             $panel = $modelo->panelCliente($ruta['client_id']);
             if ($panel === null) {
@@ -199,8 +253,8 @@ try {
                 cobrosResponderError($r);
                 break;
             }
-            AuditLogger::log([
-                'module' => 'cobros', 'action' => 'CONFIG',
+            cobrosAuditar([
+                'action' => 'CONFIG',
                 'entity_type' => 'cobro_config', 'entity_id' => $ruta['client_id'],
                 'old_values' => $r[1]['anterior'], 'new_values' => $r[1]['config'],
                 'description' => $r[1]['anterior'] === null
@@ -221,8 +275,8 @@ try {
                 cobrosResponderError($r);
                 break;
             }
-            AuditLogger::log([
-                'module' => 'cobros', 'action' => 'CREATE',
+            cobrosAuditar([
+                'action' => 'CREATE',
                 'entity_type' => 'cobro', 'entity_id' => $r[1]['id'],
                 'new_values' => cobrosResumenAuditoria($r[1]),
                 'description' => 'Cobro del periodo ' . $r[1]['periodo'] . ' creado para ' . ($r[1]['cliente']['nombre'] ?? 'el cliente') . '.',
@@ -241,8 +295,8 @@ try {
                 cobrosResponderError($r);
                 break;
             }
-            AuditLogger::log([
-                'module' => 'cobros', 'action' => 'UPDATE',
+            cobrosAuditar([
+                'action' => 'UPDATE',
                 'entity_type' => 'cobro', 'entity_id' => $ruta['id'],
                 'old_values' => cobrosResumenAuditoria($r[1]['anterior']), 'new_values' => cobrosResumenAuditoria($r[1]['cobro']),
                 'description' => 'Cobro del periodo ' . $r[1]['cobro']['periodo'] . ' modificado.',
@@ -271,8 +325,8 @@ try {
             $x = $r[1];
             // Una repeticion (misma clave) devuelve el pago de la primera vez: no se anota otra vez.
             if (!$x['repetido']) {
-                AuditLogger::log([
-                    'module' => 'cobros', 'action' => 'PAYMENT',
+                cobrosAuditar([
+                    'action' => 'PAYMENT',
                     'entity_type' => 'cobro_pago', 'entity_id' => $x['pago']['id'],
                     'new_values' => array_intersect_key($x['pago'], array_flip(['cobro_id', 'monto', 'fecha_pago', 'metodo', 'observaciones']))
                         + ['saldo_restante' => $x['cobro']['saldo'], 'estado' => $x['cobro']['estado']],
@@ -299,8 +353,8 @@ try {
                 break;
             }
             if (!$r[1]['repetido']) {
-                AuditLogger::log([
-                    'module' => 'cobros', 'action' => 'CANCEL',
+                cobrosAuditar([
+                    'action' => 'CANCEL',
                     'entity_type' => 'cobro', 'entity_id' => $ruta['id'],
                     'old_values' => cobrosResumenAuditoria($antes), 'new_values' => cobrosResumenAuditoria($r[1]['cobro']),
                     'description' => 'Cobro del periodo ' . $r[1]['cobro']['periodo'] . ' cancelado.',
@@ -317,8 +371,8 @@ try {
                 break;
             }
             if (!$r[1]['repetido']) {
-                AuditLogger::log([
-                    'module' => 'cobros', 'action' => 'REOPEN',
+                cobrosAuditar([
+                    'action' => 'REOPEN',
                     'entity_type' => 'cobro', 'entity_id' => $ruta['id'],
                     'old_values' => cobrosResumenAuditoria($antes), 'new_values' => cobrosResumenAuditoria($r[1]['cobro']),
                     'description' => 'Cobro del periodo ' . $r[1]['cobro']['periodo'] . ' reabierto.',
@@ -338,8 +392,8 @@ try {
                 cobrosResponderError($r);
                 break;
             }
-            AuditLogger::log([
-                'module' => 'cobros', 'action' => 'REMINDER',
+            cobrosAuditar([
+                'action' => 'REMINDER',
                 'entity_type' => 'cobro', 'entity_id' => $ruta['id'],
                 'new_values' => $r[1]['recordatorio'],
                 'description' => 'Recordatorio (' . $v[1]['canal'] . ') anotado al cobro del periodo ' . $r[1]['cobro']['periodo'] . '.',
@@ -359,8 +413,8 @@ try {
                 break;
             }
             if (!$r[1]['repetido']) {
-                AuditLogger::log([
-                    'module' => 'cobros', 'action' => 'VOID_PAYMENT',
+                cobrosAuditar([
+                    'action' => 'VOID_PAYMENT',
                     'entity_type' => 'cobro_pago', 'entity_id' => $ruta['pago_id'],
                     'old_values' => $r[1]['anterior'], 'new_values' => $r[1]['pago'],
                     'description' => 'Pago de ' . number_format((float) $r[1]['pago']['monto'], 2) . ' anulado en el cobro del periodo '

@@ -83,6 +83,7 @@ final class CobroReglas
     public const MSG_TIENE_PAGOS = 'Este cobro tiene pagos registrados, así que no se puede cancelar. Si un pago fue un error, anúlalo primero.';
     public const MSG_RUTA = 'Esta dirección de cobros no existe.';
     public const MSG_SIN_PERMISO = 'No tienes permiso para hacer esto. Pídeselo a un administrador.';
+    public const MSG_SIN_PERMISO_PLATAFORMA = 'Los cobros a los tenants son solo para la cuenta de soporte de la plataforma.';
     public const MSG_METODO_HTTP = 'Esta acción de cobros no admite ese método.';
     public const MSG_ERROR_GENERICO = 'No se pudo completar la operación con los cobros. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.';
 
@@ -717,22 +718,25 @@ final class CobroReglas
     // ------------------------------------------------------------------------
 
     /**
-     * Que accion pide una peticion a /api/cobros. Lee la ruta a partir del PRIMER '/api/'
-     * (como el Router) y solo mira los segmentos de despues de 'cobros'.
+     * Que accion pide una peticion a /api/cobros (la de una empresa) o a /api/cobros-tenants (la de la
+     * plataforma: las mismas rutas bajo otro primer segmento). Lee la ruta a partir del PRIMER '/api/' (como
+     * el Router) y solo mira los segmentos de despues de $segmento.
      *
      * Acciones: listar, crear, resumen, recordatorios, panel, config, obtener, actualizar,
-     * pagar, cancelar, reabrir, recordar, anular. 'metodo' = la ruta existe pero no con ese
-     * metodo (405); 'desconocida' = no existe (404).
+     * pagar, cancelar, reabrir, recordar, anular y buscar (GET .../clientes: el buscador de tenants, solo
+     * existe en la plataforma). 'metodo' = la ruta existe pero no con ese metodo (405); 'desconocida' = no
+     * existe (404).
      *
+     * @param string $segmento el primer segmento de la ruta: 'cobros' o 'cobros-tenants'
      * @return array{accion:string, id:?int, pago_id:?int, client_id:?int}
      */
-    public static function ruta(string $metodo, string $path): array
+    public static function ruta(string $metodo, string $path, string $segmento = 'cobros'): array
     {
         $r = ['accion' => 'desconocida', 'id' => null, 'pago_id' => null, 'client_id' => null];
         $pos = strpos($path, '/api/');
         $resto = $pos !== false ? substr($path, $pos + 5) : ltrim($path, '/');
         $seg = array_values(array_filter(explode('/', $resto), static fn(string $s): bool => $s !== ''));
-        if (($seg[0] ?? '') !== 'cobros') {
+        if (($seg[0] ?? '') !== $segmento) {
             return $r;
         }
         array_shift($seg);
@@ -746,6 +750,8 @@ final class CobroReglas
             $permitidos = ['GET' => 'resumen'];
         } elseif ($n === 1 && $seg[0] === 'recordatorios') {
             $permitidos = ['GET' => 'recordatorios'];
+        } elseif ($n === 1 && $seg[0] === 'clientes') {
+            $permitidos = ['GET' => 'buscar'];
         } elseif ($n === 2 && $seg[0] === 'clientes' && self::idDe($seg[1]) !== null) {
             $r['client_id'] = self::idDe($seg[1]);
             $permitidos = ['GET' => 'panel'];

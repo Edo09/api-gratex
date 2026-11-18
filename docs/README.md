@@ -49,7 +49,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | Doc | Para qué |
 |---|---|
 | [modules/gastos.md](modules/gastos.md) | Módulo de gastos (menores + facturas de proveedores), auto-emisión |
-| [modules/cobros.md](modules/cobros.md) | Cobros (cuentas por cobrar por cliente): cobro mensual con monto y día propios, pagos parciales o completos (efectivo/transferencia), recurrencia al quedar pagado, estados derivados, dashboard, recordatorios informativos; tablas (migración 038), reglas por defecto, API, permisos y despliegue |
+| [modules/cobros.md](modules/cobros.md) | Cobros (cuentas por cobrar por cliente): cobro mensual con monto y día propios, pagos parciales o completos (efectivo/transferencia), recurrencia al quedar pagado, estados derivados, dashboard, recordatorios informativos; tablas (migración 038), reglas por defecto, API, permisos y despliegue; y su segundo ámbito, **Cobros de tenants** (la plataforma a sus empresas: `/api/cobros-tenants`, tablas en la master, migración master 021, solo soporte) |
 | [modules/branding-plantillas.md](modules/branding-plantillas.md) | Plantillas de Representación Impresa por tenant, branding, logo, diseños a la medida |
 | [modules/cotizaciones-formatos.md](modules/cotizaciones-formatos.md) | Formato de cotización por tenant (`tenants.cotizacion_formato`): cómo se elige, contrato, Ferretería (totales, numeración, PDF, conduces) y cómo agregar un formato para un tenant nuevo |
 | [modules/representacion-impresa-pos.md](modules/representacion-impresa-pos.md) | Tirilla POS de 80, 76 o 72 mm: `?formato=pos` / `pos76` / `pos72`, alto variable, contenido compartido con la hoja carta |

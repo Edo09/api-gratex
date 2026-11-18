@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035 y 038; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019 y 020).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035 y 038; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020 y 021).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -86,6 +86,11 @@ que ningún otro plan los tome:
   datos: da el permiso `cobros` al rol de sistema `user` de las empresas app ya
   creadas (las nuevas lo reciben de `config/permissions.php`). La 016 sigue
   reservada para el plan ITBIS.
+- **Master 021**: `db/master_migrations/021_cobros_tenants.sql` (2026-11-17). Cobros de la
+  PLATAFORMA a sus tenants: las mismas cuatro tablas del modulo Cobros (`cobro_config`,
+  `cobros`, `cobro_pagos`, `cobro_recordatorios`), pero en la master y con FK a `tenants` (el
+  cliente es un tenant). Solo las usa la cuenta de soporte (acceso global) por
+  `/api/cobros-tenants`; no hay migracion de tenant. Va ANTES de subir el codigo que la usa.
 - Los encabezados que dicen "hasta la 038" (este README, `db/tenant_schema.sql`,
   `tools/verificar_migraciones_tenant.sql`) cuentan la 038, que sí tiene archivo;
   siguen sin nombrar la 036 ni la 037: un snapshot o un verificador no debe nombrar

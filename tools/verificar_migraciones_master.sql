@@ -20,6 +20,8 @@
 -- La 017 (edicion 'ambas') solo amplia el ENUM de tenants.edicion: su fila dice
 -- APLICADA cuando el tipo de la columna ya trae el valor 'ambas'. Necesita la 015.
 -- La 016 sigue reservada para el plan ITBIS (no esta escrita): no tiene fila aqui.
+-- La 020 (permiso cobros al rol user) son solo datos: no tiene fila. La 021 (Cobros de la plataforma a sus
+-- tenants) crea cuatro tablas: su fila dice APLICADA con las cuatro y la UNIQUE uk_cobros_cliente_periodo.
 --
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
@@ -133,6 +135,15 @@ FROM (
          EXISTS (SELECT 1 FROM information_schema.COLUMNS
                  WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
                    AND COLUMN_NAME = 'acceso_global')
+  UNION ALL
+  SELECT '021', '021_cobros_tenants.sql',
+         'tablas cobro_config, cobros, cobro_pagos y cobro_recordatorios + indice unico uk_cobros_cliente_periodo',
+         (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE()
+            AND TABLE_NAME IN ('cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios')) = 4
+         AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cobros'
+                AND INDEX_NAME = 'uk_cobros_cliente_periodo') > 0
 ) m
 ORDER BY m.migracion;
 

@@ -129,6 +129,9 @@ los datos fiscales de todos los clientes.
   sale como "Usuario #id": ese reporte solo nombra a los usuarios de la empresa.
 - Los equipos de caja que el usuario de soporte habilite en una empresa cliente no dependen de su
   acceso: al quitárselo, revocarlos con el SQL de arriba.
+- El acceso global también es lo que abre **Cobros de tenants** (`/api/cobros-tenants`: lo que la plataforma le cobra a sus
+  empresas, ver [cobros.md](cobros.md)). Se exige en el servidor y no depende de la empresa en la que esté la sesión. Quitar el
+  acceso lo cierra de inmediato; lo ya cobrado queda en la master.
 
 ## Pruebas
 

@@ -40,6 +40,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `audit_logs` | Bitácora de auditoría centralizada: quién hizo qué y cuándo (mutaciones, ciclo e-CF, auth), aislada por `tenant_id` (master_migration 006) |
 | `pos_handoff_codes` | Códigos de traspaso de un solo uso (60 s) con los que el admin abre el POS desde la app; solo guarda el sha256 del código (master_migration 012) |
 | `pos_equipos` | Equipos habilitados para el POS (token + caja) por tenant, con el bloqueo por PIN fallidos (master_migration 012) |
+| `cobro_config` / `cobros` / `cobro_pagos` / `cobro_recordatorios` | Cobros de la **plataforma** a sus tenants: las mismas cuatro tablas del módulo Cobros de cada empresa, pero el cliente es un `tenants.id` (FK a `tenants`). Solo las usa la cuenta de soporte, por `/api/cobros-tenants` (master_migration 021, ver [../modules/cobros.md](../modules/cobros.md)) |
 
 ### `tenants`
 | Columna | Tipo | Notas |

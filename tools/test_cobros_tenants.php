@@ -1,0 +1,526 @@
+<?php
+/**
+ * test_cobros_tenants.php — Cobros de la PLATAFORMA a sus tenants (docs/modules/cobros.md, "Cobros de tenants"),
+ * sin servidor y sin MySQL.
+ *
+ * Es el mismo modulo Cobros de cada empresa (tools/test_cobros.php prueba a fondo las reglas y el modelo), con otro
+ * ambito: el cliente es un TENANT de la base master y las cuatro tablas viven alli (migracion master 021, con FK a
+ * tenants). Esta suite prueba lo que cambia con el ambito y que todo lo demas sigue funcionando sobre la master:
+ *
+ *   Parte 1 — La ruta /api/cobros-tenants: las mismas acciones que /api/cobros mas el buscador de tenants, y ningun
+ *             ambito sirve el segmento del otro.
+ *   Parte 2 — El cableado: el Router define el ambito, config/permissions.php lo deja pasar con token de usuario y el
+ *             controlador exige el acceso global SIEMPRE (antes de la ruta y del modelo), falla cerrado y anota la
+ *             bitacora de la plataforma con tenant_id 0 para que ninguna empresa la vea en la suya.
+ *   Parte 3 — cobroModel REAL en AMBITO_TENANTS contra SQLite en memoria. Las cuatro tablas se traducen del DDL de
+ *             db/master_schema.sql (UNIQUE, CHECK, FK a tenants y ENUM incluidos), asi que si el snapshot pierde una
+ *             restriccion esta suite lo ve. tenants y users son minimas, a mano; la suite comprueba que el snapshot
+ *             tiene las columnas que el modelo lee de ellas. Cubre el cliente (un tenant, con el correo de su primer
+ *             admin), el buscador, la configuracion, los cobros, los pagos, la recurrencia, los filtros, el
+ *             dashboard, los recordatorios y el panel, con valores calculados a mano.
+ *
+ * Uso:
+ *   php tools/test_cobros_tenants.php
+ *   php tools/test_cobros_tenants.php --fixtures=<carpeta>   ademas escribe ahi las respuestas REALES del modelo (JSON,
+ *                                                            con el sobre {status, data}) para la prueba de contrato
+ *                                                            de la web (fiscalo-react scripts/test-cobros-tenants.ts)
+ *
+ * La Parte 3 necesita pdo_sqlite; si no esta activo se salta con aviso (las Partes 1 y 2 corren siempre):
+ *   php -d extension=php_pdo_sqlite.dll tools/test_cobros_tenants.php   (Windows)
+ *   php -d extension=pdo_sqlite tools/test_cobros_tenants.php           (Linux)
+ *
+ * Los tenants de la Parte 3 son inventados (nombres y RNC de mentira): este repo es publico.
+ */
+
+require_once __DIR__ . '/write_ahead_test_lib.php';
+require_once __DIR__ . '/cobros_test_lib.php';
+// Lo que el modelo manda al error_log (un 500 provocado a proposito) no va a la salida.
+ini_set('error_log', PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null');
+
+require_once __DIR__ . '/../src/Utils/Cobros/CobroReglas.php';
+require_once __DIR__ . '/../src/Models/cobroModel.php';
+
+$raiz = dirname(__DIR__);
+/** ¿Es un ['success', ...]? */
+$exito = static fn(mixed $r): bool => is_array($r) && ($r[0] ?? '') === 'success';
+/** ¿Es un ['error', texto, http, codigo?] con ese http (y ese codigo si se pide)? */
+$falla = static fn(mixed $r, int $http, ?string $codigo = null): bool => is_array($r) && ($r[0] ?? '') === 'error'
+    && ($r[2] ?? 0) === $http && ($codigo === null || ($r[3] ?? null) === $codigo);
+
+// ===========================================================================
+// Parte 1 — La ruta
+// ===========================================================================
+echo "== Parte 1: la ruta /api/cobros-tenants ==\n";
+foreach ([
+    // [metodo, ruta, accion, id, pago_id, client_id]
+    ['GET', '/api/cobros-tenants', 'listar', null, null, null], ['GET', '/api/cobros-tenants/', 'listar', null, null, null],
+    ['POST', '/api/cobros-tenants', 'crear', null, null, null], ['PUT', '/api/cobros-tenants', 'metodo', null, null, null],
+    ['GET', '/api/cobros-tenants/resumen', 'resumen', null, null, null], ['POST', '/api/cobros-tenants/resumen', 'metodo', null, null, null],
+    ['GET', '/api/cobros-tenants/recordatorios', 'recordatorios', null, null, null],
+    ['GET', '/api/cobros-tenants/clientes', 'buscar', null, null, null], ['POST', '/api/cobros-tenants/clientes', 'metodo', null, null, null],
+    ['GET', '/api/cobros-tenants/clientes/7', 'panel', null, null, 7], ['PUT', '/api/cobros-tenants/clientes/7/config', 'config', null, null, 7],
+    ['GET', '/api/cobros-tenants/clientes/abc', 'desconocida', null, null, null], ['GET', '/api/cobros-tenants/clientes/0', 'desconocida', null, null, null],
+    ['GET', '/api/cobros-tenants/12', 'obtener', 12, null, null], ['PUT', '/api/cobros-tenants/12', 'actualizar', 12, null, null],
+    ['POST', '/api/cobros-tenants/12/pagos', 'pagar', 12, null, null], ['POST', '/api/cobros-tenants/12/cancelar', 'cancelar', 12, null, null],
+    ['POST', '/api/cobros-tenants/12/reabrir', 'reabrir', 12, null, null], ['POST', '/api/cobros-tenants/12/recordatorios', 'recordar', 12, null, null],
+    ['POST', '/api/cobros-tenants/pagos/9/anular', 'anular', null, 9, null], ['GET', '/api/cobros-tenants/pagos/9/anular', 'metodo', null, 9, null],
+    ['GET', '/api/cobros-tenants/0', 'desconocida', null, null, null], ['GET', '/api/cobros-tenantsx', 'desconocida', null, null, null],
+    // El segmento de las empresas, y cualquier otro, no es de la plataforma.
+    ['GET', '/api/cobros', 'desconocida', null, null, null], ['GET', '/api/cobros/resumen', 'desconocida', null, null, null],
+    ['GET', '/api/facturas', 'desconocida', null, null, null], ['get', '/index.php/api/cobros-tenants/clientes/', 'buscar', null, null, null],
+] as [$m, $path, $accion, $id, $pagoId, $clientId]) {
+    $ruta = CobroReglas::ruta($m, $path, 'cobros-tenants');
+    wa_chk("ruta de la plataforma {$m} {$path} -> {$accion}", $ruta === ['accion' => $accion, 'id' => $id, 'pago_id' => $pagoId, 'client_id' => $clientId], $ruta);
+}
+wa_chk('al reves: con el segmento por defecto (una empresa) la ruta de la plataforma no existe, y la de la empresa sigue igual',
+    CobroReglas::ruta('GET', '/api/cobros-tenants')['accion'] === 'desconocida' && CobroReglas::ruta('GET', '/api/cobros-tenants/resumen')['accion'] === 'desconocida'
+    && CobroReglas::ruta('GET', '/api/cobros/resumen')['accion'] === 'resumen' && CobroReglas::ruta('GET', '/api/cobros')['accion'] === 'listar');
+wa_chk('el 403 de la plataforma habla de soporte y no manda a "pedirselo a un administrador" (un admin de empresa no lo arregla)',
+    CobroReglas::MSG_SIN_PERMISO_PLATAFORMA !== CobroReglas::MSG_SIN_PERMISO && str_contains(CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 'soporte')
+    && !str_contains(CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 'administrador'));
+
+// ===========================================================================
+// Parte 2 — El cableado
+// ===========================================================================
+echo "\n== Parte 2: el cableado de la plataforma ==\n";
+$router = str_replace("\r\n", "\n", (string) file_get_contents($raiz . '/src/Router.php'));
+wa_chk("el Router tiene el case 'cobros-tenants': define el ambito y recien despues carga cobroController.php",
+    preg_match("/case 'cobros-tenants':.*?define\\('COBROS_AMBITO', 'tenants'\\);\\s*require_once 'src\\/Controllers\\/cobroController\\.php';\\s*break;/s", $router) === 1);
+$iEmpresa = strpos($router, "case 'cobros':");
+$iPlataforma = strpos($router, "case 'cobros-tenants':");
+wa_chk("...y el case 'cobros' de las empresas no lo define: sin ese ambito el controlador es el de empresa",
+    $iEmpresa !== false && $iPlataforma !== false && $iEmpresa < $iPlataforma && !str_contains(substr($router, $iEmpresa, $iPlataforma - $iEmpresa), 'COBROS_AMBITO'));
+$defines = 0;
+foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($raiz . '/src', FilesystemIterator::SKIP_DOTS)) as $archivo) {
+    if ($archivo->isFile() && $archivo->getExtension() === 'php') {
+        $defines += substr_count((string) file_get_contents($archivo->getPathname()), "define('COBROS_AMBITO'");
+    }
+}
+wa_chk("COBROS_AMBITO solo se define en el Router: nada mas puede poner un controlador de empresa en el ambito 'tenants'", $defines === 1, $defines);
+
+$permisos = (static fn(): array => require __DIR__ . '/../config/permissions.php')();
+wa_chk("config/permissions.php: 'cobros-tenants' es 'authenticated' (token de usuario; el controlador exige el acceso global) y NO es un modulo del catalogo ni de ningun rol",
+    ($permisos['routes']['cobros-tenants'] ?? null) === 'authenticated' && !in_array('cobros-tenants', $permisos['catalog'], true)
+    && array_filter($permisos['defaults'], static fn(array $mods): bool => in_array('cobros-tenants', $mods, true)) === []);
+wa_chk("...y el modulo 'cobros' de las empresas sigue siendo el de siempre", ($permisos['routes']['cobros'] ?? null) === 'cobros');
+
+$c = str_replace("\r\n", "\n", (string) file_get_contents($raiz . '/src/Controllers/cobroController.php'));
+wa_chk('el controlador carga todo lo que usa: cada require_once __DIR__ apunta a un archivo que existe', (static function () use ($c, $raiz): bool {
+    preg_match_all("/require_once\\(__DIR__ \\. '([^']+)'\\);/", $c, $m);
+    foreach ($m[1] as $rel) {
+        if (!is_file($raiz . '/src/Controllers' . $rel)) {
+            return false;
+        }
+    }
+    return count($m[1]) >= 8 && in_array('/../AccesoGlobal.php', $m[1], true) && in_array('/../MasterDatabase.php', $m[1], true);
+})());
+$iIf = strpos($c, 'if ($ambitoTenants) {');
+$iElse = $iIf === false ? false : strpos($c, '} else {', $iIf);
+$iFin = $iElse === false ? false : strpos($c, '$metodo = $_SERVER', $iElse);
+$ramaPlat = ($iIf !== false && $iElse !== false) ? substr($c, $iIf, $iElse - $iIf) : '';
+$ramaEmp = ($iElse !== false && $iFin !== false) ? substr($c, $iElse, $iFin - $iElse) : '';
+$iRuta = strpos($c, 'CobroReglas::ruta(');
+$iModelo = strpos($c, 'new cobroModel(null, null,');
+wa_chk('el controlador exige el acceso global en la plataforma SIEMPRE, con la conexion master, antes de resolver la ruta y de abrir el modelo',
+    $ramaPlat !== '' && str_contains($ramaPlat, 'AccesoGlobal::tieneAcceso(MasterDatabase::getInstance()->getConnection(),')
+    && $iRuta !== false && $iModelo !== false && $iIf < $iRuta && $iIf < $iModelo);
+wa_chk("...falla cerrado: sin usuario (un principal maquina) no hay acceso; el 403 deja rastro (modulo cobros-tenants) y lleva el mensaje de soporte",
+    str_contains($ramaPlat, "\$validation['user_id'] ?? null") && preg_match("/logAccessDenied\\(\\s*'cobros-tenants'/", $ramaPlat) === 1
+    && str_contains($ramaPlat, 'CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 403') && str_contains($ramaPlat, 'return;'));
+wa_chk("en la plataforma no se mira el rol ni el modulo 'cobros' (un rol con ese modulo no abre los cobros de los tenants); en las empresas si, y no depende de PERMISSIONS_ENFORCE",
+    $ramaPlat !== '' && !str_contains($ramaPlat, 'permMatches') && !str_contains($ramaPlat, 'getPermissionsForRole')
+    && str_contains($ramaEmp, "PermissionGate::permMatches(\$permisos, 'cobros')") && !str_contains($c, 'PermissionGate::enforce('));
+wa_chk('el modelo se abre con el ambito de la peticion y la ruta se lee con su segmento',
+    str_contains($c, 'new cobroModel(null, null, $ambitoTenants ? cobroModel::AMBITO_TENANTS : cobroModel::AMBITO_EMPRESA)')
+    && str_contains($c, "\$ambitoTenants ? 'cobros-tenants' : 'cobros'"));
+$iBuscar = strpos($c, "case 'buscar':");
+$trozoBuscar = $iBuscar === false ? '' : substr($c, $iBuscar, 600);
+wa_chk('el buscador de tenants (accion buscar) solo responde en la plataforma: en una empresa es 404',
+    $trozoBuscar !== '' && str_contains($trozoBuscar, 'if (!$ambitoTenants) {') && str_contains($trozoBuscar, 'CobroReglas::MSG_RUTA, 404')
+    && str_contains($trozoBuscar, '$modelo->buscarClientes('));
+wa_chk("la bitacora de la plataforma va con modulo 'cobros-tenants' y tenant_id 0 (ninguna empresa la ve en la suya); la de las empresas, con modulo 'cobros'; y toda anotacion pasa por ese unico punto",
+    str_contains($c, "['module' => 'cobros-tenants', 'tenant_id' => 0]") && str_contains($c, "['module' => 'cobros']")
+    && substr_count($c, 'AuditLogger::log(') === 1 && substr_count($c, 'cobrosAuditar([') >= 9);
+$logger = (string) file_get_contents($raiz . '/src/AuditLogger.php');
+$modeloAuditoria = (string) file_get_contents($raiz . '/src/Models/AuditLogModel.php');
+wa_chk('AuditLogger respeta un tenant_id explicito (0 no cae en el de la sesion) y la bitacora de cada empresa lista solo SU tenant_id: las filas con 0 no las ve ninguna',
+    preg_match('/\'tenant_id\'\s*=>\s*\$event\[\'tenant_id\'\]\s*\?\?\s*RequestContext::tenantId\(\)/', $logger) === 1
+    && str_contains($modeloAuditoria, "\$clauses[] = 'tenant_id = :tenant_id';"));
+
+// ===========================================================================
+// Parte 3 — cobroModel real contra SQLite en memoria
+// ===========================================================================
+if (!extension_loaded('pdo_sqlite')) {
+    echo "\n(SALTADA: la Parte 3 — pdo_sqlite no esta activo; corre con -d extension=pdo_sqlite)\n";
+    wa_fin();
+}
+
+/** Una base master en miniatura: tenants y users a mano; las cuatro tablas de Cobros, del snapshot, con las FK activas. */
+function cobros_tenants_base(): PDO
+{
+    $pdo = new PDO('sqlite::memory:');
+    $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+    $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+    $pdo->exec('PRAGMA foreign_keys = ON');
+    $pdo->exec("CREATE TABLE tenants (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, rnc TEXT NOT NULL UNIQUE,
+        tipo TEXT NOT NULL DEFAULT 'app', ambiente TEXT NOT NULL DEFAULT 'ecf', activo INTEGER NOT NULL DEFAULT 1,
+        edicion TEXT NOT NULL DEFAULT 'completa')");
+    $pdo->exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL REFERENCES tenants (id),
+        email TEXT NOT NULL, role TEXT DEFAULT 'user')");
+    foreach (cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios']) as $ddl) {
+        $pdo->exec($ddl);
+    }
+    return $pdo;
+}
+
+/** Cinco tenants inventados. 1 tiene un usuario normal y dos admin; 3 (integracion) no tiene usuarios; 4 solo uno normal. */
+function cobros_tenants_sembrar(PDO $pdo): void
+{
+    $pdo->exec("INSERT INTO tenants (id, nombre, rnc, tipo, ambiente, activo, edicion) VALUES
+        (1, 'Alfa Comercial SRL', '101000011', 'app', 'ecf', 1, 'completa'),
+        (2, 'Beta Servicios SA', '101000022', 'app', 'ecf', 1, 'express'),
+        (3, 'Gamma Integraciones', '101000033', 'integracion', 'ecf', 1, 'completa'),
+        (4, 'Delta 100% Pruebas', '101000044', 'app', 'certecf', 1, 'completa'),
+        (5, 'Epsilon Inactiva SRL', '101000055', 'app', 'ecf', 0, 'completa')");
+    $pdo->exec("INSERT INTO users (id, tenant_id, email, role) VALUES
+        (1, 1, 'user@alfa.test', 'user'), (2, 1, 'admin@alfa.test', 'admin'), (3, 1, 'admin2@alfa.test', 'admin'),
+        (4, 2, 'admin@beta.test', 'admin'), (5, 4, 'solo@delta.test', 'user'), (6, 5, 'admin@epsilon.test', 'admin')");
+}
+
+echo "\n== Parte 3: el DDL real de la master traducido a SQLite ==\n";
+$ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios']);
+wa_chk('se traducen las cuatro tablas y sus indices del snapshot de la master (4 CREATE TABLE y 7 CREATE INDEX)',
+    count(array_filter($ddl, fn(string $d): bool => str_starts_with($d, 'CREATE TABLE'))) === 4
+    && count(array_filter($ddl, fn(string $d): bool => str_contains($d, 'INDEX'))) === 7, $ddl);
+$snapshot = str_replace("\r\n", "\n", (string) file_get_contents($raiz . '/db/master_schema.sql'));
+$columnasDe = static function (string $tabla) use ($snapshot): string {
+    return preg_match('/CREATE TABLE IF NOT EXISTS ' . $tabla . ' \((.*?)\) ENGINE=/s', $snapshot, $mm) === 1 ? $mm[1] : '';
+};
+$faltan = [];
+foreach (['tenants' => ['id', 'nombre', 'rnc', 'tipo', 'ambiente', 'activo', 'edicion'], 'users' => ['id', 'tenant_id', 'email', 'role']] as $tabla => $columnas) {
+    $cuerpo = $columnasDe($tabla);
+    foreach ($columnas as $col) {
+        if ($cuerpo === '' || preg_match('/^\s*' . $col . '\s/m', $cuerpo) !== 1) {
+            $faltan[] = "{$tabla}.{$col}";
+        }
+    }
+}
+wa_chk('el snapshot de la master tiene las columnas de tenants y users que el modelo lee para hacer de cliente a un tenant', $faltan === [], $faltan);
+
+$pdoC = cobros_tenants_base();
+cobros_tenants_sembrar($pdoC);
+$pdoC->exec("INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento, activo, created_at) VALUES (1, 1, 1, 1, '2026-01-01 00:00:00')");
+$intentar = static function (PDO $pdo, string $sql): ?string {
+    try {
+        $pdo->exec($sql);
+        return null;
+    } catch (PDOException $e) {
+        return $e->getMessage();
+    }
+};
+$ins = "INSERT INTO cobros (client_id, periodo, monto, fecha_vencimiento, created_at) VALUES (1, '2026-05', 10, '2026-05-10', '2026-01-01 00:00:00')";
+wa_chk('el UNIQUE (client_id, periodo) del snapshot rechaza un duplicado directo en la base', $intentar($pdoC, $ins) === null && stripos((string) $intentar($pdoC, $ins), 'UNIQUE') !== false);
+wa_chk('el CHECK monto_pagado <= monto del snapshot rechaza un saldo mayor que el monto', stripos((string) $intentar($pdoC, "UPDATE cobros SET monto_pagado = 11 WHERE periodo = '2026-05'"), 'CHECK') !== false);
+wa_chk('el CHECK monto > 0, el ENUM de metodo y el CHECK del dia (32) del snapshot rechazan un cobro de 0, un metodo inventado y un dia imposible',
+    $intentar($pdoC, "INSERT INTO cobros (client_id, periodo, monto, fecha_vencimiento, created_at) VALUES (1, '2026-06', 0, '2026-06-10', 'x')") !== null
+    && $intentar($pdoC, "INSERT INTO cobro_pagos (cobro_id, monto, fecha_pago, metodo, created_at) VALUES (1, 5, '2026-05-11', 'cheque', 'x')") !== null
+    && $intentar($pdoC, "INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento, created_at) VALUES (2, 100, 32, 'x')") !== null);
+wa_chk('la FK cobros -> tenants rechaza un cobro de un tenant que no existe, y la de cobro_config tambien',
+    stripos((string) $intentar($pdoC, "INSERT INTO cobros (client_id, periodo, monto, fecha_vencimiento, created_at) VALUES (999, '2026-07', 10, '2026-07-10', 'x')"), 'FOREIGN KEY') !== false
+    && stripos((string) $intentar($pdoC, "INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento, created_at) VALUES (999, 100, 5, 'x')"), 'FOREIGN KEY') !== false);
+wa_chk('la FK cobros -> tenants es RESTRICT: no se borra un tenant que ya tiene cobros',
+    stripos((string) $intentar($pdoC, 'DELETE FROM tenants WHERE id = 1'), 'FOREIGN KEY') !== false
+    && (int) $pdoC->query('SELECT COUNT(*) FROM tenants WHERE id = 1')->fetchColumn() === 1);
+$pdoC->exec("INSERT INTO tenants (id, nombre, rnc) VALUES (6, 'Zeta Sin Cobros', '101000066')");
+$pdoC->exec("INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento, created_at) VALUES (6, 100, 5, '2026-01-01 00:00:00')");
+$borrado = $intentar($pdoC, 'DELETE FROM tenants WHERE id = 6');
+wa_chk('la FK cobro_config -> tenants es CASCADE: al borrar un tenant sin cobros se va su configuracion, sin dejar filas huerfanas',
+    $borrado === null && (int) $pdoC->query('SELECT COUNT(*) FROM cobro_config WHERE client_id = 6')->fetchColumn() === 0);
+$pdoC = null;
+
+// El reloj de las pruebas: se mueve con $ahora.
+$fx = []; // respuestas reales que --fixtures vuelca al final
+$ahora = '2026-11-16 10:00:00';
+$reloj = function () use (&$ahora): string {
+    return $ahora;
+};
+$pdo = cobros_tenants_base();
+cobros_tenants_sembrar($pdo);
+$m = new cobroModel($pdo, $reloj, cobroModel::AMBITO_TENANTS);
+// ids de tenants: A=1 Alfa, B=2 Beta, G=3 Gamma (integracion), D=4 Delta, E=5 Epsilon (inactiva).
+$cfg = static fn(int $monto, int $dia, ?string $desc = null, bool $activo = true): array => ['monto_c' => $monto, 'dia' => $dia, 'descripcion' => $desc, 'activo' => $activo];
+$nuevo = static fn(int $cliente, ?string $periodo = null, ?string $fecha = null, ?int $monto = null, ?string $desc = null): array
+    => ['client_id' => $cliente, 'periodo' => $periodo, 'fecha' => $fecha, 'monto_c' => $monto, 'descripcion' => $desc];
+$pago = static fn(int $monto, ?string $clave = null, ?string $fecha = null, string $metodo = 'efectivo', ?string $obs = null): array
+    => ['monto_c' => $monto, 'fecha_pago' => $fecha ?? substr($GLOBALS['ahora'], 0, 10), 'metodo' => $metodo, 'observaciones' => $obs, 'clave' => $clave];
+$cuenta = static function (string $sql, array $p = []) use ($pdo): int {
+    $s = $pdo->prepare($sql);
+    $s->execute($p);
+    return (int) $s->fetchColumn();
+};
+
+echo "\n== Parte 3: el cliente es un tenant ==\n";
+wa_chk('un ambito desconocido no se acepta (InvalidArgumentException)', (function () use ($pdo, $reloj): bool {
+    try {
+        new cobroModel($pdo, $reloj, 'otro');
+        return false;
+    } catch (InvalidArgumentException $e) {
+        return true;
+    }
+})());
+$c1 = $m->cliente(1);
+wa_chk('cliente(1): el nombre del tenant hace de nombre, contacto y empresa; con su RNC; el correo es el del PRIMER admin (no el del usuario normal ni el del segundo admin)',
+    $c1 === ['id' => 1, 'nombre' => 'Alfa Comercial SRL', 'contacto' => 'Alfa Comercial SRL', 'empresa' => 'Alfa Comercial SRL', 'rnc' => '101000011', 'email' => 'admin@alfa.test', 'telefono' => ''], $c1);
+wa_chk('un tenant sin usuarios (integracion) y uno con un solo usuario normal no tienen correo ("")', $m->cliente(3)['email'] === '' && $m->cliente(4)['email'] === '');
+wa_chk('un tenant que no existe: null', $m->cliente(999) === null);
+
+echo "\n== Parte 3: configuracion mensual ==\n";
+$r = $m->guardarConfig(1, $cfg(500000, 31, 'Mensualidad Fiscalpoint'), 7);
+wa_chk('configurar a Alfa: 5000.00 el dia 31, activa, sin configuracion anterior',
+    $exito($r) && $r[1]['config']['client_id'] === 1 && $r[1]['config']['monto_mensual'] === 5000.0 && $r[1]['config']['dia_vencimiento'] === 31
+    && $r[1]['config']['activo'] === true && $r[1]['config']['descripcion'] === 'Mensualidad Fiscalpoint' && $r[1]['anterior'] === null, $r);
+wa_chk('guardarConfig de un tenant que no existe: 404 (la FK lo rechazaria despues, pero el modelo lo dice antes)', $falla($m->guardarConfig(999, $cfg(100, 5), 7), 404));
+wa_chk('obtenerConfig: la de Alfa y null para uno sin configuracion', $m->obtenerConfig(1)['monto_mensual'] === 5000.0 && $m->obtenerConfig(3) === null);
+
+echo "\n== Parte 3: el buscador de tenants ==\n";
+$b = $m->buscarClientes('');
+$fx['buscar'] = $b;
+wa_chk('sin texto: los 5 tenants, los activos primero por nombre (Alfa, Beta, Delta, Gamma) y el inactivo al final', array_column($b, 'id') === [1, 2, 4, 3, 5], array_column($b, 'id'));
+$porId = array_column($b, null, 'id');
+wa_chk('cada uno trae lo de un cliente y ademas que es: tipo, ambiente, si esta activo y si ya tiene su cobro mensual configurado',
+    $porId[1] === ['id' => 1, 'nombre' => 'Alfa Comercial SRL', 'contacto' => 'Alfa Comercial SRL', 'empresa' => 'Alfa Comercial SRL', 'rnc' => '101000011',
+        'email' => 'admin@alfa.test', 'telefono' => '', 'tipo' => 'app', 'ambiente' => 'ecf', 'activo' => true, 'con_config' => true]
+    && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['email'] === ''
+    && $porId[4]['ambiente'] === 'certecf' && $porId[5]['activo'] === false && $porId[2]['con_config'] === false, $porId);
+wa_chk('busca por nombre (sin importar mayusculas) y por RNC; un texto parcial sirve y se recorta', array_column($m->buscarClientes('alfa'), 'id') === [1]
+    && array_column($m->buscarClientes('GAMMA'), 'id') === [3] && array_column($m->buscarClientes('Servicios'), 'id') === [2]
+    && array_column($m->buscarClientes('101000044'), 'id') === [4] && array_column($m->buscarClientes('0000'), 'id') === [1, 2, 4, 3, 5]
+    && array_column($m->buscarClientes('  alfa  '), 'id') === [1]);
+wa_chk('un % o un _ en la busqueda se busca como texto: "100%" encuentra a Delta 100% Pruebas, "%" solo tambien, y "_" no trae a nadie',
+    array_column($m->buscarClientes('100%'), 'id') === [4] && array_column($m->buscarClientes('%'), 'id') === [4] && $m->buscarClientes('_') === []);
+wa_chk("un texto con comillas no rompe la consulta ni trae de mas (va como parametro)", $m->buscarClientes("' OR 1=1 --") === [] && $m->buscarClientes("alfa' OR '1'='1") === []);
+wa_chk('el limite: 2 trae 2; 0 se sube a 1; uno enorme se queda en los 50 que permite (aqui hay 5)',
+    count($m->buscarClientes('', 2)) === 2 && count($m->buscarClientes('', 0)) === 1 && count($m->buscarClientes('', 500)) === 5);
+wa_chk('en el ambito de una empresa no hay buscador de tenants: devuelve vacio sin tocar la base', (new cobroModel($pdo, $reloj))->buscarClientes('alfa') === []);
+
+echo "\n== Parte 3: crear cobros, pagos y la cadena mensual (Alfa) ==\n";
+$r = $m->crear($nuevo(1, '2026-10'), 7);
+$A1 = $exito($r) ? $r[1] : [];
+$fx['detalle'] = $A1;
+wa_chk('cobro de Alfa para octubre con la configuracion: 5000, vence el 31 de octubre, y el cliente que viaja es el tenant',
+    $exito($r) && $A1['periodo'] === '2026-10' && $A1['monto'] === 5000.0 && $A1['fecha_vencimiento'] === '2026-10-31' && $A1['descripcion'] === 'Mensualidad Fiscalpoint'
+    && $A1['generado_de_cobro_id'] === null && $A1['cliente']['nombre'] === 'Alfa Comercial SRL' && $A1['cliente']['email'] === 'admin@alfa.test'
+    && $A1['cliente']['rnc'] === '101000011', $r);
+wa_chk('el estado se deriva del reloj: vencido hace 16 dias, sin abonos, saldo 5000', $A1['estado'] === 'Vencido' && $A1['dias_atraso'] === 16 && $A1['con_abonos'] === false && $A1['saldo'] === 5000.0);
+wa_chk('crear para un tenant que no existe: 404', $falla($m->crear($nuevo(999, '2026-11', '2026-11-30', 100), 7), 404));
+$m->guardarConfig(1, $cfg(600000, 31, 'Mensualidad Fiscalpoint'), 7);
+wa_chk('cambiar el monto mensual a 6000 NO toca el cobro ya generado: sigue en 5000', $m->obtener($A1['id'])['monto'] === 5000.0);
+$r = $m->registrarPago($A1['id'], $pago(200000, null, '2026-10-20', 'transferencia', 'Abono'), 7);
+wa_chk('abono de 2000: sigue Vencido pero con abonos, saldo 3000, sin cobro siguiente',
+    $exito($r) && $r[1]['cobro']['monto_pagado'] === 2000.0 && $r[1]['cobro']['saldo'] === 3000.0 && $r[1]['cobro']['estado'] === 'Vencido'
+    && $r[1]['cobro']['con_abonos'] === true && $r[1]['siguiente'] === null && $r[1]['pago']['metodo'] === 'transferencia', $r);
+wa_chk('un pago mayor que el saldo (4000 contra 3000): 422 EXCEDE_SALDO con el saldo, y no deja nada',
+    $falla($m->registrarPago($A1['id'], $pago(400000), 7), 422, 'EXCEDE_SALDO') && $m->obtener($A1['id'])['monto_pagado'] === 2000.0);
+$K1 = '3f2504e0-4f89-41d3-9a0c-0305e82c3301';
+$r = $m->registrarPago($A1['id'], $pago(300000, $K1, '2026-11-10'), 7);
+$A2 = $exito($r) ? ($r[1]['siguiente'] ?? []) : [];
+$fx['pago'] = $r[1] ?? [];
+wa_chk('el pago que completa el cobro lo deja Pagado y genera el de noviembre con el monto ACTUAL (6000), vence el 30 (el 31 no existe) y apunta a su origen',
+    $exito($r) && $r[1]['cobro']['estado'] === 'Pagado' && $r[1]['cobro']['saldo'] === 0.0 && $r[1]['siguiente_nuevo'] === true && $r[1]['siguiente_motivo'] === 'generado'
+    && $A2 !== [] && $A2['periodo'] === '2026-11' && $A2['monto'] === 6000.0 && $A2['fecha_vencimiento'] === '2026-11-30' && $A2['generado_de_cobro_id'] === $A1['id']
+    && $A2['estado'] === 'Pendiente' && $A2['dias_para_vencer'] === 14 && $A2['cliente']['nombre'] === 'Alfa Comercial SRL', $r);
+$r2 = $m->registrarPago($A1['id'], $pago(300000, $K1, '2026-11-10'), 7);
+$fx['pago-repetido'] = $r2[1] ?? [];
+wa_chk('REPETIR la peticion con la misma clave: devuelve el mismo pago, sin otro cobro ni otro pago',
+    $exito($r2) && $r2[1]['repetido'] === true && $r2[1]['siguiente_nuevo'] === false && $r2[1]['pago']['id'] === $r[1]['pago']['id'] && $r2[1]['siguiente']['id'] === $A2['id']
+    && count($m->obtener($A1['id'])['pagos']) === 2 && $cuenta('SELECT COUNT(*) FROM cobros WHERE client_id = 1') === 2, $r2);
+wa_chk('la misma clave con OTRO monto: 409 CLAVE_CON_OTROS_DATOS; pagar un cobro ya pagado: 409 YA_PAGADO',
+    $falla($m->registrarPago($A1['id'], $pago(100, $K1, '2026-11-10'), 7), 409, 'CLAVE_CON_OTROS_DATOS') && $falla($m->registrarPago($A1['id'], $pago(100), 7), 409, 'YA_PAGADO'));
+wa_chk('crear otro cobro del mismo tenant y periodo: 409 COBRO_DUPLICADO con el id del que ya existe', ($r3 = $m->crear($nuevo(1, '2026-11'), 7)) && $falla($r3, 409, 'COBRO_DUPLICADO') && $r3[4]['cobro_id'] === $A2['id'], $r3);
+wa_chk('cancelar un cobro con pagos: 409 TIENE_PAGOS', $falla($m->cancelar($A1['id'], 'x', 7), 409, 'TIENE_PAGOS'));
+$A2 = $m->obtener($A2['id']);
+
+echo "\n== Parte 3: Beta (configuracion inactiva), Gamma (integracion), Delta y Epsilon (inactiva) ==\n";
+$m->guardarConfig(2, $cfg(100000, 10, null, false), 7);
+$r = $m->crear($nuevo(2, null, '2026-11-20', 75050), 7);
+$B1 = $exito($r) ? $r[1] : [];
+wa_chk('cobro de Beta con monto y vencimiento escritos (750.50) aunque su configuracion diga 1000: lo escrito manda', $exito($r) && $B1['monto'] === 750.5 && $B1['fecha_vencimiento'] === '2026-11-20' && $B1['periodo'] === '2026-11', $r);
+$m->registrarPago($B1['id'], $pago(25025), 7);
+$r = $m->registrarPago($B1['id'], $pago(50025), 7);
+$P2 = $exito($r) ? $r[1]['pago'] : [];
+wa_chk('dos pagos (250.25 + 500.25) suman exactos 750.50 y lo dejan Pagado; con la configuracion INACTIVA no genera el siguiente (siguiente_motivo = inactivo)',
+    $exito($r) && $r[1]['cobro']['monto_pagado'] === 750.5 && $r[1]['cobro']['estado'] === 'Pagado' && $r[1]['siguiente'] === null && $r[1]['siguiente_motivo'] === 'inactivo'
+    && $cuenta('SELECT COUNT(*) FROM cobros WHERE client_id = 2') === 1, $r);
+$r = $m->anularPago($P2['id'], 'Se digito mal', 7);
+$fx['anulado'] = $r[1] ?? [];
+wa_chk('anular el pago de 500.25: Beta vuelve a 250.25 pagado (Parcial, vence el 20) y el pago se queda a la vista como anulado, con su motivo',
+    $exito($r) && $r[1]['cobro']['monto_pagado'] === 250.25 && $r[1]['cobro']['saldo'] === 500.25 && $r[1]['cobro']['estado'] === 'Parcial'
+    && $r[1]['pago']['anulado'] === true && $r[1]['pago']['motivo_anulacion'] === 'Se digito mal' && count($r[1]['cobro']['pagos']) === 2, $r);
+$r = $m->registrarPago($B1['id'], $pago(50025), 7);
+wa_chk('volver a pagar lo que falta: Pagado otra vez (3 pagos, uno anulado que no suma)', $exito($r) && $r[1]['cobro']['estado'] === 'Pagado' && $r[1]['cobro']['monto_pagado'] === 750.5 && count($r[1]['cobro']['pagos']) === 3, $r);
+
+$r = $m->crear($nuevo(3, null, '2026-11-01', 30000), 7);
+$G1 = $exito($r) ? $r[1] : [];
+wa_chk('cobro de Gamma (integracion, sin usuarios, sin configuracion): 300, vencio el 1 de noviembre (15 dias) y el cliente no tiene correo',
+    $exito($r) && $G1['estado'] === 'Vencido' && $G1['dias_atraso'] === 15 && $G1['cliente']['nombre'] === 'Gamma Integraciones' && $G1['cliente']['email'] === '', $r);
+wa_chk('sin configuracion y sin monto: 422 pide el monto (un tenant sin config no inventa un cobro)', ($r = $m->crear($nuevo(3), 7)) && $falla($r, 422) && $r[1] === CobroReglas::MSG_MONTO_REQUERIDO, $r);
+
+$m->guardarConfig(4, $cfg(200000, 15), 7);
+$D1 = $m->crear($nuevo(4, '2026-11'), 7)[1];
+$D2 = $m->crear($nuevo(4, '2026-12'), 7)[1];
+wa_chk('dos cobros de Delta (nov y dic) con la configuracion: 2000 cada uno, vencen el 15', $D1['fecha_vencimiento'] === '2026-11-15' && $D2['fecha_vencimiento'] === '2026-12-15' && $D2['monto'] === 2000.0
+    && $D1['cliente']['nombre'] === 'Delta 100% Pruebas');
+$r = $m->registrarPago($D2['id'], $pago(50000), 7);
+wa_chk('abono de 500 a diciembre (antes de vencer): Parcial con saldo 1500, sin siguiente', $exito($r) && $r[1]['cobro']['estado'] === 'Parcial' && $r[1]['cobro']['saldo'] === 1500.0 && $r[1]['siguiente'] === null, $r);
+
+$E1 = $m->crear($nuevo(5, '2026-11', '2026-11-16', 120000), 7)[1];
+$E2 = $m->crear($nuevo(5, '2026-10', '2026-10-01', 80000), 7)[1];
+wa_chk('un tenant INACTIVO tambien se cobra (la deuda no se va con la baja): el de hoy esta Pendiente con 0 dias para vencer',
+    $E1['estado'] === 'Pendiente' && $E1['dias_para_vencer'] === 0 && $E1['cliente']['nombre'] === 'Epsilon Inactiva SRL' && $E1['cliente']['email'] === 'admin@epsilon.test');
+$r = $m->cancelar($E2['id'], 'Se perdono la deuda', 7);
+wa_chk('cancelar uno sin pagos: Cancelado y con su motivo; ya no recibe pagos (409 COBRO_CANCELADO)',
+    $exito($r) && $r[1]['cobro']['estado'] === 'Cancelado' && $r[1]['cobro']['motivo_cancelacion'] === 'Se perdono la deuda'
+    && $falla($m->registrarPago($E2['id'], $pago(100), 7), 409, 'COBRO_CANCELADO'), $r);
+wa_chk('la base queda consistente: monto_pagado = suma de los pagos vigentes, dentro de 0..monto, sin duplicados', cobros_invariantes($pdo) === [], cobros_invariantes($pdo));
+
+echo "\n== Parte 3: listar, contar y filtrar (con el nombre y el RNC del tenant) ==\n";
+$todos = $m->listar(CobroReglas::validarFiltros([])[1], 0, 500);
+$totalCobros = $m->contar(CobroReglas::validarFiltros([])[1]);
+wa_chk("listar sin filtros trae los 8 cobros y contar coincide", count($todos) === 8 && $totalCobros === 8 && $cuenta('SELECT COUNT(*) FROM cobros') === 8, [count($todos), $totalCobros]);
+wa_chk('orden por urgencia: primero lo abierto del mas atrasado al mas lejano (G1, D1, E1, A2, D2) y despues lo cerrado, lo mas reciente primero (B1, A1, E2)',
+    array_column($todos, 'id') === [$G1['id'], $D1['id'], $E1['id'], $A2['id'], $D2['id'], $B1['id'], $A1['id'], $E2['id']], array_column($todos, 'id'));
+wa_chk('cada fila trae su cliente: el tenant, con el nombre, el RNC y el correo de su admin', $todos[0]['cliente']['nombre'] === 'Gamma Integraciones' && $todos[0]['cliente']['rnc'] === '101000033'
+    && $todos[3]['cliente']['email'] === 'admin@alfa.test', $todos[0]['cliente']);
+$porEstado = [];
+foreach (CobroReglas::ESTADOS as $est) {
+    $porEstado[$est] = array_column($m->listar(CobroReglas::validarFiltros(['estado' => $est])[1], 0, 500), 'id');
+    // Parcial = con abonos y todavia debe, VENZA O NO.
+    $esperados = array_column(array_filter($todos, fn(array $c): bool => $est === CobroReglas::PARCIAL ? $c['con_abonos'] === true && $c['saldo'] > 0 : $c['estado'] === $est), 'id');
+    sort($esperados);
+    $obtenidos = $porEstado[$est];
+    sort($obtenidos);
+    wa_chk("el filtro estado={$est} (SQL) devuelve EXACTAMENTE lo que el estado derivado (PHP) dice: " . count($esperados) . ' cobros', $obtenidos === $esperados && $esperados !== [], [$obtenidos, $esperados]);
+    wa_chk("contar con estado={$est} coincide", $m->contar(CobroReglas::validarFiltros(['estado' => $est])[1]) === count($esperados));
+}
+$ids = static fn(array $f): array => array_column($m->listar(CobroReglas::validarFiltros($f)[1], 0, 500), 'id');
+wa_chk('filtro por tenant: los 2 cobros de Delta', $ids(['client_id' => 4]) === array_values(array_intersect(array_column($todos, 'id'), [$D1['id'], $D2['id']])) && count($ids(['client_id' => 4])) === 2);
+wa_chk('busqueda por nombre del tenant (sin importar mayusculas): "alfa" y "ALFA COMERCIAL SRL" traen los 2 de Alfa', count($ids(['query' => 'alfa'])) === 2 && count($ids(['query' => 'ALFA COMERCIAL SRL'])) === 2);
+wa_chk('busqueda por RNC del tenant: "101000044" trae los 2 de Delta', count($ids(['query' => '101000044'])) === 2);
+wa_chk('un % en la busqueda se busca como texto: "100%" y "%" traen los 2 de Delta, y "_" ninguno; sin resultados: vacio y total 0',
+    count($ids(['query' => '100%'])) === 2 && count($ids(['query' => '%'])) === 2 && $ids(['query' => '_']) === [] && $ids(['query' => 'zzzz']) === []
+    && $m->contar(CobroReglas::validarFiltros(['query' => 'zzzz'])[1]) === 0);
+wa_chk('filtro por periodo 2026-11: los de noviembre de Alfa, Beta, Gamma, Delta y Epsilon (5)', count($ids(['periodo' => '2026-11'])) === 5, $ids(['periodo' => '2026-11']));
+wa_chk('filtro por vencimiento entre el 1 y el 20 de noviembre: G1 (1), D1 (15), E1 (16) y B1 (20)',
+    count($ids(['vence_desde' => '2026-11-01', 'vence_hasta' => '2026-11-20'])) === 4, $ids(['vence_desde' => '2026-11-01', 'vence_hasta' => '2026-11-20']));
+$pag1 = $m->listar(CobroReglas::validarFiltros([])[1], 0, 3);
+$pag2 = $m->listar(CobroReglas::validarFiltros([])[1], 3, 3);
+wa_chk('paginacion: dos paginas de 3 no se pisan y siguen el mismo orden', array_column(array_merge($pag1, $pag2), 'id') === array_slice(array_column($todos, 'id'), 0, 6));
+$porSaldo = $m->listar(CobroReglas::validarFiltros(['orden' => 'saldo_desc'])[1], 0, 3);
+wa_chk('orden por saldo: el mayor saldo primero (A2 6000, D1 2000, D2 1500)', array_column($porSaldo, 'saldo') === [6000.0, 2000.0, 1500.0] && $porSaldo[0]['id'] === $A2['id'], array_column($porSaldo, 'saldo'));
+$fx['lista'] = ['data' => $todos, 'pagination' => ['page' => 1, 'pageSize' => 100, 'total' => $totalCobros, 'totalPages' => 1]];
+
+echo "\n== Parte 3: el estado depende del reloj, no de lo guardado ==\n";
+$otroReloj = static fn(string $f): cobroModel => new cobroModel($pdo, static fn(): string => $f, cobroModel::AMBITO_TENANTS);
+$e = static fn(string $f): array => (static function (array $c): array {
+    return [$c['estado'], $c['dias_atraso'], $c['dias_para_vencer']];
+})($otroReloj($f)->obtener($A2['id']));
+wa_chk('el cobro de Alfa que vence el 30 de noviembre: Pendiente el 29, Pendiente el mismo 30 (vence hoy), Vencido el 1 de diciembre con 1 dia de atraso',
+    $e('2026-11-29 23:59:00') === ['Pendiente', 0, 1] && $e('2026-11-30 00:00:00') === ['Pendiente', 0, 0] && $e('2026-12-01 08:00:00') === ['Vencido', 1, null],
+    [$e('2026-11-29 23:59:00'), $e('2026-11-30 00:00:00'), $e('2026-12-01 08:00:00')]);
+
+echo "\n== Parte 3: dashboard (valores calculados a mano; hoy = 2026-11-16) ==\n";
+$res = $m->resumen(7);
+$fx['resumen'] = $res;
+$t = $res['totales'];
+wa_chk('pendiente 11,000 = A2 6000 + G1 300 + D1 2000 + D2 1500 (saldo) + E1 1200; vencido 2,300 = G1 300 + D1 2000', $t['pendiente'] === 11000.0 && $t['vencido'] === 2300.0, $t);
+wa_chk('por vencer en 7 dias: 1,200 (E1, que vence hoy)', $t['por_vencer'] === 1200.0, $t);
+wa_chk('por cobrar en el mes: 9,500 = lo abierto que vence en noviembre (A2 6000 + G1 300 + D1 2000 + E1 1200)', $t['por_cobrar_mes'] === 9500.0, $t);
+wa_chk('facturado en el mes: 10,250.50 = todo lo no cancelado que vence en noviembre, pagado o no (A2 + B1 750.50 + G1 + D1 + E1)', $t['facturado_mes'] === 10250.5, $t);
+wa_chk('cobrado en el mes: 4,250.50 = pagos vigentes con fecha de noviembre (3000 de Alfa + 750.50 de Beta + 500 de Delta; no cuenta el abono de octubre ni el pago anulado)',
+    $t['cobrado_mes'] === 4250.5, $t);
+wa_chk('conteos: 5 cobros abiertos, 2 vencidos, 4 tenants con saldo (Alfa, Gamma, Delta, Epsilon) y 2 con atraso (Gamma y Delta)',
+    $t['cobros_abiertos'] === 5 && $t['cobros_vencidos'] === 2 && $t['clientes_con_saldo'] === 4 && $t['clientes_con_atraso'] === 2, $t);
+$ant = array_column($res['antiguedad'], null, 'tramo');
+wa_chk('antiguedad: vigente 8,700 en 3 cobros (A2, D2, E1); 1-30 dias 2,300 en 2 (G1, D1); lo demas en cero; y suma lo mismo que lo pendiente',
+    $ant['vigente']['monto'] === 8700.0 && $ant['vigente']['cobros'] === 3 && $ant['1-30']['monto'] === 2300.0 && $ant['1-30']['cobros'] === 2
+    && $ant['31-60']['monto'] === 0.0 && $ant['61-90']['monto'] === 0.0 && $ant['90+']['monto'] === 0.0 && array_sum(array_column($res['antiguedad'], 'monto')) === $t['pendiente'], $res['antiguedad']);
+wa_chk('el dashboard dice la fecha y la hora de RD del servidor (hoy y ahora)', $res['hoy'] === '2026-11-16' && $res['ahora'] === $ahora && $res['mes'] === '2026-11');
+wa_chk('proximos vencimientos (7 dias): solo el de hoy (E1), con su tenant; con 30 dias: E1, A2 y D2, en ese orden',
+    array_column($res['proximos'], 'id') === [$E1['id']] && $res['proximos'][0]['cliente']['nombre'] === 'Epsilon Inactiva SRL' && $res['proximos'][0]['dias_para_vencer'] === 0
+    && array_column($m->resumen(30)['proximos'], 'id') === [$E1['id'], $A2['id'], $D2['id']], array_column($m->resumen(30)['proximos'], 'id'));
+wa_chk('tenants con atraso, el que mas debe primero: Delta (1 cobro, 2,000, desde el 15, 1 dia) y Gamma (1 cobro, 300, desde el 1, 15 dias)',
+    count($res['atrasados']) === 2 && $res['atrasados'][0]['client_id'] === 4 && $res['atrasados'][0]['cliente']['nombre'] === 'Delta 100% Pruebas' && $res['atrasados'][0]['saldo_vencido'] === 2000.0
+    && $res['atrasados'][0]['mas_antiguo'] === '2026-11-15' && $res['atrasados'][0]['dias_atraso'] === 1 && $res['atrasados'][0]['cobros_vencidos'] === 1
+    && $res['atrasados'][1]['client_id'] === 3 && $res['atrasados'][1]['cliente']['nombre'] === 'Gamma Integraciones' && $res['atrasados'][1]['saldo_vencido'] === 300.0
+    && $res['atrasados'][1]['dias_atraso'] === 15, $res['atrasados']);
+wa_chk('el cobro cancelado no aparece en ningun total', $t['pendiente'] === 11000.0 && !in_array($E2['id'], array_column($res['proximos'], 'id'), true));
+$vacio = new cobroModel(cobros_tenants_base(), $reloj, cobroModel::AMBITO_TENANTS);
+$rv = $vacio->resumen();
+wa_chk('el dashboard de una plataforma sin cobros: todo en cero y las listas vacias', $rv['totales']['pendiente'] === 0.0 && $rv['totales']['cobros_abiertos'] === 0 && $rv['proximos'] === []
+    && $rv['atrasados'] === [] && count($rv['antiguedad']) === 5 && array_sum(array_column($rv['antiguedad'], 'cobros')) === 0);
+
+echo "\n== Parte 3: recordatorios (informativos) ==\n";
+$rec = $m->recordatorios(7, 7);
+wa_chk('por recordar (7 dias): G1 y D1 (vencidos) y E1 (vence hoy), del mas atrasado al menos; nadie se ha recordado todavia',
+    array_column($rec['items'], 'id') === [$G1['id'], $D1['id'], $E1['id']]
+    && $rec['resumen'] === ['por_recordar' => 3, 'recordados' => 0, 'vencidos' => 2, 'por_vencer' => 1, 'clientes' => 3, 'clientes_por_recordar' => 3, 'clientes_recordados' => 0]
+    && $rec['truncado'] === false, $rec['resumen']);
+wa_chk('los TENANTS a recordar, el mas atrasado primero: Gamma, Delta y Epsilon, con su nombre y el correo de su admin (a quien escribirle)',
+    array_column($rec['clientes'], 'client_id') === [3, 4, 5] && $rec['clientes'][0]['cliente']['nombre'] === 'Gamma Integraciones' && $rec['clientes'][1]['cliente']['email'] === ''
+    && $rec['clientes'][2]['cliente']['email'] === 'admin@epsilon.test' && $rec['clientes'][0]['dias_atraso'] === 15 && $rec['clientes'][0]['saldo_vencido'] === 300.0
+    && $rec['clientes'][2]['motivo'] === 'por_vencer' && $rec['clientes'][2]['saldo_por_vencer'] === 1200.0, $rec['clientes']);
+$r = $m->registrarRecordatorio($G1['id'], ['fecha_hora' => '2026-11-16 09:00:00', 'canal' => 'llamada', 'nota' => 'No contesto'], 7, 'soporte');
+$fx['recordatorio'] = $r[1] ?? [];
+wa_chk('registrar un recordatorio: queda con su canal, su nota y quien lo hizo', $exito($r) && $r[1]['recordatorio']['canal'] === 'llamada' && $r[1]['recordatorio']['nota'] === 'No contesto'
+    && $r[1]['recordatorio']['usuario'] === 'soporte' && $r[1]['cobro']['recordatorios'] === 1, $r);
+$rec = $m->recordatorios(7, 7);
+$fx['recordatorios'] = $rec;
+wa_chk('la llamada a Gamma lo baja al final: 2 por recordar y 1 recordado (cobros); 2 y 1 (tenants); Delta y Epsilon siguen primero',
+    $rec['resumen']['por_recordar'] === 2 && $rec['resumen']['recordados'] === 1 && $rec['resumen']['clientes_por_recordar'] === 2 && $rec['resumen']['clientes_recordados'] === 1
+    && array_column($rec['clientes'], 'client_id') === [4, 5, 3] && array_column($rec['items'], 'id') === [$D1['id'], $E1['id'], $G1['id']], [$rec['resumen'], array_column($rec['clientes'], 'client_id')]);
+wa_chk('no se recuerda un cobro pagado (409 YA_PAGADO) ni uno que no existe (404)', $falla($m->registrarRecordatorio($A1['id'], ['fecha_hora' => $ahora, 'canal' => 'otro', 'nota' => null], 7, 'u'), 409, 'YA_PAGADO')
+    && $falla($m->registrarRecordatorio(9999, ['fecha_hora' => $ahora, 'canal' => 'otro', 'nota' => null], 7, 'u'), 404));
+
+echo "\n== Parte 3: panel del tenant ==\n";
+$p = $m->panelCliente(1);
+$fx['panel'] = $p;
+$fx['config'] = $m->obtenerConfig(1);
+wa_chk('panel de Alfa: su nombre, su configuracion actual (6000, dia 31) y sus 2 cobros del mas nuevo al mas viejo, el de octubre con sus 2 pagos',
+    $p['cliente']['nombre'] === 'Alfa Comercial SRL' && $p['cliente']['email'] === 'admin@alfa.test' && $p['config']['monto_mensual'] === 6000.0 && $p['config']['dia_vencimiento'] === 31
+    && array_column($p['cobros'], 'periodo') === ['2026-11', '2026-10'] && count($p['cobros'][1]['pagos']) === 2, array_column($p['cobros'], 'periodo'));
+wa_chk('resumen de Alfa: pendiente 6,000 (noviembre), nada vencido, el proximo vencimiento es el del 30; cobrado 5,000 de 11,000 facturados',
+    $p['resumen']['saldo_pendiente'] === 6000.0 && $p['resumen']['saldo_vencido'] === 0.0 && $p['resumen']['cobros_abiertos'] === 1 && $p['resumen']['cobros_vencidos'] === 0
+    && $p['resumen']['proximo_vencimiento']['periodo'] === '2026-11' && $p['resumen']['proximo_vencimiento']['fecha_vencimiento'] === '2026-11-30' && $p['resumen']['vencido_desde'] === null
+    && $p['resumen']['total_cobrado'] === 5000.0 && $p['resumen']['total_facturado'] === 11000.0, $p['resumen']);
+wa_chk('lo que se le sugiere para el proximo cobro de Alfa: diciembre 2026, 6000 y vence el 31', $p['sugerido'] === ['periodo' => '2026-12', 'monto' => 6000.0, 'fecha_vencimiento' => '2026-12-31', 'descripcion' => 'Mensualidad Fiscalpoint'], $p['sugerido']);
+$pg = $m->panelCliente(3);
+$fx['panel-sin-config'] = $pg;
+wa_chk('panel de Gamma (sin configuracion): config null, 300 vencidos desde el 1 de noviembre, sin proximo vencimiento y con el recordatorio a la vista; sugiere solo el periodo (diciembre)',
+    $pg['config'] === null && $pg['resumen']['saldo_vencido'] === 300.0 && $pg['resumen']['vencido_desde'] === '2026-11-01' && $pg['resumen']['proximo_vencimiento'] === null
+    && count($pg['recordatorios']) === 1 && $pg['recordatorios'][0]['canal'] === 'llamada' && $pg['sugerido']['periodo'] === '2026-12' && $pg['sugerido']['monto'] === null
+    && $pg['sugerido']['fecha_vencimiento'] === null, $pg);
+wa_chk('el panel de un tenant que no existe: null', $m->panelCliente(999) === null);
+$r = $m->crear($nuevo(4, '2027-01'), 7);
+wa_chk('crear con SOLO el tenant (Delta tiene configuracion): usa el periodo, el monto y el dia pedidos (enero 2027, 2000, el 15)', $exito($r) && $r[1]['periodo'] === '2027-01' && $r[1]['monto'] === 2000.0 && $r[1]['fecha_vencimiento'] === '2027-01-15', $r);
+
+$carpetaFixtures = wa_arg('fixtures');
+if ($carpetaFixtures !== null && $carpetaFixtures !== '') {
+    if (!is_dir($carpetaFixtures)) {
+        mkdir($carpetaFixtures, 0777, true);
+    }
+    foreach ($fx as $nombre => $datos) {
+        // El sobre que manda cobroController: {status, data} (la lista trae ademas su paginacion).
+        $sobre = $nombre === 'lista' ? ['status' => true, 'data' => $datos['data'], 'pagination' => $datos['pagination']] : ['status' => true, 'data' => $datos];
+        file_put_contents($carpetaFixtures . '/' . $nombre . '.json', json_encode($sobre, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n");
+    }
+    echo "\n(fixtures escritos en {$carpetaFixtures}: " . implode(', ', array_keys($fx)) . ")\n";
+}
+
+echo "\n== Parte 3: la base queda consistente despues de todo ==\n";
+wa_chk('invariantes finales: saldos = suma de pagos vigentes, sin sobrepagos, sin cancelados con pagos, sin duplicados', cobros_invariantes($pdo) === [], cobros_invariantes($pdo));
+wa_chk('ningun pago se borro: el anulado sigue en la tabla', $cuenta('SELECT COUNT(*) FROM cobro_pagos WHERE anulado_at IS NOT NULL') === 1);
+wa_chk('ningun cobro se borro: el cancelado sigue en la tabla', $cuenta('SELECT COUNT(*) FROM cobros WHERE cancelado_at IS NOT NULL') === 1);
+wa_chk('ningun tenant cambio: el modelo nunca escribe en tenants ni en users', $cuenta('SELECT COUNT(*) FROM tenants') === 5 && $cuenta('SELECT COUNT(*) FROM users') === 6
+    && $cuenta("SELECT COUNT(*) FROM tenants WHERE nombre = 'Alfa Comercial SRL' AND activo = 1") === 1);
+
+wa_fin();

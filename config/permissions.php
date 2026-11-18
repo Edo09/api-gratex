@@ -78,6 +78,10 @@ return [
         // Modulo propio: sin esta entrada la ruta quedaria sin RBAC y el gate no
         // resolveria el tenant antes del controller.
         'cobros'                   => 'cobros',
+        // Cobros de la plataforma a sus tenants (base master): token de un usuario-app y nada mas aqui;
+        // cobroController exige ademas master.users.acceso_global = 1 (soporte), siempre, aunque el gate
+        // este en modo sombra. No es un modulo del catalogo: no se asigna a ningun rol.
+        'cobros-tenants'           => 'authenticated',
         'products'                 => 'products',
         'proveedores'              => 'proveedores',
         'unidades-medida'          => 'unidades',

@@ -13,6 +13,9 @@ módulo de clientes nuevo. Todo en **RD$ (DOP)**.
   (`db/master_migrations/020_cobros_permiso.sql`).
 - Web (fiscalo-react): `src/features/cobros/` (pantalla), `src/api/cobros.ts` (servicio) y
   `src/api/schemas/cobros.ts` (esquemas Zod).
+- **Segundo ámbito, Cobros de tenants**: lo que la *plataforma* le cobra a las empresas que usan Fiscalpoint. Mismas reglas y
+  mismo código, ruta `/api/cobros-tenants`, tablas en la base **master** (migración master **021**) y solo para la cuenta de
+  soporte. Ver "Cobros de tenants" más abajo.
 
 ## Modelo de datos
 
@@ -226,7 +229,7 @@ son solo de los que se miran.
 Cada acción deja su fila en `audit_logs` (módulo `cobros`): `CREATE` (cobro creado o generado solo, con la
 descripción de cuál lo generó), `UPDATE`, `PAYMENT`, `VOID_PAYMENT`, `CANCEL`, `REOPEN`, `REMINDER` y `CONFIG`
 (con el valor anterior y el nuevo de la configuración). Una repetición (misma clave, cancelar de nuevo…) no
-repite la fila.
+repite la fila. En Cobros de tenants el módulo es `cobros-tenants` y el `tenant_id` es 0 (ver más abajo).
 
 ## Permisos
 
@@ -242,6 +245,42 @@ resolvería el tenant y el 500 saldría vacío).
 `/api/cobros` y la web les oculta Cobros, hasta que un admin les dé el módulo en *Usuarios y roles*. `admin` lo
 tiene por `*`; los roles personalizados no se tocan.
 
+## Cobros de tenants (la plataforma a sus empresas)
+
+Además de que cada empresa le cobre a **sus** clientes, quien opera la plataforma le cobra a **sus tenants**: las
+empresas que usan Fiscalpoint. Ninguna de ellas es "dueña" de ese cobro (Gratex es solo el tenant #1), así que no
+puede vivir en la base de ninguna. Es el **mismo módulo** (mismas reglas, mismo modelo, mismo controlador): cambia el
+*ámbito*, que decide quién es "el cliente" y dónde están las tablas.
+
+| | Cobros de una empresa | Cobros de tenants |
+|---|---|---|
+| Ruta | `/api/cobros` | `/api/cobros-tenants` (las mismas rutas, más `GET /clientes?query=&limite=` para buscar tenants) |
+| Quién entra | un usuario con el módulo `cobros` de su rol | solo un usuario de **soporte** (`users.acceso_global = 1`, ver [acceso-global.md](acceso-global.md)); el módulo `cobros` no basta, ni ser `admin` |
+| El cliente es | una fila de `clients` de la empresa | un tenant (`tenants`): su nombre, su RNC y el correo de su primer usuario `admin` |
+| Las tablas viven en | la base de la empresa (migración de tenant 038) | la base **master** (migración master **021**: las mismas cuatro tablas, con FK a `tenants`) |
+| Bitácora | módulo `cobros`, con el `tenant_id` de la empresa | módulo `cobros-tenants`, con `tenant_id` **0** |
+| Web | pantalla *Cobros* | pantalla *Cobros de tenants* (solo se muestra con acceso global) |
+
+Decisiones:
+
+- **Una sola implementación.** `cobroModel` recibe el ámbito (`AMBITO_EMPRESA` por defecto o `AMBITO_TENANTS`) y lo único
+  que cambia es de dónde sale "el cliente": la tabla `clients` o una subconsulta sobre `tenants`. El Router define
+  `COBROS_AMBITO = 'tenants'` en el case `cobros-tenants` y `cobroController.php` lo lee; nada más lo define.
+- **Mismos nombres de tabla, otra base.** `cobro_config`, `cobros`, `cobro_pagos` y `cobro_recordatorios` existen en la master
+  igual que en cada empresa; ninguna base tiene filas del otro ámbito.
+- **El acceso se exige en el servidor, siempre.** `config/permissions.php` deja pasar la ruta con cualquier token de usuario
+  (`'cobros-tenants' => 'authenticated'`) y el controlador llama a `AccesoGlobal::tieneAcceso` con la master **antes** de resolver
+  la ruta y de abrir el modelo. Falla cerrado: un principal máquina (sin usuario), un usuario sin acceso global o una columna
+  que no se puede leer reciben 403 con el texto de soporte, y queda una fila de acceso denegado. No depende de `PERMISSIONS_ENFORCE`.
+- **La bitácora no se mezcla.** Los eventos de la plataforma van con `tenant_id = 0` y módulo `cobros-tenants`: la bitácora de cada
+  empresa lista solo su `tenant_id`, así que ninguna ve lo que la plataforma le cobra a otra (la sesión de soporte puede estar dentro
+  de *cualquier* empresa cuando cobra). `AuditLogger` respeta un `tenant_id` explícito, y 0 no cae en el de la sesión.
+- **Un tenant se cobra aunque esté inactivo o sea de integración**: la deuda no se va con la baja. El buscador
+  (`GET /api/cobros-tenants/clientes?query=&limite=`) los trae a todos, los activos primero, con `tipo`, `ambiente`, `activo` y si ya
+  tienen su cobro mensual configurado (`con_config`).
+- **FK a `tenants`.** Un tenant con cobros no se puede borrar (RESTRICT); su configuración mensual sí se va con él (CASCADE), como
+  la de un cliente en las empresas.
+
 ## Despliegue
 
 El orden importa (regla del proyecto: **las migraciones de tenant van primero**):
@@ -251,6 +290,14 @@ El orden importa (regla del proyecto: **las migraciones de tenant van primero**)
    quedan todas iguales). Es idempotente; se puede repetir.
 3. `db/master_migrations/020_cobros_permiso.sql` en la base master (una vez).
 4. Subir el código de la API y, después, la web.
+
+**Cobros de tenants** (la pantalla de soporte no funciona sin esto; las empresas siguen igual sin ello):
+
+5. `tools/verificar_migraciones_master.sql` en la base master (fila `021`).
+6. `db/master_migrations/021_cobros_tenants.sql` en la base **master**, una vez (idempotente). Va **antes** de subir el código:
+   sin sus cuatro tablas, `/api/cobros-tenants` responde 500.
+7. Subir el código de la API (`cobroController.php`, `cobroModel.php`, `CobroReglas.php`, `Router.php`, `config/permissions.php`; y
+   `db/tenant_schema.sql`, que lee `create_tenant.php`) y, después, la web.
 
 Registro de aplicación en producción: ver el final de este archivo.
 
@@ -264,6 +311,12 @@ Registro de aplicación en producción: ver el final de este archivo.
   `SELECT` final).
 - Para la web: `php tools/test_cobros.php --fixtures=<carpeta>` vuelca las respuestas reales del modelo, que
   `fiscalo-react/scripts/test-cobros.ts` valida contra los esquemas Zod.
+- `php tools/test_cobros_tenants.php`: el ámbito de la plataforma: la ruta `/api/cobros-tenants`, el cableado (Router, permiso,
+  acceso global antes del modelo, bitácora con `tenant_id` 0) y **el modelo real en ámbito de tenants contra SQLite**, con las
+  cuatro tablas traducidas de `db/master_schema.sql` (FK a `tenants` incluida) y los valores del dashboard calculados a mano.
+  También está en la línea base. Lo que comparte con `test_cobros.php` (traducir el DDL real y revisar saldos) vive en
+  `tools/cobros_test_lib.php`. `--fixtures=<carpeta>` vuelca sus respuestas para `fiscalo-react/scripts/test-cobros-tenants.ts`.
+- `php tools/check_tenant_schema_orden.php` compara también la master 021 con `db/master_schema.sql`.
 
 ## Límites conocidos
 
@@ -302,6 +355,10 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   en cada una las migraciones 027, 028, 030 y 038 como `APLICADA`. Las empresas de tipo `integracion` no tienen base de negocio
   (se crearon solo para certificar) y no entran.
 - **2026-11-17 · master 020** en `smhynzte_master_gratex`: 6 roles `user` de empresas app, 6 con `cobros`, 0 faltan.
+- **2026-11-17 · migración de tenant 038 también en `smhynzte_006`** (tenant 20, DICAMAG, creada el 2026-11-16): la primera
+  pasada la dejó fuera (la master 020 contó seis roles `user` y se migraron cinco bases). `todo_ok = SI`. Con ella son **seis**
+  las bases con Cobros.
+- **Master 021 (Cobros de tenants): pendiente de aplicar** en `smhynzte_master_gratex`.
 - El código está en `master` (commits `9732e85` y `3006c1e`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
