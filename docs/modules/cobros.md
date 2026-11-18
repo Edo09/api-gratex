@@ -358,7 +358,10 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
 - **2026-11-17 · migración de tenant 038 también en `smhynzte_006`** (tenant 20, DICAMAG, creada el 2026-11-16): la primera
   pasada la dejó fuera (la master 020 contó seis roles `user` y se migraron cinco bases). `todo_ok = SI`. Con ella son **seis**
   las bases con Cobros.
-- **Master 021 (Cobros de tenants): pendiente de aplicar** en `smhynzte_master_gratex`.
-- El código está en `master` (commits `9732e85` y `3006c1e`). El despliegue al servidor **no es automático** (hosting
+- **2026-11-17 · master 021 (Cobros de tenants)** en `smhynzte_master_gratex`: `todo_ok = SI` (4 tablas InnoDB, 8 índices, 5 FK y 5
+  CHECK; `tenants.id` es `int`) y `tools/verificar_migraciones_master.sql` la muestra `APLICADA`. Con solo `SELECT` se comprobó el
+  modelo en ámbito de tenants contra el MySQL real (8.0, con `ONLY_FULL_GROUP_BY`): buscador (19 tenants, 6 con correo de admin), lista,
+  filtros por estado, dashboard, recordatorios y panel, sin errores; las cuatro tablas quedaron vacías.
+- El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
