@@ -43,7 +43,8 @@ require_once(__DIR__ . '/../AccesoGlobal.php');
  *   - /api/cobros          (por defecto) cada empresa cobra a SUS clientes, en su base; exige el modulo 'cobros'.
  *   - /api/cobros-tenants  la PLATAFORMA cobra a sus tenants, en la base master; exige que el usuario tenga acceso
  *                          global (master.users.acceso_global = 1: soporte). Mismas rutas, mismas reglas, mismas
- *                          respuestas, mas GET /api/cobros-tenants/clientes?query= (el buscador de tenants).
+ *                          respuestas, mas GET /api/cobros-tenants/clientes?query=&limite= (el directorio de tenants, con su
+ *                          cobro mensual y lo que deben).
  *
  * El modulo se exige SIEMPRE, aunque PERMISSIONS_ENFORCE este en modo sombra (como
  * posAdminController): son cuentas por cobrar de la empresa, con datos de contacto de sus
@@ -213,14 +214,15 @@ try {
             break;
 
         case 'buscar':
-            // El buscador de tenants: solo existe en el ambito de la plataforma (en una empresa el buscador es el de Clientes).
+            // El directorio de tenants (buscador de los formularios y pestana Clientes): solo existe en el ambito de la
+            // plataforma (en una empresa el buscador es el de Clientes). Hasta cobroModel::MAX_DIRECTORIO por respuesta.
             if (!$ambitoTenants) {
                 cobrosResponderError(['error', CobroReglas::MSG_RUTA, 404]);
                 break;
             }
             cobrosResponder($modelo->buscarClientes(
                 is_string($_GET['query'] ?? null) ? $_GET['query'] : '',
-                CobroReglas::enteroDe($_GET, 'limite', 20, 50)
+                CobroReglas::enteroDe($_GET, 'limite', 20, cobroModel::MAX_DIRECTORIO)
             ));
             break;
 

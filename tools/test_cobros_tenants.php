@@ -137,7 +137,7 @@ $iBuscar = strpos($c, "case 'buscar':");
 $trozoBuscar = $iBuscar === false ? '' : substr($c, $iBuscar, 600);
 wa_chk('el buscador de tenants (accion buscar) solo responde en la plataforma: en una empresa es 404',
     $trozoBuscar !== '' && str_contains($trozoBuscar, 'if (!$ambitoTenants) {') && str_contains($trozoBuscar, 'CobroReglas::MSG_RUTA, 404')
-    && str_contains($trozoBuscar, '$modelo->buscarClientes('));
+    && str_contains($trozoBuscar, '$modelo->buscarClientes(') && str_contains($trozoBuscar, 'cobroModel::MAX_DIRECTORIO'));
 wa_chk("la bitacora de la plataforma va con modulo 'cobros-tenants' y tenant_id 0 (ninguna empresa la ve en la suya); la de las empresas, con modulo 'cobros'; y toda anotacion pasa por ese unico punto",
     str_contains($c, "['module' => 'cobros-tenants', 'tenant_id' => 0]") && str_contains($c, "['module' => 'cobros']")
     && substr_count($c, 'AuditLogger::log(') === 1 && substr_count($c, 'cobrosAuditar([') >= 9);
@@ -287,10 +287,12 @@ $b = $m->buscarClientes('');
 $fx['buscar'] = $b;
 wa_chk('sin texto: los 5 tenants, los activos primero por nombre (Alfa, Beta, Delta, Gamma) y el inactivo al final', array_column($b, 'id') === [1, 2, 4, 3, 5], array_column($b, 'id'));
 $porId = array_column($b, null, 'id');
-wa_chk('cada uno trae lo de un cliente y ademas que es: tipo, ambiente, si esta activo y si ya tiene su cobro mensual configurado',
+wa_chk('cada uno trae lo de un cliente, que es (tipo, ambiente, activo), su cobro mensual (config) y lo que debe (en ceros: aun no hay cobros)',
     $porId[1] === ['id' => 1, 'nombre' => 'Alfa Comercial SRL', 'contacto' => 'Alfa Comercial SRL', 'empresa' => 'Alfa Comercial SRL', 'rnc' => '101000011',
-        'email' => 'admin@alfa.test', 'telefono' => '', 'tipo' => 'app', 'ambiente' => 'ecf', 'activo' => true, 'con_config' => true]
-    && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['email'] === ''
+        'email' => 'admin@alfa.test', 'telefono' => '', 'tipo' => 'app', 'ambiente' => 'ecf', 'activo' => true, 'con_config' => true,
+        'config' => ['client_id' => 1, 'monto_mensual' => 5000.0, 'dia_vencimiento' => 31, 'descripcion' => 'Mensualidad Fiscalpoint', 'activo' => true, 'updated_at' => '2026-11-16 10:00:00'],
+        'saldo_pendiente' => 0.0, 'saldo_vencido' => 0.0, 'cobros_abiertos' => 0, 'cobros_vencidos' => 0, 'dias_atraso' => 0, 'proximo_vencimiento' => null]
+    && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['config'] === null && $porId[3]['email'] === ''
     && $porId[4]['ambiente'] === 'certecf' && $porId[5]['activo'] === false && $porId[2]['con_config'] === false, $porId);
 wa_chk('busca por nombre (sin importar mayusculas) y por RNC; un texto parcial sirve y se recorta', array_column($m->buscarClientes('alfa'), 'id') === [1]
     && array_column($m->buscarClientes('GAMMA'), 'id') === [3] && array_column($m->buscarClientes('Servicios'), 'id') === [2]
@@ -480,6 +482,39 @@ wa_chk('la llamada a Gamma lo baja al final: 2 por recordar y 1 recordado (cobro
     && array_column($rec['clientes'], 'client_id') === [4, 5, 3] && array_column($rec['items'], 'id') === [$D1['id'], $E1['id'], $G1['id']], [$rec['resumen'], array_column($rec['clientes'], 'client_id')]);
 wa_chk('no se recuerda un cobro pagado (409 YA_PAGADO) ni uno que no existe (404)', $falla($m->registrarRecordatorio($A1['id'], ['fecha_hora' => $ahora, 'canal' => 'otro', 'nota' => null], 7, 'u'), 409, 'YA_PAGADO')
     && $falla($m->registrarRecordatorio(9999, ['fecha_hora' => $ahora, 'canal' => 'otro', 'nota' => null], 7, 'u'), 404));
+
+echo "\n== Parte 3: el directorio de tenants: cobro mensual y lo que deben ==\n";
+$dir = $m->buscarClientes('', cobroModel::MAX_DIRECTORIO);
+$fx['directorio'] = $dir;
+$dirPorId = array_column($dir, null, 'id');
+$resumenDir = static fn(array $t): array => [
+    $t['con_config'], $t['saldo_pendiente'], $t['saldo_vencido'], $t['cobros_abiertos'], $t['cobros_vencidos'], $t['dias_atraso'], $t['proximo_vencimiento'],
+];
+wa_chk('el directorio trae a los 5 tenants, los activos primero por nombre (Alfa, Beta, Delta, Gamma) y la inactiva al final', array_column($dir, 'id') === [1, 2, 4, 3, 5], array_column($dir, 'id'));
+wa_chk('Alfa: cobro mensual de 6,000 (dia 31) y 6,000 pendientes (el de noviembre, que vence el 30): nada vencido',
+    $dirPorId[1]['config']['monto_mensual'] === 6000.0 && $dirPorId[1]['config']['dia_vencimiento'] === 31 && $dirPorId[1]['config']['activo'] === true
+    && $dirPorId[1]['config']['descripcion'] === 'Mensualidad Fiscalpoint'
+    && $resumenDir($dirPorId[1]) === [true, 6000.0, 0.0, 1, 0, 0, '2026-11-30'], $dirPorId[1]);
+wa_chk('Beta: cobro mensual de 1,000 (dia 10) pero INACTIVO, y no debe nada (su cobro esta pagado)',
+    $dirPorId[2]['config']['monto_mensual'] === 1000.0 && $dirPorId[2]['config']['dia_vencimiento'] === 10 && $dirPorId[2]['config']['activo'] === false
+    && $resumenDir($dirPorId[2]) === [true, 0.0, 0.0, 0, 0, 0, null], $dirPorId[2]);
+wa_chk('Delta: cobro mensual de 2,000 (dia 15); debe 3,500 (el de noviembre, 2,000 vencido hace 1 dia, y el de diciembre, 1,500 despues de un abono) y su proximo vencimiento es el 15 de diciembre',
+    $dirPorId[4]['config']['monto_mensual'] === 2000.0 && $resumenDir($dirPorId[4]) === [true, 3500.0, 2000.0, 2, 1, 1, '2026-12-15'], $dirPorId[4]);
+wa_chk('Gamma: sin cobro mensual (config null); debe 300, todo vencido hace 15 dias, y no tiene proximo vencimiento',
+    $dirPorId[3]['config'] === null && $resumenDir($dirPorId[3]) === [false, 300.0, 300.0, 1, 1, 15, null], $dirPorId[3]);
+wa_chk('Epsilon (inactiva): debe 1,200 que vencen HOY (no esta vencido: hoy es el proximo vencimiento); su cobro cancelado no suma',
+    $dirPorId[5]['config'] === null && $dirPorId[5]['activo'] === false && $resumenDir($dirPorId[5]) === [false, 1200.0, 0.0, 1, 0, 0, '2026-11-16'], $dirPorId[5]);
+wa_chk('lo del directorio suma lo mismo que el dashboard: pendiente 11,000, vencido 2,300, 5 cobros abiertos y 2 vencidos',
+    array_sum(array_column($dir, 'saldo_pendiente')) === $m->resumen(7)['totales']['pendiente'] && array_sum(array_column($dir, 'saldo_vencido')) === $m->resumen(7)['totales']['vencido']
+    && array_sum(array_column($dir, 'cobros_abiertos')) === $m->resumen(7)['totales']['cobros_abiertos']
+    && array_sum(array_column($dir, 'cobros_vencidos')) === $m->resumen(7)['totales']['cobros_vencidos'] && $m->resumen(7)['totales']['pendiente'] === 11000.0);
+wa_chk('buscar por nombre o RNC trae a ese tenant CON sus saldos (el buscador de los formularios es el mismo directorio)',
+    $resumenDir($m->buscarClientes('delta')[0]) === [true, 3500.0, 2000.0, 2, 1, 1, '2026-12-15'] && array_column($m->buscarClientes('101000033'), 'id') === [3]);
+$alfaDic = $otroReloj('2026-12-01 10:00:00')->buscarClientes('alfa')[0];
+wa_chk('depende del reloj, no de lo guardado: el 1 de diciembre lo de Alfa (vencia el 30) ya esta vencido hace 1 dia y no le queda proximo vencimiento',
+    $resumenDir($alfaDic) === [true, 6000.0, 6000.0, 1, 1, 1, null], $alfaDic);
+wa_chk('el limite se corta en MAX_DIRECTORIO (500): uno enorme no rompe ni trae de mas, y el tope es el que usa el controlador',
+    cobroModel::MAX_DIRECTORIO === 500 && count($m->buscarClientes('', 100000)) === 5 && count($m->buscarClientes('', 3)) === 3);
 
 echo "\n== Parte 3: panel del tenant ==\n";
 $p = $m->panelCliente(1);

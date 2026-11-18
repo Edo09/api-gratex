@@ -254,7 +254,7 @@ puede vivir en la base de ninguna. Es el **mismo módulo** (mismas reglas, mismo
 
 | | Cobros de una empresa | Cobros de tenants |
 |---|---|---|
-| Ruta | `/api/cobros` | `/api/cobros-tenants` (las mismas rutas, más `GET /clientes?query=&limite=` para buscar tenants) |
+| Ruta | `/api/cobros` | `/api/cobros-tenants` (las mismas rutas, más `GET /clientes?query=&limite=`: el directorio de tenants) |
 | Quién entra | un usuario con el módulo `cobros` de su rol | solo un usuario de **soporte** (`users.acceso_global = 1`, ver [acceso-global.md](acceso-global.md)); el módulo `cobros` no basta, ni ser `admin` |
 | El cliente es | una fila de `clients` de la empresa | un tenant (`tenants`): su nombre, su RNC y el correo de su primer usuario `admin` |
 | Las tablas viven en | la base de la empresa (migración de tenant 038) | la base **master** (migración master **021**: las mismas cuatro tablas, con FK a `tenants`) |
@@ -275,9 +275,14 @@ Decisiones:
 - **La bitácora no se mezcla.** Los eventos de la plataforma van con `tenant_id = 0` y módulo `cobros-tenants`: la bitácora de cada
   empresa lista solo su `tenant_id`, así que ninguna ve lo que la plataforma le cobra a otra (la sesión de soporte puede estar dentro
   de *cualquier* empresa cuando cobra). `AuditLogger` respeta un `tenant_id` explícito, y 0 no cae en el de la sesión.
-- **Un tenant se cobra aunque esté inactivo o sea de integración**: la deuda no se va con la baja. El buscador
-  (`GET /api/cobros-tenants/clientes?query=&limite=`) los trae a todos, los activos primero, con `tipo`, `ambiente`, `activo` y si ya
-  tienen su cobro mensual configurado (`con_config`).
+- **Un tenant se cobra aunque esté inactivo o sea de integración**: la deuda no se va con la baja.
+- **El directorio de tenants** (`GET /api/cobros-tenants/clientes?query=&limite=`, hasta 500 por respuesta) trae a todos, los activos
+  primero y por nombre. Cada uno trae lo de un cliente (nombre, RNC, correo de su primer admin), qué es (`tipo`, `ambiente`, `activo`),
+  su cobro mensual (`config`, `null` si no tiene; `con_config` lo resume) y lo que debe: `saldo_pendiente`, `saldo_vencido`,
+  `cobros_abiertos`, `cobros_vencidos`, `dias_atraso` (del más viejo) y `proximo_vencimiento` (hoy cuenta como "aún no vence"). Un cobro
+  pagado o cancelado no suma, igual que en el dashboard: la suma del directorio cuadra con él (lo prueba `tools/test_cobros_tenants.php`).
+  Lo usan el buscador de los formularios y la pestaña *Clientes* de la pantalla, que es lo que se ve al entrar: sin ella, quien cobra no
+  veía a sus tenants hasta que tenían un cobro.
 - **FK a `tenants`.** Un tenant con cobros no se puede borrar (RESTRICT); su configuración mensual sí se va con él (CASCADE), como
   la de un cliente en las empresas.
 

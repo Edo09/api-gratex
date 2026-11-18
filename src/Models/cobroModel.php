@@ -53,6 +53,8 @@ class cobroModel
     public const AMBITO_EMPRESA = 'empresa';
     /** ...o un tenant de la plataforma (base master). */
     public const AMBITO_TENANTS = 'tenants';
+    /** Tope de tenants que devuelve el directorio de la plataforma (buscarClientes) en una sola respuesta. */
+    public const MAX_DIRECTORIO = 500;
 
     /**
      * De donde sale "el cliente" de cada ambito, con los mismos nombres de columna que usa CLIENTE (client_name,
@@ -128,10 +130,16 @@ class cobroModel
     }
 
     /**
-     * Los clientes entre los que se elige al configurar o crear un cobro, para el buscador de la pantalla. Solo existe en
-     * el ambito de tenants (en el de una empresa el buscador es el de Clientes de siempre): ahi devuelve [] . Busca por
-     * nombre o RNC; los activos primero. Cada uno trae lo de un cliente y ademas que es (tipo, ambiente, activo) y si ya
-     * tiene su cobro mensual configurado (con_config).
+     * El DIRECTORIO de clientes de la plataforma: los tenants, con lo que hace falta para elegirlos y para ver como van
+     * con su cobro. Solo existe en el ambito de tenants (en el de una empresa el buscador es el de Clientes de siempre):
+     * ahi devuelve [] . Busca por nombre o RNC; los activos primero y, dentro, por nombre. Lo usan el buscador de los
+     * formularios (pocos resultados) y la pestana Clientes de Cobros de tenants (hasta MAX_DIRECTORIO).
+     *
+     * Cada uno trae lo de un cliente y ademas: que es (tipo, ambiente, activo); su cobro mensual (config, null si no tiene;
+     * con_config lo resume); y lo que debe: saldo_pendiente (todo lo abierto), saldo_vencido (lo que ya paso su
+     * vencimiento), cuantos cobros abiertos y vencidos tiene, los dias de atraso del mas viejo (dias_atraso, 0 si nada
+     * esta vencido) y su proximo vencimiento (el primero que aun no vence; hoy cuenta como "aun no"). Un cobro cancelado
+     * o pagado no suma, igual que en el dashboard.
      *
      * @return list<array<string,mixed>>
      */
@@ -140,7 +148,7 @@ class cobroModel
         if ($this->ambito !== self::AMBITO_TENANTS) {
             return [];
         }
-        $limite = max(1, min($limite, 50));
+        $limite = max(1, min($limite, self::MAX_DIRECTORIO));
         $donde = '1 = 1';
         $params = [];
         $texto = trim($texto);
@@ -149,17 +157,47 @@ class cobroModel
             $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!')";
             $params = [':q1' => $like, ':q2' => $like];
         }
+        $hoy = $this->hoy();
+        $saldo = self::SALDO;
         $s = $this->db->prepare(
             'SELECT ' . self::CLIENTE . ', cl.tipo AS cl_tipo, cl.ambiente AS cl_ambiente, cl.activo AS cl_activo,
-                    (SELECT COUNT(*) FROM cobro_config cc WHERE cc.client_id = cl.id) AS con_config
-               FROM ' . $this->origen . ' cl WHERE ' . $donde . '
+                    cc.client_id AS cfg_client_id, cc.monto_mensual AS cfg_monto, cc.dia_vencimiento AS cfg_dia,
+                    cc.descripcion AS cfg_desc, cc.activo AS cfg_activo, cc.updated_at AS cfg_updated, cc.created_at AS cfg_created,
+                    COALESCE(ab.pendiente, 0) AS saldo_pendiente, COALESCE(ab.vencido, 0) AS saldo_vencido,
+                    COALESCE(ab.abiertos, 0) AS cobros_abiertos, COALESCE(ab.vencidos, 0) AS cobros_vencidos,
+                    ab.mas_antiguo AS mas_antiguo, ab.proximo AS proximo
+               FROM ' . $this->origen . ' cl
+               LEFT JOIN cobro_config cc ON cc.client_id = cl.id
+               LEFT JOIN (
+                     SELECT c.client_id AS client_id,
+                            SUM(' . $saldo . ') AS pendiente,
+                            SUM(CASE WHEN c.fecha_vencimiento < :hoy1 THEN ' . $saldo . ' ELSE 0 END) AS vencido,
+                            COUNT(*) AS abiertos,
+                            SUM(CASE WHEN c.fecha_vencimiento < :hoy2 THEN 1 ELSE 0 END) AS vencidos,
+                            MIN(CASE WHEN c.fecha_vencimiento < :hoy3 THEN c.fecha_vencimiento END) AS mas_antiguo,
+                            MIN(CASE WHEN c.fecha_vencimiento >= :hoy4 THEN c.fecha_vencimiento END) AS proximo
+                       FROM cobros c WHERE ' . self::ABIERTO . ' GROUP BY c.client_id
+                    ) ab ON ab.client_id = cl.id
+              WHERE ' . $donde . '
               ORDER BY cl.activo DESC, cl.client_name ASC, cl.id ASC LIMIT ' . $limite
         );
-        $s->execute($params);
-        return array_map(static fn(array $r): array => self::clienteJson($r) + [
-            'tipo' => (string) $r['cl_tipo'], 'ambiente' => (string) $r['cl_ambiente'],
-            'activo' => (int) $r['cl_activo'] === 1, 'con_config' => (int) $r['con_config'] > 0,
-        ], $s->fetchAll());
+        $s->execute([':hoy1' => $hoy, ':hoy2' => $hoy, ':hoy3' => $hoy, ':hoy4' => $hoy] + $params);
+        return array_map(static function (array $r) use ($hoy): array {
+            $config = $r['cfg_client_id'] === null ? null : self::configJson([
+                'client_id' => $r['cfg_client_id'], 'monto_mensual' => $r['cfg_monto'], 'dia_vencimiento' => $r['cfg_dia'],
+                'descripcion' => $r['cfg_desc'], 'activo' => $r['cfg_activo'], 'updated_at' => $r['cfg_updated'], 'created_at' => $r['cfg_created'],
+            ]);
+            $masViejo = $r['mas_antiguo'] !== null ? (string) $r['mas_antiguo'] : null;
+            return self::clienteJson($r) + [
+                'tipo' => (string) $r['cl_tipo'], 'ambiente' => (string) $r['cl_ambiente'], 'activo' => (int) $r['cl_activo'] === 1,
+                'con_config' => $config !== null, 'config' => $config,
+                'saldo_pendiente' => CobroReglas::aNumero(CobroReglas::centavosDb($r['saldo_pendiente'])),
+                'saldo_vencido' => CobroReglas::aNumero(CobroReglas::centavosDb($r['saldo_vencido'])),
+                'cobros_abiertos' => (int) $r['cobros_abiertos'], 'cobros_vencidos' => (int) $r['cobros_vencidos'],
+                'dias_atraso' => $masViejo !== null ? max(0, -CobroReglas::diasEntre($hoy, $masViejo)) : 0,
+                'proximo_vencimiento' => $r['proximo'] !== null ? (string) $r['proximo'] : null,
+            ];
+        }, $s->fetchAll());
     }
 
     /** La configuracion mensual del cliente, tal cual la ve la API; null si no tiene. */
