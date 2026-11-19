@@ -147,7 +147,7 @@ Los montos son números con 2 decimales. Las fechas, `AAAA-MM-DD`; las fechas y 
 | GET | `/api/cobros/resumen?dias=7` | El dashboard: totales, antigüedad, próximos vencimientos y clientes con atraso |
 | GET | `/api/cobros/recordatorios?dias=7&cada=7` | A qué **clientes** recordarles un pago (informativo), con sus cobros vencidos o por vencer: ver "Recordatorios" |
 | GET | `/api/cobros/clientes/{id}` | Panel del cliente: datos, configuración, resumen, **todos** sus cobros con sus pagos, sus recordatorios y lo sugerido para su próximo cobro |
-| PUT | `/api/cobros/clientes/{id}/config` | Configuración mensual: `monto_mensual`, `dia_vencimiento`, `descripcion?`, `activo?` (crea o reemplaza). **No toca ningún cobro existente** |
+| PUT | `/api/cobros/clientes/{id}/config` | Configuración mensual: `monto_mensual`, `dia_vencimiento`, `descripcion?`, `activo?` (crea o reemplaza). **No toca ningún cobro existente**. En Cobros de tenants el monto es por empresa que paga y da 422 si el total con las que pagan hoy pasa del máximo |
 | GET | `/api/cobros/{id}` | Un cobro con sus pagos (`pagos`, vigentes y anulados), sus recordatorios (`recordatorios_lista`) y los cobros que generó (`genero`) |
 | PUT | `/api/cobros/{id}` | Cambia `monto`, `fecha_vencimiento` o `descripcion` → `data: { cobro, siguiente, siguiente_motivo }` |
 | POST | `/api/cobros/{id}/pagos` | Registra un pago: `monto`, `metodo`, `fecha_pago?`, `observaciones?`, `idempotency_key?` → `data: { pago, cobro, siguiente, siguiente_nuevo, siguiente_motivo, repetido }` |
@@ -346,7 +346,8 @@ Decisiones:
   las respuestas sigue siendo el monto por empresa; el item del directorio y el panel traen `empresas_que_pagan`. Una empresa que entra
   a un grupo cuenta como que paga hasta que se la marca "no paga". Guardar un monto cuyo total con las que pagan hoy pasa del máximo
   (RD$ 9,999,999,999.99) es 422; si después pagan más empresas y el total del mes siguiente ya no cabe, ese cobro no se genera
-  (`siguiente_motivo = monto_excedido`) y el pago se guarda igual. En el ámbito de una empresa no hay grupos: nada cambia.
+  (`siguiente_motivo = monto_excedido`) y el pago se guarda igual. En el ámbito de una empresa no hay grupos: ningún monto cambia (la
+  respuesta del panel trae `empresas_que_pagan: 1`).
 - **Quién no es cliente** (tabla `cobro_excluidos`, master **022**). No todos los tenants son clientes: varios se crearon solo para
   certificar a una empresa (tipo `integracion`, en certificación) o son de prueba. **Borrarlos no se puede ni se debe**: cada uno guarda
   sus e-CF (`ecf_integracion_backup`: 50 a 275 por tenant el 2026-11-18, y no tienen base propia, así que es la única copia), su bitácora y

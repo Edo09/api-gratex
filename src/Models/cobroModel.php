@@ -1035,7 +1035,7 @@ class cobroModel
      * contestarle "ya estaba registrado" a otra operacion enganaria a quien la mando.
      *
      * 'siguiente_motivo' dice que paso con el cobro del mes siguiente cuando ESTE pago completo el
-     * cobro: generado | sin_config | inactivo | ya_existia (null si el pago no lo completo).
+     * cobro: generado | sin_config | inactivo | ya_existia | monto_excedido (null si el pago no lo completo).
      *
      * @param array{monto_c:int, fecha_pago:string, metodo:string, observaciones:?string, clave:?string} $p de CobroReglas::validarPago
      * @return array ['success', ['pago'=>..., 'cobro'=>..., 'siguiente'=>...|null, 'siguiente_nuevo'=>bool, 'siguiente_motivo'=>...|null, 'repetido'=>bool]] | ['error', ...]
@@ -1245,11 +1245,12 @@ class cobroModel
      *
      * Dice tambien POR QUE no se genero, para que la pantalla no deje a la persona creyendo que la
      * cadena sigue: sin_config (el cliente no tiene cobro mensual), inactivo (lo tiene apagado) o
-     * ya_existia (ese periodo ya tenia cobro).
+     * ya_existia (ese periodo ya tenia cobro) o monto_excedido (solo Cobros de tenants: el monto por empresa por las que pagan hoy
+     * pasa del maximo de un cobro; el pago ya se guardo).
      *
      * @param array|null $cobro fila de cobros ya pagado completo
      * @return array{cobro: ?array, motivo: string} cobro = el nuevo (misma forma que cobroJson) o null;
-     *         motivo = generado | sin_config | inactivo | ya_existia
+     *         motivo = generado | sin_config | inactivo | ya_existia | monto_excedido
      */
     private function generarSiguiente(?array $cobro, ?int $userId): array
     {
