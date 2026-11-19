@@ -395,9 +395,15 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   y, con su sesión de soporte en `app.fiscalpoint.com.do`, `GET /api/cobros-tenants/clientes` devolvió 200 con `excluido = false` y
   `motivo_exclusion = null` en los 20 tenants (el `LEFT JOIN` a `cobro_excluidos` funciona contra la tabla real). La web (`fiscalo`
   `f1f537c`, Vercel en verde) pide `?excluidos=1` (200), el menú de cada fila trae **No es cliente (quitar de la lista)** y el modal abre
-  y se cancela sin escribir. **No se marcó ningún tenant**: `cobro_excluidos` sigue vacía. La escritura (`PUT .../excluido`) no se probó
-  en vivo: su SQL se corrió contra el MySQL real en una tabla temporal de la sesión y el modelo contra SQLite; la primera marca real
-  que haga el usuario es su prueba en vivo (quedará en la bitácora como `EXCLUDE`, `tenant_id` 0).
+  y se cancela sin escribir. En esa verificación **no se marcó ningún tenant** (`cobro_excluidos` seguía vacía); la escritura se probó
+  después, ver la entrada siguiente.
+- **2026-11-18 · "no es un cliente": escritura probada en vivo** (ida y vuelta, con permiso del usuario, desde la pantalla y con su sesión de
+  soporte). Se quitó a Demo Fiscalo (tenant 5) con el motivo "Prueba de ida y vuelta (se devuelve enseguida)": `PUT /api/cobros-tenants/
+  clientes/5/excluido` → 200 con `repetido = false` y `anterior.excluido = false`; la lista pasó de 20 a 19 y apareció "Mostrar las que no
+  son clientes (1)", con la fila atenuada y su motivo. Se devolvió con "Volver a la lista" (200). Resultado: `cobro_excluidos` con 0
+  filas y dos filas en la bitácora (`audit_logs` 4690 `EXCLUDE` y 4691 `INCLUDE`: módulo `cobros-tenants`, `tenant_id` 0, `entity_type`
+  `tenant`, `entity_id` 5, `user_id` 2, `success` 1). Demo Fiscalo quedó como estaba (su cobro cancelado, sin cobro mensual, activa). Hoy
+  ningún tenant está marcado: el usuario elige cuáles, uno por uno.
 - El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
