@@ -197,7 +197,7 @@ function cobros_tenants_base(): PDO
         edicion TEXT NOT NULL DEFAULT 'completa')");
     $pdo->exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL REFERENCES tenants (id),
         email TEXT NOT NULL, role TEXT DEFAULT 'user')");
-    foreach (cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos']) as $ddl) {
+    foreach (cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos', 'cobro_sin_pago']) as $ddl) {
         $pdo->exec($ddl);
     }
     return $pdo;
@@ -241,10 +241,34 @@ function cobros_tenants_sembrar_grupos(PDO $pdo): void
         (23, 'Zeta Hermana Prod', '102000023', 'integracion', 'ecf', 22)");
 }
 
+/**
+ * Doce tenants para la Parte 5 (que empresas de un grupo pagan): 30 es la cabeza de un grupo con tres hermanas (31 y 32 en
+ * produccion, 33 en certificacion); 40 es cabeza en certificacion con una hermana en produccion (41) y otra en certificacion (42);
+ * 50 es una empresa sola; 60 y 61 son un grupo de dos; 70 es cabeza en produccion con una hermana en certificacion (71). Solo 30 y
+ * 32 tienen un usuario admin (el correo del grupo 30 sale del de la cabeza, porque 31 no tiene).
+ */
+function cobros_tenants_sembrar_pagos(PDO $pdo): void
+{
+    $pdo->exec("INSERT INTO tenants (id, nombre, rnc, tipo, ambiente, grupo_id) VALUES
+        (30, 'Pago Cabeza', '103000030', 'integracion', 'ecf', 30),
+        (31, 'Pago Hermana Uno', '103000031', 'integracion', 'ecf', 30),
+        (32, 'Pago Hermana Dos', '103000032', 'integracion', 'ecf', 30),
+        (33, 'Pago Hermana Cert', '103000033', 'integracion', 'certecf', 30),
+        (40, 'Prod Cabeza', '103000040', 'integracion', 'certecf', 40),
+        (41, 'Prod Hermana', '103000041', 'integracion', 'ecf', 40),
+        (42, 'Prod Otra', '103000042', 'integracion', 'certecf', 40),
+        (50, 'Sola Marcada', '103000050', 'integracion', 'ecf', NULL),
+        (60, 'Todas Marcadas A', '103000060', 'integracion', 'ecf', 60),
+        (61, 'Todas Marcadas B', '103000061', 'integracion', 'ecf', 60),
+        (70, 'Dist Cabeza', '103000070', 'integracion', 'ecf', 70),
+        (71, 'Dist Pagadora', '103000071', 'integracion', 'certecf', 70)");
+    $pdo->exec("INSERT INTO users (id, tenant_id, email, role) VALUES (1, 30, 'admin@cabeza.test', 'admin'), (2, 32, 'admin@dos.test', 'admin')");
+}
+
 echo "\n== Parte 3: el DDL real de la master traducido a SQLite ==\n";
-$ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos']);
-wa_chk('se traducen las cinco tablas y sus indices del snapshot de la master (5 CREATE TABLE y 7 CREATE INDEX)',
-    count(array_filter($ddl, fn(string $d): bool => str_starts_with($d, 'CREATE TABLE'))) === 5
+$ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos', 'cobro_sin_pago']);
+wa_chk('se traducen las seis tablas y sus indices del snapshot de la master (6 CREATE TABLE y 7 CREATE INDEX)',
+    count(array_filter($ddl, fn(string $d): bool => str_starts_with($d, 'CREATE TABLE'))) === 6
     && count(array_filter($ddl, fn(string $d): bool => str_contains($d, 'INDEX'))) === 7, $ddl);
 $snapshot = str_replace("\r\n", "\n", (string) file_get_contents($raiz . '/db/master_schema.sql'));
 $columnasDe = static function (string $tabla) use ($snapshot): string {
@@ -671,13 +695,15 @@ wa_chk('...y cada una dice si se cobra y por que no: la marca gana (excluido) y 
     && array_column($todas, 'excluido') === [false, false, false, false, true, false, false, false], array_column($todas, 'motivo_oculto'));
 wa_chk('una empresa de un grupo que no es la cabeza (11, 12, 15, 20, 23) nunca es una fila', array_intersect([11, 12, 15, 20, 23], $ids($todas)) === [], $ids($todas));
 $g = array_column($todas, null, 'id');
-$hermana = static fn(int $id, string $nombre, string $ambiente): array => ['id' => $id, 'nombre' => $nombre, 'rnc' => '1020000' . $id, 'tipo' => 'integracion', 'ambiente' => $ambiente];
+$hermana = static fn(int $id, string $nombre, string $ambiente): array => ['id' => $id, 'nombre' => $nombre, 'rnc' => '1020000' . $id, 'tipo' => 'integracion', 'ambiente' => $ambiente, 'paga' => true, 'motivo_sin_pago' => null];
+// Un grupo sin marcas: la cabeza paga y todas las hermanas pagan.
+$grupoDe = static fn(int $cabeza, string $nombre, array $miembros): array => ['cabeza_id' => $cabeza, 'cabeza_nombre' => $nombre, 'cabeza_rnc' => '1020000' . $cabeza, 'cabeza_paga' => true, 'cabeza_motivo_sin_pago' => null, 'miembros' => $miembros];
 wa_chk('el grupo 10 es UNA fila con los datos de su cabeza y sus dos hermanas, por id (11 en produccion, 12 en certificacion)',
     $g[10]['nombre'] === 'Holding Cabeza SRL' && $g[10]['tipo'] === 'integracion' && $g[10]['ambiente'] === 'ecf'
-    && $g[10]['grupo'] === ['cabeza_id' => 10, 'miembros' => [$hermana(11, 'Holding Hermana Uno', 'ecf'), $hermana(12, 'Holding Hermana Dos', 'certecf')]], $g[10]['grupo']);
+    && $g[10]['grupo'] === $grupoDe(10, 'Holding Cabeza SRL', [$hermana(11, 'Holding Hermana Uno', 'ecf'), $hermana(12, 'Holding Hermana Dos', 'certecf')]), $g[10]['grupo']);
 wa_chk('una empresa sin grupo trae grupo null; el grupo 14 (todo en certificacion) trae su hermana 15; si la cabeza ya no existe (99) manda la de menor id (19) y su hermana es la 20',
-    $g[16]['grupo'] === null && $g[14]['grupo'] === ['cabeza_id' => 14, 'miembros' => [$hermana(15, 'Agro Hermana', 'certecf')]]
-    && $g[19]['grupo'] === ['cabeza_id' => 19, 'miembros' => [$hermana(20, 'Sin Cabeza Dos', 'ecf')]], [$g[16]['grupo'], $g[19]['grupo']]);
+    $g[16]['grupo'] === null && $g[14]['grupo'] === $grupoDe(14, 'Agro Cabeza', [$hermana(15, 'Agro Hermana', 'certecf')])
+    && $g[19]['grupo'] === $grupoDe(19, 'Sin Cabeza Uno', [$hermana(20, 'Sin Cabeza Dos', 'ecf')]), [$g[16]['grupo'], $g[19]['grupo']]);
 wa_chk('el cobro mensual de la cabeza (Agro: 1,500) es el del grupo; lo que sobro en una hermana (12) no cuenta: la cabeza 10 sigue sin cobro mensual',
     $g[14]['config']['monto_mensual'] === 1500.0 && $g[14]['config']['activo'] === true && $g[10]['config'] === null && $g[10]['con_config'] === false, $g[10]['config']);
 $mg->guardarConfig(14, $cfg(150000, 15, null, false), 7);
@@ -743,6 +769,71 @@ wa_chk('buscar en la lista el nombre (Hermana Uno) o el RNC (102000012) de una h
 wa_chk('...tambien en el grupo de Agro (14): buscar a su hermana por RNC trae el cobro (cancelado) de la cabeza; y un texto que no es de nadie no trae nada',
     $cobrosDe('102000015') === [14] && $cobrosDe('Nadie Se Llama Asi') === [] && $cuantos('Nadie Se Llama Asi') === 0, $cobrosDe('102000015'));
 wa_chk('buscar por el nombre de la cabeza sigue funcionando y no mezcla grupos: Holding Cabeza trae solo lo de 10', $cobrosDe('Holding Cabeza') === [10, 10]);
+
+echo "\n== Parte 5: que empresas de un grupo pagan ==\n";
+$pdoP = cobros_tenants_base();
+cobros_tenants_sembrar_pagos($pdoP);
+$mp = new cobroModel($pdoP, $reloj, cobroModel::AMBITO_TENANTS);
+$r1 = $mp->marcarPago(30, false, 'Cabeza no paga', 7);  // la cabeza no paga
+$mp->marcarPago(33, false, 'Solo certifico', 7);
+$mp->marcarPago(41, false, null, 7);                    // la unica de produccion del grupo 40
+$mp->marcarPago(70, false, null, 7);
+// Marcas puestas a mano que NO deben aplicar: una empresa sola (50) y un grupo donde TODAS estan marcadas (60 y 61).
+$pdoP->exec("INSERT INTO cobro_sin_pago (client_id, created_at) VALUES (50, '2026-11-19 00:00:00'), (60, '2026-11-19 00:00:00'), (61, '2026-11-19 00:00:00')");
+$todasP = $mp->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
+$fx['directorio-quien-paga'] = $todasP;
+$fx['paga'] = $r1[1] ?? [];
+$p = array_column($todasP, null, 'id');
+wa_chk('la primera marca devuelve lo de antes (paga, sin motivo) para la bitacora',
+    $exito($r1) && $r1[1] === ['client_id' => 30, 'paga' => false, 'motivo' => 'Cabeza no paga', 'repetido' => false, 'anterior' => ['paga' => true, 'motivo' => null]], $r1);
+wa_chk('el grupo 30, con su cabeza sin pagar, se nombra por la que paga de menor id (31): su nombre y RNC; el correo sale del de la cabeza (31 no tiene admin)',
+    $p[30]['nombre'] === 'Pago Hermana Uno' && $p[30]['rnc'] === '103000031' && $p[30]['email'] === 'admin@cabeza.test', [$p[30]['nombre'], $p[30]['rnc'], $p[30]['email']]);
+wa_chk('...y trae quien es la cabeza y que no paga (con su motivo), y cada hermana con si paga: 31 y 32 si, 33 no',
+    $p[30]['grupo']['cabeza_id'] === 30 && $p[30]['grupo']['cabeza_nombre'] === 'Pago Cabeza' && $p[30]['grupo']['cabeza_rnc'] === '103000030'
+    && $p[30]['grupo']['cabeza_paga'] === false && $p[30]['grupo']['cabeza_motivo_sin_pago'] === 'Cabeza no paga'
+    && array_column($p[30]['grupo']['miembros'], 'paga', 'id') === [31 => true, 32 => true, 33 => false]
+    && array_column($p[30]['grupo']['miembros'], 'motivo_sin_pago', 'id') === [31 => null, 32 => null, 33 => 'Solo certifico'], $p[30]['grupo']);
+wa_chk('el grupo 30 se cobra sin cobro mensual: las que pagan (31 y 32) estan en produccion',
+    $p[30]['facturable'] === true && $p[30]['motivo_oculto'] === null && $p[30]['con_config'] === false);
+wa_chk('el grupo 40, cuya unica empresa de produccion (41) no paga, NO se cobra (solo_certificacion) y la cabeza, que paga, sigue dando el nombre',
+    $p[40]['facturable'] === false && $p[40]['motivo_oculto'] === 'solo_certificacion' && $p[40]['nombre'] === 'Prod Cabeza', [$p[40]['facturable'], $p[40]['motivo_oculto']]);
+$mp->marcarPago(41, true, null, 7);
+$p40 = array_column($mp->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[40];
+wa_chk('...y al decir que 41 si paga, el grupo 40 vuelve a cobrarse', $p40['facturable'] === true && $p40['motivo_oculto'] === null);
+wa_chk('una marca vieja en una empresa SOLA (50) no aplica: se nombra a si misma, no tiene grupo y se cobra',
+    $p[50]['nombre'] === 'Sola Marcada' && $p[50]['grupo'] === null && $p[50]['facturable'] === true);
+wa_chk('un grupo donde TODAS estan marcadas (60 y 61) no aplica las marcas: la cabeza da el nombre, todas cuentan como que pagan y se cobra',
+    $p[60]['nombre'] === 'Todas Marcadas A' && $p[60]['grupo']['cabeza_paga'] === true && array_column($p[60]['grupo']['miembros'], 'paga') === [true] && $p[60]['facturable'] === true, $p[60]['grupo']);
+wa_chk('tipo, ambiente y estado siguen a la empresa que se muestra: el grupo 70 (cabeza en produccion que no paga) se muestra como su pagadora de certificacion (71)',
+    $p[70]['nombre'] === 'Dist Pagadora' && $p[70]['tipo'] === 'integracion' && $p[70]['ambiente'] === 'certecf' && $p[70]['grupo']['cabeza_paga'] === false, [$p[70]['nombre'], $p[70]['ambiente']]);
+wa_chk('buscar por el nombre PROPIO o el RNC de la cabeza que no paga, de la que solo certifico o de una que paga encuentra la fila del grupo (30)',
+    $ids($mp->buscarClientes('Pago Cabeza')) === [30] && $ids($mp->buscarClientes('103000033')) === [30] && $ids($mp->buscarClientes('Pago Hermana Uno')) === [30]);
+$mp->guardarConfig(30, $cfg(50000, 15), 7);
+$cobroP = $mp->crear($nuevo(30, '2027-02'), 7);
+$listaP = $mp->listar(CobroReglas::validarFiltros([])[1], 0, 50);
+$panelP = $mp->panelCliente(30);
+wa_chk('el cobro vive en la cabeza (30) pero la lista y el panel lo muestran a nombre de quien paga (Pago Hermana Uno)',
+    $exito($cobroP) && $cobroP[1]['client_id'] === 30 && $listaP[0]['client_id'] === 30 && $listaP[0]['cliente']['nombre'] === 'Pago Hermana Uno'
+    && $panelP['cliente']['nombre'] === 'Pago Hermana Uno', $listaP[0]['cliente'] ?? null);
+wa_chk('...y en la lista de cobros tambien se encuentra buscando el nombre propio de la cabeza (Pago Cabeza) o el RNC de la que solo certifico (103000033)',
+    array_unique(array_column($mp->listar(CobroReglas::validarFiltros(['query' => 'Pago Cabeza'])[1], 0, 50), 'client_id')) === [30]
+    && array_unique(array_column($mp->listar(CobroReglas::validarFiltros(['query' => '103000033'])[1], 0, 50), 'client_id')) === [30]);
+$rm = $mp->guardarConfig(32, $cfg(10000, 5), 7);
+wa_chk('MIEMBRO_DE_GRUPO nombra a la que se muestra (Pago Hermana Uno) y deja el id de la cabeza real (30)',
+    $falla($rm, 409, 'MIEMBRO_DE_GRUPO') && ($rm[4] ?? null) === ['cabeza_id' => 30, 'cabeza_nombre' => 'Pago Hermana Uno'] && str_contains((string) $rm[1], 'Pago Hermana Uno'), $rm);
+wa_chk('marcar a una empresa que no esta en un grupo de dos o mas (50): 409 NO_ES_DE_UN_GRUPO (se usa "No es cliente")',
+    $falla($mp->marcarPago(50, false, null, 7), 409, 'NO_ES_DE_UN_GRUPO'));
+wa_chk('marcar a la unica que queda pagando (71: la cabeza 70 ya esta marcada): 409 ULTIMA_QUE_PAGA', $falla($mp->marcarPago(71, false, null, 7), 409, 'ULTIMA_QUE_PAGA'));
+$rr = $mp->marcarPago(30, false, 'otro motivo', 7);
+wa_chk('repetir una marca no cambia nada (repetido) y deja el motivo de la primera',
+    $exito($rr) && $rr[1]['repetido'] === true && $rr[1]['motivo'] === 'Cabeza no paga' && $rr[1]['anterior'] === ['paga' => false, 'motivo' => 'Cabeza no paga'], $rr);
+$rq = $mp->marcarPago(50, true, null, 7);
+wa_chk('quitar una marca vieja de una empresa sola (50) se puede: paga true, y lo de antes (anterior paga false) queda para la bitacora',
+    $exito($rq) && $rq[1]['paga'] === true && $rq[1]['repetido'] === false && $rq[1]['anterior']['paga'] === false, $rq);
+$rs = $mp->marcarPago(32, true, null, 7);
+wa_chk('decir que paga a quien ya paga es repetido', $exito($rs) && $rs[1]['repetido'] === true && $rs[1]['anterior']['paga'] === true, $rs);
+wa_chk('una empresa que no existe: 404; en el ambito de una empresa no existe marcar: 404',
+    $falla($mp->marcarPago(999, false, null, 7), 404) && $falla((new cobroModel($pdoP, $reloj))->marcarPago(30, false, null, 7), 404));
 
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {

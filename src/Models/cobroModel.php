@@ -65,15 +65,46 @@ class cobroModel
      * Un tenant con grupo_id (migracion master 008: empresas de un mismo cliente) se cobra POR GRUPO: la UNIDAD de cobro es la
      * cabeza, el tenant cuyo id es el grupo_id (--grupo=self); si esa fila ya no existe, la de menor id con ese grupo_id; sin
      * grupo_id, el tenant solo. cabeza_id es el id de la unidad de cada tenant.
+     *
+     * No todas las empresas de un grupo pagan la mensualidad (master 023, cobro_sin_pago: solo certificaron). El cobro y el cobro
+     * mensual siguen en la cabeza, pero el CLIENTE que se muestra de una cabeza es la EMPRESA QUE SE MUESTRA: la cabeza si paga y,
+     * si no, la que paga de menor id (nombre, RNC, tipo, ambiente, activo, edicion y correo: el del admin de esa empresa, o el de
+     * la cabeza, o el de cualquiera del grupo). Una marca solo APLICA si la empresa esta en un grupo de dos o mas y queda alguna
+     * sin marcar (marcas_aplican); si no, todas cuentan como que pagan y se muestra la cabeza. Las columnas *_propio son las de la
+     * empresa misma (la busqueda las usa, y el nombre de una cabeza que no paga sigue encontrando a su grupo).
      */
     private const ORIGEN_EMPRESA = 'clients';
-    private const ORIGEN_TENANTS = "(SELECT t.id AS id, t.nombre AS client_name, t.nombre AS company_name, t.nombre AS razon_social,
-        t.rnc AS rnc, COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id AND u.role = 'admin' ORDER BY u.id LIMIT 1), '') AS email,
-        '' AS phone_number, t.tipo AS tipo, t.ambiente AS ambiente, t.activo AS activo, t.edicion AS edicion, t.grupo_id AS grupo_id,
-        CASE WHEN t.grupo_id IS NULL THEN t.id
+    /** La clave del grupo de un tenant (sin grupo_id, el propio id: una cabeza que no se enlazo a si misma). */
+    private const SQL_GKEY = 'COALESCE(t.grupo_id, t.id)';
+    private const SQL_CABEZA = 'CASE WHEN t.grupo_id IS NULL THEN t.id
              WHEN EXISTS (SELECT 1 FROM tenants h WHERE h.id = t.grupo_id) THEN t.grupo_id
-             ELSE (SELECT MIN(g.id) FROM tenants g WHERE g.grupo_id = t.grupo_id) END AS cabeza_id
-        FROM tenants t)";
+             ELSE (SELECT MIN(g.id) FROM tenants g WHERE g.grupo_id = t.grupo_id) END';
+    private const SQL_MARCADO = 'EXISTS (SELECT 1 FROM cobro_sin_pago s0 WHERE s0.client_id = t.id)';
+    /** Las marcas del grupo de t aplican: son dos o mas empresas y queda alguna sin marcar. */
+    private const SQL_APLICAN = '((SELECT COUNT(*) FROM tenants x WHERE x.id = t.id OR x.grupo_id = COALESCE(t.grupo_id, t.id)) >= 2
+             AND EXISTS (SELECT 1 FROM tenants x WHERE (x.id = t.id OR x.grupo_id = COALESCE(t.grupo_id, t.id))
+                         AND NOT EXISTS (SELECT 1 FROM cobro_sin_pago s1 WHERE s1.client_id = x.id)))';
+    /** La que paga de menor id, de las demas del grupo de t (solo se usa cuando t no paga y las marcas aplican). */
+    private const SQL_PAGADORA = '(SELECT MIN(x.id) FROM tenants x WHERE x.grupo_id = COALESCE(t.grupo_id, t.id) AND x.id <> t.id
+             AND NOT EXISTS (SELECT 1 FROM cobro_sin_pago s2 WHERE s2.client_id = x.id))';
+    private const ORIGEN_TENANTS = "(SELECT t.id AS id,
+        COALESCE(p.nombre, t.nombre) AS client_name, COALESCE(p.nombre, t.nombre) AS company_name, COALESCE(p.nombre, t.nombre) AS razon_social,
+        COALESCE(p.rnc, t.rnc) AS rnc,
+        COALESCE(NULLIF((SELECT u.email FROM users u WHERE u.tenant_id = COALESCE(p.id, t.id) AND u.role = 'admin' ORDER BY u.id LIMIT 1), ''),
+                 NULLIF((SELECT u.email FROM users u WHERE u.tenant_id = t.id AND u.role = 'admin' ORDER BY u.id LIMIT 1), ''),
+                 (SELECT u.email FROM users u JOIN tenants g ON g.id = u.tenant_id
+                   WHERE u.role = 'admin' AND (g.id = t.id OR g.grupo_id = " . self::SQL_GKEY . ") ORDER BY u.id LIMIT 1), '') AS email,
+        '' AS phone_number,
+        COALESCE(p.tipo, t.tipo) AS tipo, COALESCE(p.ambiente, t.ambiente) AS ambiente, COALESCE(p.activo, t.activo) AS activo,
+        COALESCE(p.edicion, t.edicion) AS edicion, t.grupo_id AS grupo_id,
+        " . self::SQL_CABEZA . " AS cabeza_id,
+        t.nombre AS nombre_propio, t.rnc AS rnc_propio, t.tipo AS tipo_propio, t.ambiente AS ambiente_propio,
+        " . self::SQL_MARCADO . " AS marcado,
+        (SELECT s.motivo FROM cobro_sin_pago s WHERE s.client_id = t.id) AS motivo_sin_pago,
+        " . self::SQL_APLICAN . " AS marcas_aplican
+        FROM tenants t
+        LEFT JOIN tenants p ON p.id = (CASE WHEN (" . self::SQL_CABEZA . ") = t.id AND " . self::SQL_MARCADO . " AND " . self::SQL_APLICAN . "
+                                            THEN " . self::SQL_PAGADORA . " ELSE t.id END))";
 
     /** Los datos del cliente que viajan con un cobro (alias cl_* para no chocar con las columnas de cobros). */
     private const CLIENTE = 'cl.id AS cl_id, cl.client_name AS cl_contacto, cl.company_name AS cl_empresa,
@@ -176,10 +207,12 @@ class cobroModel
      * esta vencido) y su proximo vencimiento (el primero que aun no vence; hoy cuenta como "aun no"). Un cobro cancelado
      * o pagado no suma, igual que en el dashboard.
      *
-     * Hay UNA fila por unidad de cobro (ver ORIGEN_TENANTS): un grupo es la fila de su cabeza (con su nombre, RNC, tipo, ambiente,
-     * cobro mensual y saldos), y sus hermanas no salen solas. `grupo` es null sin grupo; con grupo trae `cabeza_id` y `miembros`
-     * (las demas empresas del grupo, por id: id, nombre, rnc, tipo, ambiente; vacio en un grupo de una). La busqueda por nombre o
-     * RNC encuentra la unidad por ella o por cualquiera de sus hermanas.
+     * Hay UNA fila por unidad de cobro (ver ORIGEN_TENANTS): un grupo es la fila de su cabeza (con el cobro mensual y los saldos de
+     * la cabeza, y el nombre, RNC, tipo y ambiente de la empresa que se muestra: la cabeza si paga, si no la que paga de menor id),
+     * y sus hermanas no salen solas. `grupo` es null sin grupo; con grupo trae `cabeza_id`, `cabeza_nombre`, `cabeza_rnc`,
+     * `cabeza_paga`, `cabeza_motivo_sin_pago` y `miembros` (las demas empresas del grupo, por id: id, nombre, rnc, tipo, ambiente,
+     * `paga` y `motivo_sin_pago`; vacio en un grupo de una). La busqueda por nombre o RNC PROPIOS encuentra la unidad por ella o
+     * por cualquiera de sus hermanas.
      *
      * Solo salen las unidades que se COBRAN ($conExcluidos = false). Con $conExcluidos salen todas, cada una con `facturable` y,
      * si no se cobra, `motivo_oculto`: `excluido` (la plataforma la marco "no es un cliente", cobro_excluidos; la marca gana) o
@@ -201,17 +234,20 @@ class cobroModel
         $texto = trim($texto);
         if ($texto !== '') {
             $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $texto) . '%';
-            // La unidad coincide por si misma o por cualquiera de sus hermanas (escribir el nombre de una encuentra a su grupo).
-            $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!' OR EXISTS (SELECT 1 FROM " . $this->origen
-                . " h WHERE h.cabeza_id = cl.id AND (h.client_name LIKE :q3 ESCAPE '!' OR h.rnc LIKE :q4 ESCAPE '!')))";
+            // La unidad coincide por el nombre o RNC PROPIOS de la cabeza (aunque no pague y se muestre otra) o de cualquiera de sus
+            // hermanas (escribir el nombre de una encuentra a su grupo; la que se muestra es una de ellas).
+            $donde = "(cl.nombre_propio LIKE :q1 ESCAPE '!' OR cl.rnc_propio LIKE :q2 ESCAPE '!' OR EXISTS (SELECT 1 FROM " . $this->origen
+                . " h WHERE h.cabeza_id = cl.id AND (h.nombre_propio LIKE :q3 ESCAPE '!' OR h.rnc_propio LIKE :q4 ESCAPE '!')))";
             $params = [':q1' => $like, ':q2' => $like, ':q3' => $like, ':q4' => $like];
         }
         // Se cobra: sin marca de "no es un cliente" y (cobro mensual activo, o plata por cobrar, o alguna empresa de base propia o de
         // integracion en produccion). Quien debe plata no desaparece de la lista aunque se apague su cobro mensual (igual que la marca
         // se niega a quitar a quien tiene cobros abiertos). Solo cuenta el cobro mensual de la cabeza: el que sobre en una hermana
         // no hace a nadie cliente.
+        // Solo cuentan las empresas que PAGAN (una marca "no paga" que aplica las deja fuera) y con su propio tipo y ambiente.
         $facturable = "(ex.client_id IS NULL AND (COALESCE(cc.activo, 0) = 1 OR COALESCE(ab.abiertos, 0) > 0 OR EXISTS (SELECT 1 FROM " . $this->origen
-            . " m WHERE m.cabeza_id = cl.id AND (m.tipo = 'app' OR (m.tipo = 'integracion' AND m.ambiente = 'ecf')))))";
+            . " m WHERE m.cabeza_id = cl.id AND (m.marcado = 0 OR cl.marcas_aplican = 0)"
+            . " AND (m.tipo_propio = 'app' OR (m.tipo_propio = 'integracion' AND m.ambiente_propio = 'ecf')))))";
         $donde = '(' . $donde . ') AND cl.id = cl.cabeza_id';
         if (!$conExcluidos) {
             $donde .= ' AND ' . $facturable;
@@ -221,6 +257,8 @@ class cobroModel
         $s = $this->db->prepare(
             'SELECT ' . self::CLIENTE . ', cl.tipo AS cl_tipo, cl.ambiente AS cl_ambiente, cl.activo AS cl_activo,
                     cl.grupo_id AS cl_grupo_id, ' . $facturable . ' AS cl_facturable,
+                    cl.nombre_propio AS cl_nombre_propio, cl.rnc_propio AS cl_rnc_propio, cl.marcado AS cl_marcado,
+                    cl.motivo_sin_pago AS cl_motivo_sin_pago, cl.marcas_aplican AS cl_aplican,
                     cc.client_id AS cfg_client_id, cc.monto_mensual AS cfg_monto, cc.dia_vencimiento AS cfg_dia,
                     cc.descripcion AS cfg_desc, cc.activo AS cfg_activo, cc.updated_at AS cfg_updated, cc.created_at AS cfg_created,
                     ex.client_id AS ex_client_id, ex.motivo AS ex_motivo,
@@ -250,17 +288,29 @@ class cobroModel
         if ($filas !== []) {
             $enLista = implode(', ', array_map(static fn(array $r): int => (int) $r['cl_id'], $filas));
             $mq = $this->db->query(
-                'SELECT m.cabeza_id AS cabeza_id, m.id AS id, m.client_name AS nombre, m.rnc AS rnc, m.tipo AS tipo, m.ambiente AS ambiente
+                'SELECT m.cabeza_id AS cabeza_id, m.id AS id, m.nombre_propio AS nombre, m.rnc_propio AS rnc, m.tipo_propio AS tipo,
+                        m.ambiente_propio AS ambiente, m.marcado AS marcado, m.motivo_sin_pago AS motivo_sin_pago
                    FROM ' . $this->origen . ' m WHERE m.cabeza_id IN (' . $enLista . ') AND m.id <> m.cabeza_id ORDER BY m.id'
             );
             foreach ($mq->fetchAll() as $m) {
                 $miembros[(int) $m['cabeza_id']][] = [
                     'id' => (int) $m['id'], 'nombre' => (string) $m['nombre'], 'rnc' => (string) $m['rnc'],
                     'tipo' => (string) $m['tipo'], 'ambiente' => (string) $m['ambiente'],
+                    'marcado' => (int) $m['marcado'] === 1, 'motivo_sin_pago' => $m['motivo_sin_pago'] !== null ? (string) $m['motivo_sin_pago'] : null,
                 ];
             }
         }
         return array_map(static function (array $r) use ($hoy, $miembros): array {
+            // Una marca "no paga" solo cuenta si APLICA (grupo de dos o mas con alguna sin marcar); si no, todas pagan.
+            $aplican = (int) $r['cl_aplican'] === 1;
+            $cabezaSinPago = $aplican && (int) $r['cl_marcado'] === 1;
+            $deLaUnidad = array_map(static function (array $m) use ($aplican): array {
+                $sinPago = $aplican && $m['marcado'];
+                return [
+                    'id' => $m['id'], 'nombre' => $m['nombre'], 'rnc' => $m['rnc'], 'tipo' => $m['tipo'], 'ambiente' => $m['ambiente'],
+                    'paga' => !$sinPago, 'motivo_sin_pago' => $sinPago ? $m['motivo_sin_pago'] : null,
+                ];
+            }, $miembros[(int) $r['cl_id']] ?? []);
             $config = $r['cfg_client_id'] === null ? null : self::configJson([
                 'client_id' => $r['cfg_client_id'], 'monto_mensual' => $r['cfg_monto'], 'dia_vencimiento' => $r['cfg_dia'],
                 'descripcion' => $r['cfg_desc'], 'activo' => $r['cfg_activo'], 'updated_at' => $r['cfg_updated'], 'created_at' => $r['cfg_created'],
@@ -279,7 +329,12 @@ class cobroModel
                 'motivo_oculto' => $r['ex_client_id'] !== null ? 'excluido' : ((int) $r['cl_facturable'] === 1 ? null : 'solo_certificacion'),
                 // Pertenece a un grupo si tiene grupo_id, o si otras empresas lo tienen como cabeza (una cabeza sin su propio grupo_id).
                 'grupo' => $r['cl_grupo_id'] !== null || isset($miembros[(int) $r['cl_id']])
-                    ? ['cabeza_id' => (int) $r['cl_id'], 'miembros' => $miembros[(int) $r['cl_id']] ?? []]
+                    ? [
+                        'cabeza_id' => (int) $r['cl_id'], 'cabeza_nombre' => (string) $r['cl_nombre_propio'], 'cabeza_rnc' => (string) $r['cl_rnc_propio'],
+                        'cabeza_paga' => !$cabezaSinPago,
+                        'cabeza_motivo_sin_pago' => $cabezaSinPago && $r['cl_motivo_sin_pago'] !== null ? (string) $r['cl_motivo_sin_pago'] : null,
+                        'miembros' => $deLaUnidad,
+                    ]
                     : null,
             ];
         }, $filas);
@@ -343,6 +398,68 @@ class cobroModel
             $i->execute([':cid' => $clientId, ':motivo' => $motivo, ':user' => $userId, ':ahora' => $this->ahora()]);
             return ['success', ['client_id' => $clientId, 'excluido' => true, 'motivo' => $motivo, 'repetido' => $i->rowCount() === 0, 'anterior' => $anterior]];
         }, 'No se pudo cambiar si la empresa es un cliente. Inténtalo de nuevo.');
+    }
+
+    /**
+     * Marca que una empresa de un GRUPO no paga la mensualidad del grupo (paga = false: solo certifico) o que si la paga (true).
+     * NO borra nada: cobro_sin_pago solo marca, y quitar la fila la devuelve a las que pagan; sin fila = paga. Solo existe en el
+     * ambito de tenants. Marcar exige que la empresa este en un grupo de dos o mas (si no: NO_ES_DE_UN_GRUPO, se usa "No es
+     * cliente") y que quede otra sin marcar (si no: ULTIMA_QUE_PAGA). Repetir lo mismo no cambia nada (repetido = true) y deja el
+     * motivo de la primera marca. Decir que paga se puede siempre, tambien a una empresa que ya no esta en un grupo (para limpiar
+     * una marca vieja). `anterior` es lo que habia, para la bitacora.
+     *
+     * @return array ['success', ['client_id' => int, 'paga' => bool, 'motivo' => ?string, 'repetido' => bool, 'anterior' => array]]
+     *               | ['error', ...]
+     */
+    public function marcarPago(int $clientId, bool $paga, ?string $motivo, ?int $userId): array
+    {
+        if ($this->ambito !== self::AMBITO_TENANTS) {
+            return self::err(CobroReglas::MSG_RUTA, 404);
+        }
+        return $this->protegido(function () use ($clientId, $paga, $motivo, $userId): array {
+            if ($this->cliente($clientId) === null) {
+                return self::err(CobroReglas::MSG_CLIENTE_NO_EXISTE, 404);
+            }
+            // Lo de antes, SIN bloqueo (la fila puede no existir; el INSERT y el DELETE de abajo son atomicos por si mismos).
+            $s = $this->db->prepare('SELECT motivo FROM cobro_sin_pago WHERE client_id = :cid');
+            $s->execute([':cid' => $clientId]);
+            $fila = $s->fetch();
+            $anterior = ['paga' => $fila === false, 'motivo' => $fila !== false && $fila['motivo'] !== null ? (string) $fila['motivo'] : null];
+            if ($paga) {
+                $d = $this->db->prepare('DELETE FROM cobro_sin_pago WHERE client_id = :cid');
+                $d->execute([':cid' => $clientId]);
+                return ['success', ['client_id' => $clientId, 'paga' => true, 'motivo' => null, 'repetido' => $d->rowCount() === 0, 'anterior' => $anterior]];
+            }
+            // Las empresas de su unidad (su grupo, con la cabeza) y cuales siguen sin marca.
+            $u = $this->db->prepare(
+                'SELECT m.id AS id, m.marcado AS marcado FROM ' . $this->origen . ' m
+                  WHERE m.cabeza_id = (SELECT c.cabeza_id FROM ' . $this->origen . ' c WHERE c.id = :cid) ORDER BY m.id'
+            );
+            $u->execute([':cid' => $clientId]);
+            $empresas = $u->fetchAll();
+            if (count($empresas) < 2) {
+                return self::err(
+                    'Esta empresa no es parte de un grupo de dos o más empresas. Si no se le cobra, quítala de la lista con "No es cliente".',
+                    409, 'NO_ES_DE_UN_GRUPO'
+                );
+            }
+            if ($fila !== false) {
+                return ['success', ['client_id' => $clientId, 'paga' => false, 'motivo' => $anterior['motivo'], 'repetido' => true, 'anterior' => $anterior]];
+            }
+            $quedan = array_filter($empresas, static fn(array $e): bool => (int) $e['marcado'] === 0 && (int) $e['id'] !== $clientId);
+            if ($quedan === []) {
+                return self::err(
+                    'Es la última empresa del grupo que paga. Si el grupo no paga, quítalo de la lista con "No es cliente".',
+                    409, 'ULTIMA_QUE_PAGA'
+                );
+            }
+            $i = $this->db->prepare(
+                'INSERT INTO cobro_sin_pago (client_id, motivo, user_id, created_at) VALUES (:cid, :motivo, :user, :ahora) '
+                . ($this->mysql ? 'ON DUPLICATE KEY UPDATE client_id = client_id' : 'ON CONFLICT (client_id) DO NOTHING')
+            );
+            $i->execute([':cid' => $clientId, ':motivo' => $motivo, ':user' => $userId, ':ahora' => $this->ahora()]);
+            return ['success', ['client_id' => $clientId, 'paga' => false, 'motivo' => $motivo, 'repetido' => $i->rowCount() === 0, 'anterior' => $anterior]];
+        }, 'No se pudo cambiar si la empresa paga la mensualidad. Inténtalo de nuevo.');
     }
 
     /** La configuracion mensual del cliente, tal cual la ve la API; null si no tiene. */
@@ -1443,11 +1560,15 @@ class cobroModel
         if (!empty($f['query'])) {
             $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], (string) $f['query']) . '%';
             $cols = ['cl.client_name', 'cl.company_name', 'cl.razon_social', 'cl.rnc'];
+            if ($this->ambito === self::AMBITO_TENANTS) {
+                // La cabeza tambien por su nombre y RNC propios (si no paga, el cliente que se muestra es otra).
+                $cols = array_merge($cols, ['cl.nombre_propio', 'cl.rnc_propio']);
+            }
             $o = array_map(static fn(string $c): string => $c . ' LIKE ' . $add($like) . " ESCAPE '!'", $cols);
             if ($this->ambito === self::AMBITO_TENANTS) {
                 // Un grupo se cobra en su cabeza: el nombre o el RNC de una hermana encuentra los cobros del grupo.
-                $o[] = 'EXISTS (SELECT 1 FROM ' . $this->origen . ' h WHERE h.cabeza_id = cl.id AND (h.client_name LIKE ' . $add($like)
-                    . " ESCAPE '!' OR h.rnc LIKE " . $add($like) . " ESCAPE '!'))";
+                $o[] = 'EXISTS (SELECT 1 FROM ' . $this->origen . ' h WHERE h.cabeza_id = cl.id AND (h.nombre_propio LIKE ' . $add($like)
+                    . " ESCAPE '!' OR h.rnc_propio LIKE " . $add($like) . " ESCAPE '!'))";
             }
             $w[] = '(' . implode(' OR ', $o) . ')';
         }
