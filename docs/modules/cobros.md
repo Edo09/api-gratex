@@ -429,4 +429,15 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   ningún tenant está marcado: el usuario elige cuáles, uno por uno.
 - El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
+- **2026-11-19 · Cobros de tenants por unidad (quién se cobra y los grupos) en producción.** API `f8f2f2d` en `master` (CI `express-api` php83 en
+  verde); el dueño subió `src/Models/cobroModel.php` por cPanel; web `d648dc6` (Vercel en verde). **Sin migración.** Antes de empezar, con una
+  lectura en solo lectura de la master real y el modelo nuevo: se cobran los tenants 1, 2, 5, 6, 9, 17, 18 y 20, los 8 de solo certificación
+  (3, 4, 8, 10, 11, 12, 16 y 21) quedan ocultos, el grupo 6 sale como una fila (la cabeza, 6, con 13, 14, 15 y 19 adentro) y Agrovisa (18) se
+  cobra por su cobro mensual activo.
+- **2026-11-19 · borrada la configuración de cobro mensual sobrante de dos hermanas del grupo 6.** Los tenants 14 y 15 tenían cada uno un cobro
+  mensual (500.00, día 15, activo) creado ese día desde la pantalla, antes de que el sistema cobrara por grupo; ninguno tenía cobros. Con el go del
+  dueño se borraron esas dos filas de `cobro_config` en una transacción (2 filas, comprobadas antes y después): `cobro_config` pasó de 7 a 5 filas
+  (tenants 2, 9, 17, 18 y 20), y `cobros` y `tenants` quedaron igual; el respaldo, con su `INSERT` para deshacerlo, quedó en el scratchpad de la
+  sesión. El grupo 6 queda **sin cobro mensual**: su monto lo pone el dueño en la fila de la cabeza (Public Sound, tenant 6). Pendiente: marcar
+  Gratex (1) y Demo Fiscalo (5) como "No es cliente".
 
