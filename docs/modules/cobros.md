@@ -387,6 +387,10 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   Sigue en la tabla (un cobro no se borra) y no cuenta en ningún total. La bitácora quedó con dos filas (`audit_logs` 4483 y 4484:
   módulo `cobros-tenants`, `tenant_id` 0, CREATE y CANCEL). No se probaron en vivo la configuración mensual, los pagos, anular un
   pago ni los recordatorios: usan el mismo modelo y el mismo SQL que el módulo de las empresas, ya verificado en Demo Fiscalo.
+- **2026-11-18 · master 022 ("no es un cliente", tabla `cobro_excluidos`)** en `smhynzte_master_gratex`: `todo_ok = SI` (InnoDB, 1 FK a
+  `tenants` con `ON DELETE CASCADE`; `tenants.id` es `int`) y `tools/verificar_migraciones_master.sql` la muestra `APLICADA`. Antes de
+  aplicarla se comprobó en solo lectura que la tabla no existía, y el SQL del directorio y de quitar/devolver se probó contra el MySQL
+  real con una tabla temporal de la sesión (sin crear nada). La tabla quedó vacía: ningún tenant marcado todavía.
 - El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
