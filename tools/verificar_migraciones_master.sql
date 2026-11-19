@@ -23,6 +23,7 @@
 -- La 020 (permiso cobros al rol user) son solo datos: no tiene fila. La 021 (Cobros de la plataforma a sus
 -- tenants) crea cuatro tablas: su fila dice APLICADA con las cuatro y la UNIQUE uk_cobros_cliente_periodo.
 -- La 022 (tenants que no son clientes) crea la tabla cobro_excluidos: su fila dice APLICADA con la tabla.
+-- La 023 (empresas de un grupo que no pagan la mensualidad) crea la tabla cobro_sin_pago: su fila dice APLICADA con la tabla.
 --
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
@@ -149,6 +150,10 @@ FROM (
   SELECT '022', '022_cobro_excluidos.sql', 'tabla cobro_excluidos (los tenants que no son clientes de Cobros de tenants)',
          (SELECT COUNT(*) FROM information_schema.TABLES
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cobro_excluidos') = 1
+  UNION ALL
+  SELECT '023', '023_cobro_sin_pago.sql', 'tabla cobro_sin_pago (las empresas de un grupo que no pagan la mensualidad)',
+         (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cobro_sin_pago') = 1
 ) m
 ORDER BY m.migracion;
 

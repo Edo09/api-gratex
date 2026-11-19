@@ -533,6 +533,17 @@ CREATE TABLE IF NOT EXISTS cobro_excluidos (
   CONSTRAINT cobro_excluidos_client_fk FOREIGN KEY (client_id) REFERENCES tenants (id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- cobro_sin_pago (master_migrations/023): las empresas de un GRUPO (tenants.grupo_id) que NO pagan la mensualidad del grupo
+-- (solo certificaron). Solo marca: nada se borra, y quitar la fila la devuelve a las que pagan. SIN FILA = paga.
+CREATE TABLE IF NOT EXISTS cobro_sin_pago (
+  client_id   INT(11)      NOT NULL COMMENT 'tenants.id: la empresa de un grupo que NO paga la mensualidad (solo certifico)',
+  motivo      VARCHAR(150) NULL COMMENT 'Por que no paga (ej. solo certificacion); lo escribe quien la marca',
+  user_id     INT(11)      NULL COMMENT 'users.id de quien la marco (sin FK a proposito)',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (client_id),
+  CONSTRAINT cobro_sin_pago_client_fk FOREIGN KEY (client_id) REFERENCES tenants (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- MIGRACION GRATEX = TENANT #1  (ejecutar tras crear el schema)
 -- ----------------------------------------------------------------------------

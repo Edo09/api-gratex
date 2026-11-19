@@ -825,5 +825,65 @@ $chk('verificador de la master: la fila 022 pide la tabla cobro_excluidos',
     preg_match("/SELECT '022', '022_cobro_excluidos\.sql',\s*'[^']*',\s*"
         . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'cobro_excluidos'\) = 1/", (string) file_get_contents($rutaVerificadorMaster)) === 1);
 
+echo "\n== Master 023 (empresas de un grupo que no pagan la mensualidad) ==\n";
+$rutaM023 = $raiz . '/db/master_migrations/023_cobro_sin_pago.sql';
+$chk('existe db/master_migrations/023_cobro_sin_pago.sql', is_file($rutaM023));
+$m023 = is_file($rutaM023) ? sinComentarios((string) file_get_contents($rutaM023)) : '';
+$plano023 = (string) preg_replace('/\s+/', ' ', $m023);
+$sentM023 = sentencias($m023);
+$chk('master 023: la primera sentencia fija la base en @db y la segunda es la guardia (#1049 / #1146 sin tenants), sin USE',
+    ($sentM023[0] ?? '') === 'SET @db := DATABASE()'
+    && str_contains(preg_replace('/\s+/', ' ', $sentM023[1] ?? ''), "CONCAT('DO (SELECT 1 FROM `', @db, '`.tenants LIMIT 1)')")
+    && array_slice($sentM023, 2, 3) === ['PREPARE s_guardia FROM @guardia', 'EXECUTE s_guardia', 'DEALLOCATE PREPARE s_guardia']
+    && stripos($m023, 'USE ') === false);
+$chk('master 023: DATABASE() aparece una sola vez y cada consulta a information_schema filtra por @db',
+    substr_count($m023, 'DATABASE()') === 1
+    && preg_match_all('/\binformation_schema\./i', $m023) === preg_match_all('/\b(?:TABLE|CONSTRAINT)_SCHEMA = @db\b/', $m023));
+$selectsM023 = array_keys(array_filter($sentM023, fn($s) => stripos($s, 'SELECT') === 0));
+$chk('master 023: el unico SELECT de nivel superior es la ultima sentencia, con base, fks y todo_ok',
+    $sentM023 !== [] && $selectsM023 === [count($sentM023) - 1]
+    && str_contains($sentM023[count($sentM023) - 1], '@db AS base') && str_contains($sentM023[count($sentM023) - 1], 'AS todo_ok'));
+$chk('master 023: copia el tipo de tenants.id, exige que tenants sea InnoDB y solo crea si esta listo y falta la tabla',
+    str_contains($plano023, "SET @tipo_tenant_id := ( SELECT COLUMN_TYPE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND COLUMN_NAME = 'id' );")
+    && str_contains($plano023, "SET @motor_innodb := ( SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'tenants' AND ENGINE = 'InnoDB' );")
+    && str_contains($plano023, 'SET @listo := (@motor_innodb = 1 AND @tipo_tenant_id IS NOT NULL);')
+    && str_contains($plano023, 'SET @crear_cobro_sin_pago := (@listo = 1 AND @has_cobro_sin_pago = 0);'));
+preg_match_all('/^\s*PREPARE\s+(\w+)\s+FROM\s+(@\w+)\s*;/mi', $m023, $prep023);
+preg_match_all('/^\s*EXECUTE\s+(\w+)\s*;/mi', $m023, $exec023);
+preg_match_all('/^\s*DEALLOCATE\s+PREPARE\s+(\w+)\s*;/mi', $m023, $deal023);
+$chk('master 023: cada PREPARE tiene su EXECUTE y su DEALLOCATE, sin repetir nombres (' . count($prep023[1]) . ' sentencias)',
+    $prep023[1] !== [] && $prep023[1] === $exec023[1] && $prep023[1] === $deal023[1] && count($prep023[1]) === count(array_unique($prep023[1])));
+$ejemplo023 = ['@db' => 'master', '@tipo_tenant_id' => 'int(11)', '@crear_cobro_sin_pago' => '1'];
+$dinamicos023 = armarDinamicos($m023, $ejemplo023);
+$tablas023 = [];
+foreach ($dinamicos023 as $d) {
+    $ok = $d['desconocida'] === null
+        && ($ejemplo023[$d['guarda']] ?? null) === $d['valor']
+        && preg_match('/^CREATE TABLE IF NOT EXISTS `master`\.cobro_sin_pago \(/', $d['sql']) === 1
+        && preg_match('/REFERENCES (?!`master`\.)/', $d['sql']) === 0
+        && balanceado($d['sql']);
+    $chk("master 023: {$d['variable']} arma un CREATE TABLE valido (guarda {$d['guarda']} = {$d['valor']})", $ok);
+    foreach (tablas(str_replace('`master`.', '', $d['sql'])) as $t) {
+        $tablas023[$t['nombre']] = $t['elementos'];
+    }
+}
+$chk('master 023: arma exactamente la tabla cobro_sin_pago', count($dinamicos023) === 1 && array_keys($tablas023) === ['cobro_sin_pago']);
+$deM023 = array_map('strtoupper', $tablas023['cobro_sin_pago'] ?? []);
+$deSnapExcluidos = array_map('strtoupper', $porNombreMaster['cobro_sin_pago'] ?? []);
+$distintoEx = '';
+foreach (array_keys($deM023 + $deSnapExcluidos) as $i) {
+    if (($deM023[$i] ?? '') !== ($deSnapExcluidos[$i] ?? '')) {
+        $distintoEx = ' (023: ' . ($deM023[$i] ?? 'nada') . ' | snapshot: ' . ($deSnapExcluidos[$i] ?? 'nada') . ')';
+        break;
+    }
+}
+$chk("master 023: cobro_sin_pago queda igual que en db/master_schema.sql{$distintoEx}", $deM023 !== [] && $distintoEx === '');
+$chk('master snapshot: cobro_sin_pago tiene por PK client_id y cuelga de tenants con ON DELETE CASCADE (la marca no es historial)',
+    tieneElemento($porNombreMaster['cobro_sin_pago'] ?? [], 'PRIMARY KEY (client_id)')
+    && tieneElemento($porNombreMaster['cobro_sin_pago'] ?? [], 'CONSTRAINT cobro_sin_pago_client_fk FOREIGN KEY (client_id) REFERENCES tenants (id) ON DELETE CASCADE'));
+$chk('verificador de la master: la fila 023 pide la tabla cobro_sin_pago',
+    preg_match("/SELECT '023', '023_cobro_sin_pago\.sql',\s*'[^']*',\s*"
+        . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'cobro_sin_pago'\) = 1/", (string) file_get_contents($rutaVerificadorMaster)) === 1);
+
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);
