@@ -391,6 +391,13 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   `tenants` con `ON DELETE CASCADE`; `tenants.id` es `int`) y `tools/verificar_migraciones_master.sql` la muestra `APLICADA`. Antes de
   aplicarla se comprobó en solo lectura que la tabla no existía, y el SQL del directorio y de quitar/devolver se probó contra el MySQL
   real con una tabla temporal de la sesión (sin crear nada). La tabla quedó vacía: ningún tenant marcado todavía.
+- **2026-11-18 · "no es un cliente" en vivo (solo lectura).** El usuario subió `cobroModel.php`, `cobroController.php` y `CobroReglas.php`
+  y, con su sesión de soporte en `app.fiscalpoint.com.do`, `GET /api/cobros-tenants/clientes` devolvió 200 con `excluido = false` y
+  `motivo_exclusion = null` en los 20 tenants (el `LEFT JOIN` a `cobro_excluidos` funciona contra la tabla real). La web (`fiscalo`
+  `f1f537c`, Vercel en verde) pide `?excluidos=1` (200), el menú de cada fila trae **No es cliente (quitar de la lista)** y el modal abre
+  y se cancela sin escribir. **No se marcó ningún tenant**: `cobro_excluidos` sigue vacía. La escritura (`PUT .../excluido`) no se probó
+  en vivo: su SQL se corrió contra el MySQL real en una tabla temporal de la sesión y el modelo contra SQLite; la primera marca real
+  que haga el usuario es su prueba en vivo (quedará en la bitácora como `EXCLUDE`, `tenant_id` 0).
 - El código está en `master` (commits `9732e85`, `3006c1e`, `386871a` y `d5990a7`). El despliegue al servidor **no es automático** (hosting
   compartido): se suben los archivos por cPanel, con las migraciones ya aplicadas.
 
