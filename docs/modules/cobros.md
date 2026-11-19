@@ -179,7 +179,9 @@ solo viene en uno abierto que aún no vence (0 = vence hoy).
 | Código | HTTP | Cuándo |
 |---|---|---|
 | `COBRO_DUPLICADO` | 409 | Ya hay un cobro de ese cliente en ese periodo (`data`: `cobro_id`, `estado`, `periodo`) |
-| `MIEMBRO_DE_GRUPO` | 409 | Solo en Cobros de tenants: la empresa es una hermana de un grupo y el cobro es el de su cabeza (`data`: `cabeza_id`, `cabeza_nombre`) |
+| `MIEMBRO_DE_GRUPO` | 409 | Solo en Cobros de tenants: la empresa es una hermana de un grupo y el cobro es el de su cabeza (`data`: `cabeza_id`, `cabeza_nombre`: la que se muestra) |
+| `NO_ES_DE_UN_GRUPO` | 409 | Solo en Cobros de tenants: se marcó "no paga" a una empresa que no está en un grupo de dos o más (se usa "No es cliente") |
+| `ULTIMA_QUE_PAGA` | 409 | Solo en Cobros de tenants: se marcó "no paga" a la última empresa del grupo que paga (se usa "No es cliente" para sacar el grupo) |
 | `COBRO_CANCELADO` | 409 | El cobro está cancelado: no admite pagos, cambios ni recordatorios |
 | `YA_PAGADO` | 409 | El cobro ya está pagado completo |
 | `TIENE_PAGOS` | 409 | No se cancela un cobro con pagos vigentes |
@@ -289,9 +291,9 @@ Decisiones:
 - **Quién se cobra y los grupos** (diseño: `docs/superpowers/specs/2026-11-19-cobros-tenants-facturables-design.md` del repo `fiscalo`;
   sin migración). La plataforma cobra por **unidad**: un tenant solo, o un **grupo** (`tenants.grupo_id`, migración master 008:
   empresas de un mismo cliente, que comparten un solo cobro mensual). La unidad de un grupo es su **cabeza**: el tenant cuyo `id` es el
-  `grupo_id` (`--grupo=self`); si esa fila ya no existe, la de menor id del grupo. El directorio trae **una fila por unidad**, con los
-  datos y el cobro mensual de la cabeza; las hermanas salen en `grupo.miembros` (id, nombre, rnc, tipo, ambiente) y no son filas
-  propias. Buscar por el nombre o el RNC de una hermana trae la fila de su grupo, y en la lista de cobros (`GET /api/cobros-tenants?query=`),
+  `grupo_id` (`--grupo=self`); si esa fila ya no existe, la de menor id del grupo. El directorio trae **una fila por unidad**, con el
+  cobro mensual y los saldos de la cabeza (y el nombre de la empresa que se muestra: ver "Quién paga dentro de un grupo"); las hermanas
+  salen en `grupo.miembros` (id, nombre, rnc, tipo, ambiente, `paga`, `motivo_sin_pago`) y no son filas propias. Buscar por el nombre o el RNC de una hermana trae la fila de su grupo, y en la lista de cobros (`GET /api/cobros-tenants?query=`),
   los cobros del grupo (que son los de su cabeza). `grupo` es `null` sin grupo (en un grupo de una sola
   empresa, `miembros` va vacío).
 
@@ -308,6 +310,29 @@ Decisiones:
   pagan: se marcan "no es un cliente". Una **hermana no tiene cobro propio**: configurar su cobro mensual, crearle un cobro o marcarla
   "no es un cliente" da 409 `MIEMBRO_DE_GRUPO` (con la cabeza en `data`: `cabeza_id`, `cabeza_nombre`); todo va en la cabeza, así un
   grupo no se cobra dos veces. Marcar a la cabeza oculta el grupo entero.
+- **Quién paga dentro de un grupo** (tabla `cobro_sin_pago`, master **023**; diseño:
+  `docs/superpowers/specs/2026-11-19-cobros-tenants-quien-paga-design.md` del repo `fiscalo`). Un grupo comparte UNA mensualidad, pero no
+  todas sus empresas la pagan: algunas solo certificaron (y después pasaron a producción, así que ni `tipo` ni `ambiente` dicen quién
+  paga). `PUT /api/cobros-tenants/clientes/{id}/paga` con `{ "paga": false, "motivo"?: "…" }` marca que una empresa **no paga**, y
+  `{ "paga": true }` la devuelve; responde `{ client_id, paga, motivo, repetido, anterior: { paga, motivo } }`. **Sin fila = paga**: nada
+  se rellena y todo sigue igual hasta que alguien marca. Reglas: solo una empresa de un grupo de **dos o más** (si no, 409
+  `NO_ES_DE_UN_GRUPO`: se usa "No es cliente"); no la última que queda pagando (409 `ULTIMA_QUE_PAGA`: se usa "No es cliente" para sacar
+  el grupo); repetir una marca no cambia nada (`repetido: true`, sin bitácora, y queda el motivo de la primera); decir que paga se
+  puede siempre (también a una empresa que ya no está en un grupo, para limpiar una marca vieja). Cada cambio deja `NO_PAGA` o `SI_PAGA`
+  en la bitácora (módulo `cobros-tenants`, `tenant_id` 0). No es lo mismo que "No es cliente": aquel saca una unidad entera de la lista;
+  este solo dice quién paga y se puede poner en la cabeza sin ocultar el grupo.
+  - **La empresa que se muestra** de una unidad es la cabeza si paga y, si no, la que paga de menor `id`: su nombre, RNC, `tipo`,
+    `ambiente`, `activo`, `edicion` y correo (el del admin de esa empresa, o el de la cabeza, o el de cualquiera del grupo; este respaldo del correo también vale en un grupo
+    sin marcas, donde antes salía vacío) salen en el
+    directorio, la lista de cobros, el panel, el dashboard, los recordatorios y el aviso de `MIEMBRO_DE_GRUPO`, definidos una sola vez en
+    `ORIGEN_TENANTS`. **El cobro y el cobro mensual siguen en la cabeza** (no se mueve nada) y `data.cabeza_id` del 409 es su id.
+  - **Marcas que no aplican se ignoran:** una marca solo cuenta mientras la empresa esté en un grupo de dos o más y quede alguna sin
+    marcar; si no (una empresa que salió de su grupo, la última que pagaba se borró), todas cuentan como que pagan y se muestra la cabeza,
+    así no hay un nombre en blanco ni un grupo que deje de cobrarse por accidente.
+  - **Se cobra** si alguna empresa **que paga** es de base propia o de integración en producción (además del cobro mensual activo y los
+    cobros abiertos de siempre). El item del directorio trae en `grupo`: `cabeza_id`, `cabeza_nombre`, `cabeza_rnc`, `cabeza_paga`,
+    `cabeza_motivo_sin_pago` y `miembros` (cada uno con `paga` y `motivo_sin_pago`). La búsqueda usa el nombre y el RNC **propios** de
+    cada empresa (la cabeza que no paga sigue encontrando a su grupo).
 - **Quién no es cliente** (tabla `cobro_excluidos`, master **022**). No todos los tenants son clientes: varios se crearon solo para
   certificar a una empresa (tipo `integracion`, en certificación) o son de prueba. **Borrarlos no se puede ni se debe**: cada uno guarda
   sus e-CF (`ecf_integracion_backup`: 50 a 275 por tenant el 2026-11-18, y no tienen base propia, así que es la única copia), su bitácora y
@@ -333,7 +358,7 @@ El orden importa (regla del proyecto: **las migraciones de tenant van primero**)
 
 **Cobros de tenants** (la pantalla de soporte no funciona sin esto; las empresas siguen igual sin ello):
 
-5. `tools/verificar_migraciones_master.sql` en la base master (filas `021` y `022`).
+5. `tools/verificar_migraciones_master.sql` en la base master (filas `021`, `022` y `023`).
 6. `db/master_migrations/021_cobros_tenants.sql` en la base **master**, una vez (idempotente). Va **antes** de subir el código:
    sin sus cuatro tablas, `/api/cobros-tenants` responde 500.
 7. Subir el código de la API (`cobroController.php`, `cobroModel.php`, `CobroReglas.php`, `Router.php`, `config/permissions.php`; y
@@ -341,6 +366,10 @@ El orden importa (regla del proyecto: **las migraciones de tenant van primero**)
 8. `db/master_migrations/022_cobro_excluidos.sql` en la base **master**, una vez (idempotente), **antes** de subir el código que trae
    "no es un cliente": el directorio consulta `cobro_excluidos` y sin la tabla responde 500. Solo cambian `cobroModel.php`,
    `cobroController.php` y `CobroReglas.php`.
+9. `db/master_migrations/023_cobro_sin_pago.sql` en la base **master**, una vez (idempotente), **antes** de subir el código que trae "quién
+   paga": **cada** consulta de Cobros de tenants lee `cobro_sin_pago` (la define `ORIGEN_TENANTS`), y sin la tabla todo el módulo
+   responde 500. Después, `tools/verificar_migraciones_master.sql` (fila `023`). Solo cambian `cobroModel.php`, `cobroController.php` y
+   `CobroReglas.php`; la web va después de la API (sus campos nuevos son obligatorios).
 
 Registro de aplicación en producción: ver el final de este archivo.
 

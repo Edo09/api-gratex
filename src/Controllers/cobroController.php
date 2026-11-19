@@ -46,7 +46,8 @@ require_once(__DIR__ . '/../AccesoGlobal.php');
  *                          respuestas, mas GET /api/cobros-tenants/clientes?query=&limite= (el directorio de tenants, con su
  *                          cobro mensual y lo que deben, una fila por unidad de cobro (un grupo es la fila de su cabeza);
  *                          ?excluidos=1 trae tambien las unidades que no se cobran) y
- *                          PUT /api/cobros-tenants/clientes/{id}/excluido (quitar un tenant de la lista de clientes, o devolverlo).
+ *                          PUT /api/cobros-tenants/clientes/{id}/excluido (quitar un tenant de la lista de clientes, o devolverlo) y
+ *                          PUT /api/cobros-tenants/clientes/{id}/paga (marcar que una empresa de un grupo paga o no la mensualidad).
  *
  * El modulo se exige SIEMPRE, aunque PERMISSIONS_ENFORCE este en modo sombra (como
  * posAdminController): son cuentas por cobrar de la empresa, con datos de contacto de sus
@@ -294,6 +295,36 @@ try {
                     'description' => $r[1]['excluido']
                         ? 'El tenant ' . $ruta['client_id'] . ' deja de ser un cliente al que se le cobra.'
                         : 'El tenant ' . $ruta['client_id'] . ' vuelve a la lista de clientes.',
+                ]);
+            }
+            cobrosResponder($r[1]);
+            break;
+
+        case 'quien_paga':
+            // Marcar que una empresa de un grupo paga la mensualidad del grupo, o que no (solo certifico): solo en la plataforma.
+            // No borra nada; marcar exige un grupo de dos o mas y que quede otra que pague (409).
+            if (!$ambitoTenants) {
+                cobrosResponderError(['error', CobroReglas::MSG_RUTA, 404]);
+                break;
+            }
+            $v = CobroReglas::validarPaga($body);
+            if ($v[0] !== 'success') {
+                cobrosResponderError($v);
+                break;
+            }
+            $r = $modelo->marcarPago($ruta['client_id'], $v[1]['paga'], $v[1]['motivo'], $usuarioId);
+            if ($r[0] !== 'success') {
+                cobrosResponderError($r);
+                break;
+            }
+            if (!$r[1]['repetido']) {
+                cobrosAuditar([
+                    'action' => $r[1]['paga'] ? 'SI_PAGA' : 'NO_PAGA',
+                    'entity_type' => 'tenant', 'entity_id' => $ruta['client_id'],
+                    'old_values' => $r[1]['anterior'], 'new_values' => ['paga' => $r[1]['paga'], 'motivo' => $r[1]['motivo']],
+                    'description' => $r[1]['paga']
+                        ? 'La empresa ' . $ruta['client_id'] . ' vuelve a pagar la mensualidad.'
+                        : 'La empresa ' . $ruta['client_id'] . ' deja de pagar la mensualidad (solo certificó).',
                 ]);
             }
             cobrosResponder($r[1]);

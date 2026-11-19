@@ -70,6 +70,8 @@ foreach ([
     ['GET', '/api/facturas', 'desconocida', null, null, null], ['get', '/index.php/api/cobros-tenants/clientes/', 'buscar', null, null, null],
     ['PUT', '/api/cobros-tenants/clientes/7/excluido', 'excluir', null, null, 7], ['GET', '/api/cobros-tenants/clientes/7/excluido', 'metodo', null, null, 7],
     ['PUT', '/api/cobros-tenants/clientes/abc/excluido', 'desconocida', null, null, null], ['PUT', '/api/cobros-tenants/clientes/0/excluido', 'desconocida', null, null, null],
+    ['PUT', '/api/cobros-tenants/clientes/7/paga', 'quien_paga', null, null, 7], ['GET', '/api/cobros-tenants/clientes/7/paga', 'metodo', null, null, 7],
+    ['PUT', '/api/cobros-tenants/clientes/abc/paga', 'desconocida', null, null, null], ['PUT', '/api/cobros-tenants/clientes/0/paga', 'desconocida', null, null, null],
 ] as [$m, $path, $accion, $id, $pagoId, $clientId]) {
     $ruta = CobroReglas::ruta($m, $path, 'cobros-tenants');
     wa_chk("ruta de la plataforma {$m} {$path} -> {$accion}", $ruta === ['accion' => $accion, 'id' => $id, 'pago_id' => $pagoId, 'client_id' => $clientId], $ruta);
@@ -100,6 +102,24 @@ wa_chk('sin "excluido", con null o con algo que no es un booleano: 422 con el te
 wa_chk('el motivo de 151 caracteres es 422 con su texto; el de 150 pasa, tambien con tildes',
     $ex(['excluido' => true, 'motivo' => str_repeat('a', 151)])[1] === CobroReglas::MSG_MOTIVO_EXCLUSION && $ex(['excluido' => true, 'motivo' => str_repeat('a', 151)])[2] === 422
     && $ex(['excluido' => true, 'motivo' => str_repeat('a', 150)])[0] === 'success' && $ex(['excluido' => true, 'motivo' => str_repeat('á', 150)])[0] === 'success');
+
+// El cuerpo de PUT .../clientes/{id}/paga: `paga` es obligatorio y booleano; el motivo, opcional, de hasta 150 caracteres y solo se guarda al marcar que NO paga.
+echo "\n== Parte 1: el cuerpo de paga ==\n";
+$pg = static fn(array $a): array => CobroReglas::validarPaga($cuerpo($a));
+wa_chk('paga: false con motivo (recortado); true no guarda el motivo; sin motivo o con uno vacio queda null',
+    $pg(['paga' => false, 'motivo' => '  Solo certifico ']) === ['success', ['paga' => false, 'motivo' => 'Solo certifico']]
+    && $pg(['paga' => true, 'motivo' => 'x']) === ['success', ['paga' => true, 'motivo' => null]]
+    && $pg(['paga' => false]) === ['success', ['paga' => false, 'motivo' => null]]
+    && $pg(['paga' => false, 'motivo' => ''])[1]['motivo'] === null);
+wa_chk('paga acepta el booleano como texto o numero (igual que excluido): "si", 1 y true; "no", 0 y "0"',
+    array_map(fn($v) => $pg(['paga' => $v])[1]['paga'] ?? 'error', [true, 'si', 1, '1', false, 'no', 0, '0'])
+    === [true, true, true, true, false, false, false, false]);
+wa_chk('sin "paga", con null o con algo que no es un booleano: 422 con el texto que lo explica (MSG_PAGA)',
+    $pg([])[0] === 'error' && $pg([])[1] === CobroReglas::MSG_PAGA && $pg([])[2] === 422 && $pg(['paga' => null])[1] === CobroReglas::MSG_PAGA
+    && $pg(['paga' => 'quizas'])[1] === CobroReglas::MSG_PAGA && $pg(['paga' => [false]])[2] === 422);
+wa_chk('el motivo de 151 caracteres es 422 con MSG_MOTIVO_SIN_PAGO; el de 150 pasa, tambien con tildes',
+    $pg(['paga' => false, 'motivo' => str_repeat('a', 151)])[1] === CobroReglas::MSG_MOTIVO_SIN_PAGO && $pg(['paga' => false, 'motivo' => str_repeat('a', 151)])[2] === 422
+    && $pg(['paga' => false, 'motivo' => str_repeat('a', 150)])[0] === 'success' && $pg(['paga' => false, 'motivo' => str_repeat('á', 150)])[0] === 'success');
 
 // ===========================================================================
 // Parte 2 — El cableado
@@ -163,6 +183,12 @@ wa_chk('quitar de la lista de clientes (accion excluir) solo existe en la plataf
     $trozoExcluir !== '' && str_contains($trozoExcluir, 'if (!$ambitoTenants) {') && str_contains($trozoExcluir, 'CobroReglas::MSG_RUTA, 404')
     && str_contains($trozoExcluir, 'CobroReglas::validarExclusion($body)') && str_contains($trozoExcluir, '$modelo->excluirCliente(')
     && str_contains($trozoExcluir, "'EXCLUDE'") && str_contains($trozoExcluir, "'INCLUDE'") && str_contains($trozoExcluir, 'if (!$r[1][\'repetido\'])'));
+$iPaga = strpos($c, "case 'quien_paga':");
+$trozoPaga = $iPaga === false ? '' : substr($c, $iPaga, 1800);
+wa_chk('marcar quien paga (accion quien_paga) solo existe en la plataforma (en una empresa es 404), valida el cuerpo, llama al modelo y deja NO_PAGA/SI_PAGA en la bitacora solo si no es una repeticion',
+    $trozoPaga !== '' && str_contains($trozoPaga, 'if (!$ambitoTenants) {') && str_contains($trozoPaga, 'CobroReglas::MSG_RUTA, 404')
+    && str_contains($trozoPaga, 'CobroReglas::validarPaga($body)') && str_contains($trozoPaga, '$modelo->marcarPago(')
+    && str_contains($trozoPaga, "'NO_PAGA'") && str_contains($trozoPaga, "'SI_PAGA'") && str_contains($trozoPaga, 'if (!$r[1][\'repetido\'])'));
 wa_chk("el directorio acepta ?excluidos=1 para traer tambien a los que no son clientes (por defecto no salen)",
     str_contains($c, "in_array(\$_GET['excluidos'] ?? '', ['1', 'true'], true)"));
 wa_chk('el buscador de tenants (accion buscar) solo responde en la plataforma: en una empresa es 404',
