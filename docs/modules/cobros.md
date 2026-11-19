@@ -302,7 +302,7 @@ Decisiones:
   | está marcada "no es un cliente" (`cobro_excluidos`) | No: `motivo_oculto = "excluido"` (la marca gana) |
   | es de base propia (`app`), o alguna empresa de su grupo lo es | Sí |
   | es de `integracion` en `ecf` (producción), o alguna empresa de su grupo lo está | Sí |
-  | es de integración en certificación (`certecf`/`testecf`) **con su cobro mensual activo** | Sí: el cobro mensual activo es la decisión de cobrarle (así se trata a Agrovisa) |
+  | es de integración en certificación (`certecf`/`testecf`) **con su cobro mensual activo** | Sí: el cobro mensual activo es la decisión de cobrarle (así se trata a una empresa que sigue certificando pero ya paga su mensualidad) |
   | es de integración en certificación, sin cobro mensual activo, pero **con cobros abiertos** (le deben plata) | Sí, mientras los deba: quien debe no desaparece de la lista (igual que la marca se niega con `TIENE_COBROS_ABIERTOS`); al cobrarse o cancelarse lo último, vuelve a ocultarse |
   | es de integración en certificación, sin cobro mensual activo y sin cobros abiertos | No: `motivo_oculto = "solo_certificacion"`; entra sola al pasar a `ecf`, o al activarle su cobro mensual |
 
@@ -462,12 +462,12 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
 - **2026-11-19 · Cobros de tenants por unidad (quién se cobra y los grupos) en producción.** API `f8f2f2d` en `master` (CI `express-api` php83 en
   verde); el dueño subió `src/Models/cobroModel.php` por cPanel; web `d648dc6` (Vercel en verde). **Sin migración.** Antes de empezar, con una
   lectura en solo lectura de la master real y el modelo nuevo: se cobran los tenants 1, 2, 5, 6, 9, 17, 18 y 20, los 8 de solo certificación
-  (3, 4, 8, 10, 11, 12, 16 y 21) quedan ocultos, el grupo 6 sale como una fila (la cabeza, 6, con 13, 14, 15 y 19 adentro) y Agrovisa (18) se
+  (3, 4, 8, 10, 11, 12, 16 y 21) quedan ocultos, el grupo 6 sale como una fila (la cabeza, 6, con 13, 14, 15 y 19 adentro) y el tenant 18 se
   cobra por su cobro mensual activo.
 - **2026-11-19 · borrada la configuración de cobro mensual sobrante de dos hermanas del grupo 6.** Los tenants 14 y 15 tenían cada uno un cobro
   mensual (500.00, día 15, activo) creado ese día desde la pantalla, antes de que el sistema cobrara por grupo; ninguno tenía cobros. Con el go del
   dueño se borraron esas dos filas de `cobro_config` en una transacción (2 filas, comprobadas antes y después): `cobro_config` pasó de 7 a 5 filas
   (tenants 2, 9, 17, 18 y 20), y `cobros` y `tenants` quedaron igual; el respaldo, con su `INSERT` para deshacerlo, quedó en el scratchpad de la
-  sesión. El grupo 6 queda **sin cobro mensual**: su monto lo pone el dueño en la fila de la cabeza (Public Sound, tenant 6). Pendiente: marcar
+  sesión. El grupo 6 queda **sin cobro mensual**: su monto lo pone el dueño en la fila de la cabeza (la cabeza, tenant 6). Pendiente: marcar
   Gratex (1) y Demo Fiscalo (5) como "No es cliente".
 

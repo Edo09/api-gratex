@@ -245,7 +245,7 @@ function cobros_tenants_sembrar(PDO $pdo): void
 
 /**
  * Trece tenants para la Parte 4 (quien se cobra y los grupos): 10 es cabeza de un grupo con dos hermanas (11 en produccion, 12 en
- * certificacion); 13 solo certifico; 14 es la cabeza de un grupo que solo esta en certificacion (como Agrovisa) con la hermana 15;
+ * certificacion); 13 solo certifico; 14 es la cabeza de un grupo que solo esta en certificacion (con su cobro mensual activo) con la hermana 15;
  * 16 es de base propia; 17 certifica y tendra el cobro mensual apagado; 18 es interna (se marca); 19 y 20 son de un grupo cuya cabeza
  * (99) ya no existe; 22 es cabeza en certificacion con una hermana (23) en produccion.
  */
