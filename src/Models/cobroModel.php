@@ -183,9 +183,10 @@ class cobroModel
      *
      * Solo salen las unidades que se COBRAN ($conExcluidos = false). Con $conExcluidos salen todas, cada una con `facturable` y,
      * si no se cobra, `motivo_oculto`: `excluido` (la plataforma la marco "no es un cliente", cobro_excluidos; la marca gana) o
-     * `solo_certificacion`. Se cobra la unidad que no esta marcada y (tiene su cobro mensual ACTIVO, o alguna de sus empresas es
-     * de base propia, o es de integracion en produccion `ecf`). Una de integracion que sigue en certificacion no se cobra hasta
-     * que pasa a produccion o alguien le activa su cobro mensual. `excluido` y `motivo_exclusion` dicen solo de la marca.
+     * `solo_certificacion`. Se cobra la unidad que no esta marcada y (tiene su cobro mensual ACTIVO, o le deben plata (cobros
+     * abiertos), o alguna de sus empresas es de base propia, o es de integracion en produccion `ecf`). Una de integracion que sigue
+     * en certificacion no se cobra hasta que pasa a produccion o alguien le activa su cobro mensual (o le crea un cobro, y mientras
+     * lo deba). `excluido` y `motivo_exclusion` dicen solo de la marca.
      *
      * @return list<array<string,mixed>>
      */
@@ -205,9 +206,11 @@ class cobroModel
                 . " h WHERE h.cabeza_id = cl.id AND (h.client_name LIKE :q3 ESCAPE '!' OR h.rnc LIKE :q4 ESCAPE '!')))";
             $params = [':q1' => $like, ':q2' => $like, ':q3' => $like, ':q4' => $like];
         }
-        // Se cobra: sin marca de "no es un cliente" y (cobro mensual activo, o alguna empresa de base propia o de integracion en
-        // produccion). Solo cuenta el cobro mensual de la cabeza: el que sobre en una hermana no hace a nadie cliente.
-        $facturable = "(ex.client_id IS NULL AND (COALESCE(cc.activo, 0) = 1 OR EXISTS (SELECT 1 FROM " . $this->origen
+        // Se cobra: sin marca de "no es un cliente" y (cobro mensual activo, o plata por cobrar, o alguna empresa de base propia o de
+        // integracion en produccion). Quien debe plata no desaparece de la lista aunque se apague su cobro mensual (igual que la marca
+        // se niega a quitar a quien tiene cobros abiertos). Solo cuenta el cobro mensual de la cabeza: el que sobre en una hermana
+        // no hace a nadie cliente.
+        $facturable = "(ex.client_id IS NULL AND (COALESCE(cc.activo, 0) = 1 OR COALESCE(ab.abiertos, 0) > 0 OR EXISTS (SELECT 1 FROM " . $this->origen
             . " m WHERE m.cabeza_id = cl.id AND (m.tipo = 'app' OR (m.tipo = 'integracion' AND m.ambiente = 'ecf')))))";
         $donde = '(' . $donde . ') AND cl.id = cl.cabeza_id';
         if (!$conExcluidos) {

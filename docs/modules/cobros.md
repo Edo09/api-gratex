@@ -300,7 +300,8 @@ Decisiones:
   | es de base propia (`app`), o alguna empresa de su grupo lo es | Sí |
   | es de `integracion` en `ecf` (producción), o alguna empresa de su grupo lo está | Sí |
   | es de integración en certificación (`certecf`/`testecf`) **con su cobro mensual activo** | Sí: el cobro mensual activo es la decisión de cobrarle (así se trata a Agrovisa) |
-  | es de integración en certificación y sin cobro mensual activo | No: `motivo_oculto = "solo_certificacion"`; entra sola al pasar a `ecf`, o al activarle su cobro mensual |
+  | es de integración en certificación, sin cobro mensual activo, pero **con cobros abiertos** (le deben plata) | Sí, mientras los deba: quien debe no desaparece de la lista (igual que la marca se niega con `TIENE_COBROS_ABIERTOS`); al cobrarse o cancelarse lo último, vuelve a ocultarse |
+  | es de integración en certificación, sin cobro mensual activo y sin cobros abiertos | No: `motivo_oculto = "solo_certificacion"`; entra sola al pasar a `ecf`, o al activarle su cobro mensual |
 
   Solo cuenta el cobro mensual **de la cabeza**: el que sobre en una hermana ni la hace cliente ni se muestra. Gratex y Demo Fiscalo no
   pagan: se marcan "no es un cliente". Una **hermana no tiene cobro propio**: configurar su cobro mensual, crearle un cobro o marcarla

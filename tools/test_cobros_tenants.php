@@ -720,6 +720,21 @@ wa_chk('nada se escribio con esas cinco peticiones rechazadas: mismas configurac
     (int) $pdoG->query('SELECT COUNT(*) FROM cobro_config')->fetchColumn() === $antesConfig && (int) $pdoG->query('SELECT COUNT(*) FROM cobros')->fetchColumn() === $antesCobros);
 wa_chk('la cabeza (10) si puede tener su cobro mensual y su cobro', $exito($mg->guardarConfig(10, $cfg(60000, 15), 7)) && $exito($mg->crear($nuevo(10, '2027-03'), 7)));
 
+echo "\n== Parte 4: quien debe plata no desaparece de la lista ==\n";
+$enLista = static fn(int $id): ?array => array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO), null, 'id')[$id] ?? null;
+$c14 = $mg->crear($nuevo(14, '2027-04'), 7);
+$mg->guardarConfig(14, $cfg(150000, 15, null, false), 7);
+wa_chk('Agro (certecf) con un cobro abierto de 1,500 SIGUE en la lista aunque se apague su cobro mensual: facturable y sin motivo_oculto (alguien que debe no desaparece)',
+    $exito($c14) && $enLista(14) !== null && $enLista(14)['facturable'] === true && $enLista(14)['motivo_oculto'] === null && $enLista(14)['saldo_pendiente'] === 1500.0, $enLista(14));
+$mg->cancelar($c14[1]['id'], 'prueba', 7);
+wa_chk('...y cuando ya no debe nada (cobro cancelado) y su cobro mensual sigue apagado, vuelve a "solo_certificacion" y sale de la lista', $enLista(14) === null
+    && array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[14]['motivo_oculto'] === 'solo_certificacion');
+$c17 = $mg->crear($nuevo(17, '2027-04', '2027-04-15', 20000), 7);
+wa_chk('una de certificacion que nunca tuvo cobro mensual activo (17) a la que se le creo un cobro de 200 tambien se queda en la lista mientras lo deba',
+    $exito($c17) && $enLista(17) !== null && $enLista(17)['facturable'] === true && $enLista(17)['saldo_pendiente'] === 200.0, $enLista(17));
+$mg->cancelar($c17[1]['id'], 'prueba', 7);
+wa_chk('...y al cancelarse sale otra vez', $enLista(17) === null);
+
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {
     if (!is_dir($carpetaFixtures)) {
