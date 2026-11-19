@@ -44,7 +44,8 @@ require_once(__DIR__ . '/../AccesoGlobal.php');
  *   - /api/cobros-tenants  la PLATAFORMA cobra a sus tenants, en la base master; exige que el usuario tenga acceso
  *                          global (master.users.acceso_global = 1: soporte). Mismas rutas, mismas reglas, mismas
  *                          respuestas, mas GET /api/cobros-tenants/clientes?query=&limite= (el directorio de tenants, con su
- *                          cobro mensual y lo que deben; ?excluidos=1 trae tambien a los que no son clientes) y
+ *                          cobro mensual y lo que deben, una fila por unidad de cobro (un grupo es la fila de su cabeza);
+ *                          ?excluidos=1 trae tambien las unidades que no se cobran) y
  *                          PUT /api/cobros-tenants/clientes/{id}/excluido (quitar un tenant de la lista de clientes, o devolverlo).
  *
  * El modulo se exige SIEMPRE, aunque PERMISSIONS_ENFORCE este en modo sombra (como

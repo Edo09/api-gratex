@@ -705,6 +705,21 @@ wa_chk('marcar a la cabeza de un grupo (22) lo oculta entero: sale de la lista, 
     && array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[22]['motivo_oculto'] === 'excluido', $r);
 wa_chk('...y devolverla la regresa con su grupo', $exito($mg->excluirCliente(22, false, null, 7)) && in_array(22, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO)), true));
 
+echo "\n== Parte 4: una empresa de un grupo no tiene cobro propio ==\n";
+$antesConfig = (int) $pdoG->query('SELECT COUNT(*) FROM cobro_config')->fetchColumn();
+$antesCobros = (int) $pdoG->query('SELECT COUNT(*) FROM cobros')->fetchColumn();
+$rc = $mg->crear($nuevo(12, '2027-03'), 7);
+wa_chk('configurar el cobro mensual de una hermana (11; y 15, la hermana de Agro) se rechaza: 409 MIEMBRO_DE_GRUPO',
+    $falla($mg->guardarConfig(11, $cfg(10000, 5), 7), 409, 'MIEMBRO_DE_GRUPO') && $falla($mg->guardarConfig(15, $cfg(10000, 5), 7), 409, 'MIEMBRO_DE_GRUPO'));
+wa_chk('crear un cobro a nombre de una hermana (12) tambien: 409, con la cabeza (10, Holding Cabeza SRL) en data y en el texto',
+    $falla($rc, 409, 'MIEMBRO_DE_GRUPO') && ($rc[4] ?? null) === ['cabeza_id' => 10, 'cabeza_nombre' => 'Holding Cabeza SRL'] && str_contains((string) $rc[1], 'Holding Cabeza SRL'), $rc);
+wa_chk('...y marcar a una hermana (11) "no es un cliente" tambien: la marca va en la cabeza', $falla($mg->excluirCliente(11, true, null, 7), 409, 'MIEMBRO_DE_GRUPO'));
+$rg = $mg->guardarConfig(20, $cfg(10000, 5), 7);
+wa_chk('si la cabeza ya no existe, la que se nombra es la de menor id: la hermana 20 apunta a la 19', $falla($rg, 409, 'MIEMBRO_DE_GRUPO') && ($rg[4]['cabeza_id'] ?? null) === 19, $rg);
+wa_chk('nada se escribio con esas cinco peticiones rechazadas: mismas configuraciones y mismos cobros',
+    (int) $pdoG->query('SELECT COUNT(*) FROM cobro_config')->fetchColumn() === $antesConfig && (int) $pdoG->query('SELECT COUNT(*) FROM cobros')->fetchColumn() === $antesCobros);
+wa_chk('la cabeza (10) si puede tener su cobro mensual y su cobro', $exito($mg->guardarConfig(10, $cfg(60000, 15), 7)) && $exito($mg->crear($nuevo(10, '2027-03'), 7)));
+
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {
     if (!is_dir($carpetaFixtures)) {

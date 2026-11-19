@@ -138,6 +138,33 @@ class cobroModel
     }
 
     /**
+     * Si el tenant es una hermana de un grupo (no la cabeza), la cabeza que cobra por el grupo: ['id' => int, 'nombre' => string];
+     * null si es la cabeza, no tiene grupo, no existe, o en el ambito de una empresa (alli no hay grupos).
+     */
+    private function cabezaDeGrupo(int $clientId): ?array
+    {
+        if ($this->ambito !== self::AMBITO_TENANTS) {
+            return null;
+        }
+        $s = $this->db->prepare(
+            'SELECT h.id AS id, h.client_name AS nombre FROM ' . $this->origen . ' cl JOIN ' . $this->origen
+            . ' h ON h.id = cl.cabeza_id WHERE cl.id = :id AND cl.cabeza_id <> cl.id'
+        );
+        $s->execute([':id' => $clientId]);
+        $f = $s->fetch();
+        return $f ? ['id' => (int) $f['id'], 'nombre' => (string) $f['nombre']] : null;
+    }
+
+    /** El rechazo de cobrarle por separado a una hermana de un grupo: el cobro del grupo es el de su cabeza. */
+    private static function errMiembroDeGrupo(array $cabeza): array
+    {
+        return self::err(
+            'Esta empresa es parte del grupo de ' . $cabeza['nombre'] . ': el cobro del grupo se maneja en ' . $cabeza['nombre'] . '.',
+            409, 'MIEMBRO_DE_GRUPO', ['cabeza_id' => $cabeza['id'], 'cabeza_nombre' => $cabeza['nombre']]
+        );
+    }
+
+    /**
      * El DIRECTORIO de clientes de la plataforma: los tenants, con lo que hace falta para elegirlos y para ver como van
      * con su cobro. Solo existe en el ambito de tenants (en el de una empresa el buscador es el de Clientes de siempre):
      * ahi devuelve [] . Busca por nombre o RNC; los activos primero y, dentro, por nombre. Lo usan el buscador de los
@@ -274,6 +301,9 @@ class cobroModel
             if ($this->cliente($clientId) === null) {
                 return self::err(CobroReglas::MSG_CLIENTE_NO_EXISTE, 404);
             }
+            if (($cabeza = $this->cabezaDeGrupo($clientId)) !== null) {
+                return self::errMiembroDeGrupo($cabeza);
+            }
             // Lo de antes, SIN bloqueo (la fila puede no existir: un bloqueo de hueco entre dos sesiones daria deadlock). El
             // INSERT y el DELETE de abajo son atomicos por si mismos y su rowCount dice si de verdad cambiaron algo.
             $s = $this->db->prepare('SELECT motivo FROM cobro_excluidos WHERE client_id = :cid');
@@ -332,6 +362,9 @@ class cobroModel
         return $this->protegido(function () use ($clientId, $c, $userId): array {
             if ($this->cliente($clientId) === null) {
                 return self::err(CobroReglas::MSG_CLIENTE_NO_EXISTE, 404);
+            }
+            if (($cabeza = $this->cabezaDeGrupo($clientId)) !== null) {
+                return self::errMiembroDeGrupo($cabeza);
             }
             // Lo de antes, SIN bloqueo: solo es el old_values de la bitacora. No se bloquea (SELECT ...
             // FOR UPDATE) porque la fila puede no existir todavia: en InnoDB eso toma un bloqueo de
@@ -766,6 +799,9 @@ class cobroModel
             $clientId = (int) $d['client_id'];
             if ($this->cliente($clientId) === null) {
                 return self::err(CobroReglas::MSG_CLIENTE_NO_EXISTE, 404);
+            }
+            if (($cabeza = $this->cabezaDeGrupo($clientId)) !== null) {
+                return self::errMiembroDeGrupo($cabeza);
             }
             $config = $this->configInterna($clientId);
             $hoy = $this->hoy();

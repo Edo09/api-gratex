@@ -179,6 +179,7 @@ solo viene en uno abierto que aún no vence (0 = vence hoy).
 | Código | HTTP | Cuándo |
 |---|---|---|
 | `COBRO_DUPLICADO` | 409 | Ya hay un cobro de ese cliente en ese periodo (`data`: `cobro_id`, `estado`, `periodo`) |
+| `MIEMBRO_DE_GRUPO` | 409 | Solo en Cobros de tenants: la empresa es una hermana de un grupo y el cobro es el de su cabeza (`data`: `cabeza_id`, `cabeza_nombre`) |
 | `COBRO_CANCELADO` | 409 | El cobro está cancelado: no admite pagos, cambios ni recordatorios |
 | `YA_PAGADO` | 409 | El cobro ya está pagado completo |
 | `TIENE_PAGOS` | 409 | No se cancela un cobro con pagos vigentes |
@@ -275,15 +276,36 @@ Decisiones:
 - **La bitácora no se mezcla.** Los eventos de la plataforma van con `tenant_id = 0` y módulo `cobros-tenants`: la bitácora de cada
   empresa lista solo su `tenant_id`, así que ninguna ve lo que la plataforma le cobra a otra (la sesión de soporte puede estar dentro
   de *cualquier* empresa cuando cobra). `AuditLogger` respeta un `tenant_id` explícito, y 0 no cae en el de la sesión.
-- **Un tenant se cobra aunque esté inactivo o sea de integración**: la deuda no se va con la baja.
-- **El directorio de tenants** (`GET /api/cobros-tenants/clientes?query=&limite=`, hasta 500 por respuesta) trae a todos, los activos
-  primero y por nombre. Cada uno trae lo de un cliente (nombre, RNC, correo de su primer admin), qué es (`tipo`, `ambiente`, `activo`),
+- **Un tenant que se cobra se cobra aunque esté inactivo**: la deuda no se va con la baja.
+- **El directorio de tenants** (`GET /api/cobros-tenants/clientes?query=&limite=`, hasta 500 por respuesta) trae las **unidades que se
+  cobran** (ver "Quién se cobra y los grupos"), los activos primero y por nombre. Cada una trae lo de un cliente (nombre, RNC, correo de su primer admin), qué es (`tipo`, `ambiente`, `activo`),
   su cobro mensual (`config`, `null` si no tiene; `con_config` lo resume) y lo que debe: `saldo_pendiente`, `saldo_vencido`,
   `cobros_abiertos`, `cobros_vencidos`, `dias_atraso` (del más viejo) y `proximo_vencimiento` (hoy cuenta como "aún no vence"). Un cobro
   pagado o cancelado no suma, igual que en el dashboard: la suma del directorio cuadra con él (lo prueba `tools/test_cobros_tenants.php`).
   Lo usan el buscador de los formularios y la pestaña *Clientes* de la pantalla, que es lo que se ve al entrar: sin ella, quien cobra no
-  veía a sus tenants hasta que tenían un cobro. Los que **no son clientes** (ver el punto siguiente) no salen, salvo con `?excluidos=1`
-  (la pestaña lo pide para poder mostrarlos y devolverlos); cada item dice `excluido` y, si lo está, su `motivo_exclusion`.
+  veía a sus tenants hasta que tenían un cobro. Las que **no se cobran** no salen, salvo con `?excluidos=1` (la pestaña lo pide para poder
+  mostrarlas y devolverlas): ahora significa "también las unidades que no se cobran". Cada item dice `facturable`, `motivo_oculto`, `grupo`,
+  `excluido` (solo la marca) y, si está marcada, su `motivo_exclusion`.
+- **Quién se cobra y los grupos** (diseño: `docs/superpowers/specs/2026-11-19-cobros-tenants-facturables-design.md` del repo `fiscalo`;
+  sin migración). La plataforma cobra por **unidad**: un tenant solo, o un **grupo** (`tenants.grupo_id`, migración master 008:
+  empresas de un mismo cliente, que comparten un solo cobro mensual). La unidad de un grupo es su **cabeza**: el tenant cuyo `id` es el
+  `grupo_id` (`--grupo=self`); si esa fila ya no existe, la de menor id del grupo. El directorio trae **una fila por unidad**, con los
+  datos y el cobro mensual de la cabeza; las hermanas salen en `grupo.miembros` (id, nombre, rnc, tipo, ambiente) y no son filas
+  propias. Buscar por el nombre o el RNC de una hermana trae la fila de su grupo. `grupo` es `null` sin grupo (en un grupo de una sola
+  empresa, `miembros` va vacío).
+
+  | La unidad… | ¿Se cobra? |
+  |---|---|
+  | está marcada "no es un cliente" (`cobro_excluidos`) | No: `motivo_oculto = "excluido"` (la marca gana) |
+  | es de base propia (`app`), o alguna empresa de su grupo lo es | Sí |
+  | es de `integracion` en `ecf` (producción), o alguna empresa de su grupo lo está | Sí |
+  | es de integración en certificación (`certecf`/`testecf`) **con su cobro mensual activo** | Sí: el cobro mensual activo es la decisión de cobrarle (así se trata a Agrovisa) |
+  | es de integración en certificación y sin cobro mensual activo | No: `motivo_oculto = "solo_certificacion"`; entra sola al pasar a `ecf`, o al activarle su cobro mensual |
+
+  Solo cuenta el cobro mensual **de la cabeza**: el que sobre en una hermana ni la hace cliente ni se muestra. Gratex y Demo Fiscalo no
+  pagan: se marcan "no es un cliente". Una **hermana no tiene cobro propio**: configurar su cobro mensual, crearle un cobro o marcarla
+  "no es un cliente" da 409 `MIEMBRO_DE_GRUPO` (con la cabeza en `data`: `cabeza_id`, `cabeza_nombre`); todo va en la cabeza, así un
+  grupo no se cobra dos veces. Marcar a la cabeza oculta el grupo entero.
 - **Quién no es cliente** (tabla `cobro_excluidos`, master **022**). No todos los tenants son clientes: varios se crearon solo para
   certificar a una empresa (tipo `integracion`, en certificación) o son de prueba. **Borrarlos no se puede ni se debe**: cada uno guarda
   sus e-CF (`ecf_integracion_backup`: 50 a 275 por tenant el 2026-11-18, y no tienen base propia, así que es la única copia), su bitácora y
