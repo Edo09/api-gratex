@@ -483,6 +483,19 @@ Valores por defecto con los que salió la primera versión; conviene confirmarlo
   mensual (500.00, día 15, activo) creado ese día desde la pantalla, antes de que el sistema cobrara por grupo; ninguno tenía cobros. Con el go del
   dueño se borraron esas dos filas de `cobro_config` en una transacción (2 filas, comprobadas antes y después): `cobro_config` pasó de 7 a 5 filas
   (tenants 2, 9, 17, 18 y 20), y `cobros` y `tenants` quedaron igual; el respaldo, con su `INSERT` para deshacerlo, quedó en el scratchpad de la
-  sesión. El grupo 6 queda **sin cobro mensual**: su monto lo pone el dueño en la fila de la cabeza (la cabeza, tenant 6). Pendiente: marcar
-  Gratex (1) y Demo Fiscalo (5) como "No es cliente".
+  sesión. El grupo 6 quedó **sin cobro mensual** hasta que el dueño lo puso en la fila de la cabeza (tenant 6). Ese mismo día el dueño marcó
+  a Gratex (1) y a Demo Fiscalo (5) como "No es cliente" desde la pantalla (filas de bitácora `EXCLUDE`).
+- **2026-11-19 · "quién paga" (tabla `cobro_sin_pago`, master 023) en producción.** La 023 se aplicó a la master con el go del dueño con un
+  script de una sola corrida (ensayo en solo lectura primero; 15 sentencias, solo crea una tabla): `todo_ok = SI`, una tabla nueva
+  (`cobro_sin_pago`, InnoDB, PK `client_id`, FK a `tenants` ON DELETE CASCADE) vacía, `tenants` sin cambios, y el verificador la muestra
+  `APLICADA`. API `188bd43` + corrección de CI `52b5d78` en `master`, el dueño subió `cobroModel.php`, `cobroController.php` y
+  `CobroReglas.php`, y la web `6f84b0e` (Vercel en verde). El dueño marcó "no paga" a los tenants 6 y 13 desde la pantalla (`NO_PAGA` en la
+  bitácora; también marcó y devolvió el 14: `NO_PAGA` y `SI_PAGA`). El grupo 6 se muestra con el nombre del tenant 14 y su cobro sigue en
+  la cabeza (6).
+- **2026-11-19 · el cobro mensual es por empresa que paga, en producción.** API `22f63eb` en `master` (CI `express-api` php83 en verde); el
+  dueño subió `src/Models/cobroModel.php`; web `cede0c3` (Vercel en verde). Sin migración. Lectura en solo lectura de la master real con el
+  modelo nuevo: el grupo 6 tiene `empresas_que_pagan = 3` (tenants 14, 15 y 19), monto por empresa 500.00 y total 1,500.00 (también en el
+  panel y en `sugerido.monto`, con la consulta nueva corriendo en MySQL real); el grupo 18 y las empresas solas siguen igual
+  (`empresas_que_pagan = 1`); la tarjeta "Cobro mensual total" da RD$ 8,600.00 (antes 7,600.00). Todavía no hay cobros creados (el único es el
+  de prueba cancelado de Demo Fiscalo): el primer cobro de cada cliente se crea a mano y lleva el total; los siguientes se generan al pagarse.
 
