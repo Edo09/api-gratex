@@ -570,6 +570,7 @@ wa_chk('Beta no debe nada, pero con su cobro mensual ACTIVO tampoco se le quita 
     $falla($r, 409, 'CONFIG_ACTIVA') && str_contains($sinCliente($r), 'desactívalo'), $r);
 $m->guardarConfig(2, $cfg(100000, 10, null, false), 7);
 $r = $m->excluirCliente(2, true, 'Solo certificacion', 7);
+$fx['exclusion'] = $r[1] ?? [];
 wa_chk('con el cobro mensual inactivo y sin cobros abiertos, a Beta SI: excluido, con su motivo, y lo de antes (anterior) para la bitacora',
     $exito($r) && $r[1] === ['client_id' => 2, 'excluido' => true, 'motivo' => 'Solo certificacion', 'repetido' => false, 'anterior' => ['excluido' => false, 'motivo' => null]], $r);
 $r = $m->excluirCliente(2, true, 'otro motivo', 7);
