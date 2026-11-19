@@ -1443,7 +1443,13 @@ class cobroModel
         if (!empty($f['query'])) {
             $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], (string) $f['query']) . '%';
             $cols = ['cl.client_name', 'cl.company_name', 'cl.razon_social', 'cl.rnc'];
-            $w[] = '(' . implode(' OR ', array_map(static fn(string $c): string => $c . ' LIKE ' . $add($like) . " ESCAPE '!'", $cols)) . ')';
+            $o = array_map(static fn(string $c): string => $c . ' LIKE ' . $add($like) . " ESCAPE '!'", $cols);
+            if ($this->ambito === self::AMBITO_TENANTS) {
+                // Un grupo se cobra en su cabeza: el nombre o el RNC de una hermana encuentra los cobros del grupo.
+                $o[] = 'EXISTS (SELECT 1 FROM ' . $this->origen . ' h WHERE h.cabeza_id = cl.id AND (h.client_name LIKE ' . $add($like)
+                    . " ESCAPE '!' OR h.rnc LIKE " . $add($like) . " ESCAPE '!'))";
+            }
+            $w[] = '(' . implode(' OR ', $o) . ')';
         }
         $saldo = self::SALDO;
         switch ($f['estado'] ?? null) {

@@ -291,7 +291,8 @@ Decisiones:
   empresas de un mismo cliente, que comparten un solo cobro mensual). La unidad de un grupo es su **cabeza**: el tenant cuyo `id` es el
   `grupo_id` (`--grupo=self`); si esa fila ya no existe, la de menor id del grupo. El directorio trae **una fila por unidad**, con los
   datos y el cobro mensual de la cabeza; las hermanas salen en `grupo.miembros` (id, nombre, rnc, tipo, ambiente) y no son filas
-  propias. Buscar por el nombre o el RNC de una hermana trae la fila de su grupo. `grupo` es `null` sin grupo (en un grupo de una sola
+  propias. Buscar por el nombre o el RNC de una hermana trae la fila de su grupo, y en la lista de cobros (`GET /api/cobros-tenants?query=`),
+  los cobros del grupo (que son los de su cabeza). `grupo` es `null` sin grupo (en un grupo de una sola
   empresa, `miembros` va vacío).
 
   | La unidad… | ¿Se cobra? |

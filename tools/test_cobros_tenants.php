@@ -735,6 +735,15 @@ wa_chk('una de certificacion que nunca tuvo cobro mensual activo (17) a la que s
 $mg->cancelar($c17[1]['id'], 'prueba', 7);
 wa_chk('...y al cancelarse sale otra vez', $enLista(17) === null);
 
+echo "\n== Parte 4: la busqueda de la lista de cobros tambien encuentra el grupo por una hermana ==\n";
+$cobrosDe = static fn(string $q): array => array_column($mg->listar(CobroReglas::validarFiltros(['query' => $q])[1], 0, 50), 'client_id');
+$cuantos = static fn(string $q): int => $mg->contar(CobroReglas::validarFiltros(['query' => $q])[1]);
+wa_chk('buscar en la lista el nombre (Hermana Uno) o el RNC (102000012) de una hermana del grupo 10 trae sus 2 cobros, que son los de la cabeza, y contar da lo mismo',
+    $cobrosDe('Hermana Uno') === [10, 10] && $cobrosDe('102000012') === [10, 10] && $cuantos('Hermana Uno') === 2, [$cobrosDe('Hermana Uno'), $cuantos('Hermana Uno')]);
+wa_chk('...tambien en el grupo de Agro (14): buscar a su hermana por RNC trae el cobro (cancelado) de la cabeza; y un texto que no es de nadie no trae nada',
+    $cobrosDe('102000015') === [14] && $cobrosDe('Nadie Se Llama Asi') === [] && $cuantos('Nadie Se Llama Asi') === 0, $cobrosDe('102000015'));
+wa_chk('buscar por el nombre de la cabeza sigue funcionando y no mezcla grupos: Holding Cabeza trae solo lo de 10', $cobrosDe('Holding Cabeza') === [10, 10]);
+
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {
     if (!is_dir($carpetaFixtures)) {
