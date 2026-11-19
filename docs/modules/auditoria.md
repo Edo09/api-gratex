@@ -41,6 +41,16 @@ la [vista de operaciones](#vista-web-de-operaciones)):
   `new_values.autenticacion` (`metodo`, `rnc_del_token`, `token_expedido`): las
   dos filas quedan ligadas.
 
+Se escriben con la empresa a la que tocan pero **no se leen** en la bitácora de esa empresa:
+
+- **Un usuario de soporte (`master.users.acceso_global = 1`) en una empresa que no es la suya**: su
+  entrada (`CAMBIO_EMPRESA`), todo lo que hace ahí y su `LOGOUT`. `AuditLogModel::buildWhere` agrega a
+  `search`/`count`/`summary`/`facets` un `NOT EXISTS` sobre `users` (`acceso_global = 1` y
+  `users.tenant_id <> audit_logs.tenant_id`). En la empresa propia del usuario de soporte se ve como
+  cualquier empleado. La vista de operaciones (`searchAllTenants`/`countAllTenants`) no filtra. Si la
+  columna no se puede leer (master sin la 019, o sin multi-tenant) no se filtra nada. Detalle en
+  [acceso-global.md](acceso-global.md#bitácora).
+
 ## Arquitectura
 
 | Pieza | Archivo | Rol |
@@ -110,7 +120,7 @@ contenga: `password`, `pass`, `secret`, `api_secret`, `token`, `authorization`,
 
 | Acción | Módulo | Cuándo |
 |---|---|---|
-| `CAMBIO_EMPRESA` | `auth` | Un usuario de soporte (acceso global) abre sesión en esta empresa (`POST /api/auth/empresa`). `tenant_id` = la empresa a la que entró; `new_values` `{tenant_id}`; `session_token_hash` = la sesión nueva, así lo que haga después se une a esta fila. La empresa de origen solo aparece (`description` y `old_values`) si es la del propio usuario de soporte, nunca la de otro cliente. En la web, «Entrada de soporte». Ver [acceso-global.md](acceso-global.md). |
+| `CAMBIO_EMPRESA` | `auth` | Un usuario de soporte (acceso global) abre sesión en esta empresa (`POST /api/auth/empresa`). `tenant_id` = la empresa a la que entró; `new_values` `{tenant_id}`; `session_token_hash` = la sesión nueva, así lo que haga después se une a esta fila. La empresa de origen solo aparece (`description` y `old_values`) si es la del propio usuario de soporte, nunca la de otro cliente. En la web, «Entrada de soporte». **El admin de una empresa cliente no la ve** (ni nada de lo que hizo soporte ahí): la lectura por empresa la filtra, ver [Qué fila le toca a qué empresa](#qué-fila-le-toca-a-qué-empresa); la vista de operaciones sí. Ver [acceso-global.md](acceso-global.md). |
 | `ACCESS_DENIED` | el módulo al que se intentó entrar | Un usuario con sesión válida pide un módulo que su rol no tiene (**403**). Lo registran `PermissionGate::deny`, `auditLogController` e `inventarioController` (un `PUT /api/inventario/configuracion` de un rol que no es `admin`: módulo `inventario`, motivo `rol distinto de admin`). `new_values.bloqueado=false` = modo sombra (`PERMISSIONS_ENFORCE=false`): se anotó pero no se bloqueó. Los **401** (token vencido o falso) no se registran a propósito: cada sesión que expira con la app abierta dejaría filas sin usuario. |
 | `INVENTARIO_CONFIG` | `inventario` | Un admin enciende o apaga «Bloquear ventas sin existencia» de su empresa (`PUT /api/inventario/configuracion`, solo rol `admin`). `entity_type` `inventario_config`, `entity_id` = el id de la empresa. `old_values` / `new_values`: `{ bloquear_sin_existencia: bool }`. Se registra solo cuando el cambio quedó guardado; si falla la escritura (p. ej. la migración master `013` sin correr) no hay fila de éxito. |
 | `DGII_AUTH_IN_OK` | `dgii-auth` | Token emitido a quien se autentica contra nuestro receptor (incluye los reintentos sobre una semilla ya canjeada). Sin empresa. |

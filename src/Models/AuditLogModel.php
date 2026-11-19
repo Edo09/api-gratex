@@ -67,13 +67,40 @@ class AuditLogModel
      */
     public function search(array $filters, int $offset, int $limit): array
     {
-        return $this->fetchPage(self::buildWhere($filters, true), $offset, $limit);
+        return $this->fetchPage(self::buildWhere($filters, true, $this->ocultarSoporte()), $offset, $limit);
     }
 
     /** Total de filas que cumplen los filtros (para paginacion). */
     public function count(array $filters): int
     {
-        return $this->fetchCount(self::buildWhere($filters, true));
+        return $this->fetchCount(self::buildWhere($filters, true, $this->ocultarSoporte()));
+    }
+
+    /** null = aun no se probo; ver ocultarSoporte(). */
+    private ?bool $soporteLegible = null;
+
+    /**
+     * ¿Las lecturas POR EMPRESA (search/count/summary/facets) deben dejar fuera al usuario
+     * de soporte? Si: en multi-tenant y si la master tiene users.acceso_global (migracion
+     * 019). Sin multi-tenant no hay soporte, y en una master sin la 019 la consulta de
+     * `users` fallaria: ahi la bitacora sale entera, como antes. Se prueba UNA vez por
+     * instancia y nunca deja escapar un error (la bitacora no se cae por esto).
+     *
+     * La vista de operaciones (searchAllTenants) no pasa por aqui: ve todo.
+     */
+    private function ocultarSoporte(): bool
+    {
+        if (!self::multiTenant()) {
+            return false;
+        }
+        if ($this->soporteLegible === null) {
+            try {
+                $this->soporteLegible = $this->conexion->query('SELECT acceso_global, tenant_id FROM users LIMIT 1') !== false;
+            } catch (Throwable $e) {
+                $this->soporteLegible = false;
+            }
+        }
+        return $this->soporteLegible;
     }
 
     /**
@@ -84,7 +111,7 @@ class AuditLogModel
      */
     public function summary(array $filters): array
     {
-        [$clause, $params] = self::buildWhere($filters, true);
+        [$clause, $params] = self::buildWhere($filters, true, $this->ocultarSoporte());
 
         $stmt = $this->conexion->prepare(
             'SELECT COUNT(*) AS total,'
@@ -138,7 +165,7 @@ class AuditLogModel
      */
     public function facets(?int $tenantId): array
     {
-        [$clause, $params] = self::buildWhere(['tenant_id' => $tenantId], true);
+        [$clause, $params] = self::buildWhere(['tenant_id' => $tenantId], true, $this->ocultarSoporte());
 
         $valores = function (string $col) use ($clause, $params): array {
             $stmt = $this->conexion->prepare("SELECT DISTINCT {$col} FROM audit_logs WHERE {$clause} ORDER BY {$col}");
@@ -232,12 +259,23 @@ class AuditLogModel
     /**
      * @param bool $isolate true = tenant_id SIEMPRE presente (API, por tenant).
      *                      false = solo si viene en $filters (vista de operaciones).
+     * @param bool $sinSoporte true = deja fuera las filas de un usuario de soporte
+     *                      (master.users.acceso_global = 1) en una empresa que no es la suya:
+     *                      su entrada (CAMBIO_EMPRESA) y todo lo que hizo ahi. En SU empresa
+     *                      (users.tenant_id) es un empleado mas y se ve. Solo la bitacora de
+     *                      una empresa; el dato sigue en la master y en la vista de operaciones.
      * @return array{0:string,1:array} clausula WHERE + parametros.
      */
-    private static function buildWhere(array $filters, bool $isolate): array
+    private static function buildWhere(array $filters, bool $isolate, bool $sinSoporte = false): array
     {
         $clauses = [];
         $params = [];
+
+        if ($sinSoporte) {
+            // Con user_id o tenant_id NULL el <> da NULL: la fila no cuenta como de soporte y se queda.
+            $clauses[] = 'NOT EXISTS (SELECT 1 FROM users u WHERE u.id = audit_logs.user_id'
+                . ' AND u.acceso_global = 1 AND u.tenant_id <> audit_logs.tenant_id)';
+        }
 
         // Con $isolate, tenant_id SIEMPRE presente para aislar (NULL valido para auditorias globales).
         if (array_key_exists('tenant_id', $filters) && $filters['tenant_id'] === null) {

@@ -417,6 +417,100 @@ if (!extension_loaded('pdo_sqlite')) {
     $r = $authViejo->cambiarEmpresaSesion(10, 2);
     $chk('cambiarEmpresaSesion -> 403 y no abre ninguna sesion',
         $r[0] === 'error' && $r[2] === 403 && (int) $viejo->query('SELECT COUNT(*) FROM api_tokens')->fetchColumn() === $antesViejo);
+
+    // -------------------------------------------------------------------------
+    // La bitacora de una empresa cliente no muestra al usuario de soporte
+    // -------------------------------------------------------------------------
+    require_once __DIR__ . '/../src/Models/AuditLogModel.php';
+
+    /** AuditLogModel sobre $pdo (el constructor busca el MasterDatabase real: aqui se salta). */
+    $auditoriaSobre = function (PDO $pdo): AuditLogModel {
+        $m = (new ReflectionClass('AuditLogModel'))->newInstanceWithoutConstructor();
+        (new ReflectionProperty('AuditLogModel', 'conexion'))->setValue($m, $pdo);
+        return $m;
+    };
+    $tablaAuditoria = function (PDO $pdo): void {
+        $pdo->exec('CREATE TABLE audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER, user_id INTEGER,
+            username TEXT, email TEXT, module TEXT NOT NULL, entity_type TEXT, entity_id TEXT, action TEXT NOT NULL,
+            http_method TEXT, endpoint TEXT, ip_address TEXT, user_agent TEXT, browser TEXT, os TEXT, device_type TEXT,
+            session_token_hash TEXT, old_values TEXT, new_values TEXT, description TEXT, success INTEGER NOT NULL DEFAULT 1,
+            error_message TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+    };
+    $anotar = function (PDO $pdo, int $tenant, ?int $user, string $modulo, string $accion) use ($auditoriaSobre): void {
+        $auditoriaSobre($pdo)->insert(['tenant_id' => $tenant, 'user_id' => $user, 'username' => $user === null ? null : 'u' . $user,
+            'email' => $user === null ? null : 'u' . $user . '@x.test', 'module' => $modulo, 'action' => $accion, 'success' => 1]);
+    };
+    $acciones = function (array $filas): array {
+        $a = array_map(static fn($f) => $f['user_id'] . ':' . $f['action'], $filas);
+        sort($a);
+        return $a;
+    };
+
+    echo "\nParte 2 — bitacora de una empresa: el usuario de soporte (acceso global) no aparece en la de un cliente\n";
+    putenv('MULTI_TENANT_ENABLED=true');
+    $_ENV['MULTI_TENANT_ENABLED'] = 'true';
+    $pdoAud = $crearMaster(true);
+    $tablaAuditoria($pdoAud);
+    // Soporte (10) es de la empresa 1; entra a la 2 (cliente) y trabaja ahi. Cinthia (11) es de la 1, Ferre (12) de la 2.
+    $anotar($pdoAud, 2, 10, 'auth', 'CAMBIO_EMPRESA');
+    $anotar($pdoAud, 2, 10, 'products', 'CREATE');
+    $anotar($pdoAud, 2, 12, 'products', 'CREATE');
+    $anotar($pdoAud, 2, 12, 'auth', 'LOGIN_SUCCESS');
+    $anotar($pdoAud, 2, null, 'auth', 'LOGIN_FAILED');
+    $anotar($pdoAud, 1, 10, 'auth', 'LOGIN_SUCCESS');      // en su propia empresa es un empleado mas
+    $anotar($pdoAud, 1, 10, 'auth', 'CAMBIO_EMPRESA');     // volvio a la suya desde un cliente
+    $anotar($pdoAud, 1, 11, 'products', 'CREATE');
+    $aud = $auditoriaSobre($pdoAud);
+
+    $f2 = ['tenant_id' => 2];
+    $filas2 = $aud->search($f2, 0, 50);
+    $chk('en la empresa cliente: ni la entrada de soporte ni lo que hizo ahi',
+        $acciones($filas2) === ['12:CREATE', '12:LOGIN_SUCCESS', ':LOGIN_FAILED']);
+    $chk('count coincide con lo que lista (3, no 5): la paginacion no deja huecos', $aud->count($f2) === 3);
+    $res2 = $aud->summary($f2);
+    $chk('resumen: total 3 y un solo usuario (el de la empresa)', $res2['total'] === 3 && $res2['usuarios'] === 1
+        && array_column($res2['top_usuarios'], 'user_id') === [12]);
+    $chk('resumen: por modulo sin lo de soporte (auth 2, products 1)',
+        array_column($res2['por_modulo'], 'total', 'module') === ['auth' => 2, 'products' => 1]);
+    $fac2 = $aud->facets(2);
+    $chk('facetas: el usuario de soporte no se ofrece como filtro y CAMBIO_EMPRESA tampoco',
+        array_column($fac2['usuarios'], 'user_id') === [12] && $fac2['acciones'] === ['CREATE', 'LOGIN_FAILED', 'LOGIN_SUCCESS']);
+    $chk('filtrar por el id del usuario de soporte no lo trae de vuelta',
+        $aud->search($f2 + ['user_id' => 10], 0, 50) === [] && $aud->count($f2 + ['user_id' => 10]) === 0);
+    $chk('ni buscando por su correo o por la accion', $aud->count($f2 + ['q' => 'u10@x.test']) === 0
+        && $aud->count($f2 + ['action' => 'CAMBIO_EMPRESA']) === 0);
+
+    $filas1 = $aud->search(['tenant_id' => 1], 0, 50);
+    $chk('en SU empresa (la del operador) se ve como cualquier empleado: su login y su vuelta',
+        $acciones($filas1) === ['10:CAMBIO_EMPRESA', '10:LOGIN_SUCCESS', '11:CREATE']);
+
+    $chk('la vista de operaciones (todas las empresas) lo sigue viendo todo: 8 filas, 4 de soporte (2 en el cliente)',
+        $aud->countAllTenants([]) === 8 && $aud->countAllTenants(['user_id' => 10]) === 4
+        && $aud->countAllTenants(['tenant_id' => 2, 'user_id' => 10]) === 2);
+
+    // Si a soporte le quitan el acceso, deja de ser "de soporte": sus filas viejas en clientes vuelven a salir.
+    $pdoAud->exec('UPDATE users SET acceso_global = 0 WHERE id = 10');
+    $chk('sin acceso global ya no se oculta nada (el filtro lee la marca de hoy)', $aud->count($f2) === 5);
+    $pdoAud->exec('UPDATE users SET acceso_global = 1 WHERE id = 10');
+    $chk('...y al devolverlo se vuelve a ocultar', $aud->count($f2) === 3);
+
+    // Un master sin la 019: la bitacora sigue funcionando entera.
+    $viejoAud = $crearMaster(false);
+    $tablaAuditoria($viejoAud);
+    $anotar($viejoAud, 2, 10, 'auth', 'CAMBIO_EMPRESA');
+    $anotar($viejoAud, 2, 12, 'products', 'CREATE');
+    $audViejo = $auditoriaSobre($viejoAud);
+    $chk('master SIN la columna: la bitacora lista todo y no falla',
+        $audViejo->count($f2) === 2 && count($audViejo->search($f2, 0, 50)) === 2
+        && $audViejo->summary($f2)['total'] === 2 && count($audViejo->facets(2)['usuarios']) === 2);
+
+    // Sin multi-tenant la tabla vive en la base de la empresa (sin soporte): nada que ocultar, ni se consulta users.
+    putenv('MULTI_TENANT_ENABLED=false');
+    $_ENV['MULTI_TENANT_ENABLED'] = 'false';
+    $audUna = $auditoriaSobre($pdoAud);
+    $chk('sin multi-tenant no hay soporte: no se oculta nada', $audUna->count($f2) === 5);
+    putenv('MULTI_TENANT_ENABLED=true');
+    $_ENV['MULTI_TENANT_ENABLED'] = 'true';
 }
 
 // =============================================================================

@@ -70,12 +70,28 @@ Todo eso se hace por SQL en la master.
 
 ## Bitácora
 
-Cada cambio de empresa deja una fila **en la bitácora de la empresa a la que entra**: acción
+Cada cambio de empresa deja una fila con `tenant_id` = la empresa a la que entra: acción
 `CAMBIO_EMPRESA` (en la web, "Entrada de soporte"), con el usuario y la sesión nueva. La empresa de
 origen solo se nombra si es la del propio usuario de soporte (la del operador); si venía de otro
-cliente, la fila no dice de cuál: el administrador de cada empresa lee su bitácora y no tiene por qué
-saber quién más es cliente. Lo que haga después queda a su nombre en esa empresa, como cualquier
-usuario.
+cliente, la fila no dice de cuál. Lo que haga después queda a su nombre, igual que el de cualquier usuario.
+
+**Pero el administrador de una empresa cliente no ve nada de eso** (decisión del dueño, 2026-11-19: «mi
+usuario no debería aparecer en la bitácora de los tenants»). `GET /api/audit-logs` y sus subrutas
+`/resumen` y `/facetas` (`AuditLogModel::search/count/summary/facets`) dejan fuera toda fila cuyo
+`user_id` sea de un usuario con `acceso_global = 1` **en una empresa que no es la suya**
+(`users.tenant_id <> audit_logs.tenant_id`): la entrada, lo que hizo y su `LOGOUT`. Los totales, el
+resumen, los filtros de usuario y acción y el contador de la paginación salen ya sin esas filas.
+
+- **No se borra ni se deja de escribir nada.** El filtro es de lectura: las filas siguen en la master y
+  la [vista de operaciones](auditoria.md#vista-web-de-operaciones) (`public/audit_logs.html`, todas las
+  empresas) las muestra. El SQL de más abajo («Qué hizo en empresas cliente») sigue valiendo.
+- **En su propia empresa se ve como un empleado más** (su login, su logout, la vuelta a su empresa):
+  el filtro solo aplica en empresas ajenas.
+- **Lee la marca de hoy.** Si a un usuario le quitan `acceso_global`, sus filas viejas en las empresas
+  cliente vuelven a aparecer; al devolvérselo, se ocultan otra vez.
+- Sin multi-tenant, o en una master sin la 019 (la consulta de `users.acceso_global` falla), el filtro
+  se apaga solo y la bitácora sale entera: nunca se cae por esto.
+- La acción `CAMBIO_EMPRESA` ya no aparece en el filtro «Acción» de ninguna empresa cliente.
 
 ## Dar y quitar el acceso
 
