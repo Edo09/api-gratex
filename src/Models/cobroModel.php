@@ -186,6 +186,31 @@ class cobroModel
         return $f ? ['id' => (int) $f['id'], 'nombre' => (string) $f['nombre']] : null;
     }
 
+    /**
+     * Cuantas empresas de la unidad de $clientId pagan la mensualidad: el monto mensual configurado es POR EMPRESA que paga, asi que
+     * el total de la unidad (lo que lleva un cobro nuevo) es ese monto por este numero. 1 para una empresa sola y siempre en el ambito de
+     * una empresa (alli no hay grupos); en un grupo, las que no estan marcadas "no paga" (una marca que no aplica cuenta a todas como que
+     * pagan, igual que en el directorio); nunca menos de 1.
+     */
+    private function empresasQuePagan(int $clientId): int
+    {
+        if ($this->ambito !== self::AMBITO_TENANTS) {
+            return 1;
+        }
+        $s = $this->db->prepare(
+            'SELECT m.marcado AS marcado, h.marcas_aplican AS aplican FROM ' . $this->origen . ' m JOIN ' . $this->origen
+            . ' h ON h.id = m.cabeza_id WHERE m.cabeza_id = (SELECT c.cabeza_id FROM ' . $this->origen . ' c WHERE c.id = :cid)'
+        );
+        $s->execute([':cid' => $clientId]);
+        $n = 0;
+        foreach ($s->fetchAll() as $f) {
+            if ((int) $f['marcado'] === 0 || (int) $f['aplican'] === 0) {
+                $n++;
+            }
+        }
+        return max(1, $n);
+    }
+
     /** El rechazo de cobrarle por separado a una hermana de un grupo: el cobro del grupo es el de su cabeza. */
     private static function errMiembroDeGrupo(array $cabeza): array
     {
@@ -336,6 +361,8 @@ class cobroModel
                         'miembros' => $deLaUnidad,
                     ]
                     : null,
+                // Cuantas empresas de la unidad pagan: el monto mensual es POR EMPRESA que paga (el total es monto x esto).
+                'empresas_que_pagan' => max(1, ($cabezaSinPago ? 0 : 1) + count(array_filter($deLaUnidad, static fn(array $m): bool => $m['paga']))),
             ];
         }, $filas);
     }
@@ -485,6 +512,11 @@ class cobroModel
             }
             if (($cabeza = $this->cabezaDeGrupo($clientId)) !== null) {
                 return self::errMiembroDeGrupo($cabeza);
+            }
+            // El monto es por empresa que paga: el total con las que pagan hoy tiene que caber en un cobro (si no, el pago que genere
+            // el mes siguiente no podria guardarlo).
+            if ($c['monto_c'] * $this->empresasQuePagan($clientId) > CobroReglas::MAX_CENTAVOS) {
+                return self::err(CobroReglas::MSG_MONTO_GRANDE, 422);
             }
             // Lo de antes, SIN bloqueo: solo es el old_values de la bitacora. No se bloquea (SELECT ...
             // FOR UPDATE) porque la fila puede no existir todavia: en InnoDB eso toma un bloqueo de
@@ -639,6 +671,7 @@ class cobroModel
         return [
             'cliente' => $cliente,
             'config' => $config,
+            'empresas_que_pagan' => $this->empresasQuePagan($clientId),
             'resumen' => $resumen,
             'sugerido' => $this->sugerido($clientId, $config, $hoy),
             'cobros' => $cobros,
@@ -656,7 +689,7 @@ class cobroModel
         $periodo = $this->periodoSugerido($clientId, $hoy);
         return [
             'periodo' => $periodo,
-            'monto' => $config['monto_mensual'] ?? null,
+            'monto' => $config !== null ? CobroReglas::aNumero(CobroReglas::centavosDb($config['monto_mensual']) * $this->empresasQuePagan($clientId)) : null,
             'fecha_vencimiento' => $config !== null ? CobroReglas::vencimientoDe($periodo, (int) $config['dia_vencimiento']) : null,
             'descripcion' => $config['descripcion'] ?? null,
         ];
@@ -1231,6 +1264,10 @@ class cobroModel
         if (!$config['activo']) {
             return ['cobro' => null, 'motivo' => 'inactivo'];
         }
+        // Mas empresas pagan que cuando se guardo el monto y el total ya no cabe en un cobro: no se genera (el pago ya se guardo).
+        if ($config['monto_c'] > CobroReglas::MAX_CENTAVOS) {
+            return ['cobro' => null, 'motivo' => 'monto_excedido'];
+        }
         $periodo = CobroReglas::periodoSiguiente((string) $cobro['periodo']);
         $nuevo = $this->insertarCobro(
             $clientId, $periodo, $config['descripcion'], $config['monto_c'],
@@ -1409,7 +1446,8 @@ class cobroModel
     {
         $f = $this->filaConfig($clientId, false);
         return $f === null ? null : [
-            'monto_c' => CobroReglas::centavosDb($f['monto_mensual']),
+            // El monto configurado es POR EMPRESA que paga: lo que lleva un cobro nuevo es el total de la unidad.
+            'monto_c' => CobroReglas::centavosDb($f['monto_mensual']) * $this->empresasQuePagan($clientId),
             'dia' => (int) $f['dia_vencimiento'],
             'descripcion' => $f['descripcion'] !== null ? (string) $f['descripcion'] : null,
             'activo' => (int) $f['activo'] === 1,

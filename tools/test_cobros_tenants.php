@@ -404,7 +404,7 @@ wa_chk('cada uno trae lo de un cliente, que es (tipo, ambiente, activo), su cobr
         'config' => ['client_id' => 1, 'monto_mensual' => 5000.0, 'dia_vencimiento' => 31, 'descripcion' => 'Mensualidad Fiscalpoint', 'activo' => true, 'updated_at' => '2026-11-16 10:00:00'],
         'excluido' => false, 'motivo_exclusion' => null,
         'saldo_pendiente' => 0.0, 'saldo_vencido' => 0.0, 'cobros_abiertos' => 0, 'cobros_vencidos' => 0, 'dias_atraso' => 0, 'proximo_vencimiento' => null,
-        'facturable' => true, 'motivo_oculto' => null, 'grupo' => null]
+        'facturable' => true, 'motivo_oculto' => null, 'grupo' => null, 'empresas_que_pagan' => 1]
     && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['config'] === null && $porId[3]['email'] === ''
     && $porId[4]['ambiente'] === 'certecf' && $porId[5]['activo'] === false && $porId[2]['con_config'] === false, $porId);
 wa_chk('busca por nombre (sin importar mayusculas) y por RNC; un texto parcial sirve y se recorta', array_column($m->buscarClientes('alfa'), 'id') === [1]
@@ -746,8 +746,8 @@ $mg->guardarConfig(10, $cfg(50000, 15), 7);
 $cobroGrupo = $mg->crear($nuevo(10, '2027-02'), 7);
 $conCobro = $mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
 $fila10 = array_column($conCobro, null, 'id')[10];
-wa_chk('el grupo se cobra UNA vez: el cobro es de la cabeza (500), la fila del grupo lo trae, lo del directorio cuadra con el dashboard y ninguna hermana tiene cobros',
-    $exito($cobroGrupo) && $fila10['saldo_pendiente'] === 500.0 && $fila10['con_config'] === true && $fila10['cobros_abiertos'] === 1
+wa_chk('el grupo se cobra UNA vez: un solo cobro, el de la cabeza, por el TOTAL (500 por empresa x 3 que pagan = 1,500); la fila del grupo lo trae, lo del directorio cuadra con el dashboard y ninguna hermana tiene cobros',
+    $exito($cobroGrupo) && $fila10['saldo_pendiente'] === 1500.0 && $fila10['con_config'] === true && $fila10['cobros_abiertos'] === 1
     && array_sum(array_column($conCobro, 'saldo_pendiente')) === $mg->resumen(7)['totales']['pendiente']
     && (int) $pdoG->query('SELECT COUNT(*) FROM cobros WHERE client_id <> 10')->fetchColumn() === 0, $fila10);
 $r = $mg->excluirCliente(22, true, 'Interna', 7);
@@ -776,8 +776,8 @@ echo "\n== Parte 4: quien debe plata no desaparece de la lista ==\n";
 $enLista = static fn(int $id): ?array => array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO), null, 'id')[$id] ?? null;
 $c14 = $mg->crear($nuevo(14, '2027-04'), 7);
 $mg->guardarConfig(14, $cfg(150000, 15, null, false), 7);
-wa_chk('Agro (certecf) con un cobro abierto de 1,500 SIGUE en la lista aunque se apague su cobro mensual: facturable y sin motivo_oculto (alguien que debe no desaparece)',
-    $exito($c14) && $enLista(14) !== null && $enLista(14)['facturable'] === true && $enLista(14)['motivo_oculto'] === null && $enLista(14)['saldo_pendiente'] === 1500.0, $enLista(14));
+wa_chk('Agro (certecf, 2 empresas a 1,500 cada una) con un cobro abierto de 3,000 SIGUE en la lista aunque se apague su cobro mensual: facturable y sin motivo_oculto (alguien que debe no desaparece)',
+    $exito($c14) && $enLista(14) !== null && $enLista(14)['facturable'] === true && $enLista(14)['motivo_oculto'] === null && $enLista(14)['saldo_pendiente'] === 3000.0, $enLista(14));
 $mg->cancelar($c14[1]['id'], 'prueba', 7);
 wa_chk('...y cuando ya no debe nada (cobro cancelado) y su cobro mensual sigue apagado, vuelve a "solo_certificacion" y sale de la lista', $enLista(14) === null
     && array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[14]['motivo_oculto'] === 'solo_certificacion');
@@ -860,6 +860,63 @@ $rs = $mp->marcarPago(32, true, null, 7);
 wa_chk('decir que paga a quien ya paga es repetido', $exito($rs) && $rs[1]['repetido'] === true && $rs[1]['anterior']['paga'] === true, $rs);
 wa_chk('una empresa que no existe: 404; en el ambito de una empresa no existe marcar: 404',
     $falla($mp->marcarPago(999, false, null, 7), 404) && $falla((new cobroModel($pdoP, $reloj))->marcarPago(30, false, null, 7), 404));
+
+echo "\n== Parte 6: el cobro mensual es POR EMPRESA que paga ==\n";
+$pdoM = cobros_tenants_base();
+cobros_tenants_sembrar_pagos($pdoM);
+$mm = new cobroModel($pdoM, $reloj, cobroModel::AMBITO_TENANTS);
+$mm->marcarPago(30, false, 'Cabeza no paga', 7);   // paga 31 y 32 (la cabeza y la 33 no)
+$mm->marcarPago(33, false, 'Solo certifico', 7);
+$mm->marcarPago(70, false, null, 7);                // paga solo 71
+$pdoM->exec("INSERT INTO cobro_sin_pago (client_id, created_at) VALUES (60, '2026-11-19 00:00:00'), (61, '2026-11-19 00:00:00')");  // marcas que no aplican
+$dirM = static fn(): array => array_column($mm->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id');
+$pagan = array_column($dirM(), 'empresas_que_pagan', 'id');
+ksort($pagan);
+wa_chk('empresas_que_pagan en el directorio: 30 -> 2 (31 y 32), 40 -> 3 (sin marcas), 50 -> 1 (sola), 60 -> 2 (marcas que no aplican: todas pagan), 70 -> 1 (solo 71)',
+    $pagan === [30 => 2, 40 => 3, 50 => 1, 60 => 2, 70 => 1], $pagan);
+$mm->guardarConfig(30, $cfg(50000, 15), 7);   // 500 por empresa
+$mm->guardarConfig(40, $cfg(30000, 15), 7);   // 300 por empresa
+$mm->guardarConfig(50, $cfg(70000, 15), 7);   // 700, una sola empresa
+$fx['directorio-monto-por-empresa'] = $mm->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
+$sumaM = 0.0;
+foreach ($fx['directorio-monto-por-empresa'] as $rM) {
+    if ($rM['config'] !== null) {
+        $sumaM += $rM['config']['monto_mensual'] * $rM['empresas_que_pagan'];
+    }
+}
+wa_chk('el monto configurado es por empresa y el total de cada unidad es monto x las que pagan: 500 x 2 + 300 x 3 + 700 x 1 = 2,600', $sumaM === 2600.0, $sumaM);
+$panelM = $mm->panelCliente(30);
+$fx['panel-grupo'] = $panelM;
+wa_chk('el panel del grupo 30: el monto configurado sigue siendo POR EMPRESA (500), pagan 2 y lo que se sugiere para un cobro es el total (1,000)',
+    $panelM['empresas_que_pagan'] === 2 && $panelM['config']['monto_mensual'] === 500.0 && $panelM['sugerido']['monto'] === 1000.0, [$panelM['empresas_que_pagan'], $panelM['sugerido']]);
+wa_chk('...y el de una empresa sola (50) pagan 1 y se sugiere su monto tal cual (700); sin cobro mensual (60) no se sugiere monto',
+    $mm->panelCliente(50)['empresas_que_pagan'] === 1 && $mm->panelCliente(50)['sugerido']['monto'] === 700.0 && $mm->panelCliente(60)['sugerido']['monto'] === null);
+$c30 = $mm->crear($nuevo(30, '2027-02'), 7);
+$c40 = $mm->crear($nuevo(40, '2027-02'), 7);
+$c50 = $mm->crear($nuevo(50, '2027-02'), 7);
+$c60 = $mm->crear($nuevo(60, '2027-02', '2027-02-15', 12345), 7);
+wa_chk('un cobro creado con la configuracion lleva el TOTAL: grupo 30 (2 pagan) 1,000; grupo 40 (3 pagan) 900; la sola 50, 700; con un monto escrito se queda con el escrito (123.45)',
+    $exito($c30) && $c30[1]['monto'] === 1000.0 && $exito($c40) && $c40[1]['monto'] === 900.0 && $exito($c50) && $c50[1]['monto'] === 700.0
+    && $exito($c60) && $c60[1]['monto'] === 123.45, [$c30[1]['monto'] ?? null, $c40[1]['monto'] ?? null, $c50[1]['monto'] ?? null, $c60[1]['monto'] ?? null]);
+$p1 = $mm->registrarPago($c30[1]['id'], $pago(100000, null, '2026-10-20'), 7);
+wa_chk('al pagar el cobro del grupo 30, el del mes siguiente (2027-03) se genera con el total de hoy (1,000)',
+    $exito($p1) && $p1[1]['siguiente_motivo'] === 'generado' && $p1[1]['siguiente']['periodo'] === '2027-03' && $p1[1]['siguiente']['monto'] === 1000.0, $p1);
+$mm->marcarPago(32, false, null, 7);   // ahora paga solo 31
+$p2 = $mm->registrarPago($p1[1]['siguiente']['id'], $pago(100000, null, '2026-10-20'), 7);
+wa_chk('...si despues una empresa deja de pagar (32), el cobro de 2027-04 es de 500 y el de 2027-03 sigue siendo de 1,000: solo cambia lo que se crea despues',
+    $exito($p2) && $p2[1]['siguiente']['periodo'] === '2027-04' && $p2[1]['siguiente']['monto'] === 500.0 && $mm->obtener($p1[1]['siguiente']['id'])['monto'] === 1000.0, $p2);
+$antesM = $mm->obtenerConfig(40);
+$rg = $mm->guardarConfig(40, $cfg(400000000000, 15), 7);
+wa_chk('guardar un monto que, con las 3 que pagan hoy, pasa del maximo (999,999,999,999 centavos) es 422 y la configuracion no cambia',
+    $falla($rg, 422) && $mm->obtenerConfig(40) === $antesM, $rg);
+$mm->guardarConfig(70, $cfg(600000000000, 15), 7);   // con 1 que paga cabe
+$c70 = $mm->crear($nuevo(70, '2027-02', null, 100000), 7);
+$mm->marcarPago(70, true, null, 7);                  // ahora pagan 2: el total del mes siguiente pasaria del maximo
+$p70 = $mm->registrarPago($c70[1]['id'], $pago(100000, null, '2026-10-20'), 7);
+wa_chk('si al generar el mes siguiente el total pasa del maximo NO se genera, pero el PAGO se registra: siguiente null y motivo monto_excedido',
+    $exito($p70) && $p70[1]['cobro']['estado'] === 'Pagado' && $p70[1]['siguiente'] === null && $p70[1]['siguiente_motivo'] === 'monto_excedido'
+    && (int) $pdoM->query('SELECT COUNT(*) FROM cobros WHERE client_id = 70')->fetchColumn() === 1, $p70);
+wa_chk('un cobro a mano sin monto cuyo total pasa del maximo (grupo 70 con 2 que pagan) es 422 (no un error de la base)', $falla($mm->crear($nuevo(70, '2027-05'), 7), 422));
 
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {

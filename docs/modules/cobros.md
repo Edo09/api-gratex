@@ -76,7 +76,8 @@ pide otra cosa):
    edición del monto lo iguala a lo ya pagado) se genera el del mes siguiente, dentro de la misma
    transacción:
    - periodo = el del cobro pagado **+ 1 mes** (no depende de cuándo se pagó);
-   - monto = el `monto_mensual` **actual** del cliente; vencimiento = su `dia_vencimiento` actual;
+   - monto = el `monto_mensual` **actual** del cliente (en Cobros de tenants, ese monto es **por empresa que paga**: el cobro lleva el
+     total, monto × `empresas_que_pagan`; ver "Monto por empresa que paga"); vencimiento = su `dia_vencimiento` actual;
      descripción = la de la configuración;
    - solo si el cliente tiene configuración **activa** (`activo = 1`);
    - **un cobro Parcial o Cancelado no genera nada**;
@@ -127,7 +128,9 @@ pide otra cosa):
 - **Tope de pagos**: 500 por cobro, contando los anulados (el historial no se borra): el 501 da `LIMITE_PAGOS` (409).
 - **`siguiente_motivo`**: cuando un pago (o una edición del monto) deja el cobro pagado completo, la respuesta dice
   qué pasó con el cobro del mes siguiente: `generado`, `sin_config` (el cliente no tiene cobro mensual), `inactivo`
-  (lo tiene apagado) o `ya_existia` (ese periodo ya tenía cobro). `null` si no lo completó, o si es una repetición.
+  (lo tiene apagado), `ya_existia` (ese periodo ya tenía cobro) o `monto_excedido` (solo Cobros de tenants: con las empresas que pagan hoy
+  el total del mes siguiente pasaría del máximo de un cobro, así que no se genera; el pago sí se guardó). `null` si no lo completó, o si
+  es una repetición.
 - **Cancelar, reabrir y anular** repetidos devuelven el estado actual (`repetido: true`), sin error.
 - **Siguiente cobro**: ver el punto 2 (la UNIQUE).
 
@@ -333,6 +336,17 @@ Decisiones:
     cobros abiertos de siempre). El item del directorio trae en `grupo`: `cabeza_id`, `cabeza_nombre`, `cabeza_rnc`, `cabeza_paga`,
     `cabeza_motivo_sin_pago` y `miembros` (cada uno con `paga` y `motivo_sin_pago`). La búsqueda usa el nombre y el RNC **propios** de
     cada empresa (la cabeza que no paga sigue encontrando a su grupo).
+- **Monto por empresa que paga** (diseño: `docs/superpowers/specs/2026-11-19-cobros-tenants-monto-por-empresa-design.md` del repo `fiscalo`;
+  sin migración). En Cobros de tenants, `cobro_config.monto_mensual` es el monto **por empresa que paga**, y el total de una unidad es ese
+  monto por `empresas_que_pagan`: 1 para una empresa sola, y en un grupo las empresas que no están marcadas "no paga" (una marca que no
+  aplica cuenta a todas como que pagan; nunca menos de 1). Un grupo con 500 por empresa y 3 que pagan es 1,500 al mes. Sigue siendo **un
+  cobro por grupo al mes, en la cabeza, por el total**; no hay cobros ni pagos por empresa. La multiplicación se aplica al **crear** un
+  cobro desde la configuración (el del mes siguiente tras un pago, el monto por defecto de "Nuevo cobro" y `sugerido.monto`); un cobro
+  conserva el monto con el que se creó, así que marcar quién paga solo cambia los cobros que se creen después. `config.monto_mensual` en
+  las respuestas sigue siendo el monto por empresa; el item del directorio y el panel traen `empresas_que_pagan`. Una empresa que entra
+  a un grupo cuenta como que paga hasta que se la marca "no paga". Guardar un monto cuyo total con las que pagan hoy pasa del máximo
+  (RD$ 9,999,999,999.99) es 422; si después pagan más empresas y el total del mes siguiente ya no cabe, ese cobro no se genera
+  (`siguiente_motivo = monto_excedido`) y el pago se guarda igual. En el ámbito de una empresa no hay grupos: nada cambia.
 - **Quién no es cliente** (tabla `cobro_excluidos`, master **022**). No todos los tenants son clientes: varios se crearon solo para
   certificar a una empresa (tipo `integracion`, en certificación) o son de prueba. **Borrarlos no se puede ni se debe**: cada uno guarda
   sus e-CF (`ecf_integracion_backup`: 50 a 275 por tenant el 2026-11-18, y no tienen base propia, así que es la única copia), su bitácora y
