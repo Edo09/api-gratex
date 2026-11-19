@@ -17,7 +17,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
      MySQL.
 - Si la DDL de producción puede no ser la del repo, la migración se escribe
   idempotente: cada cambio se condiciona a `information_schema` y se ejecuta con
-  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 038 y 039; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021 y 022).
+  `PREPARE/EXECUTE` (ver 018, 026, 027, 028, 029, 030, 031, 032, 033, 034, 035, 038 y 039; en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021, 022 y 023).
 - En phpMyAdmin, un `SELECT` sobre `information_schema` cambia la base actual a
   `information_schema` para las sentencias que siguen (la 028 falló así el
   2026-10-05: "#1109 - Unknown table 'FACTURAS' in information_schema"). Una
@@ -95,6 +95,10 @@ que ningún otro plan los tome:
   `cobro_excluidos` de Cobros de tenants: marca los tenants que NO son clientes (los que se
   crearon solo para certificar, los de prueba) para que no salgan en la pestana Clientes; no
   borra nada. Va ANTES de subir el codigo que la usa: el directorio de tenants la consulta.
+- **Master 023**: `db/master_migrations/023_cobro_sin_pago.sql` (2026-11-19). La tabla
+  `cobro_sin_pago` de Cobros de tenants: marca las empresas de un GRUPO (`tenants.grupo_id`) que NO
+  pagan la mensualidad del grupo (solo certificaron); sin fila = paga; no borra nada. Va ANTES de
+  subir el codigo que la usa: cada consulta de Cobros de tenants la lee, y sin la tabla responde 500.
 - **Tenant 039**: `db/migrations/039_clients_lista_precio.sql` (2026-11-18). Agrega la
   columna `clients.lista_precio` (la lista de precio por defecto del cliente, 1 a 4;
   NULL = preguntar cada vez). Toma la 039 porque la 036 es de Express, la 037 del plan

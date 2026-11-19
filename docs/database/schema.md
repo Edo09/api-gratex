@@ -42,6 +42,7 @@ Fuente: `db/master_schema.sql`. Solo routing, auth y datos globales.
 | `pos_equipos` | Equipos habilitados para el POS (token + caja) por tenant, con el bloqueo por PIN fallidos (master_migration 012) |
 | `cobro_config` / `cobros` / `cobro_pagos` / `cobro_recordatorios` | Cobros de la **plataforma** a sus tenants: las mismas cuatro tablas del módulo Cobros de cada empresa, pero el cliente es un `tenants.id` (FK a `tenants`). Solo las usa la cuenta de soporte, por `/api/cobros-tenants` (master_migration 021, ver [../modules/cobros.md](../modules/cobros.md)) |
 | `cobro_excluidos` | Los tenants que **no son clientes** de Cobros de tenants (se crearon solo para certificar, son de prueba): una fila por tenant (`client_id` PK, FK a `tenants` ON DELETE CASCADE, `motivo`, `user_id`). Solo marca: nada se borra y quitar la fila los devuelve a la lista (master_migration 022) |
+| `cobro_sin_pago` | Las empresas de un **grupo** (`tenants.grupo_id`) que **no pagan** la mensualidad del grupo (solo certificaron): una fila por empresa (`client_id` PK, FK a `tenants` ON DELETE CASCADE, `motivo`, `user_id`). Sin fila = paga. Solo marca: nada se borra y quitar la fila la devuelve a las que pagan (master_migration 023) |
 
 ### `tenants`
 | Columna | Tipo | Notas |
