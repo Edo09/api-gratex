@@ -61,11 +61,19 @@ class cobroModel
      * company_name, razon_social, rnc, email, phone_number). Un tenant solo tiene nombre y RNC: el nombre hace de
      * razon social, empresa y contacto, y el correo es el del primer usuario admin de esa empresa (para saber a quien
      * escribirle). tipo, ambiente, activo y edicion sirven al buscador de tenants.
+     *
+     * Un tenant con grupo_id (migracion master 008: empresas de un mismo cliente) se cobra POR GRUPO: la UNIDAD de cobro es la
+     * cabeza, el tenant cuyo id es el grupo_id (--grupo=self); si esa fila ya no existe, la de menor id con ese grupo_id; sin
+     * grupo_id, el tenant solo. cabeza_id es el id de la unidad de cada tenant.
      */
     private const ORIGEN_EMPRESA = 'clients';
     private const ORIGEN_TENANTS = "(SELECT t.id AS id, t.nombre AS client_name, t.nombre AS company_name, t.nombre AS razon_social,
         t.rnc AS rnc, COALESCE((SELECT u.email FROM users u WHERE u.tenant_id = t.id AND u.role = 'admin' ORDER BY u.id LIMIT 1), '') AS email,
-        '' AS phone_number, t.tipo AS tipo, t.ambiente AS ambiente, t.activo AS activo, t.edicion AS edicion FROM tenants t)";
+        '' AS phone_number, t.tipo AS tipo, t.ambiente AS ambiente, t.activo AS activo, t.edicion AS edicion, t.grupo_id AS grupo_id,
+        CASE WHEN t.grupo_id IS NULL THEN t.id
+             WHEN EXISTS (SELECT 1 FROM tenants h WHERE h.id = t.grupo_id) THEN t.grupo_id
+             ELSE (SELECT MIN(g.id) FROM tenants g WHERE g.grupo_id = t.grupo_id) END AS cabeza_id
+        FROM tenants t)";
 
     /** Los datos del cliente que viajan con un cobro (alias cl_* para no chocar con las columnas de cobros). */
     private const CLIENTE = 'cl.id AS cl_id, cl.client_name AS cl_contacto, cl.company_name AS cl_empresa,
@@ -141,9 +149,16 @@ class cobroModel
      * esta vencido) y su proximo vencimiento (el primero que aun no vence; hoy cuenta como "aun no"). Un cobro cancelado
      * o pagado no suma, igual que en el dashboard.
      *
-     * Los tenants que la plataforma marco como "no es un cliente" (cobro_excluidos: los creados solo para certificar, los
-     * de prueba) NO salen, salvo con $conExcluidos (la pestana Clientes los muestra si se lo piden); cada item dice
-     * `excluido` y, si lo esta, su `motivo_exclusion`.
+     * Hay UNA fila por unidad de cobro (ver ORIGEN_TENANTS): un grupo es la fila de su cabeza (con su nombre, RNC, tipo, ambiente,
+     * cobro mensual y saldos), y sus hermanas no salen solas. `grupo` es null sin grupo; con grupo trae `cabeza_id` y `miembros`
+     * (las demas empresas del grupo, por id: id, nombre, rnc, tipo, ambiente; vacio en un grupo de una). La busqueda por nombre o
+     * RNC encuentra la unidad por ella o por cualquiera de sus hermanas.
+     *
+     * Solo salen las unidades que se COBRAN ($conExcluidos = false). Con $conExcluidos salen todas, cada una con `facturable` y,
+     * si no se cobra, `motivo_oculto`: `excluido` (la plataforma la marco "no es un cliente", cobro_excluidos; la marca gana) o
+     * `solo_certificacion`. Se cobra la unidad que no esta marcada y (tiene su cobro mensual ACTIVO, o alguna de sus empresas es
+     * de base propia, o es de integracion en produccion `ecf`). Una de integracion que sigue en certificacion no se cobra hasta
+     * que pasa a produccion o alguien le activa su cobro mensual. `excluido` y `motivo_exclusion` dicen solo de la marca.
      *
      * @return list<array<string,mixed>>
      */
@@ -158,16 +173,24 @@ class cobroModel
         $texto = trim($texto);
         if ($texto !== '') {
             $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $texto) . '%';
-            $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!')";
-            $params = [':q1' => $like, ':q2' => $like];
+            // La unidad coincide por si misma o por cualquiera de sus hermanas (escribir el nombre de una encuentra a su grupo).
+            $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!' OR EXISTS (SELECT 1 FROM " . $this->origen
+                . " h WHERE h.cabeza_id = cl.id AND (h.client_name LIKE :q3 ESCAPE '!' OR h.rnc LIKE :q4 ESCAPE '!')))";
+            $params = [':q1' => $like, ':q2' => $like, ':q3' => $like, ':q4' => $like];
         }
+        // Se cobra: sin marca de "no es un cliente" y (cobro mensual activo, o alguna empresa de base propia o de integracion en
+        // produccion). Solo cuenta el cobro mensual de la cabeza: el que sobre en una hermana no hace a nadie cliente.
+        $facturable = "(ex.client_id IS NULL AND (COALESCE(cc.activo, 0) = 1 OR EXISTS (SELECT 1 FROM " . $this->origen
+            . " m WHERE m.cabeza_id = cl.id AND (m.tipo = 'app' OR (m.tipo = 'integracion' AND m.ambiente = 'ecf')))))";
+        $donde = '(' . $donde . ') AND cl.id = cl.cabeza_id';
         if (!$conExcluidos) {
-            $donde = '(' . $donde . ') AND ex.client_id IS NULL';
+            $donde .= ' AND ' . $facturable;
         }
         $hoy = $this->hoy();
         $saldo = self::SALDO;
         $s = $this->db->prepare(
             'SELECT ' . self::CLIENTE . ', cl.tipo AS cl_tipo, cl.ambiente AS cl_ambiente, cl.activo AS cl_activo,
+                    cl.grupo_id AS cl_grupo_id, ' . $facturable . ' AS cl_facturable,
                     cc.client_id AS cfg_client_id, cc.monto_mensual AS cfg_monto, cc.dia_vencimiento AS cfg_dia,
                     cc.descripcion AS cfg_desc, cc.activo AS cfg_activo, cc.updated_at AS cfg_updated, cc.created_at AS cfg_created,
                     ex.client_id AS ex_client_id, ex.motivo AS ex_motivo,
@@ -191,7 +214,23 @@ class cobroModel
               ORDER BY cl.activo DESC, cl.client_name ASC, cl.id ASC LIMIT ' . $limite
         );
         $s->execute([':hoy1' => $hoy, ':hoy2' => $hoy, ':hoy3' => $hoy, ':hoy4' => $hoy] + $params);
-        return array_map(static function (array $r) use ($hoy): array {
+        $filas = $s->fetchAll();
+        // Las hermanas de cada unidad (todas las demas empresas de su grupo), de una sola consulta.
+        $miembros = [];
+        if ($filas !== []) {
+            $enLista = implode(', ', array_map(static fn(array $r): int => (int) $r['cl_id'], $filas));
+            $mq = $this->db->query(
+                'SELECT m.cabeza_id AS cabeza_id, m.id AS id, m.client_name AS nombre, m.rnc AS rnc, m.tipo AS tipo, m.ambiente AS ambiente
+                   FROM ' . $this->origen . ' m WHERE m.cabeza_id IN (' . $enLista . ') AND m.id <> m.cabeza_id ORDER BY m.id'
+            );
+            foreach ($mq->fetchAll() as $m) {
+                $miembros[(int) $m['cabeza_id']][] = [
+                    'id' => (int) $m['id'], 'nombre' => (string) $m['nombre'], 'rnc' => (string) $m['rnc'],
+                    'tipo' => (string) $m['tipo'], 'ambiente' => (string) $m['ambiente'],
+                ];
+            }
+        }
+        return array_map(static function (array $r) use ($hoy, $miembros): array {
             $config = $r['cfg_client_id'] === null ? null : self::configJson([
                 'client_id' => $r['cfg_client_id'], 'monto_mensual' => $r['cfg_monto'], 'dia_vencimiento' => $r['cfg_dia'],
                 'descripcion' => $r['cfg_desc'], 'activo' => $r['cfg_activo'], 'updated_at' => $r['cfg_updated'], 'created_at' => $r['cfg_created'],
@@ -206,8 +245,14 @@ class cobroModel
                 'cobros_abiertos' => (int) $r['cobros_abiertos'], 'cobros_vencidos' => (int) $r['cobros_vencidos'],
                 'dias_atraso' => $masViejo !== null ? max(0, -CobroReglas::diasEntre($hoy, $masViejo)) : 0,
                 'proximo_vencimiento' => $r['proximo'] !== null ? (string) $r['proximo'] : null,
+                'facturable' => (int) $r['cl_facturable'] === 1,
+                'motivo_oculto' => $r['ex_client_id'] !== null ? 'excluido' : ((int) $r['cl_facturable'] === 1 ? null : 'solo_certificacion'),
+                // Pertenece a un grupo si tiene grupo_id, o si otras empresas lo tienen como cabeza (una cabeza sin su propio grupo_id).
+                'grupo' => $r['cl_grupo_id'] !== null || isset($miembros[(int) $r['cl_id']])
+                    ? ['cabeza_id' => (int) $r['cl_id'], 'miembros' => $miembros[(int) $r['cl_id']] ?? []]
+                    : null,
             ];
-        }, $s->fetchAll());
+        }, $filas);
     }
 
     /**

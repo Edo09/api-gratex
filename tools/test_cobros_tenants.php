@@ -193,7 +193,7 @@ function cobros_tenants_base(): PDO
     $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     $pdo->exec('PRAGMA foreign_keys = ON');
     $pdo->exec("CREATE TABLE tenants (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, rnc TEXT NOT NULL UNIQUE,
-        tipo TEXT NOT NULL DEFAULT 'app', ambiente TEXT NOT NULL DEFAULT 'ecf', activo INTEGER NOT NULL DEFAULT 1,
+        tipo TEXT NOT NULL DEFAULT 'app', grupo_id INTEGER NULL, ambiente TEXT NOT NULL DEFAULT 'ecf', activo INTEGER NOT NULL DEFAULT 1,
         edicion TEXT NOT NULL DEFAULT 'completa')");
     $pdo->exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL REFERENCES tenants (id),
         email TEXT NOT NULL, role TEXT DEFAULT 'user')");
@@ -217,6 +217,30 @@ function cobros_tenants_sembrar(PDO $pdo): void
         (4, 2, 'admin@beta.test', 'admin'), (5, 4, 'solo@delta.test', 'user'), (6, 5, 'admin@epsilon.test', 'admin')");
 }
 
+/**
+ * Trece tenants para la Parte 4 (quien se cobra y los grupos): 10 es cabeza de un grupo con dos hermanas (11 en produccion, 12 en
+ * certificacion); 13 solo certifico; 14 es la cabeza de un grupo que solo esta en certificacion (como Agrovisa) con la hermana 15;
+ * 16 es de base propia; 17 certifica y tendra el cobro mensual apagado; 18 es interna (se marca); 19 y 20 son de un grupo cuya cabeza
+ * (99) ya no existe; 22 es cabeza en certificacion con una hermana (23) en produccion.
+ */
+function cobros_tenants_sembrar_grupos(PDO $pdo): void
+{
+    $pdo->exec("INSERT INTO tenants (id, nombre, rnc, tipo, ambiente, grupo_id) VALUES
+        (10, 'Holding Cabeza SRL', '102000010', 'integracion', 'ecf', 10),
+        (11, 'Holding Hermana Uno', '102000011', 'integracion', 'ecf', 10),
+        (12, 'Holding Hermana Dos', '102000012', 'integracion', 'certecf', 10),
+        (13, 'Solo Certificacion SRL', '102000013', 'integracion', 'certecf', NULL),
+        (14, 'Agro Cabeza', '102000014', 'integracion', 'certecf', 14),
+        (15, 'Agro Hermana', '102000015', 'integracion', 'certecf', 14),
+        (16, 'App Normal', '102000016', 'app', 'ecf', NULL),
+        (17, 'Certecf Apagada', '102000017', 'integracion', 'certecf', NULL),
+        (18, 'Marcada Interna', '102000018', 'app', 'ecf', NULL),
+        (19, 'Sin Cabeza Uno', '102000019', 'integracion', 'ecf', 99),
+        (20, 'Sin Cabeza Dos', '102000020', 'integracion', 'ecf', 99),
+        (22, 'Zeta Cabeza Cert', '102000022', 'integracion', 'certecf', 22),
+        (23, 'Zeta Hermana Prod', '102000023', 'integracion', 'ecf', 22)");
+}
+
 echo "\n== Parte 3: el DDL real de la master traducido a SQLite ==\n";
 $ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos']);
 wa_chk('se traducen las cinco tablas y sus indices del snapshot de la master (5 CREATE TABLE y 7 CREATE INDEX)',
@@ -227,7 +251,7 @@ $columnasDe = static function (string $tabla) use ($snapshot): string {
     return preg_match('/CREATE TABLE IF NOT EXISTS ' . $tabla . ' \((.*?)\) ENGINE=/s', $snapshot, $mm) === 1 ? $mm[1] : '';
 };
 $faltan = [];
-foreach (['tenants' => ['id', 'nombre', 'rnc', 'tipo', 'ambiente', 'activo', 'edicion'], 'users' => ['id', 'tenant_id', 'email', 'role']] as $tabla => $columnas) {
+foreach (['tenants' => ['id', 'nombre', 'rnc', 'tipo', 'grupo_id', 'ambiente', 'activo', 'edicion'], 'users' => ['id', 'tenant_id', 'email', 'role']] as $tabla => $columnas) {
     $cuerpo = $columnasDe($tabla);
     foreach ($columnas as $col) {
         if ($cuerpo === '' || preg_match('/^\s*' . $col . '\s/m', $cuerpo) !== 1) {
@@ -329,7 +353,8 @@ wa_chk('cada uno trae lo de un cliente, que es (tipo, ambiente, activo), su cobr
         'email' => 'admin@alfa.test', 'telefono' => '', 'tipo' => 'app', 'ambiente' => 'ecf', 'activo' => true, 'con_config' => true,
         'config' => ['client_id' => 1, 'monto_mensual' => 5000.0, 'dia_vencimiento' => 31, 'descripcion' => 'Mensualidad Fiscalpoint', 'activo' => true, 'updated_at' => '2026-11-16 10:00:00'],
         'excluido' => false, 'motivo_exclusion' => null,
-        'saldo_pendiente' => 0.0, 'saldo_vencido' => 0.0, 'cobros_abiertos' => 0, 'cobros_vencidos' => 0, 'dias_atraso' => 0, 'proximo_vencimiento' => null]
+        'saldo_pendiente' => 0.0, 'saldo_vencido' => 0.0, 'cobros_abiertos' => 0, 'cobros_vencidos' => 0, 'dias_atraso' => 0, 'proximo_vencimiento' => null,
+        'facturable' => true, 'motivo_oculto' => null, 'grupo' => null]
     && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['config'] === null && $porId[3]['email'] === ''
     && $porId[4]['ambiente'] === 'certecf' && $porId[5]['activo'] === false && $porId[2]['con_config'] === false, $porId);
 wa_chk('busca por nombre (sin importar mayusculas) y por RNC; un texto parcial sirve y se recorta', array_column($m->buscarClientes('alfa'), 'id') === [1]
@@ -622,6 +647,63 @@ wa_chk('panel de Gamma (sin configuracion): config null, 300 vencidos desde el 1
 wa_chk('el panel de un tenant que no existe: null', $m->panelCliente(999) === null);
 $r = $m->crear($nuevo(4, '2027-01'), 7);
 wa_chk('crear con SOLO el tenant (Delta tiene configuracion): usa el periodo, el monto y el dia pedidos (enero 2027, 2000, el 15)', $exito($r) && $r[1]['periodo'] === '2027-01' && $r[1]['monto'] === 2000.0 && $r[1]['fecha_vencimiento'] === '2027-01-15', $r);
+
+echo "\n== Parte 4: quien se cobra, y un grupo se cobra una sola vez ==\n";
+$pdoG = cobros_tenants_base();
+cobros_tenants_sembrar_grupos($pdoG);
+$mg = new cobroModel($pdoG, $reloj, cobroModel::AMBITO_TENANTS);
+$mg->guardarConfig(14, $cfg(150000, 15), 7);               // Agro: cabeza en certecf con su cobro mensual ACTIVO
+$mg->guardarConfig(17, $cfg(100000, 15, null, false), 7);  // certecf con el cobro mensual APAGADO
+// Sobra de una hermana (en produccion hay dos): no debe contar para nada ni mostrarse.
+$pdoG->exec("INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento, activo, created_at) VALUES (12, 500, 15, 1, '2026-11-19 00:00:00')");
+$mg->excluirCliente(18, true, 'Interna', 7);
+$ids = static fn(array $r): array => array_column($r, 'id');
+$visibles = $mg->buscarClientes('', cobroModel::MAX_DIRECTORIO);
+$todas = $mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
+$fx['directorio-grupos'] = $todas;
+wa_chk('por defecto solo salen las unidades que se cobran: Agro (14, certecf pero con cobro mensual activo), App Normal (16), Holding (10, cabeza en produccion), Sin Cabeza (19) y Zeta (22, su hermana 23 esta en produccion)',
+    $ids($visibles) === [14, 16, 10, 19, 22], $ids($visibles));
+wa_chk('con "excluidos" salen todas las unidades (cabezas), tambien la que solo certifico (13), la de cobro mensual apagado (17) y la marcada (18)',
+    $ids($todas) === [14, 16, 17, 10, 18, 19, 13, 22], $ids($todas));
+wa_chk('...y cada una dice si se cobra y por que no: la marca gana (excluido) y lo demas es "solo_certificacion"',
+    array_column($todas, 'facturable') === [true, true, false, true, false, true, false, true]
+    && array_column($todas, 'motivo_oculto') === [null, null, 'solo_certificacion', null, 'excluido', null, 'solo_certificacion', null]
+    && array_column($todas, 'excluido') === [false, false, false, false, true, false, false, false], array_column($todas, 'motivo_oculto'));
+wa_chk('una empresa de un grupo que no es la cabeza (11, 12, 15, 20, 23) nunca es una fila', array_intersect([11, 12, 15, 20, 23], $ids($todas)) === [], $ids($todas));
+$g = array_column($todas, null, 'id');
+$hermana = static fn(int $id, string $nombre, string $ambiente): array => ['id' => $id, 'nombre' => $nombre, 'rnc' => '1020000' . $id, 'tipo' => 'integracion', 'ambiente' => $ambiente];
+wa_chk('el grupo 10 es UNA fila con los datos de su cabeza y sus dos hermanas, por id (11 en produccion, 12 en certificacion)',
+    $g[10]['nombre'] === 'Holding Cabeza SRL' && $g[10]['tipo'] === 'integracion' && $g[10]['ambiente'] === 'ecf'
+    && $g[10]['grupo'] === ['cabeza_id' => 10, 'miembros' => [$hermana(11, 'Holding Hermana Uno', 'ecf'), $hermana(12, 'Holding Hermana Dos', 'certecf')]], $g[10]['grupo']);
+wa_chk('una empresa sin grupo trae grupo null; el grupo 14 (todo en certificacion) trae su hermana 15; si la cabeza ya no existe (99) manda la de menor id (19) y su hermana es la 20',
+    $g[16]['grupo'] === null && $g[14]['grupo'] === ['cabeza_id' => 14, 'miembros' => [$hermana(15, 'Agro Hermana', 'certecf')]]
+    && $g[19]['grupo'] === ['cabeza_id' => 19, 'miembros' => [$hermana(20, 'Sin Cabeza Dos', 'ecf')]], [$g[16]['grupo'], $g[19]['grupo']]);
+wa_chk('el cobro mensual de la cabeza (Agro: 1,500) es el del grupo; lo que sobro en una hermana (12) no cuenta: la cabeza 10 sigue sin cobro mensual',
+    $g[14]['config']['monto_mensual'] === 1500.0 && $g[14]['config']['activo'] === true && $g[10]['config'] === null && $g[10]['con_config'] === false, $g[10]['config']);
+$mg->guardarConfig(14, $cfg(150000, 15, null, false), 7);
+$agroApagada = array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[14];
+wa_chk('si se apaga el cobro mensual de Agro deja de cobrarse (sale de la lista y dice "solo_certificacion")...',
+    !in_array(14, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO)), true) && $agroApagada['facturable'] === false && $agroApagada['motivo_oculto'] === 'solo_certificacion', $agroApagada['motivo_oculto']);
+$mg->guardarConfig(14, $cfg(150000, 15), 7);
+wa_chk('...y al volver a activarlo regresa', in_array(14, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO)), true));
+wa_chk('buscar por el nombre o el RNC de una hermana trae la fila de su grupo, no la de ella; y la que solo certifico solo sale pidiendo las ocultas',
+    $ids($mg->buscarClientes('Hermana Uno')) === [10] && $ids($mg->buscarClientes('102000012')) === [10] && $ids($mg->buscarClientes('102000023')) === [22]
+    && $ids($mg->buscarClientes('Holding Cabeza')) === [10] && $mg->buscarClientes('Solo Certificacion') === []
+    && $ids($mg->buscarClientes('Solo Certificacion', 20, true)) === [13]);
+$mg->guardarConfig(10, $cfg(50000, 15), 7);
+$cobroGrupo = $mg->crear($nuevo(10, '2027-02'), 7);
+$conCobro = $mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
+$fila10 = array_column($conCobro, null, 'id')[10];
+wa_chk('el grupo se cobra UNA vez: el cobro es de la cabeza (500), la fila del grupo lo trae, lo del directorio cuadra con el dashboard y ninguna hermana tiene cobros',
+    $exito($cobroGrupo) && $fila10['saldo_pendiente'] === 500.0 && $fila10['con_config'] === true && $fila10['cobros_abiertos'] === 1
+    && array_sum(array_column($conCobro, 'saldo_pendiente')) === $mg->resumen(7)['totales']['pendiente']
+    && (int) $pdoG->query('SELECT COUNT(*) FROM cobros WHERE client_id <> 10')->fetchColumn() === 0, $fila10);
+$r = $mg->excluirCliente(22, true, 'Interna', 7);
+wa_chk('marcar a la cabeza de un grupo (22) lo oculta entero: sale de la lista, su hermana (23) no aparece y dice "excluido"',
+    $exito($r) && !in_array(22, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO)), true)
+    && !in_array(23, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true)), true)
+    && array_column($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), null, 'id')[22]['motivo_oculto'] === 'excluido', $r);
+wa_chk('...y devolverla la regresa con su grupo', $exito($mg->excluirCliente(22, false, null, 7)) && in_array(22, $ids($mg->buscarClientes('', cobroModel::MAX_DIRECTORIO)), true));
 
 $carpetaFixtures = wa_arg('fixtures');
 if ($carpetaFixtures !== null && $carpetaFixtures !== '') {
