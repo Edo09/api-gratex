@@ -68,6 +68,8 @@ foreach ([
     // El segmento de las empresas, y cualquier otro, no es de la plataforma.
     ['GET', '/api/cobros', 'desconocida', null, null, null], ['GET', '/api/cobros/resumen', 'desconocida', null, null, null],
     ['GET', '/api/facturas', 'desconocida', null, null, null], ['get', '/index.php/api/cobros-tenants/clientes/', 'buscar', null, null, null],
+    ['PUT', '/api/cobros-tenants/clientes/7/excluido', 'excluir', null, null, 7], ['GET', '/api/cobros-tenants/clientes/7/excluido', 'metodo', null, null, 7],
+    ['PUT', '/api/cobros-tenants/clientes/abc/excluido', 'desconocida', null, null, null], ['PUT', '/api/cobros-tenants/clientes/0/excluido', 'desconocida', null, null, null],
 ] as [$m, $path, $accion, $id, $pagoId, $clientId]) {
     $ruta = CobroReglas::ruta($m, $path, 'cobros-tenants');
     wa_chk("ruta de la plataforma {$m} {$path} -> {$accion}", $ruta === ['accion' => $accion, 'id' => $id, 'pago_id' => $pagoId, 'client_id' => $clientId], $ruta);
@@ -78,6 +80,26 @@ wa_chk('al reves: con el segmento por defecto (una empresa) la ruta de la plataf
 wa_chk('el 403 de la plataforma habla de soporte y no manda a "pedirselo a un administrador" (un admin de empresa no lo arregla)',
     CobroReglas::MSG_SIN_PERMISO_PLATAFORMA !== CobroReglas::MSG_SIN_PERMISO && str_contains(CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 'soporte')
     && !str_contains(CobroReglas::MSG_SIN_PERMISO_PLATAFORMA, 'administrador'));
+
+// El cuerpo de PUT .../clientes/{id}/excluido: `excluido` es obligatorio y booleano; el motivo, opcional y de hasta 150 caracteres.
+echo "\n== Parte 1: el cuerpo de excluir ==\n";
+$cuerpo = static fn(array $a): object => (object) $a;
+$ex = static fn(array $a): array => CobroReglas::validarExclusion($cuerpo($a));
+wa_chk('excluir: true sin motivo; con motivo (recortado); y al VOLVER a la lista el motivo no se guarda',
+    $ex(['excluido' => true]) === ['success', ['excluido' => true, 'motivo' => null]]
+    && $ex(['excluido' => true, 'motivo' => '  Solo certificacion '])[1] === ['excluido' => true, 'motivo' => 'Solo certificacion']
+    && $ex(['excluido' => false, 'motivo' => 'x'])[1] === ['excluido' => false, 'motivo' => null]
+    && $ex(['excluido' => true, 'motivo' => ''])[1]['motivo'] === null);
+wa_chk('excluir acepta el booleano como texto o numero (igual que "activo" de la configuracion): "si", 1 y true; "no", 0 y "0"',
+    array_map(fn($v) => $ex(['excluido' => $v])[1]['excluido'] ?? 'error', [true, 'si', 1, '1', false, 'no', 0, '0'])
+    === [true, true, true, true, false, false, false, false]);
+wa_chk('sin "excluido", con null o con algo que no es un booleano: 422 con el texto que lo explica',
+    $ex([])[0] === 'error' && $ex([])[1] === CobroReglas::MSG_EXCLUIDO && $ex([])[2] === 422
+    && $ex(['excluido' => null])[1] === CobroReglas::MSG_EXCLUIDO && $ex(['excluido' => 'quizas'])[1] === CobroReglas::MSG_EXCLUIDO
+    && $ex(['excluido' => [true]])[2] === 422);
+wa_chk('el motivo de 151 caracteres es 422 con su texto; el de 150 pasa, tambien con tildes',
+    $ex(['excluido' => true, 'motivo' => str_repeat('a', 151)])[1] === CobroReglas::MSG_MOTIVO_EXCLUSION && $ex(['excluido' => true, 'motivo' => str_repeat('a', 151)])[2] === 422
+    && $ex(['excluido' => true, 'motivo' => str_repeat('a', 150)])[0] === 'success' && $ex(['excluido' => true, 'motivo' => str_repeat('á', 150)])[0] === 'success');
 
 // ===========================================================================
 // Parte 2 — El cableado
@@ -135,6 +157,14 @@ wa_chk('el modelo se abre con el ambito de la peticion y la ruta se lee con su s
     && str_contains($c, "\$ambitoTenants ? 'cobros-tenants' : 'cobros'"));
 $iBuscar = strpos($c, "case 'buscar':");
 $trozoBuscar = $iBuscar === false ? '' : substr($c, $iBuscar, 600);
+$iExcluir = strpos($c, "case 'excluir':");
+$trozoExcluir = $iExcluir === false ? '' : substr($c, $iExcluir, 1800);
+wa_chk('quitar de la lista de clientes (accion excluir) solo existe en la plataforma (en una empresa es 404), valida el cuerpo, llama al modelo y deja EXCLUDE/INCLUDE en la bitacora',
+    $trozoExcluir !== '' && str_contains($trozoExcluir, 'if (!$ambitoTenants) {') && str_contains($trozoExcluir, 'CobroReglas::MSG_RUTA, 404')
+    && str_contains($trozoExcluir, 'CobroReglas::validarExclusion($body)') && str_contains($trozoExcluir, '$modelo->excluirCliente(')
+    && str_contains($trozoExcluir, "'EXCLUDE'") && str_contains($trozoExcluir, "'INCLUDE'") && str_contains($trozoExcluir, 'if (!$r[1][\'repetido\'])'));
+wa_chk("el directorio acepta ?excluidos=1 para traer tambien a los que no son clientes (por defecto no salen)",
+    str_contains($c, "in_array(\$_GET['excluidos'] ?? '', ['1', 'true'], true)"));
 wa_chk('el buscador de tenants (accion buscar) solo responde en la plataforma: en una empresa es 404',
     $trozoBuscar !== '' && str_contains($trozoBuscar, 'if (!$ambitoTenants) {') && str_contains($trozoBuscar, 'CobroReglas::MSG_RUTA, 404')
     && str_contains($trozoBuscar, '$modelo->buscarClientes(') && str_contains($trozoBuscar, 'cobroModel::MAX_DIRECTORIO'));
@@ -167,7 +197,7 @@ function cobros_tenants_base(): PDO
         edicion TEXT NOT NULL DEFAULT 'completa')");
     $pdo->exec("CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id INTEGER NOT NULL REFERENCES tenants (id),
         email TEXT NOT NULL, role TEXT DEFAULT 'user')");
-    foreach (cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios']) as $ddl) {
+    foreach (cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos']) as $ddl) {
         $pdo->exec($ddl);
     }
     return $pdo;
@@ -188,9 +218,9 @@ function cobros_tenants_sembrar(PDO $pdo): void
 }
 
 echo "\n== Parte 3: el DDL real de la master traducido a SQLite ==\n";
-$ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios']);
-wa_chk('se traducen las cuatro tablas y sus indices del snapshot de la master (4 CREATE TABLE y 7 CREATE INDEX)',
-    count(array_filter($ddl, fn(string $d): bool => str_starts_with($d, 'CREATE TABLE'))) === 4
+$ddl = cobros_ddl_sqlite(__DIR__ . '/../db/master_schema.sql', ['cobro_config', 'cobros', 'cobro_pagos', 'cobro_recordatorios', 'cobro_excluidos']);
+wa_chk('se traducen las cinco tablas y sus indices del snapshot de la master (5 CREATE TABLE y 7 CREATE INDEX)',
+    count(array_filter($ddl, fn(string $d): bool => str_starts_with($d, 'CREATE TABLE'))) === 5
     && count(array_filter($ddl, fn(string $d): bool => str_contains($d, 'INDEX'))) === 7, $ddl);
 $snapshot = str_replace("\r\n", "\n", (string) file_get_contents($raiz . '/db/master_schema.sql'));
 $columnasDe = static function (string $tabla) use ($snapshot): string {
@@ -236,6 +266,13 @@ $pdoC->exec("INSERT INTO cobro_config (client_id, monto_mensual, dia_vencimiento
 $borrado = $intentar($pdoC, 'DELETE FROM tenants WHERE id = 6');
 wa_chk('la FK cobro_config -> tenants es CASCADE: al borrar un tenant sin cobros se va su configuracion, sin dejar filas huerfanas',
     $borrado === null && (int) $pdoC->query('SELECT COUNT(*) FROM cobro_config WHERE client_id = 6')->fetchColumn() === 0);
+$pdoC->exec("INSERT INTO tenants (id, nombre, rnc) VALUES (7, 'Eta Sin Cobros', '101000077')");
+$pdoC->exec("INSERT INTO cobro_excluidos (client_id, motivo, created_at) VALUES (7, 'Solo certificacion', '2026-01-01 00:00:00')");
+wa_chk('cobro_excluidos: una sola marca por tenant (PK) y la FK rechaza marcar a un tenant que no existe',
+    stripos((string) $intentar($pdoC, "INSERT INTO cobro_excluidos (client_id, created_at) VALUES (7, 'x')"), 'UNIQUE') !== false
+    && stripos((string) $intentar($pdoC, "INSERT INTO cobro_excluidos (client_id, created_at) VALUES (999, 'x')"), 'FOREIGN KEY') !== false);
+wa_chk('...y es CASCADE: al borrar un tenant se va su marca de "no es cliente", sin dejar filas huerfanas',
+    $intentar($pdoC, 'DELETE FROM tenants WHERE id = 7') === null && (int) $pdoC->query('SELECT COUNT(*) FROM cobro_excluidos WHERE client_id = 7')->fetchColumn() === 0);
 $pdoC = null;
 
 // El reloj de las pruebas: se mueve con $ahora.
@@ -287,10 +324,11 @@ $b = $m->buscarClientes('');
 $fx['buscar'] = $b;
 wa_chk('sin texto: los 5 tenants, los activos primero por nombre (Alfa, Beta, Delta, Gamma) y el inactivo al final', array_column($b, 'id') === [1, 2, 4, 3, 5], array_column($b, 'id'));
 $porId = array_column($b, null, 'id');
-wa_chk('cada uno trae lo de un cliente, que es (tipo, ambiente, activo), su cobro mensual (config) y lo que debe (en ceros: aun no hay cobros)',
+wa_chk('cada uno trae lo de un cliente, que es (tipo, ambiente, activo), su cobro mensual (config), si esta excluido y lo que debe (en ceros: aun no hay cobros)',
     $porId[1] === ['id' => 1, 'nombre' => 'Alfa Comercial SRL', 'contacto' => 'Alfa Comercial SRL', 'empresa' => 'Alfa Comercial SRL', 'rnc' => '101000011',
         'email' => 'admin@alfa.test', 'telefono' => '', 'tipo' => 'app', 'ambiente' => 'ecf', 'activo' => true, 'con_config' => true,
         'config' => ['client_id' => 1, 'monto_mensual' => 5000.0, 'dia_vencimiento' => 31, 'descripcion' => 'Mensualidad Fiscalpoint', 'activo' => true, 'updated_at' => '2026-11-16 10:00:00'],
+        'excluido' => false, 'motivo_exclusion' => null,
         'saldo_pendiente' => 0.0, 'saldo_vencido' => 0.0, 'cobros_abiertos' => 0, 'cobros_vencidos' => 0, 'dias_atraso' => 0, 'proximo_vencimiento' => null]
     && $porId[3]['tipo'] === 'integracion' && $porId[3]['con_config'] === false && $porId[3]['config'] === null && $porId[3]['email'] === ''
     && $porId[4]['ambiente'] === 'certecf' && $porId[5]['activo'] === false && $porId[2]['con_config'] === false, $porId);
@@ -515,6 +553,51 @@ wa_chk('depende del reloj, no de lo guardado: el 1 de diciembre lo de Alfa (venc
     $resumenDir($alfaDic) === [true, 6000.0, 6000.0, 1, 1, 1, null], $alfaDic);
 wa_chk('el limite se corta en MAX_DIRECTORIO (500): uno enorme no rompe ni trae de mas, y el tope es el que usa el controlador',
     cobroModel::MAX_DIRECTORIO === 500 && count($m->buscarClientes('', 100000)) === 5 && count($m->buscarClientes('', 3)) === 3);
+
+echo "\n== Parte 3: quitar a un tenant de la lista de clientes (y devolverlo) ==\n";
+$sinCliente = static fn(array $r): string => (string) ($r[1] ?? '');
+wa_chk('quitar a un tenant que no existe: 404',  $falla($m->excluirCliente(999, true, null, 7), 404));
+$r = $m->excluirCliente(1, true, 'x', 7);
+wa_chk('a Alfa, que tiene 1 cobro abierto, NO se le quita de la lista: 409 TIENE_COBROS_ABIERTOS, con el texto y la cuenta',
+    $falla($r, 409, 'TIENE_COBROS_ABIERTOS') && str_contains($sinCliente($r), '1 cobro abierto') && ($r[4]['cobros_abiertos'] ?? null) === 1, $r);
+$r = $m->excluirCliente(4, true, null, 7);
+wa_chk('a Delta, con 2 cobros abiertos, tampoco: el texto dice "2 cobros abiertos"', $falla($r, 409, 'TIENE_COBROS_ABIERTOS') && str_contains($sinCliente($r), '2 cobros abiertos'), $r);
+wa_chk('...ni a Gamma ni a Epsilon (tienen un cobro abierto cada una); cancelado o pagado no cuenta como abierto',
+    $falla($m->excluirCliente(3, true, null, 7), 409, 'TIENE_COBROS_ABIERTOS') && $falla($m->excluirCliente(5, true, null, 7), 409, 'TIENE_COBROS_ABIERTOS'));
+$m->guardarConfig(2, $cfg(100000, 10, null, true), 7);
+$r = $m->excluirCliente(2, true, 'Solo certificacion', 7);
+wa_chk('Beta no debe nada, pero con su cobro mensual ACTIVO tampoco se le quita (sigue generando cobros): 409 CONFIG_ACTIVA',
+    $falla($r, 409, 'CONFIG_ACTIVA') && str_contains($sinCliente($r), 'desactívalo'), $r);
+$m->guardarConfig(2, $cfg(100000, 10, null, false), 7);
+$r = $m->excluirCliente(2, true, 'Solo certificacion', 7);
+wa_chk('con el cobro mensual inactivo y sin cobros abiertos, a Beta SI: excluido, con su motivo, y lo de antes (anterior) para la bitacora',
+    $exito($r) && $r[1] === ['client_id' => 2, 'excluido' => true, 'motivo' => 'Solo certificacion', 'repetido' => false, 'anterior' => ['excluido' => false, 'motivo' => null]], $r);
+$r = $m->excluirCliente(2, true, 'otro motivo', 7);
+wa_chk('repetirlo es lo mismo que una vez (repetido) y no cambia el motivo', $exito($r) && $r[1]['repetido'] === true && $r[1]['motivo'] === 'Solo certificacion', $r);
+wa_chk('el directorio de siempre ya no la trae (ni el buscador de los formularios): quedan Alfa, Delta, Gamma y Epsilon',
+    array_column($m->buscarClientes('', cobroModel::MAX_DIRECTORIO), 'id') === [1, 4, 3, 5] && $m->buscarClientes('beta') === []);
+$conOcultas = $m->buscarClientes('', cobroModel::MAX_DIRECTORIO, true);
+$fx['directorio-con-excluidos'] = $conOcultas;
+wa_chk('con "excluidos" la trae, marcada y con su motivo; las demas dicen excluido false y sin motivo',
+    array_column($conOcultas, 'id') === [1, 2, 4, 3, 5] && array_column($conOcultas, 'excluido') === [false, true, false, false, false]
+    && $conOcultas[1]['motivo_exclusion'] === 'Solo certificacion' && $conOcultas[0]['motivo_exclusion'] === null
+    && array_column($m->buscarClientes('beta', 20, true), 'id') === [2], $conOcultas);
+wa_chk('no se borra nada: su cobro sigue en la lista y en los totales, y su panel se abre',
+    in_array($B1['id'], array_column($m->listar(CobroReglas::validarFiltros([])[1], 0, 500), 'id'), true)
+    && $m->panelCliente(2) !== null && $m->resumen(7)['totales']['pendiente'] === 11000.0 && $cuenta('SELECT COUNT(*) FROM tenants') === 5);
+wa_chk('en el ambito de una empresa no existe quitar de la lista de clientes: 404', $falla((new cobroModel($pdo, $reloj))->excluirCliente(2, true, null, 7), 404));
+$r = $m->excluirCliente(2, false, null, 7);
+wa_chk('devolverla a la lista: excluido false, y lo de antes (el motivo) queda para la bitacora',
+    $exito($r) && $r[1] === ['client_id' => 2, 'excluido' => false, 'motivo' => null, 'repetido' => false, 'anterior' => ['excluido' => true, 'motivo' => 'Solo certificacion']], $r);
+$r = $m->excluirCliente(2, false, null, 7);
+wa_chk('devolverla otra vez es lo mismo que una vez (repetido); el directorio vuelve a traer a los 5 y ninguno esta excluido',
+    $exito($r) && $r[1]['repetido'] === true && array_column($m->buscarClientes('', cobroModel::MAX_DIRECTORIO), 'id') === [1, 2, 4, 3, 5]
+    && !in_array(true, array_column($m->buscarClientes('', cobroModel::MAX_DIRECTORIO, true), 'excluido'), true));
+$pdo->exec("INSERT INTO tenants (id, nombre, rnc) VALUES (6, 'Zeta Sin Nada', '101000066')");
+$r = $m->excluirCliente(6, true, null, 7);
+wa_chk('un tenant sin cobros ni cobro mensual se quita sin problema, y su marca se va sola si se borra el tenant (CASCADE)',
+    $exito($r) && $r[1]['repetido'] === false && $cuenta('SELECT COUNT(*) FROM cobro_excluidos') === 1
+    && $pdo->exec('DELETE FROM tenants WHERE id = 6') === 1 && $cuenta('SELECT COUNT(*) FROM cobro_excluidos') === 0 && $cuenta('SELECT COUNT(*) FROM tenants') === 5, $r);
 
 echo "\n== Parte 3: panel del tenant ==\n";
 $p = $m->panelCliente(1);

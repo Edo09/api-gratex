@@ -22,6 +22,7 @@
 -- La 016 sigue reservada para el plan ITBIS (no esta escrita): no tiene fila aqui.
 -- La 020 (permiso cobros al rol user) son solo datos: no tiene fila. La 021 (Cobros de la plataforma a sus
 -- tenants) crea cuatro tablas: su fila dice APLICADA con las cuatro y la UNIQUE uk_cobros_cliente_periodo.
+-- La 022 (tenants que no son clientes) crea la tabla cobro_excluidos: su fila dice APLICADA con la tabla.
 --
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
 -- =============================================================================
@@ -144,6 +145,10 @@ FROM (
          AND (SELECT COUNT(*) FROM information_schema.STATISTICS
               WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cobros'
                 AND INDEX_NAME = 'uk_cobros_cliente_periodo') > 0
+  UNION ALL
+  SELECT '022', '022_cobro_excluidos.sql', 'tabla cobro_excluidos (los tenants que no son clientes de Cobros de tenants)',
+         (SELECT COUNT(*) FROM information_schema.TABLES
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'cobro_excluidos') = 1
 ) m
 ORDER BY m.migracion;
 

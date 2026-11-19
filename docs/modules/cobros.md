@@ -282,7 +282,18 @@ Decisiones:
   `cobros_abiertos`, `cobros_vencidos`, `dias_atraso` (del más viejo) y `proximo_vencimiento` (hoy cuenta como "aún no vence"). Un cobro
   pagado o cancelado no suma, igual que en el dashboard: la suma del directorio cuadra con él (lo prueba `tools/test_cobros_tenants.php`).
   Lo usan el buscador de los formularios y la pestaña *Clientes* de la pantalla, que es lo que se ve al entrar: sin ella, quien cobra no
-  veía a sus tenants hasta que tenían un cobro.
+  veía a sus tenants hasta que tenían un cobro. Los que **no son clientes** (ver el punto siguiente) no salen, salvo con `?excluidos=1`
+  (la pestaña lo pide para poder mostrarlos y devolverlos); cada item dice `excluido` y, si lo está, su `motivo_exclusion`.
+- **Quién no es cliente** (tabla `cobro_excluidos`, master **022**). No todos los tenants son clientes: varios se crearon solo para
+  certificar a una empresa (tipo `integracion`, en certificación) o son de prueba. **Borrarlos no se puede ni se debe**: cada uno guarda
+  sus e-CF (`ecf_integracion_backup`: 50 a 275 por tenant el 2026-11-18, y no tienen base propia, así que es la única copia), su bitácora y
+  su historial, y las FK lo impiden mientras existan. En vez de eso, `PUT /api/cobros-tenants/clientes/{id}/excluido` con
+  `{ "excluido": true, "motivo"?: "…" }` los **marca**, y `{ "excluido": false }` los devuelve: la tabla guarda una fila por tenant
+  (`client_id` PK, FK a `tenants` ON DELETE CASCADE, `motivo`, `user_id`, `created_at`) y quitar la fila revierte todo. Reglas: no se quita
+  de la lista a quien tiene plata de por medio, con **cobros abiertos** (409 `TIENE_COBROS_ABIERTOS`, con `cobros_abiertos` en `data`) o
+  con su **cobro mensual activo** (409 `CONFIG_ACTIVA`: se desactiva antes); repetir lo mismo no cambia nada (`repetido: true`, sin
+  fila de bitácora). Cada cambio deja `EXCLUDE` o `INCLUDE` en la bitácora (módulo `cobros-tenants`, `tenant_id` 0). La marca no toca
+  los cobros, los pagos ni el dashboard de ese tenant (si los tiene, siguen ahí), solo la lista de clientes y el buscador.
 - **FK a `tenants`.** Un tenant con cobros no se puede borrar (RESTRICT); su configuración mensual sí se va con él (CASCADE), como
   la de un cliente en las empresas.
 
@@ -298,11 +309,14 @@ El orden importa (regla del proyecto: **las migraciones de tenant van primero**)
 
 **Cobros de tenants** (la pantalla de soporte no funciona sin esto; las empresas siguen igual sin ello):
 
-5. `tools/verificar_migraciones_master.sql` en la base master (fila `021`).
+5. `tools/verificar_migraciones_master.sql` en la base master (filas `021` y `022`).
 6. `db/master_migrations/021_cobros_tenants.sql` en la base **master**, una vez (idempotente). Va **antes** de subir el código:
    sin sus cuatro tablas, `/api/cobros-tenants` responde 500.
 7. Subir el código de la API (`cobroController.php`, `cobroModel.php`, `CobroReglas.php`, `Router.php`, `config/permissions.php`; y
    `db/tenant_schema.sql`, que lee `create_tenant.php`) y, después, la web.
+8. `db/master_migrations/022_cobro_excluidos.sql` en la base **master**, una vez (idempotente), **antes** de subir el código que trae
+   "no es un cliente": el directorio consulta `cobro_excluidos` y sin la tabla responde 500. Solo cambian `cobroModel.php`,
+   `cobroController.php` y `CobroReglas.php`.
 
 Registro de aplicación en producción: ver el final de este archivo.
 

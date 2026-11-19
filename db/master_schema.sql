@@ -522,6 +522,17 @@ CREATE TABLE IF NOT EXISTS cobro_recordatorios (
   CONSTRAINT cobro_recordatorios_cobro_fk FOREIGN KEY (cobro_id) REFERENCES cobros (id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- cobro_excluidos (master_migrations/022): los tenants que NO son clientes de Cobros de tenants (los que se crearon solo
+-- para certificar, los de prueba). Solo marca: nada se borra, y quitar la fila los devuelve a la lista de clientes.
+CREATE TABLE IF NOT EXISTS cobro_excluidos (
+  client_id   INT(11)      NOT NULL COMMENT 'tenants.id: el tenant que NO es un cliente al que se le cobra',
+  motivo      VARCHAR(150) NULL COMMENT 'Por que no es un cliente (ej. solo certificacion); lo escribe quien lo quita de la lista',
+  user_id     INT(11)      NULL COMMENT 'users.id de quien lo quito de la lista (sin FK a proposito)',
+  created_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (client_id),
+  CONSTRAINT cobro_excluidos_client_fk FOREIGN KEY (client_id) REFERENCES tenants (id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ============================================================================
 -- MIGRACION GRATEX = TENANT #1  (ejecutar tras crear el schema)
 -- ----------------------------------------------------------------------------

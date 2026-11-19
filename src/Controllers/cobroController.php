@@ -44,7 +44,8 @@ require_once(__DIR__ . '/../AccesoGlobal.php');
  *   - /api/cobros-tenants  la PLATAFORMA cobra a sus tenants, en la base master; exige que el usuario tenga acceso
  *                          global (master.users.acceso_global = 1: soporte). Mismas rutas, mismas reglas, mismas
  *                          respuestas, mas GET /api/cobros-tenants/clientes?query=&limite= (el directorio de tenants, con su
- *                          cobro mensual y lo que deben).
+ *                          cobro mensual y lo que deben; ?excluidos=1 trae tambien a los que no son clientes) y
+ *                          PUT /api/cobros-tenants/clientes/{id}/excluido (quitar un tenant de la lista de clientes, o devolverlo).
  *
  * El modulo se exige SIEMPRE, aunque PERMISSIONS_ENFORCE este en modo sombra (como
  * posAdminController): son cuentas por cobrar de la empresa, con datos de contacto de sus
@@ -222,7 +223,8 @@ try {
             }
             cobrosResponder($modelo->buscarClientes(
                 is_string($_GET['query'] ?? null) ? $_GET['query'] : '',
-                CobroReglas::enteroDe($_GET, 'limite', 20, cobroModel::MAX_DIRECTORIO)
+                CobroReglas::enteroDe($_GET, 'limite', 20, cobroModel::MAX_DIRECTORIO),
+                in_array($_GET['excluidos'] ?? '', ['1', 'true'], true)
             ));
             break;
 
@@ -264,6 +266,36 @@ try {
                     : 'Cobro mensual del cliente ' . $ruta['client_id'] . ' modificado (no cambia los cobros ya generados).',
             ]);
             cobrosResponder($r[1]['config']);
+            break;
+
+        case 'excluir':
+            // Quitar a un tenant de la lista de clientes (los creados solo para certificar, los de prueba) o devolverlo: solo en
+            // la plataforma. No borra nada; con cobros abiertos o su cobro mensual activo se rechaza (409).
+            if (!$ambitoTenants) {
+                cobrosResponderError(['error', CobroReglas::MSG_RUTA, 404]);
+                break;
+            }
+            $v = CobroReglas::validarExclusion($body);
+            if ($v[0] !== 'success') {
+                cobrosResponderError($v);
+                break;
+            }
+            $r = $modelo->excluirCliente($ruta['client_id'], $v[1]['excluido'], $v[1]['motivo'], $usuarioId);
+            if ($r[0] !== 'success') {
+                cobrosResponderError($r);
+                break;
+            }
+            if (!$r[1]['repetido']) {
+                cobrosAuditar([
+                    'action' => $r[1]['excluido'] ? 'EXCLUDE' : 'INCLUDE',
+                    'entity_type' => 'tenant', 'entity_id' => $ruta['client_id'],
+                    'old_values' => $r[1]['anterior'], 'new_values' => ['excluido' => $r[1]['excluido'], 'motivo' => $r[1]['motivo']],
+                    'description' => $r[1]['excluido']
+                        ? 'El tenant ' . $ruta['client_id'] . ' deja de ser un cliente al que se le cobra.'
+                        : 'El tenant ' . $ruta['client_id'] . ' vuelve a la lista de clientes.',
+                ]);
+            }
+            cobrosResponder($r[1]);
             break;
 
         case 'crear':

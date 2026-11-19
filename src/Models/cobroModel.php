@@ -141,9 +141,13 @@ class cobroModel
      * esta vencido) y su proximo vencimiento (el primero que aun no vence; hoy cuenta como "aun no"). Un cobro cancelado
      * o pagado no suma, igual que en el dashboard.
      *
+     * Los tenants que la plataforma marco como "no es un cliente" (cobro_excluidos: los creados solo para certificar, los
+     * de prueba) NO salen, salvo con $conExcluidos (la pestana Clientes los muestra si se lo piden); cada item dice
+     * `excluido` y, si lo esta, su `motivo_exclusion`.
+     *
      * @return list<array<string,mixed>>
      */
-    public function buscarClientes(string $texto, int $limite = 20): array
+    public function buscarClientes(string $texto, int $limite = 20, bool $conExcluidos = false): array
     {
         if ($this->ambito !== self::AMBITO_TENANTS) {
             return [];
@@ -157,17 +161,22 @@ class cobroModel
             $donde = "(cl.client_name LIKE :q1 ESCAPE '!' OR cl.rnc LIKE :q2 ESCAPE '!')";
             $params = [':q1' => $like, ':q2' => $like];
         }
+        if (!$conExcluidos) {
+            $donde = '(' . $donde . ') AND ex.client_id IS NULL';
+        }
         $hoy = $this->hoy();
         $saldo = self::SALDO;
         $s = $this->db->prepare(
             'SELECT ' . self::CLIENTE . ', cl.tipo AS cl_tipo, cl.ambiente AS cl_ambiente, cl.activo AS cl_activo,
                     cc.client_id AS cfg_client_id, cc.monto_mensual AS cfg_monto, cc.dia_vencimiento AS cfg_dia,
                     cc.descripcion AS cfg_desc, cc.activo AS cfg_activo, cc.updated_at AS cfg_updated, cc.created_at AS cfg_created,
+                    ex.client_id AS ex_client_id, ex.motivo AS ex_motivo,
                     COALESCE(ab.pendiente, 0) AS saldo_pendiente, COALESCE(ab.vencido, 0) AS saldo_vencido,
                     COALESCE(ab.abiertos, 0) AS cobros_abiertos, COALESCE(ab.vencidos, 0) AS cobros_vencidos,
                     ab.mas_antiguo AS mas_antiguo, ab.proximo AS proximo
                FROM ' . $this->origen . ' cl
                LEFT JOIN cobro_config cc ON cc.client_id = cl.id
+               LEFT JOIN cobro_excluidos ex ON ex.client_id = cl.id
                LEFT JOIN (
                      SELECT c.client_id AS client_id,
                             SUM(' . $saldo . ') AS pendiente,
@@ -191,6 +200,7 @@ class cobroModel
             return self::clienteJson($r) + [
                 'tipo' => (string) $r['cl_tipo'], 'ambiente' => (string) $r['cl_ambiente'], 'activo' => (int) $r['cl_activo'] === 1,
                 'con_config' => $config !== null, 'config' => $config,
+                'excluido' => $r['ex_client_id'] !== null, 'motivo_exclusion' => $r['ex_motivo'] !== null ? (string) $r['ex_motivo'] : null,
                 'saldo_pendiente' => CobroReglas::aNumero(CobroReglas::centavosDb($r['saldo_pendiente'])),
                 'saldo_vencido' => CobroReglas::aNumero(CobroReglas::centavosDb($r['saldo_vencido'])),
                 'cobros_abiertos' => (int) $r['cobros_abiertos'], 'cobros_vencidos' => (int) $r['cobros_vencidos'],
@@ -198,6 +208,63 @@ class cobroModel
                 'proximo_vencimiento' => $r['proximo'] !== null ? (string) $r['proximo'] : null,
             ];
         }, $s->fetchAll());
+    }
+
+    /**
+     * Quita a un tenant de la lista de clientes (excluir = true: no es un cliente al que se le cobra, p. ej. lo creo solo
+     * para certificar) o lo devuelve a ella (false). NO borra nada: cobro_excluidos solo marca, y quitar la marca lo devuelve.
+     * Solo existe en el ambito de tenants. Repetir lo mismo no cambia nada (repetido = true). Quitar de la lista a quien tiene
+     * plata de por medio se rechaza con 409: con cobros abiertos (TIENE_COBROS_ABIERTOS) o con su cobro mensual activo
+     * (CONFIG_ACTIVA); sus cobros ya pagados o cancelados no lo impiden. `anterior` es lo que habia, para la bitacora.
+     *
+     * @return array ['success', ['client_id' => int, 'excluido' => bool, 'motivo' => ?string, 'repetido' => bool, 'anterior' => array]]
+     *               | ['error', ...]
+     */
+    public function excluirCliente(int $clientId, bool $excluir, ?string $motivo, ?int $userId): array
+    {
+        if ($this->ambito !== self::AMBITO_TENANTS) {
+            return self::err(CobroReglas::MSG_RUTA, 404);
+        }
+        return $this->protegido(function () use ($clientId, $excluir, $motivo, $userId): array {
+            if ($this->cliente($clientId) === null) {
+                return self::err(CobroReglas::MSG_CLIENTE_NO_EXISTE, 404);
+            }
+            // Lo de antes, SIN bloqueo (la fila puede no existir: un bloqueo de hueco entre dos sesiones daria deadlock). El
+            // INSERT y el DELETE de abajo son atomicos por si mismos y su rowCount dice si de verdad cambiaron algo.
+            $s = $this->db->prepare('SELECT motivo FROM cobro_excluidos WHERE client_id = :cid');
+            $s->execute([':cid' => $clientId]);
+            $fila = $s->fetch();
+            $anterior = ['excluido' => $fila !== false, 'motivo' => $fila !== false && $fila['motivo'] !== null ? (string) $fila['motivo'] : null];
+            if (!$excluir) {
+                $d = $this->db->prepare('DELETE FROM cobro_excluidos WHERE client_id = :cid');
+                $d->execute([':cid' => $clientId]);
+                return ['success', ['client_id' => $clientId, 'excluido' => false, 'motivo' => null, 'repetido' => $d->rowCount() === 0, 'anterior' => $anterior]];
+            }
+            if ($fila !== false) {
+                return ['success', ['client_id' => $clientId, 'excluido' => true, 'motivo' => $anterior['motivo'], 'repetido' => true, 'anterior' => $anterior]];
+            }
+            // No se quita de la lista a quien tiene plata de por medio: un cobro abierto o un cobro mensual que sigue generando.
+            $a = $this->db->prepare('SELECT COUNT(*) FROM cobros c WHERE c.client_id = :cid AND ' . self::ABIERTO);
+            $a->execute([':cid' => $clientId]);
+            $abiertos = (int) $a->fetchColumn();
+            if ($abiertos > 0) {
+                return self::err(
+                    'Esta empresa tiene ' . ($abiertos === 1 ? '1 cobro abierto' : $abiertos . ' cobros abiertos')
+                        . ': cóbralos o cancélalos antes de quitarla de la lista de clientes.',
+                    409, 'TIENE_COBROS_ABIERTOS', ['cobros_abiertos' => $abiertos]
+                );
+            }
+            $config = $this->filaConfig($clientId, false);
+            if ($config !== null && (int) $config['activo'] === 1) {
+                return self::err('Esta empresa tiene el cobro mensual activo: desactívalo antes de quitarla de la lista de clientes.', 409, 'CONFIG_ACTIVA');
+            }
+            $i = $this->db->prepare(
+                'INSERT INTO cobro_excluidos (client_id, motivo, user_id, created_at) VALUES (:cid, :motivo, :user, :ahora) '
+                . ($this->mysql ? 'ON DUPLICATE KEY UPDATE client_id = client_id' : 'ON CONFLICT (client_id) DO NOTHING')
+            );
+            $i->execute([':cid' => $clientId, ':motivo' => $motivo, ':user' => $userId, ':ahora' => $this->ahora()]);
+            return ['success', ['client_id' => $clientId, 'excluido' => true, 'motivo' => $motivo, 'repetido' => $i->rowCount() === 0, 'anterior' => $anterior]];
+        }, 'No se pudo cambiar si la empresa es un cliente. Inténtalo de nuevo.');
     }
 
     /** La configuracion mensual del cliente, tal cual la ve la API; null si no tiene. */

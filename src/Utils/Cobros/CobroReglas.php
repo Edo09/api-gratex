@@ -84,6 +84,8 @@ final class CobroReglas
     public const MSG_RUTA = 'Esta dirección de cobros no existe.';
     public const MSG_SIN_PERMISO = 'No tienes permiso para hacer esto. Pídeselo a un administrador.';
     public const MSG_SIN_PERMISO_PLATAFORMA = 'Los cobros a los tenants son solo para la cuenta de soporte de la plataforma.';
+    public const MSG_EXCLUIDO = 'Indica si la empresa deja de ser un cliente (excluido: true) o vuelve a serlo (excluido: false).';
+    public const MSG_MOTIVO_EXCLUSION = 'El motivo no puede pasar de 150 caracteres.';
     public const MSG_METODO_HTTP = 'Esta acción de cobros no admite ese método.';
     public const MSG_ERROR_GENERICO = 'No se pudo completar la operación con los cobros. Inténtalo de nuevo y, si sigue pasando, avisa a soporte.';
 
@@ -381,6 +383,29 @@ final class CobroReglas
             }
         }
         return ['success', ['monto_c' => $monto, 'dia' => $dia, 'descripcion' => $desc[1], 'activo' => $activo]];
+    }
+
+    /**
+     * El cuerpo de PUT /api/cobros-tenants/clientes/{id}/excluido (solo la plataforma): `excluido` (true = deja de ser un
+     * cliente al que se le cobra; false = vuelve a serlo) y, opcional, el `motivo` (hasta 150 caracteres; solo se guarda al
+     * quitarlo de la lista).
+     *
+     * @return array ['success', ['excluido' => bool, 'motivo' => ?string]] | ['error', texto, 422]
+     */
+    public static function validarExclusion(object $b): array
+    {
+        if (!self::tiene($b, 'excluido') || $b->excluido === null) {
+            return ['error', self::MSG_EXCLUIDO, 422];
+        }
+        $excluido = self::booleano($b->excluido);
+        if ($excluido === null) {
+            return ['error', self::MSG_EXCLUIDO, 422];
+        }
+        $motivo = self::texto255($b->motivo ?? null, self::MAX_DESCRIPCION);
+        if ($motivo[0] !== 'ok') {
+            return ['error', self::MSG_MOTIVO_EXCLUSION, 422];
+        }
+        return ['success', ['excluido' => $excluido, 'motivo' => $excluido ? $motivo[1] : null]];
     }
 
     /** El dia de vencimiento: entero de 1 a 31 (numero o texto de digitos); null si no. */
@@ -723,8 +748,9 @@ final class CobroReglas
      * el Router) y solo mira los segmentos de despues de $segmento.
      *
      * Acciones: listar, crear, resumen, recordatorios, panel, config, obtener, actualizar,
-     * pagar, cancelar, reabrir, recordar, anular y buscar (GET .../clientes: el buscador de tenants, solo
-     * existe en la plataforma). 'metodo' = la ruta existe pero no con ese metodo (405); 'desconocida' = no
+     * pagar, cancelar, reabrir, recordar, anular, buscar (GET .../clientes: el directorio de tenants) y excluir
+     * (PUT .../clientes/{id}/excluido: quitar un tenant de la lista de clientes, o devolverlo); las dos ultimas solo
+     * existen en la plataforma. 'metodo' = la ruta existe pero no con ese metodo (405); 'desconocida' = no
      * existe (404).
      *
      * @param string $segmento el primer segmento de la ruta: 'cobros' o 'cobros-tenants'
@@ -758,6 +784,9 @@ final class CobroReglas
         } elseif ($n === 3 && $seg[0] === 'clientes' && self::idDe($seg[1]) !== null && $seg[2] === 'config') {
             $r['client_id'] = self::idDe($seg[1]);
             $permitidos = ['PUT' => 'config'];
+        } elseif ($n === 3 && $seg[0] === 'clientes' && self::idDe($seg[1]) !== null && $seg[2] === 'excluido') {
+            $r['client_id'] = self::idDe($seg[1]);
+            $permitidos = ['PUT' => 'excluir'];
         } elseif ($n === 3 && $seg[0] === 'pagos' && self::idDe($seg[1]) !== null && $seg[2] === 'anular') {
             $r['pago_id'] = self::idDe($seg[1]);
             $permitidos = ['POST' => 'anular'];
