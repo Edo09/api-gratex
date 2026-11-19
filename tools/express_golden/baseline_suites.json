@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "3683c343f149eb1bb754f60c4d8dbb5f3e7bebde",
+    "git_sha": "43347713618f6bdcd6191103117e5c624c189c99",
     "php": "8.5",
-    "capturado": "2026-11-18T20:44:04-04:00",
+    "capturado": "2026-11-18T20:56:45-04:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 379,
@@ -131,7 +131,7 @@
             "estado": "OK"
         },
         "test_cobros_tenants.php": {
-            "total": 171,
+            "total": 172,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
