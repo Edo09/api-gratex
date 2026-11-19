@@ -249,8 +249,8 @@ class cobroModel
             $abiertos = (int) $a->fetchColumn();
             if ($abiertos > 0) {
                 return self::err(
-                    'Esta empresa tiene ' . ($abiertos === 1 ? '1 cobro abierto' : $abiertos . ' cobros abiertos')
-                        . ': cóbralos o cancélalos antes de quitarla de la lista de clientes.',
+                    'Esta empresa tiene ' . ($abiertos === 1 ? '1 cobro abierto: cóbralo o cancélalo' : $abiertos . ' cobros abiertos: cóbralos o cancélalos')
+                        . ' antes de quitarla de la lista de clientes.',
                     409, 'TIENE_COBROS_ABIERTOS', ['cobros_abiertos' => $abiertos]
                 );
             }

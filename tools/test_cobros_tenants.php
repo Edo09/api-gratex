@@ -560,8 +560,9 @@ wa_chk('quitar a un tenant que no existe: 404',  $falla($m->excluirCliente(999, 
 $r = $m->excluirCliente(1, true, 'x', 7);
 wa_chk('a Alfa, que tiene 1 cobro abierto, NO se le quita de la lista: 409 TIENE_COBROS_ABIERTOS, con el texto y la cuenta',
     $falla($r, 409, 'TIENE_COBROS_ABIERTOS') && str_contains($sinCliente($r), '1 cobro abierto') && ($r[4]['cobros_abiertos'] ?? null) === 1, $r);
+wa_chk('...y el texto concuerda con la cuenta: con 1 cobro, "cóbralo o cancélalo" (no "cóbralos")', str_contains($sinCliente($r), 'cóbralo o cancélalo') && !str_contains($sinCliente($r), 'cóbralos'), $r);
 $r = $m->excluirCliente(4, true, null, 7);
-wa_chk('a Delta, con 2 cobros abiertos, tampoco: el texto dice "2 cobros abiertos"', $falla($r, 409, 'TIENE_COBROS_ABIERTOS') && str_contains($sinCliente($r), '2 cobros abiertos'), $r);
+wa_chk('a Delta, con 2 cobros abiertos, tampoco: el texto dice "2 cobros abiertos: cóbralos o cancélalos"', $falla($r, 409, 'TIENE_COBROS_ABIERTOS') && str_contains($sinCliente($r), '2 cobros abiertos: cóbralos o cancélalos'), $r);
 wa_chk('...ni a Gamma ni a Epsilon (tienen un cobro abierto cada una); cancelado o pagado no cuenta como abierto',
     $falla($m->excluirCliente(3, true, null, 7), 409, 'TIENE_COBROS_ABIERTOS') && $falla($m->excluirCliente(5, true, null, 7), 409, 'TIENE_COBROS_ABIERTOS'));
 $m->guardarConfig(2, $cfg(100000, 10, null, true), 7);
