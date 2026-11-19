@@ -320,8 +320,8 @@ wa_chk('verificador del master: la cabecera menciona la 015',
 // La lista del README son TODAS las migraciones del master que condicionan cada cambio a information_schema y
 // lo ejecutan con PREPARE/EXECUTE (007, 008, 010 a 015, 017, 018 y 019; la lista del tenant, 018 y 026 a 035, ya
 // era completa): quien agregue otra del mismo estilo la suma al README y a este texto en el mismo cambio.
-wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021 y 022 son las idempotentes con PREPARE/EXECUTE',
-    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021 y 022'));
+wa_chk('README de migraciones: en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021, 022 y 023 son las idempotentes con PREPARE/EXECUTE',
+    str_contains($s1Leer('db/migrations/README.md'), 'en el master, 007, 008, 010, 011, 012, 013, 014, 015, 017, 018, 019, 020, 021, 022 y 023'));
 $s1Doc = $s1Leer('docs/database/schema.md');
 $s1Faltan = array_values(array_filter(
     ['edicion', 'modulos_habilitados', 'tipos_ecf_habilitados', 'cert_vence', 'inventario_estricto', 'pos_enabled', 'grupo_id',
