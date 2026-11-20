@@ -221,7 +221,8 @@ herramienta de operaciones, no del cliente). Solo lectura.
 ## Cobertura actual
 
 Mutaciones (CREATE/UPDATE/DELETE) de: clients, products, categories, warehouses,
-proveedores, users, roles (+ASSIGN), branding, landing, ncf (rangos/secuencia),
+proveedores, users, roles (+ASSIGN), branding, **emisor** (los datos de la empresa, `UPDATE` con
+antes/después solo de lo que cambió; ver [emisor.md](emisor.md)), landing, ncf (rangos/secuencia),
 cotizaciones, **facturas simples** (`facturas-simples`, entidad `factura_simple`,
 con antes/después) y **conduces** (`conduces`, entidad `conduce`, `entity_id` = el id del
 conduce: CREATE con el cuerpo en `new_values`, UPDATE con la fila de antes y el cuerpo,

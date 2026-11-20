@@ -58,6 +58,7 @@ asistentes IA ver `CLAUDE.md` en la raíz.
 | [modules/acceso-global.md](modules/acceso-global.md) | Usuario de soporte que entra a todas las empresas (`users.acceso_global`, master 019): `/api/auth/empresas`, `/api/auth/empresa`, bitácora, cómo dar y quitar el acceso |
 | [modules/inventario.md](modules/inventario.md) | Inventario: categorías y almacenes, integración con productos, ventas y compras que mueven existencia (ajustes, kardex, valor de inventario) y el [interruptor «Bloquear ventas sin existencia»](modules/inventario.md#control-de-existencias-en-las-ventas): cómo funciona, encender, apagar y límites |
 | [modules/auditoria.md](modules/auditoria.md) | Bitácora de auditoría (`audit_logs`): quién hizo qué y cuándo, `AuditLogger`, `GET /api/audit-logs` |
+| [modules/emisor.md](modules/emisor.md) | Datos de la empresa (`emisor_config`): `GET /api/emisor` y `PUT /api/emisor` (el administrador edita todo menos RNC y razón social), reglas del XSD, permisos, bitácora y pruebas |
 
 ### `business-rules/`
 | Doc | Para qué |

@@ -39,7 +39,9 @@ Módulos del rol `user` por defecto (operativos): `facturas`, `facturas-simples`
 > están abiertos a **cualquier usuario** (valor `'authenticated'`): navbar, facturas y
 > cotizaciones muestran nombre, RNC, dirección y logo del emisor a todo rol. Ninguno trae
 > certificado ni secretos (viven en `master.tenants`). `PUT/POST/DELETE` (logo, plantilla,
-> color, preview) siguen exigiendo el módulo.
+> color, preview) siguen exigiendo el módulo. `PUT /api/emisor` (los datos de la empresa, todo
+> menos RNC y razón social) lo exige también el controller aunque el gate esté en sombra:
+> [emisor.md](emisor.md).
 
 > `conduces` **no es un módulo**: `/api/conduces` (los conduces de mercancía de Ferretería)
 > usa el módulo `cotizaciones` (`'conduces' => 'cotizaciones'` en `routes`), porque un conduce
