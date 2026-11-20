@@ -278,7 +278,7 @@ Cada fila representa **un rango autorizado** por DGII para un tipo y ambiente.
 La emisión dispensa del rango ACTIVO (con capacidad y no vencido); al agotarse, falla con
 error claro hasta registrar el siguiente rango (en el POS no falla: la venta toma el número siguiente
 y espera ese rango, ver [../integrations/pos-write-ahead.md](../integrations/pos-write-ahead.md)).
-Ver `POST /api/ncf/rangos` en [../api/facturas.md](../api/facturas.md).
+Ver `POST /api/ncf/rangos` (registrar) y `PUT /api/ncf/rangos/{id}` (corregir) en [../api/facturas.md](../api/facturas.md).
 
 Tipos B (legacy): `B01` Crédito Fiscal, `B02` Consumidor Final, `B14` Reg. Especiales, `B15` Gubernamental.
 Tipos e-NCF: `E31` Crédito Fiscal, `E32` Consumo, `E33` Nota Débito, `E34` Nota Crédito,

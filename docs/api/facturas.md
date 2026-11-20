@@ -365,7 +365,10 @@ con `data.factura_id` si queda sin confirmar. **La revisión de existencia no se
 reenviando, ya se reenvió, no está rechazada, **incluida toda factura sin confirmar**, la DGII consumió
 el e-NCF o se envió en otro ambiente); `422` (no es electrónica, no tiene líneas o no guarda su
 e-NCF). Cuando la nueva se guarda, la rechazada queda archivada (`..._ARCHIVADO`), su inventario se
-devuelve y el número no vuelve al contador (lo usa la nueva).
+devuelve y el número no vuelve al contador (lo usa la nueva). El rechazo sin consumir había devuelto
+el número al contador (valor → valor − 1): el reenvío lo vuelve a tomar (`ncfModel::retomarECF`) y,
+si lo aceptan, el contador queda en ese número, así que el formulario ofrece el siguiente y «Quedan N»
+cuenta bien. Si lo rechazan otra vez sin consumirlo, vuelve a devolverlo como una emisión normal.
 
 ### Facturas que una nota puede modificar — `GET /api/facturas/modificables`
 
@@ -417,7 +420,7 @@ de la más reciente a la más vieja.
 | `GET/POST` | `/api/gastos` (+ `/stats`, `/{id}/estado`, `/{id}/xml`) | Gastos menores y facturas de proveedores — ver [../modules/gastos.md](../modules/gastos.md) |
 | `GET/POST` | `/api/cotizaciones` | Cotizaciones |
 | `GET/POST/PUT/DELETE` | `/api/facturas-simples` | Facturas NO electrónicas — ver [facturas-simples.md](facturas-simples.md) |
-| `GET/POST` | `/api/ncf/rangos` | Rangos e-NCF autorizados por DGII (listar / registrar) — ver sección abajo |
+| `GET/POST/PUT` | `/api/ncf/rangos` | Rangos e-NCF autorizados por DGII (listar / registrar / corregir) — ver sección abajo |
 | `GET/PUT` | `/api/ncf` | Gestión legacy de secuencias NCF (B01) |
 | `POST` | `/api/aprobaciones-comerciales` | Enviar ACECF a DGII (aprobación comercial saliente) |
 | `POST` | `/api/ecf/recepcion` | Recibir e-CFs entrantes de otros emisores |
@@ -477,6 +480,35 @@ empezar dentro de ellos para cubrirlos. Arranca a dispensar después del último
 (nunca reparte dos veces un número ya usado), y el reenvío automático del POS envía esas ventas en su
 siguiente vuelta. Si existía una fila legacy "sin límite", se cierra en su consumo actual y el rango
 nuevo pasa a dispensar al agotarse el activo.
+
+**`PUT /api/ncf/rangos/{id}`** — corregir un rango ya registrado (mismo módulo `ncf` que el POST).
+Cuerpo **parcial**, solo lo que cambia:
+
+```json
+{ "fecha_vencimiento": "2027-12-31", "numero_hasta": 100, "no_autorizacion": "6005308087" }
+```
+
+Campos: `fecha_vencimiento` (`Y-m-d`; cualquier fecha válida, también una pasada, para corregir un rango
+que una fecha mal puesta dejó `vencido`), `no_solicitud` y `no_autorizacion` (hasta 20 caracteres; vacío =
+sin dato), `numero_hasta` y `numero_desde`. `type`, `ambiente` y `current_value` en el cuerpo dan `422`: no
+se cambian. Una fila `sin_limite` tampoco se edita: se formaliza con el `POST`.
+
+Reglas (todas en `ncfModel::updateRange`, dentro de una transacción con los rangos del tipo bloqueados):
+
+- **Último usado** = el mayor entre `current_value` y el mayor e-NCF emitido dentro del rango, sin los
+  estados reintentables: el de `facturas` y, en los tipos de gastos (E41/E43/E47), el de `gastos` (solo lo que
+  la empresa emite; lo recibido trae el NCF del proveedor). Así un contador atrasado no deja reescribir lo ya
+  emitido.
+- `numero_hasta`: entero, ≥ «Desde», ≥ último usado y menor que el «Desde» del rango siguiente del tipo.
+  Puede subir para cubrir números que el POS usó sin rango.
+- `numero_desde`: solo si el rango no tiene números usados; mayor que el «Hasta» del rango anterior y ≤
+  «Hasta». Al cambiarlo, el contador queda en «Desde» − 1.
+- Sin cambios reales: `200` con el rango, sin escribir ni auditar.
+
+Respuesta `200`: `{ "status": true, "data": <rango, como en GET> }`. `404` si el `id` no es un rango del
+ambiente activo, `422` con el motivo en español y `400` si el cuerpo no se lee. Cada cambio queda en la
+bitácora como `NCF_RANGE_UPDATE` (módulo `ncf`, entidad `ncf_rango`) con los valores de antes y de después
+y el `rango_id`.
 
 > `GET /api/facturas/stats` y `/api/gastos/stats` ahora incluyen por secuencia
 > `restantes` (capacidad vigente; `null` = sin rango con límite) y `vencimiento`.

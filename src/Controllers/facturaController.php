@@ -460,6 +460,9 @@ function emitirFacturaEcf(array $input, facturaModel $facturaModel, clientModel 
     $payload = [
         'tipo_ecf' => $tipoEcf,
         'e_ncf' => $eNcf,
+        // Reenvio de una rechazada: su e_ncf salio de nuestro contador y la devolucion lo dejo en valor - 1.
+        // emitir() lo vuelve a tomar (ver retomar_secuencia en ECFEmissionService::emitir).
+        'retomar_secuencia' => $reenvioDe !== null,
         'fecha_emision' => $input['fecha_emision'] ?? date('d-m-Y'),
         'fecha_vencimiento_secuencia' => $input['fecha_vencimiento_secuencia'] ?? null,
         'tipo_ingresos' => $input['tipo_ingresos'] ?? '01',

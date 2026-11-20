@@ -136,6 +136,44 @@ switch ($_SERVER['REQUEST_METHOD']) {
         break;
 
     case 'PUT':
+        // /api/ncf/rangos/{id} -> corregir un rango autorizado por DGII (docs/specs/ncf-rangos-edicion.md).
+        // Body parcial: { fecha_vencimiento?, no_solicitud?, no_autorizacion?, numero_hasta?, numero_desde? }.
+        // Las reglas viven en ncfModel::updateRange; aqui solo se traduce a HTTP y se audita.
+        if (strpos($uri, '/api/ncf/rangos') !== false) {
+            if (!preg_match('#/api/ncf/rangos/(\d+)(?:[/?]|$)#', $uri, $m)) {
+                http_response_code(404);
+                echo json_encode(['status' => false, 'error' => 'No encontramos ese rango.']);
+                break;
+            }
+            $body = InputSanitizer::jsonInput(false);
+            if (!is_object($body)) {
+                http_response_code(400);
+                echo json_encode(['status' => false, 'error' => 'No se pudieron leer los datos del rango. Inténtalo de nuevo.']);
+                break;
+            }
+            $result = $ncfModel->updateRange((int) $m[1], (array) $body);
+            if ($result[0] === 'success') {
+                // Sin cambios no hay nada que auditar.
+                if ($result[1]['cambios'] !== []) {
+                    AuditLogger::log([
+                        'module' => 'ncf', 'action' => 'NCF_RANGE_UPDATE',
+                        'entity_type' => 'ncf_rango', 'entity_id' => $result[1]['rango']['type'] ?? null,
+                        'old_values' => array_map(fn($c) => $c['antes'], $result[1]['cambios']),
+                        'new_values' => array_map(fn($c) => $c['despues'], $result[1]['cambios']) + ['rango_id' => (int) $m[1]],
+                        'description' => 'Rango NCF autorizado por DGII corregido.',
+                    ]);
+                }
+                echo json_encode(['status' => true, 'data' => $result[1]['rango']]);
+            } elseif ($result[0] === 'notfound') {
+                http_response_code(404);
+                echo json_encode(['status' => false, 'error' => $result[1]]);
+            } else {
+                http_response_code(422);
+                echo json_encode(['status' => false, 'error' => $result[1]]);
+            }
+            break;
+        }
+
         // Update NCF Sequence
         if (strpos($uri, '/api/ncf/sequence') !== false) {
             $_PUT = InputSanitizer::jsonInput(false);

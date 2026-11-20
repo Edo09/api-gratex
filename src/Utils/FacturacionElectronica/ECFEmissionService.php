@@ -217,6 +217,12 @@ class ECFEmissionService
      *       se toma el numero siguiente al ultimo (ncfModel::dispenseSinRango); la
      *       fila se reserva con la meta sin_rango y emitir() vuelve SIN llamar a
      *       la DGII (ni para el token) con estado PENDIENTE_ENVIO y sin_rango true.
+     *   - retomar_secuencia (bool, false): solo con un e_ncf dado y fuera de integracion. Lo pide el
+     *       reenvio de un rechazado (POST /api/facturas/{id}/reenviar): el numero salio de nuestro
+     *       contador y la devolucion tras el rechazo lo dejo en valor - 1. emitir() lo vuelve a tomar
+     *       (ncfModel::retomarECF) y, si el contador avanzo, el numero cuenta como dispensado por
+     *       nosotros: dispensado, rango_id y secuencia_valor van a la meta de la fila y un rechazo que
+     *       no lo consume lo devuelve otra vez. Con el contador en otro valor no se toca nada.
      *   - validar_vigencia_certificado (bool, false): antes de firmar, o sea antes de
      *       reservar, se lee el .p12 y, si su vigencia ya paso, sale EcfUsuarioException:
      *       un fallo previo a la reserva (el numero vuelve al contador). Solo lo pide el
@@ -344,6 +350,7 @@ class ECFEmissionService
         }
         $rangoVencimiento = null; // vencimiento del rango autorizado que dispensa
         $sinRango = false; // true: el numero salio de dispenseSinRango (fuera de rango)
+        $retomado = null; // ['rango_id', 'avanzo'] de ncfModel::retomarECF: solo el reenvio de un rechazado
         if ($eNcfOverride !== null && $eNcfOverride !== '') {
             if (!preg_match('/^E' . $tipoEcf . '\d{10}$/', (string) $eNcfOverride)) {
                 throw new EcfUsuarioException(
@@ -352,6 +359,13 @@ class ECFEmissionService
                 );
             }
             $eNcf = (string) $eNcfOverride;
+            // Reenvio de un rechazado: el numero salio de NUESTRO contador y la devolucion tras el rechazo lo
+            // dejo en valor - 1. Se vuelve a tomar (compare-and-set) para que el contador cuente un numero que
+            // se esta usando; sin esto un reenvio aceptado dejaba el contador atras y el formulario ofrecia otra
+            // vez ese numero. Los e_ncf dados del set de pruebas y de la integracion no lo piden.
+            if (!$integration && !empty($payload['retomar_secuencia'])) {
+                $retomado = $this->ncfModel()->retomarECF('E' . $tipoEcf, (int) substr($eNcf, 3), $ambienteEarly);
+            }
         } else {
             // El contador puede quedar DETRAS de lo realmente usado: la fase 2 de
             // certificacion emite con los e-NCF del set, que vienen dados y no
@@ -400,10 +414,14 @@ class ECFEmissionService
         }
         // Si nosotros dispensamos la secuencia (no es un e_ncf override), se puede
         // revertir cuando DGII rechace sin consumirla (secuenciaUtilizada=false).
-        $dispensamosSecuencia = ($eNcfOverride === null || $eNcfOverride === '');
+        // Un reenvio que retomo su numero (el contador subio con ESTE envio) cuenta igual: la meta de la
+        // fila lo dice y un rechazo que no lo consume lo devuelve, o un fallo antes de reservar. Si el
+        // contador estaba en otro valor no avanzo y el numero se trata como cualquier e_ncf dado.
+        $retomamosSecuencia = ($retomado['avanzo'] ?? false) === true;
+        $dispensamosSecuencia = ($eNcfOverride === null || $eNcfOverride === '') || $retomamosSecuencia;
         $secuenciaType = 'E' . $tipoEcf;
         $secuenciaValor = $dispensamosSecuencia ? (int) substr($eNcf, 3) : 0;
-        $secuenciaRangoId = $dispensamosSecuencia ? ($disp['rango_id'] ?? null) : null;
+        $secuenciaRangoId = $retomamosSecuencia ? $retomado['rango_id'] : ($dispensamosSecuencia ? ($disp['rango_id'] ?? null) : null);
 
         $emisorBase = [
             'rnc' => $emisor['rnc'],

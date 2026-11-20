@@ -314,6 +314,14 @@ Decisión 7 de Release 1, redefinida el 2026-10-12: la app **nunca** reenvía un
 - **Cómo:** sale por la misma emisión write-ahead de la app (guardar, enviar, anotar) con `e_ncf` = el
   de la rechazada: el mismo número. La reserva archiva la rechazada (regla de los estados
   reintentables, `..._ARCHIVADO`); `archivarRechazoReenviado` queda como respaldo.
+- **Contador:** el rechazo sin consumir (`secuenciaUtilizada=false`) había devuelto el número
+  (`current_value` valor → valor − 1). Como el reenvío lleva el `e_ncf` dado, `emitir()` no dispensa, y
+  antes nada volvía a subir el contador: un reenvío aceptado dejaba `ncf_sequences` un número atrás y el
+  formulario ofrecía otra vez el número ya usado con «Quedan N» de más (empresa 133454394, 2026-11-20,
+  E310000000001). Ahora el reenvío pide `retomar_secuencia`: `ncfModel::retomarECF` sube el contador de
+  valor − 1 a valor (compare-and-set, el inverso de `rollbackECFSequence`) y ese envío cuenta como
+  dispensado por nosotros: su meta lleva `dispensado`, `rango_id` y `secuencia_valor`, y un nuevo rechazo
+  sin consumir lo devuelve otra vez. Con el contador en otro valor no se toca nada.
 - **Inventario:** la nueva se descuenta según las reglas de Release 1 y `devolverSaldoDeFactura`
   devuelve lo que la vieja haya movido (una venta del POS rechazada sí lo había descontado).
 - **Sobre una factura sin confirmar responde `409`:** si la DGII ya la tiene, reenviar duplicaría el

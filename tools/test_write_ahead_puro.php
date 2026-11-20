@@ -2083,6 +2083,282 @@ wa_chk('18b: emitirFacturaEcf corta con 422 el emisor ajeno antes de emitir (o s
     && preg_match('/if \(\$emisorAjeno !== null\) \{\s*respond\(false, [^;]*, 422\);\s*return;/s', $s18Emitir) === 1, $s18Guarda);
 
 // ---------------------------------------------------------------------------
+// 19) Reenviar un rechazado vuelve a tomar su numero del contador (2026-11-20,
+// empresa 133454394, rango E31 1-10). El primer envio dispenso E310000000001, la
+// DGII lo rechazo sin consumirlo (145: la fecha de vencimiento del rango estaba mal
+// escrita) y el contador volvio de 1 a 0. Cada reenvio sale con ese mismo numero
+// (e_ncf dado: emitir() no dispensa) y no lo subia: el cuarto, aceptado, dejaba el
+// contador en 0 y el formulario ofrecia otra vez E310000000001 con "Quedan 10
+// numeros". ncfModel::retomarECF es el inverso de rollbackECFSequence: sube el
+// contador de valor - 1 a valor solo si sigue ahi. El comportamiento del UPDATE se
+// prueba con una conexion falsa; el recorrido completo de emitir() con la base de
+// prueba, en tools/test_write_ahead_ecf.php.
+// ---------------------------------------------------------------------------
+echo "\n== 19) Reenviar un rechazado retoma su numero del contador ==\n";
+
+$s19Existe = method_exists(ncfModel::class, 'retomarECF');
+wa_chk('19: ncfModel::retomarECF(string $type, int $valor, ?string $ambiente = null): ?array es publico',
+    $s19Existe && (static function (): bool {
+        $m = new ReflectionMethod(ncfModel::class, 'retomarECF');
+        return $m->isPublic() && !$m->isStatic() && (string) $m->getReturnType() === '?array'
+            && implode(', ', array_map(
+                static fn(ReflectionParameter $p): string => $p->getType() . ' $' . $p->getName(), $m->getParameters()
+            )) === 'string $type, int $valor, ?string $ambiente';
+    })());
+if ($s19Existe) {
+    $s19Modelo = static function (GuionConexion $c): ncfModel {
+        $ref = new ReflectionClass(ncfModel::class);
+        $modelo = $ref->newInstanceWithoutConstructor();
+        $ref->getProperty('conexion')->setValue($modelo, $c);
+        return $modelo;
+    };
+
+    // El contador esta donde lo dejo la devolucion (valor - 1): sube a valor, en el rango que cubre el numero.
+    $c = new GuionConexion();
+    $c->filas['SELECT id FROM ncf_sequences'] = [['id' => 15]];
+    $s19R = $s19Modelo($c)->retomarECF('E31', 1, 'ecf');
+    wa_chk('19: contador en valor - 1: avanza y dice en que rango', $s19R === ['rango_id' => 15, 'avanzo' => true], $s19R);
+    wa_chk('19: el rango se busca por tipo, por ambiente y por cubrir el numero',
+        $c->params('SELECT id FROM ncf_sequences') === [':type' => 'E31', ':ambiente' => 'ecf', ':desde' => 1, ':hasta' => 1],
+        $c->params('SELECT id FROM ncf_sequences'));
+    wa_chk('19: el UPDATE es compare-and-set: solo sube si el contador sigue en valor - 1 (no pisa a otra emision)',
+        $c->params('UPDATE ncf_sequences') === [':valor' => 1, ':id' => 15, ':anterior' => 0]
+        && str_contains((string) $c->sql('UPDATE ncf_sequences'), 'current_value = :anterior'), $c->sql('UPDATE ncf_sequences'));
+    wa_chk('19: nunca baja el contador ni lo pone a ciegas (sin "current_value - 1", sin UPDATE por tipo)',
+        !str_contains((string) $c->sql('UPDATE ncf_sequences'), 'current_value - 1')
+        && str_contains((string) $c->sql('UPDATE ncf_sequences'), 'WHERE id = :id'), $c->sql('UPDATE ncf_sequences'));
+
+    // Un numero mas arriba (contador en 7, numero 9): no es el estado de la devolucion; no se toca.
+    $c = new GuionConexion();
+    $c->filas['SELECT id FROM ncf_sequences'] = [['id' => 15]];
+    $c->rowCounts['UPDATE ncf_sequences'] = 0;
+    $s19R = $s19Modelo($c)->retomarECF('E31', 9, 'ecf');
+    wa_chk('19: contador en otro valor: no avanza (devuelve el rango y avanzo false)', $s19R === ['rango_id' => 15, 'avanzo' => false], $s19R);
+    wa_chk('19: el UPDATE de ese caso pregunta por valor - 1 (8), no por el contador',
+        ($c->params('UPDATE ncf_sequences')[':anterior'] ?? null) === 8, $c->params('UPDATE ncf_sequences'));
+
+    // Ningun rango cubre el numero: null y ni siquiera se intenta el UPDATE.
+    $c = new GuionConexion();
+    $s19R = $s19Modelo($c)->retomarECF('E31', 55, 'ecf');
+    wa_chk('19: ningun rango cubre el numero: null y sin UPDATE', $s19R === null && $c->sql('UPDATE ncf_sequences') === null, $s19R);
+
+    // Entradas que no son un e-NCF de la secuencia: null sin tocar la base.
+    foreach ([['B01', 1], ['E3', 1], ['E31', 0], ['E31', -3]] as [$s19Tipo, $s19Valor]) {
+        $c = new GuionConexion();
+        wa_chk("19: retomarECF('{$s19Tipo}', {$s19Valor}) es null y no consulta la base",
+            $s19Modelo($c)->retomarECF($s19Tipo, $s19Valor, 'ecf') === null && $c->llamadas === [], $c->llamadas);
+    }
+
+    // La base falla: el reenvio no se detiene por esto (sale como hasta hoy) y queda rastro en el log.
+    $c = new GuionConexion();
+    $c->errores[] = ['SELECT id FROM ncf_sequences', new PDOException('se cayo la base')];
+    [$s19R, $s19E, $s19Log] = puro_con_log(static fn() => $s19Modelo($c)->retomarECF('E31', 1, 'ecf'));
+    wa_chk('19: la base falla: null, sin excepcion y una linea [ECF] retomarECF fallo en el log',
+        $s19E === null && $s19R === null && str_contains($s19Log, '[ECF] retomarECF fallo: '), $s19E?->getMessage() ?? $s19Log);
+}
+
+// El cableado: solo el reenvio pide retomar, y emitir() trata el numero retomado como dispensado por nosotros
+// (asi la meta de la fila lleva dispensado, rango_id y secuencia_valor, y un rechazo que no consume lo devuelve).
+$s19Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/facturaController.php'));
+$s19Svc = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php'));
+wa_chk('19: emitirFacturaEcf pide retomar la secuencia solo cuando reemplaza una rechazada (reenvioDe !== null)',
+    substr_count($s19Ctl, "'retomar_secuencia'") === 1
+    && preg_match('/\'retomar_secuencia\' => \$reenvioDe !== null,/', $s19Ctl) === 1);
+wa_chk('19: emitir() retoma solo con retomar_secuencia, fuera de integracion y con el e_ncf dado',
+    substr_count($s19Svc, '->retomarECF(') === 1
+    && str_contains($s19Svc, "!\$integration && !empty(\$payload['retomar_secuencia'])")
+    && strpos($s19Svc, '->retomarECF(') > strpos($s19Svc, '$eNcf = (string) $eNcfOverride;')
+    && strpos($s19Svc, '->retomarECF(') < strpos($s19Svc, '$dispensamosSecuencia = '));
+wa_chk('19: $dispensamosSecuencia incluye el numero retomado (solo si de verdad avanzo el contador)',
+    str_contains($s19Svc, "\$retomamosSecuencia = (\$retomado['avanzo'] ?? false) === true;")
+    && preg_match('/\$dispensamosSecuencia = \(\$eNcfOverride === null \|\| \$eNcfOverride === \'\'\) \|\| \$retomamosSecuencia;/', $s19Svc) === 1);
+wa_chk('19: el rango del numero retomado es el de la meta y el del rollback ($secuenciaRangoId)',
+    str_contains($s19Svc, "\$retomamosSecuencia ? \$retomado['rango_id']"));
+wa_chk('19: el docblock de emitir() documenta la opcion retomar_secuencia', str_contains($s19Svc, 'retomar_secuencia (bool, false)'));
+foreach (['docs/api/facturas.md', 'docs/integrations/dgii-ecf.md'] as $s19Doc) {
+    wa_chk("19: {$s19Doc} cuenta que el reenvio retoma el numero (ncfModel::retomarECF)",
+        str_contains((string) file_get_contents(__DIR__ . '/../' . $s19Doc), 'ncfModel::retomarECF'));
+}
+wa_chk('19: dgii-ecf.md documenta el contador del reenvio (retomar_secuencia, compare-and-set)',
+    str_contains((string) file_get_contents(__DIR__ . '/../docs/integrations/dgii-ecf.md'), '`retomar_secuencia`')
+    && str_contains((string) file_get_contents(__DIR__ . '/../docs/integrations/dgii-ecf.md'), 'compare-and-set'));
+
+// ---------------------------------------------------------------------------
+// 20) Corregir un rango e-NCF autorizado (spec docs/specs/ncf-rangos-edicion.md). El 2026-11-20
+// Q & F Variedades registro su rango E31 con vencimiento 2027-12-21 en vez de 2027-12-31 y la app
+// no tenia como corregirlo (re-registrarlo choca con el control de solapes). ncfModel::updateRange
+// aplica las reglas del spec 4.2 en una transaccion con los rangos del tipo bloqueados; el
+// controlador lo expone como PUT /api/ncf/rangos/{id}. El modelo se prueba con una conexion falsa:
+// el SQL real se valida aparte, en solo lectura, contra el hosting.
+// ---------------------------------------------------------------------------
+echo "\n== 20) ncfModel::updateRange y PUT /api/ncf/rangos/{id} ==\n";
+$s20Existe = method_exists(ncfModel::class, 'updateRange');
+wa_chk('20: ncfModel::updateRange(int $id, array $cambios, ?string $ambiente = null): array es publico',
+    $s20Existe && (new ReflectionMethod(ncfModel::class, 'updateRange'))->isPublic());
+if ($s20Existe) {
+    $s20Rango = static fn(array $r = []): array => $r + ['id' => 15, 'type' => 'E31', 'prefix' => 'E31', 'description' => 'Rango autorizado DGII',
+        'ambiente' => 'ecf', 'current_value' => 0, 'numero_desde' => 1, 'numero_hasta' => 10, 'fecha_vencimiento' => '2027-12-21',
+        'no_solicitud' => null, 'no_autorizacion' => null, 'created_at' => '2026-11-12 09:57:55', 'updated_at' => '2026-11-12 09:57:55'];
+    $s20Correr = static function (array $rangos, array $cambios, int $id = 15, ?int $maxFacturas = null, bool $existe = true, array $errores = [], ?int $maxGastos = null): array {
+        $c = new GuionConexion();
+        $c->filas['SELECT type FROM ncf_sequences'] = $existe ? [['type' => 'E31']] : [];
+        $c->filas['FOR UPDATE'] = $rangos;
+        $c->filas['FROM facturas'] = $maxFacturas === null ? [] : [['mx' => $maxFacturas]];
+        $c->filas['FROM gastos'] = $maxGastos === null ? [] : [['mx' => $maxGastos]];
+        $c->filas['ORDER BY type, numero_desde'] = $rangos; // listRanges tras el commit
+        foreach ($errores as $s20Error) {
+            $c->errores[] = $s20Error;
+        }
+        $ref = new ReflectionClass(ncfModel::class);
+        $m = $ref->newInstanceWithoutConstructor();
+        $ref->getProperty('conexion')->setValue($m, $c);
+        return [$m->updateRange($id, $cambios, 'ecf'), $c];
+    };
+    $s20B = $s20Rango(['id' => 16, 'numero_desde' => 11, 'numero_hasta' => 20, 'current_value' => 10]); // rango siguiente, sin usar
+
+    $s20Casos = [
+        ['la fecha 2027-12-21 se corrige a 2027-12-31', [$s20Rango()], ['fecha_vencimiento' => '2027-12-31'], 15, null, 'success', null, true],
+        ['fecha inexistente 2027-02-30', [$s20Rango()], ['fecha_vencimiento' => '2027-02-30'], 15, null, 'error', 'fecha', false],
+        ['fecha en d/m/Y', [$s20Rango()], ['fecha_vencimiento' => '31/12/2027'], 15, null, 'error', 'fecha', false],
+        ['autorizacion de 21 caracteres', [$s20Rango()], ['no_autorizacion' => str_repeat('9', 21)], 15, null, 'error', '20', false],
+        ['autorizacion de 20 caracteres', [$s20Rango()], ['no_autorizacion' => str_repeat('9', 20)], 15, null, 'success', null, true],
+        ['Hasta 10 -> 100', [$s20Rango()], ['numero_hasta' => 100], 15, null, 'success', null, true],
+        ['Hasta bajo el contador (5): nombra el 5', [$s20Rango(['current_value' => 5])], ['numero_hasta' => 3], 15, null, 'error', '5', false],
+        ['Hasta bajo lo facturado (contador 0, factura #7): nombra el 7', [$s20Rango()], ['numero_hasta' => 5], 15, 7, 'error', '7', false],
+        ['Hasta que invade el rango 11-20: nombra el 11', [$s20Rango(), $s20B], ['numero_hasta' => 11], 15, null, 'error', '11', false],
+        ['Hasta menor que Desde', [$s20Rango()], ['numero_desde' => 8, 'numero_hasta' => 7], 15, null, 'error', null, false],
+        ['Desde con usados (contador 7): nombra el 7', [$s20Rango(['current_value' => 7])], ['numero_desde' => 2], 15, null, 'error', '7', false],
+        ['Desde con contador atrasado y factura #4: nombra el 4', [$s20Rango()], ['numero_desde' => 6], 15, 4, 'error', '4', false],
+        ['Desde sin usar 1 -> 5', [$s20Rango()], ['numero_desde' => 5], 15, null, 'success', null, true],
+        ['Desde mayor que Hasta: nombra el 10', [$s20Rango()], ['numero_desde' => 11], 15, null, 'error', '10', false],
+        ['Desde que pisa el rango anterior (1-10): nombra el 10', [$s20Rango(['current_value' => 10]), $s20B], ['numero_desde' => 10], 16, null, 'error', '10', false],
+        ['fila sin limite: manda a Registrar', [$s20Rango(['numero_hasta' => null])], ['numero_hasta' => 50], 15, null, 'error', 'Registrar', false],
+        ['cambios vacios: 200 sin UPDATE', [$s20Rango()], [], 15, null, 'success', null, false],
+        ['mismo valor que el guardado: sin UPDATE', [$s20Rango()], ['fecha_vencimiento' => '2027-12-21'], 15, null, 'success', null, false],
+        ['un rango vencido se puede editar', [$s20Rango(['fecha_vencimiento' => '2020-01-01'])], ['fecha_vencimiento' => '2027-12-31'], 15, null, 'success', null, true],
+        ['un rango agotado se puede ampliar', [$s20Rango(['current_value' => 10])], ['numero_hasta' => 100], 15, null, 'success', null, true],
+    ];
+    foreach ($s20Casos as [$desc, $rangos, $cambios, $id, $maxFact, $esperado, $contiene, $hayUpdate]) {
+        [$r, $c] = $s20Correr($rangos, $cambios, $id, $maxFact);
+        wa_chk("20: {$desc}", $r[0] === $esperado && ($contiene === null || str_contains(is_string($r[1]) ? $r[1] : '', $contiene))
+            && ($c->sql('UPDATE ncf_sequences') !== null) === $hayUpdate, $r);
+    }
+
+    // Entradas que no son un cambio valido: error y ninguna consulta (nunca un error de MySQL).
+    foreach (['numero_hasta', 'numero_desde'] as $s20Campo) {
+        foreach ([0, -5, 10.5, 'abc', ''] as $s20Malo) {
+            [$s20R, $s20C] = $s20Correr([$s20Rango()], [$s20Campo => $s20Malo]);
+            wa_chk("20: {$s20Campo} = " . json_encode($s20Malo) . ': error y ninguna consulta', $s20R[0] === 'error' && $s20C->llamadas === [], $s20R);
+        }
+    }
+    foreach (['type' => 'E32', 'ambiente' => 'certecf', 'current_value' => 9] as $s20Clave => $s20Valor) {
+        [$s20R, $s20C] = $s20Correr([$s20Rango()], [$s20Clave => $s20Valor]);
+        wa_chk("20: {$s20Clave} en el cuerpo: error y ninguna consulta", $s20R[0] === 'error' && $s20C->llamadas === [], $s20R);
+    }
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_hasta' => 50], 99, null, false);
+    wa_chk('20: un id que no existe en el ambiente: notfound y sin transaccion', $s20R[0] === 'notfound' && $s20C->de('beginTransaction') === [], $s20R);
+
+    // Una edicion de Hasta: orden de la transaccion, cambios devueltos, parametros y lectura de facturas.
+    $s20Pos = static function (GuionConexion $c, string $tipo, string $fragmento = ''): int {
+        foreach ($c->llamadas as $i => $l) {
+            if ($l[0] === $tipo && ($fragmento === '' || str_contains((string) ($l[1] ?? ''), $fragmento))) {
+                return $i;
+            }
+        }
+        return -1;
+    };
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_hasta' => 100]);
+    $s20Ini = $s20Pos($s20C, 'beginTransaction');
+    $s20Lock = $s20Pos($s20C, 'prepare', 'FOR UPDATE');
+    $s20Upd = $s20Pos($s20C, 'prepare', 'UPDATE ncf_sequences');
+    $s20Fin = $s20Pos($s20C, 'commit');
+    wa_chk('20: Hasta 10 -> 100: begin, lectura FOR UPDATE, UPDATE y commit, en ese orden',
+        $s20Ini >= 0 && $s20Ini < $s20Lock && $s20Lock < $s20Upd && $s20Upd < $s20Fin, $s20C->llamadas);
+    wa_chk("20: Hasta 10 -> 100: cambios = ['numero_hasta' => ['antes' => 10, 'despues' => 100]]",
+        ($s20R[1]['cambios'] ?? null) === ['numero_hasta' => ['antes' => 10, 'despues' => 100]], $s20R[1] ?? null);
+    $s20P = $s20C->params('UPDATE ncf_sequences') ?? [];
+    wa_chk('20: el UPDATE lleva :numero_hasta => 100 y :id => 15', ($s20P[':numero_hasta'] ?? null) === 100 && ($s20P[':id'] ?? null) === 15, $s20P);
+    wa_chk('20: la lectura de facturas excluye los estados reintentables y busca E31%',
+        str_contains((string) $s20C->sql('FROM facturas'), "NOT IN ('RECHAZADO'") && ($s20C->params('FROM facturas')[':patron'] ?? null) === 'E31%',
+        $s20C->sql('FROM facturas'));
+
+    // Los tipos de gastos (E41/E43/E47) se emiten desde el modulo de gastos: su e-NCF vive en gastos.ncf, no en
+    // facturas. Revision final 2026-11-20: sin esta lectura "ultimo usado" era solo el contador para esos tipos.
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_hasta' => 5], 15, null, true, [], 7);
+    wa_chk('20: Hasta bajo lo emitido por el modulo de gastos (#7): error que nombra el 7', $s20R[0] === 'error' && str_contains((string) $s20R[1], '7'), $s20R);
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_desde' => 6], 15, null, true, [], 4);
+    wa_chk('20: Desde con un gasto emitido (#4): error que nombra el 4', $s20R[0] === 'error' && str_contains((string) $s20R[1], '4'), $s20R);
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_hasta' => 8], 15, 9, true, [], 7);
+    wa_chk('20: manda el mayor de facturas (#9) y gastos (#7): error que nombra el 9', $s20R[0] === 'error' && str_contains((string) $s20R[1], '9'), $s20R);
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_hasta' => 100], 15, 3, true, [], 7);
+    $s20SqlGastos = (string) $s20C->sql('FROM gastos');
+    wa_chk('20: la lectura de gastos cuenta solo lo que la empresa emite, en este ambiente o sin ambiente, y sin los reintentables',
+        $s20R[0] === 'success' && str_contains($s20SqlGastos, 'es_auto_emision = 1') && str_contains($s20SqlGastos, "NOT IN ('RECHAZADO'")
+        && str_contains($s20SqlGastos, '(ambiente = :ambiente OR ambiente IS NULL)')
+        && ($s20C->params('FROM gastos')[':patron'] ?? null) === 'E31%' && ($s20C->params('FROM gastos')[':ambiente'] ?? null) === 'ecf', $s20SqlGastos);
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['fecha_vencimiento' => '2027-12-31'], 15, null, true, [], 7);
+    wa_chk('20: corregir solo la fecha tampoco lee gastos', $s20R[0] === 'success' && $s20C->sql('FROM gastos') === null, $s20C->llamadas);
+
+    // Solo la fecha: no se lee facturas. Cambia de Desde: el contador queda en Desde - 1.
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['fecha_vencimiento' => '2027-12-31']);
+    wa_chk('20: corregir solo la fecha no lee facturas', $s20R[0] === 'success' && $s20C->sql('FROM facturas') === null, $s20C->llamadas);
+    wa_chk("20: la fecha: cambios = ['fecha_vencimiento' => ['antes' => '2027-12-21', 'despues' => '2027-12-31']]",
+        ($s20R[1]['cambios'] ?? null) === ['fecha_vencimiento' => ['antes' => '2027-12-21', 'despues' => '2027-12-31']], $s20R[1] ?? null);
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_desde' => 5]);
+    $s20P = $s20C->params('UPDATE ncf_sequences') ?? [];
+    wa_chk('20: Desde 1 -> 5: el UPDATE lleva :numero_desde => 5 y :current_value => 4',
+        ($s20P[':numero_desde'] ?? null) === 5 && ($s20P[':current_value'] ?? null) === 4, $s20P);
+
+    // Fallos de la base: la clave unica (rango con ese Desde) y cualquier otro.
+    [$s20R, $s20C] = $s20Correr([$s20Rango()], ['numero_desde' => 5], 15, null, true,
+        [['UPDATE ncf_sequences', puro_pdo_error(1062, '23000', 'Duplicate entry')]]);
+    wa_chk('20: clave duplicada en Desde (uq_type_amb_desde): error que nombra el 5, con rollBack y sin commit',
+        $s20R[0] === 'error' && str_contains((string) $s20R[1], '5') && $s20C->de('rollBack') !== [] && $s20C->de('commit') === [],
+        [$s20R, $s20C->llamadas]);
+    [$s20Res, $s20Exc, $s20Log] = puro_con_log(static fn() => $s20Correr([$s20Rango()], ['numero_hasta' => 100], 15, null, true,
+        [['FOR UPDATE', new PDOException('se cayo la base')]]));
+    [$s20R, $s20C] = $s20Res ?? [null, null];
+    wa_chk('20: otro fallo de la base al bloquear: error generico, rollBack y una linea [ncfModel] updateRange en el log',
+        $s20Exc === null && ($s20R[0] ?? null) === 'error' && $s20C !== null && $s20C->de('rollBack') !== []
+        && str_contains($s20Log, '[ncfModel] updateRange'), $s20Exc?->getMessage() ?? $s20Log);
+}
+
+// El controlador (PUT /api/ncf/rangos/{id}) se lee como texto, como las secciones 11 y 12. Las
+// comprobaciones miran solo desde `case 'PUT':` para que el POST, que se parece, no las cumpla solo.
+$s20Ctl = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../src/Controllers/ncfController.php'));
+$s20Put = strpos($s20Ctl, "case 'PUT':");
+$s20PutTexto = $s20Put === false ? '' : substr($s20Ctl, $s20Put);
+$s20Rangos = strpos($s20PutTexto, "'/api/ncf/rangos'");
+$s20Secuencia = strpos($s20PutTexto, "'/api/ncf/sequence'");
+$s20Legado = strpos($s20PutTexto, 'Update Invoice NCF (Legacy)');
+wa_chk('20: PUT: /api/ncf/rangos se atiende antes que la secuencia B01 y que el NCF legado',
+    $s20Rangos !== false && $s20Secuencia !== false && $s20Legado !== false && $s20Rangos < $s20Secuencia && $s20Rangos < $s20Legado);
+$s20Regex = "preg_match('#/api/ncf/rangos/(\\d+)(?:[/?]|\$)#', \$uri, \$m)";
+$s20PosId = strpos($s20PutTexto, $s20Regex);
+wa_chk('20: PUT: el id sale de /api/ncf/rangos/(\d+) y sin un id valido responde 404',
+    $s20PosId !== false && ($s20Pos404 = strpos($s20PutTexto, 'http_response_code(404);', $s20PosId)) !== false && $s20Pos404 - $s20PosId < 120, $s20PosId);
+wa_chk('20: PUT: un cuerpo que no es un objeto responde 400 con el texto del POST',
+    str_contains($s20PutTexto, '!is_object($body)') && substr_count($s20Ctl, 'No se pudieron leer los datos del rango') === 2);
+wa_chk("20: PUT: llama a updateRange una vez, con el cuerpo como arreglo",
+    substr_count($s20PutTexto, '->updateRange(') === 1 && str_contains($s20PutTexto, '(array) $body'));
+wa_chk("20: PUT: 'notfound' responde 404 y 'error' 422",
+    preg_match('/\$result\[0\] === \'notfound\'\) \{\s*http_response_code\(404\);/', $s20PutTexto) === 1
+    && str_contains($s20PutTexto, 'http_response_code(422);'));
+wa_chk("20: PUT: la bitacora NCF_RANGE_UPDATE (entidad ncf_rango) solo cuando hubo cambios",
+    str_contains($s20PutTexto, "'action' => 'NCF_RANGE_UPDATE'") && str_contains($s20PutTexto, "'entity_type' => 'ncf_rango'")
+    && preg_match('/if \(\$result\[1\]\[\'cambios\'\] !== \[\]\) \{\s*AuditLogger::log\(/', $s20PutTexto) === 1);
+$s20Doc = str_replace("\r\n", "\n", (string) file_get_contents(__DIR__ . '/../docs/api/facturas.md'));
+wa_chk('20: facturas.md documenta PUT /api/ncf/rangos/{id} y la bitacora NCF_RANGE_UPDATE',
+    str_contains($s20Doc, 'PUT /api/ncf/rangos/{id}') && str_contains($s20Doc, 'NCF_RANGE_UPDATE'));
+wa_chk('20: facturas.md: la fila de /api/ncf/rangos de la tabla lista GET/POST/PUT',
+    str_contains($s20Doc, '| `GET/POST/PUT` | `/api/ncf/rangos` |'));
+wa_chk('20: schema.md menciona PUT /api/ncf/rangos/{id}',
+    str_contains((string) file_get_contents(__DIR__ . '/../docs/database/schema.md'), 'PUT /api/ncf/rangos/{id}'));
+wa_chk('20: facturas.md y la spec dicen que "ultimo usado" mira tambien los gastos emitidos (E41/E43/E47)',
+    str_contains($s20Doc, 'en los tipos de gastos (E41/E43/E47)')
+    && str_contains((string) file_get_contents(__DIR__ . '/../docs/specs/ncf-rangos-edicion.md'), 'en E41/E43/E47, de `gastos`'));
+
+// ---------------------------------------------------------------------------
 // Cierre. Cada tarea agrega su seccion justo encima de este bloque.
 // ---------------------------------------------------------------------------
 wa_fin();

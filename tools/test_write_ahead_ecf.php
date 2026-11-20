@@ -536,6 +536,42 @@ wa_chk('R1: contador +1', $r['delta'] === 1, $r['delta']);
 wa_chk("R1: log 'reservado, enviando'", str_contains($r['log'], "[ECF e-NCF={$r['e_ncf']} factura_id=") && str_contains($r['log'], '] reservado, enviando'));
 chkComun('R1', $r);
 
+// R1b reenvio de un rechazado (retomar_secuencia con el e_ncf de la rechazada): la devolucion dejo el contador en
+// valor - 1 (aqui 0, tras limpiar) y este envio lo vuelve a subir. El numero cuenta como dispensado por nosotros.
+$r = correr($pdo, $ids, ['payload' => ['e_ncf' => 'E310000000001', 'retomar_secuencia' => true]]);
+$ctx = $r['ctxs']['reservar'] ?? [];
+wa_chk('R1b: emitir termina sin excepcion', $r['err'] === null, descErr($r['err']));
+wa_chk('R1b: el contador sube a 1 con el reenvio (ya no queda atras)', $r['delta'] === 1, $r['delta']);
+wa_chk('R1b: ctx dispensado, rango_id y secuencia_valor, como los de una emision normal',
+    ($ctx['e_ncf'] ?? null) === 'E310000000001' && ($ctx['dispensado'] ?? null) === true
+    && is_int($ctx['rango_id'] ?? null) && ($ctx['secuencia_valor'] ?? null) === 1, $ctx);
+wa_chk('R1b: aceptado: no se dispensa otro numero ni se devuelve este',
+    $r['ncf']->dispensas === 0 && $r['ncf']->rollbacks === [], ['dispensas' => $r['ncf']->dispensas, 'rollbacks' => $r['ncf']->rollbacks]);
+chkComun('R1b', $r);
+
+// R1c el contador no esta en valor - 1 (esta en 1 y el numero es el 9): no avanza y el numero se trata como
+// cualquier e_ncf dado, sin tocar el contador ni la meta.
+correr($pdo, $ids, []);
+$r = correr($pdo, $ids, ['limpiar' => false, 'payload' => ['e_ncf' => 'E310000000009', 'retomar_secuencia' => true]]);
+$ctx = $r['ctxs']['reservar'] ?? [];
+wa_chk('R1c: emitir termina sin excepcion', $r['err'] === null, descErr($r['err']));
+wa_chk('R1c: el contador no se toca', $r['delta'] === 0, $r['delta']);
+wa_chk('R1c: ctx como el de un e_ncf dado cualquiera: dispensado false, sin rango_id ni secuencia_valor',
+    ($ctx['e_ncf'] ?? null) === 'E310000000009' && ($ctx['dispensado'] ?? null) === false
+    && ($ctx['rango_id'] ?? null) === null && ($ctx['secuencia_valor'] ?? null) === null, $ctx);
+chkComun('R1c', $r);
+
+// R1d el reenvio vuelve a ser rechazado sin consumir el numero (secuenciaUtilizada=false): el numero retomado se
+// devuelve, igual que el de una emision normal, con el rango que lo retomo.
+$r = correr($pdo, $ids, ['modo' => 'rechaza', 'payload' => ['e_ncf' => 'E310000000001', 'retomar_secuencia' => true]]);
+$ctx = $r['ctxs']['reservar'] ?? [];
+wa_chk('R1d: emitir termina sin excepcion', $r['err'] === null, descErr($r['err']));
+wa_chk('R1d: retomado y devuelto: el contador queda como estaba (+0)', $r['delta'] === 0, $r['delta']);
+wa_chk('R1d: un solo rollback, del numero 1 y del rango que lo retomo',
+    count($r['ncf']->rollbacks) === 1 && ($r['ncf']->rollbacks[0]['valor'] ?? null) === 1
+    && is_int($ctx['rango_id'] ?? null) && $r['ncf']->rollbacks[0]['rango_id'] === $ctx['rango_id'], $r['ncf']->rollbacks);
+chkComun('R1d', $r);
+
 // R2 E32 < 250k: el RFCE firmado ya esta en la fila cuando sale.
 $visto = null;
 $r = correr($pdo, $ids, ['tipo' => '32', 'espia' => function (string $metodo, string $xml, ?string $eNcf) use ($pdo, &$visto): void {

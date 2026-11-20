@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../Database.php';
 require_once __DIR__ . '/../AmbienteResolver.php';
+require_once __DIR__ . '/../Utils/FacturacionElectronica/EstadosEcf.php';
 
 class ncfModel
 {
@@ -231,6 +232,58 @@ class ncfModel
             // igual que "rollback sin coincidencia".
             error_log('[ECF] rollbackECFSequence fallo: ' . $e->getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Vuelve a tomar del contador un e-NCF que ya se habia dispensado y se devolvio. El reenvio de
+     * un rechazado (POST /api/facturas/{id}/reenviar) sale con el MISMO numero y no pasa por
+     * dispenseNextECF: el rechazo sin consumir lo habia devuelto (rollbackECFSequence, valor ->
+     * valor - 1) y nada lo volvia a subir. Un reenvio aceptado dejaba el contador un numero atras:
+     * el formulario ofrecia otra vez el numero ya usado y "Quedan N" contaba uno de mas (empresa
+     * 133454394, 2026-11-20: E310000000001 aceptado con el contador en 0).
+     *
+     * Es el inverso de rollbackECFSequence: sube el contador del rango que cubre el numero de
+     * valor - 1 a valor, y solo si sigue en valor - 1, que es donde lo dejo la devolucion
+     * (compare-and-set: no pisa lo que otra emision haya movido).
+     *
+     * Con el contador en otro valor no se toca nada: mas abajo hay numeros devueltos que
+     * dispenseNextECF debe entregar primero; igual o mas arriba, el numero ya esta contado (una
+     * venta del POS, que nunca devuelve el suyo, o un hueco que no se pudo devolver).
+     *
+     * @return array|null ['rango_id' => int, 'avanzo' => bool]; null si no es un e-NCF de la
+     *                    secuencia, si ningun rango cubre el numero o si la base fallo (el reenvio
+     *                    sale como siempre y queda una linea en el error_log)
+     */
+    public function retomarECF(string $type, int $valor, ?string $ambiente = null): ?array
+    {
+        if (!preg_match('/^E\d{2}$/', $type) || $valor < 1) {
+            return null;
+        }
+        $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+        try {
+            // El mismo orden que dispenseNextECF: el rango de menor numero_desde que cubre el numero.
+            $sel = $this->conexion->prepare(
+                'SELECT id FROM ncf_sequences
+                 WHERE type = :type AND ambiente = :ambiente
+                   AND numero_desde <= :desde AND (numero_hasta IS NULL OR numero_hasta >= :hasta)
+                 ORDER BY numero_desde ASC LIMIT 1'
+            );
+            $sel->execute([':type' => $type, ':ambiente' => $amb, ':desde' => $valor, ':hasta' => $valor]);
+            $rangoId = $sel->fetchColumn();
+            if ($rangoId === false) {
+                return null;
+            }
+            $upd = $this->conexion->prepare(
+                'UPDATE ncf_sequences SET current_value = :valor
+                 WHERE id = :id AND current_value = :anterior'
+            );
+            $upd->execute([':valor' => $valor, ':id' => (int) $rangoId, ':anterior' => $valor - 1]);
+            return ['rango_id' => (int) $rangoId, 'avanzo' => $upd->rowCount() > 0];
+        } catch (PDOException $e) {
+            // El reenvio no se detiene por esto: sale como antes de retomarECF, con el contador sin subir.
+            error_log('[ECF] retomarECF fallo: ' . $e->getMessage());
+            return null;
         }
     }
 
@@ -568,5 +621,272 @@ class ncfModel
             error_log('[ncfModel] registerRange ' . $type . ' ' . $numeroDesde . '-' . $numeroHasta . ': ' . $e->getMessage());
             return ['error', 'No se pudo registrar el rango. Inténtalo de nuevo.'];
         }
+    }
+
+    /**
+     * Corrige un rango autorizado ya registrado (docs/specs/ncf-rangos-edicion.md). Cambios parciales:
+     * fecha_vencimiento (Y-m-d), no_solicitud y no_autorizacion (hasta 20 caracteres; vacio = sin dato),
+     * numero_hasta y numero_desde. Nunca el tipo, el ambiente ni el contador: un cambio de "Desde"
+     * (solo sin numeros usados) deja el contador en Desde - 1.
+     *
+     * Todo ocurre en una transaccion con los rangos del tipo bloqueados (FOR UPDATE): el dispensador
+     * no mueve el contador mientras se revisa. "Ultimo usado" = el mayor entre el contador y el mayor
+     * e-NCF emitido dentro del rango, en facturas y, para los tipos de gastos (E41/E43/E47), en gastos,
+     * sin los estados reintentables (el criterio de ECFEmissionService::eNcfYaUsado): el contador manda
+     * y lo emitido cubre un contador atrasado, como lo dejaba el reenvio de un rechazado hasta 2026-11-20.
+     *
+     * @return array ['success', ['rango' => fila de listRanges, 'cambios' => [columna => ['antes', 'despues']]]]
+     *               | ['notfound', mensaje] | ['error', mensaje]
+     */
+    public function updateRange(int $id, array $cambios, ?string $ambiente = null): array
+    {
+        foreach (['type', 'ambiente', 'current_value'] as $prohibida) {
+            if (array_key_exists($prohibida, $cambios)) {
+                return ['error', 'El tipo, el ambiente y el contador de un rango no se pueden cambiar.'];
+            }
+        }
+        // Lo que vino en el cuerpo, ya normalizado: solo columnas que se pueden cambiar. Nada toca la base todavia.
+        $nuevos = [];
+        if (array_key_exists('fecha_vencimiento', $cambios)) {
+            $fecha = is_string($cambios['fecha_vencimiento']) ? trim($cambios['fecha_vencimiento']) : '';
+            $venc = DateTime::createFromFormat('Y-m-d', $fecha);
+            if (!$venc || $venc->format('Y-m-d') !== $fecha) {
+                return ['error', 'La fecha de vencimiento no es válida. Elígela en el calendario.'];
+            }
+            $nuevos['fecha_vencimiento'] = $fecha;
+        }
+        foreach (['no_solicitud' => 'solicitud', 'no_autorizacion' => 'autorización'] as $col => $nombre) {
+            if (!array_key_exists($col, $cambios)) {
+                continue;
+            }
+            $valor = $cambios[$col];
+            if ($valor !== null && !is_string($valor) && !is_int($valor)) {
+                return ['error', "El número de {$nombre} no es válido."];
+            }
+            $valor = trim((string) $valor);
+            if (mb_strlen($valor) > 20) {
+                return ['error', "El número de {$nombre} no puede tener más de 20 caracteres."];
+            }
+            $nuevos[$col] = $valor === '' ? null : $valor;
+        }
+        foreach (['numero_desde' => 'inicial', 'numero_hasta' => 'final'] as $col => $nombre) {
+            if (!array_key_exists($col, $cambios)) {
+                continue;
+            }
+            $n = self::enteroPositivo($cambios[$col]);
+            if ($n === null) {
+                return ['error', "El número {$nombre} tiene que ser un número entero de 1 o más."];
+            }
+            $nuevos[$col] = $n;
+        }
+
+        $amb = $ambiente ?? $this->resolveActiveAmbiente() ?? 'certecf';
+        $ambLabel = self::ambienteLabel($amb);
+        $type = '';
+        try {
+            $st = $this->conexion->prepare(
+                "SELECT type FROM ncf_sequences WHERE id = :id AND ambiente = :ambiente AND type LIKE 'E%'"
+            );
+            $st->execute([':id' => $id, ':ambiente' => $amb]);
+            $type = $st->fetchColumn();
+            if ($type === false) {
+                return ['notfound', 'No encontramos ese rango en el ambiente activo.'];
+            }
+            $type = (string) $type;
+
+            // Desde aqui, todo error de regla cierra la transaccion antes de responder.
+            $abortar = function (string $mensaje): array {
+                if ($this->conexion->inTransaction()) {
+                    $this->conexion->rollBack();
+                }
+                return ['error', $mensaje];
+            };
+            $this->conexion->beginTransaction();
+            $sel = $this->conexion->prepare(
+                'SELECT id, type, current_value, numero_desde, numero_hasta, fecha_vencimiento, no_solicitud, no_autorizacion
+                   FROM ncf_sequences
+                  WHERE type = :type AND ambiente = :ambiente
+                  ORDER BY numero_desde FOR UPDATE'
+            );
+            $sel->execute([':type' => $type, ':ambiente' => $amb]);
+            $filas = $sel->fetchAll(PDO::FETCH_ASSOC);
+
+            $r = null;
+            foreach ($filas as $f) {
+                if ((int) $f['id'] === $id) {
+                    $r = $f;
+                }
+            }
+            if ($r === null) {
+                $this->conexion->rollBack();
+                return ['notfound', 'No encontramos ese rango en el ambiente activo.'];
+            }
+            if ($r['numero_hasta'] === null) {
+                return $abortar('Este tipo no tiene un rango registrado: usa «Registrar rango aprobado» para formalizarlo.');
+            }
+            $desdeActual = (int) $r['numero_desde'];
+            $hastaActual = (int) $r['numero_hasta'];
+            // Vecinos por numero_desde: el rango anterior y el siguiente del mismo tipo y ambiente.
+            $previo = null;
+            $siguiente = null;
+            foreach ($filas as $f) {
+                if ((int) $f['id'] === $id) {
+                    continue;
+                }
+                $d = (int) $f['numero_desde'];
+                if ($d < $desdeActual) {
+                    if ($previo === null || $d > (int) $previo['numero_desde']) {
+                        $previo = $f;
+                    }
+                } elseif ($siguiente === null || $d < (int) $siguiente['numero_desde']) {
+                    $siguiente = $f;
+                }
+            }
+
+            // Solo cuenta como cambio lo que difiere de lo guardado (valores normalizados).
+            $actual = [
+                'fecha_vencimiento' => $r['fecha_vencimiento'] !== null ? (string) $r['fecha_vencimiento'] : null,
+                'no_solicitud' => $r['no_solicitud'] !== null && $r['no_solicitud'] !== '' ? (string) $r['no_solicitud'] : null,
+                'no_autorizacion' => $r['no_autorizacion'] !== null && $r['no_autorizacion'] !== '' ? (string) $r['no_autorizacion'] : null,
+                'numero_desde' => $desdeActual,
+                'numero_hasta' => $hastaActual,
+            ];
+            $reales = [];
+            foreach ($nuevos as $col => $v) {
+                if ($v !== $actual[$col]) {
+                    $reales[$col] = $v;
+                }
+            }
+            if ($reales === []) {
+                $this->conexion->rollBack();
+                return ['success', ['rango' => $this->rangoListado($amb, $type, $id) ?? $r, 'cambios' => []]];
+            }
+
+            if (isset($reales['numero_desde']) || isset($reales['numero_hasta'])) {
+                $desde = $reales['numero_desde'] ?? $desdeActual;
+                $hasta = $reales['numero_hasta'] ?? $hastaActual;
+                $usado = max(
+                    (int) $r['current_value'],
+                    $this->ultimoNumeroEmitido($type, $amb, $desdeActual, $siguiente !== null ? (int) $siguiente['numero_desde'] : null)
+                );
+                if (isset($reales['numero_desde'])) {
+                    if ($usado >= $desdeActual) {
+                        return $abortar("Este rango ya tiene números usados (hasta el {$usado}): el número inicial no se puede cambiar.");
+                    }
+                    if ($previo !== null) {
+                        $tope = $previo['numero_hasta'] !== null ? (int) $previo['numero_hasta'] : (int) $previo['current_value'];
+                        if ($desde <= $tope) {
+                            return $abortar("El número inicial debe ser mayor que {$tope}, que es el último número de {$type} ya usado o autorizado en el rango anterior.");
+                        }
+                    }
+                    if ($desde > $hasta) {
+                        return $abortar("El número inicial ({$desde}) no puede ser mayor que el número final ({$hasta}).");
+                    }
+                }
+                if (isset($reales['numero_hasta'])) {
+                    if ($hasta < $desde) {
+                        return $abortar("El número final ({$hasta}) no puede ser menor que el número inicial ({$desde}).");
+                    }
+                    if ($hasta < $usado) {
+                        return $abortar("El número final no puede ser menor que {$usado}, el último número de {$type} ya usado.");
+                    }
+                    if ($siguiente !== null && $hasta >= (int) $siguiente['numero_desde']) {
+                        $sigDesde = (int) $siguiente['numero_desde'];
+                        $sigHasta = $siguiente['numero_hasta'] !== null ? (int) $siguiente['numero_hasta'] : '∞';
+                        return $abortar("El número final tiene que ser menor que {$sigDesde}, donde empieza el siguiente rango ({$type} {$sigDesde}–{$sigHasta}).");
+                    }
+                }
+            }
+
+            // Las columnas del SET salen de $reales, que ya solo trae las del permiso de arriba.
+            $set = [];
+            $params = [':id' => $id];
+            $antesDespues = [];
+            foreach ($reales as $col => $v) {
+                $set[] = "{$col} = :{$col}";
+                $params[':' . $col] = $v;
+                $antesDespues[$col] = ['antes' => $actual[$col], 'despues' => $v];
+            }
+            $contador = null;
+            if (isset($reales['numero_desde'])) {
+                // Sin usados (comprobado arriba): el contador arranca en el nuevo Desde - 1.
+                $contador = $reales['numero_desde'] - 1;
+                $set[] = 'current_value = :current_value';
+                $params[':current_value'] = $contador;
+                $antesDespues['current_value'] = ['antes' => (int) $r['current_value'], 'despues' => $contador];
+            }
+            $upd = $this->conexion->prepare('UPDATE ncf_sequences SET ' . implode(', ', $set) . ' WHERE id = :id');
+            $upd->execute($params);
+            $this->conexion->commit();
+
+            $rango = $this->rangoListado($amb, $type, $id)
+                ?? ($reales + ($contador !== null ? ['current_value' => $contador] : []) + $r);
+            return ['success', ['rango' => $rango, 'cambios' => $antesDespues]];
+        } catch (PDOException $e) {
+            if ($this->conexion->inTransaction()) {
+                $this->conexion->rollBack();
+            }
+            if (($e->errorInfo[0] ?? (string) $e->getCode()) === '23000' && isset($nuevos['numero_desde'])) {
+                return ['error', 'Ya hay un rango de ' . $type . ' registrado en ' . $ambLabel . ' que empieza en '
+                    . $nuevos['numero_desde'] . '. Revisa la lista de rangos.'];
+            }
+            error_log('[ncfModel] updateRange ' . $id . ': ' . $e->getMessage());
+            return ['error', 'No se pudo guardar el cambio del rango. Inténtalo de nuevo.'];
+        }
+    }
+
+    /** La fila de listRanges de un rango ya guardado, o null si no esta (listRanges devuelve [] si la base falla). */
+    private function rangoListado(string $amb, string $type, int $id): ?array
+    {
+        foreach ($this->listRanges($amb, $type) as $fila) {
+            if ((int) $fila['id'] === $id) {
+                return $fila;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Mayor numero de e-NCF de $type emitido en $amb desde $desde (y antes de $limite, el Desde del rango
+     * siguiente, si lo hay) que no este en un estado reintentable. 0 si no hay ninguno. Se lee en facturas
+     * y en gastos: E41/E43/E47 los emite el modulo de gastos y su e-NCF vive en gastos.ncf, no en facturas.
+     * De gastos solo cuentan los que la empresa emite (es_auto_emision = 1): los recibidos traen el NCF del
+     * proveedor, que no sale de nuestra secuencia. Mismo criterio que ECFEmissionService::eNcfYaUsado: una
+     * fila sin ambiente cuenta; un gasto rechazado que se reusa queda archivado con ncf NULL y no cuenta.
+     */
+    private function ultimoNumeroEmitido(string $type, string $amb, int $desde, ?int $limite): int
+    {
+        $fuentes = [
+            ['tabla' => 'facturas', 'ncf' => 'e_ncf', 'ambiente' => 'ambiente_dgii', 'filtro' => ''],
+            ['tabla' => 'gastos', 'ncf' => 'ncf', 'ambiente' => 'ambiente', 'filtro' => ' AND es_auto_emision = 1'],
+        ];
+        $mayor = 0;
+        foreach ($fuentes as $f) {
+            // Tabla y columnas salen de la lista fija de arriba; los valores van como parametros.
+            $numero = "CAST(SUBSTRING({$f['ncf']}, 4) AS UNSIGNED)";
+            $sql = "SELECT MAX({$numero}) FROM {$f['tabla']}
+                     WHERE {$f['ncf']} LIKE :patron{$f['filtro']} AND ({$f['ambiente']} = :ambiente OR {$f['ambiente']} IS NULL)
+                       AND estado_dgii NOT IN (" . EstadosEcf::sql(EstadosEcf::REINTENTABLES) . ")
+                       AND {$numero} >= :desde" . ($limite !== null ? " AND {$numero} < :limite" : '');
+            $params = [':patron' => $type . '%', ':ambiente' => $amb, ':desde' => $desde];
+            if ($limite !== null) {
+                $params[':limite'] = $limite;
+            }
+            $st = $this->conexion->prepare($sql);
+            $st->execute($params);
+            $mayor = max($mayor, (int) $st->fetchColumn());
+        }
+        return $mayor;
+    }
+
+    /** Entero de 1 a 2147483647 (INT con signo de MySQL) desde un int, un texto de digitos o un float entero; null si no lo es. */
+    private static function enteroPositivo(mixed $valor): ?int
+    {
+        if (is_string($valor) && preg_match('/^\s*\d{1,10}\s*$/', $valor)) {
+            $valor = (int) trim($valor);
+        } elseif (is_float($valor) && is_finite($valor) && floor($valor) == $valor && abs($valor) < 1e10) {
+            $valor = (int) $valor;
+        }
+        return is_int($valor) && $valor >= 1 && $valor <= 2147483647 ? $valor : null;
     }
 }
