@@ -37,6 +37,8 @@ jobs:
             php -l "$f" || exit 1
           done
           php tools/test_express_entitlements.php
+      - name: Datos de la empresa (PUT /api/emisor), reglas del XSD, modelo sobre SQLite y E31 contra el XSD oficial
+        run: php tools/test_emisor_edicion.php
       - name: Version web de tenant_edicion (src/Admin/TenantEdicionWeb.php), sintaxis 8.3 y suite pura
         run: |
           for f in src/Admin/TenantEdicionWeb.php public/tenant_edicion.php; do
