@@ -45,7 +45,7 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `SIN_ACCESO_GLOBAL` | 403 | Canje: el código es de una empresa que no es la del usuario (un usuario de soporte que estaba en un cliente) y ya no puede estar en ella: login normal. Ver [../modules/acceso-global.md](../modules/acceso-global.md) |
 | `SIN_PERMISO` | 403 | Habilitar equipos y administrar (`/api/pos-admin/*`) piden el módulo `pos`: pos.\* muestra "este equipo todavía no es una caja, hace falta un administrador". El botón POS y el canje, no: los pide cualquier usuario de la empresa |
 | `USUARIO_NO_AUTENTICADO` | 401 | `/api/pos/yo*`: venció la sesión de FiscalPoint del usuario: entrar de nuevo con su usuario |
-| `EQUIPO_OTRA_EMPRESA` | 403 | `/api/pos/yo*`: el usuario es de otra empresa que la del equipo |
+| `EQUIPO_OTRA_EMPRESA` | 403 | `/api/pos/yo*`: la sesión del usuario es de otra empresa que la del equipo. pos.\* ofrece habilitar el equipo para la empresa del usuario o volver al PIN; con `soporte: true` (el usuario de soporte) no ofrece habilitarlo y el texto le dice que en las empresas de sus clientes no vende |
 | `USUARIO_OTRA_EMPRESA` | 403 | Crear PIN: el usuario (soporte) no es empleado de esta empresa |
 | `ACCESO_DESACTIVADO` | 403 | Crear PIN: un administrador desactivó el acceso de ese empleado |
 | `USUARIO_SIN_ACCESO` | 403 | Entrar con el PIN: el usuario de FiscalPoint de ese empleado ya no existe en la empresa (el empleado se desactiva). Dentro del POS la misma situación responde `SESION_REQUERIDA` |
@@ -115,7 +115,7 @@ no puede hacer es habilitar el equipo (`SIN_PERMISO` en `/api/pos-admin/*`).
 | `POST /empleados` | `{nombre, rol: "cajero"\|"supervisor"}` | `{empleado, pin}` · 201 — **el PIN se ve una sola vez** |
 | `PUT /empleados/{id}` | `{nombre?, rol?, activo?: bool}` | `{empleado}` — desactivar cierra sus sesiones. El nombre de un usuario de FiscalPoint no se cambia aquí (`422 NOMBRE_DE_USUARIO`) |
 | `POST /empleados/{id}/pin` | — | `{empleado, pin}` — el anterior deja de servir y sus sesiones se cierran. Si el empleado es un **usuario de FiscalPoint** no se genera nada: se **restablece** (su PIN se borra, sus sesiones se cierran) y responde `pin: null`; él crea otro al entrar al POS |
-| `GET /equipos` | — | `{equipos: [{id, caja_id, caja, nombre, last_used, bloqueado, bloqueo_segundos, habilitado_por_nombre}]}` |
+| `GET /equipos` | — | `{equipos: [{id, caja_id, caja, nombre, last_used, bloqueado, bloqueo_segundos, habilitado_por, habilitado_por_nombre}]}`. `habilitado_por` y `habilitado_por_nombre` vienen `null` si quien lo habilitó no es de la empresa (el soporte, decisión 43) o ya no existe |
 | `POST /equipos` | `{caja_id, nombre?, reemplazar?: bool}` | `{equipo: {id, nombre, caja}, token}` · 201 — **el token se ve una sola vez** |
 | `DELETE /equipos/{id}` | — | `{revocado}` — el equipo deja de entrar y sus sesiones se cierran |
 
@@ -179,8 +179,8 @@ saca el canje del código del botón POS o `POST /api/auth/login` desde la panta
 
 - `tiene_pin: false` → pos.\* muestra "Crea tu PIN"; `true` → el teclado del PIN con un saludo.
 - `elegible: false` (sin `empleado`): `motivo` = `OTRA_EMPRESA` (un usuario de soporte que está dentro de un
-  cliente: puede habilitar el equipo, no entrar a vender) o `DESACTIVADO` (un administrador desactivó su
-  acceso). `mensaje` trae el texto para la persona.
+  cliente: puede habilitar el equipo, no entrar a vender; no se le crea empleado, decisión 43) o `DESACTIVADO`
+  (un administrador desactivó su acceso). `mensaje` trae el texto para la persona.
 - Errores: `USUARIO_NO_AUTENTICADO` (401), `EQUIPO_OTRA_EMPRESA` (403).
 
 **`POST /api/pos/yo/pin`** `{ "pin": "2468" }` → `{ "creado": true }` — el usuario crea **su** PIN, solo si
@@ -303,7 +303,8 @@ cédula** (e-CF completo).
 - `forma_pago`: 1 efectivo (`recibido_centavos` ≥ total; vacío en el POS = exacto),
   2 transferencia/depósito, 3 tarjeta. Va en `TablaFormasPago` del RFCE **y** del e-CF.
 - Se emite con `IndicadorMontoGravado = 1`. La venta queda a nombre del admin que habilitó
-  el equipo (`user_id`, que es obligatorio) y del empleado (`pos_empleado_id`), con
+  el equipo (`user_id`, que es obligatorio; si no es de la empresa, como el soporte, a nombre del primer
+  administrador de la empresa: decisión 45) y del empleado (`pos_empleado_id`), con
   `turno_id`. La factura se guarda antes de enviarla; la caja y el inventario se entregan después, una sola vez.
 - **La factura se guarda antes de enviarla** (write-ahead, ver
   [../integrations/pos-write-ahead.md](../integrations/pos-write-ahead.md)) y cualquier resultado
@@ -482,6 +483,14 @@ servidor, sin MySQL, sin red; `php -d extension=pdo_sqlite tools/test_pos_sesion
 deja de valer una sesión: solo un usuario de FiscalPoint activo con el PIN pendiente, en el equipo de la
 petición, da `pin_restablecido`; un token desconocido, otro equipo, quien tiene PIN, un empleado creado a
 mano y uno desactivado dan el mensaje de siempre. No está en la línea base de `express_baseline.php`.
+
+`tools/test_pos_soporte_otra_empresa.php`: 18 verificaciones, también en proceso y con SQLite en memoria (un master
+y la base de una empresa) y la bitácora reemplazada por un doble, de que el soporte no aparece en el POS de otra
+empresa (decisiones 43 y 45): a nombre de quién quedan las ventas (`responsableDeVentas`), `esSoporte` (también con
+una master sin `acceso_global`), que no es elegible ni se le crea empleado en un cliente y que la sincronización lo
+da de baja si hubiera uno. **Se niega a correr si la raíz trae un `.env`** (podría tocar esa base): córrela en el CI o
+en un worktree limpio. La lista de equipos usa funciones de MySQL y se comprobó con un SELECT de solo lectura. Tampoco
+está en la línea base.
 
 `tools/test_pos_backend.php`: 103 verificaciones contra un API local con dos tenants de
 prueba (traspaso, administración, bloqueo por PIN, sesiones, catálogo y precio final,

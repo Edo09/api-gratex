@@ -76,7 +76,13 @@ function posUsuarioDelRequest(array $equipo): ?array
         throw new PosError('Tu sesión de FiscalPoint venció. Entra de nuevo con tu usuario.', 401, 'USUARIO_NO_AUTENTICADO');
     }
     if ((int) ($v['tenant_id'] ?? 0) !== (int) $equipo['tenant_id']) {
-        throw new PosError('Este equipo es de otra empresa. Entra con un usuario de la empresa de este equipo o habilítalo de nuevo.', 403, 'EQUIPO_OTRA_EMPRESA');
+        // pos.* ofrece habilitar el equipo para la empresa del usuario (decision 44), salvo al soporte (`soporte`):
+        // haria de la PC de un cliente una caja de su propia empresa, y en la de un cliente no vende (decision 43).
+        $soporte = (new posMasterModel())->esSoporte((int) $v['user_id']);
+        throw new PosError($soporte
+            ? 'Este equipo es de otra empresa. Como soporte no vendes en las empresas de tus clientes: para revisar o habilitar su caja, entra a esa empresa en FiscalPoint.'
+            : 'Este equipo es de otra empresa. Entra con un usuario de la empresa de este equipo o habilítalo de nuevo.',
+            403, 'EQUIPO_OTRA_EMPRESA', $soporte ? ['soporte' => true] : []);
     }
     return (new posMasterModel())->usuarioDeEmpresa((int) $v['user_id'], (int) $equipo['tenant_id']);
 }

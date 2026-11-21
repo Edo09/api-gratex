@@ -2,6 +2,7 @@
 require_once __DIR__ . '/PosError.php';
 require_once __DIR__ . '/PosPrecio.php';
 require_once __DIR__ . '/../Models/posModel.php';
+require_once __DIR__ . '/../Models/posMasterModel.php';
 require_once __DIR__ . '/../Models/facturaModel.php';
 require_once __DIR__ . '/../Models/unidadMedidaModel.php';
 require_once __DIR__ . '/../Utils/FacturacionElectronica/ECFEmissionService.php';
@@ -145,8 +146,13 @@ final class PosVenta
 
         // facturas.user_id es NOT NULL: el empleado del POS no es usuario, asi
         // que la venta queda a nombre del admin que habilito esta caja (y el
-        // empleado en pos_empleado_id).
-        $userId = (int) ($equipo['habilitado_por'] ?? 0);
+        // empleado en pos_empleado_id). Si quien la habilito no es de esta
+        // empresa (soporte, estando en la de un cliente), a nombre de su primer
+        // administrador: un usuario de otra empresa no queda en sus datos (decision 45).
+        $userId = (int) ((new posMasterModel())->responsableDeVentas(
+            (int) $equipo['tenant_id'],
+            isset($equipo['habilitado_por']) ? (int) $equipo['habilitado_por'] : null
+        ) ?? 0);
         if ($userId <= 0) {
             throw new PosError('No se sabe quién habilitó este equipo. Pide a un administrador que lo habilite de nuevo.', 409, 'EQUIPO_SIN_RESPONSABLE');
         }

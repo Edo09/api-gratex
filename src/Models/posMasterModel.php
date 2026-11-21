@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../MasterDatabase.php';
+require_once __DIR__ . '/../AccesoGlobal.php';
 
 /**
  * POS en el master (master_migrations/012): codigos de traspaso app.* -> pos.*
@@ -57,6 +58,30 @@ class posMasterModel
         $stmt->execute([':u' => $userId, ':t' => $tenantId]);
         $f = $stmt->fetch();
         return $f ?: null;
+    }
+
+    /** ¿Es un usuario de soporte (acceso global)? Solo si se pudo leer y vale 1 (AccesoGlobal::tieneAcceso). */
+    public function esSoporte(int $userId): bool
+    {
+        return AccesoGlobal::tieneAcceso($this->conexion, $userId);
+    }
+
+    /**
+     * A nombre de quien quedan las ventas del POS de un equipo (facturas.user_id es NOT NULL y el empleado del POS
+     * no es usuario): de quien lo habilito, si es usuario de ESA empresa. Si no lo es (el usuario de soporte lo
+     * habilito estando en la empresa de un cliente) o ya no existe, del primer administrador de la empresa, o de su
+     * primer usuario si no hay administrador: un usuario de otra empresa nunca queda en los datos de esta
+     * (decision 45 de docs/specs/pos.md). null: la empresa no tiene usuarios.
+     */
+    public function responsableDeVentas(int $tenantId, ?int $habilitadoPor): ?int
+    {
+        if ($habilitadoPor !== null && $habilitadoPor > 0 && $this->usuarioDeEmpresa($habilitadoPor, $tenantId) !== null) {
+            return $habilitadoPor;
+        }
+        $stmt = $this->conexion->prepare("SELECT id FROM users WHERE tenant_id = :t ORDER BY (role = 'admin') DESC, id LIMIT 1");
+        $stmt->execute([':t' => $tenantId]);
+        $id = $stmt->fetchColumn();
+        return $id !== false ? (int) $id : null;
     }
 
     /** Todos los usuarios de la empresa, por id. */
@@ -148,9 +173,10 @@ class posMasterModel
             'SELECT e.id, e.caja_id, e.nombre, e.created_at, e.last_used,
                     (e.bloqueado_hasta IS NOT NULL AND e.bloqueado_hasta > NOW()) AS bloqueado,
                     GREATEST(TIMESTAMPDIFF(SECOND, NOW(), e.bloqueado_hasta), 0) AS bloqueo_segundos,
-                    e.habilitado_por, TRIM(CONCAT(COALESCE(u.name, \'\'), \' \', COALESCE(u.last_name, \'\'))) AS habilitado_por_nombre
+                    CASE WHEN u.id IS NULL THEN NULL ELSE e.habilitado_por END AS habilitado_por,
+                    TRIM(CONCAT(COALESCE(u.name, \'\'), \' \', COALESCE(u.last_name, \'\'))) AS habilitado_por_nombre
              FROM pos_equipos e
-             LEFT JOIN users u ON u.id = e.habilitado_por
+             LEFT JOIN users u ON u.id = e.habilitado_por AND u.tenant_id = e.tenant_id
              WHERE e.tenant_id = :t AND e.revocado_at IS NULL
              ORDER BY e.caja_id, e.id'
         );

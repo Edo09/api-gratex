@@ -161,7 +161,8 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [x] El PIN se elige **una sola vez**: con PIN, el administrador solo puede **restablecerlo** (se borra, sus sesiones se cierran y el usuario crea otro con el botón POS de FiscalPoint o con "Crear mi PIN con mi usuario" en el teclado del PIN). Si la persona estaba dentro del POS, su siguiente petición (o el sondeo de `GET /api/pos/estado`) responde `SESION_REQUERIDA` con `pin_restablecido` y el POS la lleva directo a "Crea tu PIN con tu usuario", con el aviso "Un administrador restableció tu PIN", en vez de pedirle un PIN que ya no existe. Nunca se genera ni se muestra el PIN de un usuario.
 - [x] El PIN elegido: 4 dígitos, nada obvio (las mismas reglas que el generado: ni 0000, ni 1234, ni 4321…) y único en la empresa. Si ya lo usa otro empleado el servidor responde "no está disponible" sin decir de quién, y tras 5 PIN no disponibles en 15 minutos pide esperar (`PIN_DEMASIADOS_INTENTOS`, con `espera_segundos`). Elegirlo queda en la bitácora **sin** el PIN.
 - [x] El nombre del empleado sigue al de su usuario (la sincronización lo pone al día; no se edita en el POS). Un usuario que se borra deja de entrar en el acto: se desactiva el empleado y se cierran sus sesiones. Un empleado que un administrador desactivó no se reactiva solo, ni siquiera al crear PIN (`ACCESO_DESACTIVADO`).
-- [x] Quien es de **otra empresa** (soporte con acceso global dentro de un cliente) no es empleado de ella: puede habilitar el equipo, no entrar a vender.
+- [x] **El usuario de soporte no aparece en ningún lado de una empresa que no es la suya** (decisión 43, 2026-11-21). Dentro de la empresa de un cliente no es empleado: puede habilitar el equipo, pero no crear PIN ni vender, y la sincronización nunca le crea uno (si apareciera uno, lo da de baja). Si habilita la caja de un cliente, la lista de equipos de ese cliente no dice quién la habilitó, y las ventas de esa caja quedan a nombre del primer administrador del cliente (decisión 45). La bitácora del cliente ya no lo mostraba (docs/modules/acceso-global.md).
+- [x] **Equipo de otra empresa** (decisión 44): si el equipo guardado es caja de otra empresa que la del usuario que entra (`EQUIPO_OTRA_EMPRESA`), el POS muestra "Este equipo es de otra empresa" con "Habilitar este equipo para mi empresa" (con su misma sesión: elige la caja; sin permiso de Punto de venta, se le dice que hace falta un administrador) o "Volver al PIN". Al soporte no se le ofrece habilitarlo (haría de la PC de un cliente una caja de su propia empresa): se le dice que en las empresas de sus clientes no vende.
 - Los empleados creados a mano (A5) siguen igual, sin usuario y con el PIN generado; no se funden con los usuarios aunque se llamen igual.
 
 **A6 · Entrada con PIN** — `Piloto`
@@ -522,6 +523,9 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 40 | Usuarios de FiscalPoint en el POS | Todo usuario de la empresa es empleado del POS sin alta previa y entra con un PIN que elige él mismo la primera vez (2026-11-19). Cambia las decisiones 31 y 33 solo para estos empleados; los creados a mano siguen igual y no se funden con los usuarios |
 | 41 | PIN elegido por el usuario | Una sola vez; con PIN solo el administrador lo restablece (nunca lo genera ni lo ve); 4 dígitos, no obvio, único en la empresa; "no disponible" no dice de quién y tras 5 no disponibles en 15 min hay que esperar; la bitácora nunca lo guarda. Es el contrapeso de la decisión 32 («solo PIN, único») ahora que alguien lo elige |
 | 42 | Quién ve el botón POS | Todo usuario de la empresa con el POS activo; administrar (cajas, empleados, equipos) sigue pidiendo el módulo `pos`. `PosUsuarios::puedeUsarPos()` es el único sitio a tocar si se quisiera exigir un módulo |
+| 43 | El soporte no aparece en otras empresas | El usuario de soporte (acceso global; hoy uno solo) no aparece en ningún lado de una empresa que no es la suya (2026-11-21). Dentro de un cliente no es empleado del POS: habilita la caja, no crea PIN ni vende. Un "sí" previo a que vendiera en clientes se retiró el mismo día por esta regla |
+| 44 | Equipo de otra empresa | El POS ofrece habilitarlo para la empresa del usuario con su misma sesión, o volver al PIN (2026-11-21); al soporte no se le ofrece habilitarlo |
+| 45 | Ventas de una caja que habilitó soporte | Quedan a nombre del primer administrador del cliente (o de su primer usuario si no hay administrador), no del soporte; la lista de equipos no dice quién la habilitó. Las ventas ya hechas no se tocan (2026-11-21) |
 
 ## 8. Decisiones por defecto — revisar
 
@@ -767,7 +771,7 @@ servidor, clave de idempotencia + candado `GET_LOCK`, `TablaFormasPago` en RFCE 
 e-CF, factura reservada antes de enviarla (`reservarFacturaECF` con el gancho write-ahead; el 10-08 salió como factura + caja en una transacción, ver `docs/integrations/pos-write-ahead.md`;
 las columnas POS solo se escriben en ventas POS, app.\* intacto) y caja entregada de forma
 idempotente, venta a nombre del admin
-que habilitó la caja (`facturas.user_id` es NOT NULL). DGII sin respuesta en
+que habilitó la caja (`facturas.user_id` es NOT NULL; desde la decisión 45, si no es de la empresa, a nombre de su primer administrador). DGII sin respuesta en
 `POS_DGII_TIMEOUT` → `ENVIO_INCIERTO` impreso y reenviado por
 `/api/pos/pendientes/reenviar` (consulta antes de reenviar). En el POS: diálogo de cobro
 (efectivo con devuelta y billetes, tarjeta, transferencia; F9/F2/F3), impresión del
