@@ -74,6 +74,11 @@ Los **empleados POS no son usuarios de app.\***: no tienen correo ni usuario, no
 entran a app.\* y no ocupan un `users.email`/`username` del master (ambos son
 `NOT NULL UNIQUE` en todo el sistema).
 
+**Desde A5b (2026-11-19), los usuarios de FiscalPoint también son empleados del POS:**
+todo usuario de la empresa tiene su empleado (se crea solo, con el PIN pendiente) y
+elige su propio PIN la primera vez que entra. Los empleados creados a mano siguen sin
+usuario y con el PIN que genera el sistema.
+
 ## 5. Historias de usuario
 
 ### Cajero
@@ -102,6 +107,11 @@ entran a app.\* y no ocupan un `users.email`/`username` del master (ambos son
 - Como dueño, quiero **escribir el precio de góndola en la ficha del producto** y que el sistema calcule el neto.
 - Como dueño, quiero **revocar un equipo** si la PC se pierde o se reemplaza.
 
+### Usuario de FiscalPoint
+- Como usuario de FiscalPoint, quiero **entrar al POS sin que nadie me dé de alta**, para vender con mi propio acceso.
+- Como usuario de FiscalPoint, quiero **crear mi PIN ahí mismo la primera vez que entro al POS**, escribiéndolo dos veces, y entrar con él sin pasos de más.
+- Como administrador, quiero **restablecer el PIN de un usuario que lo olvidó** sin conocerlo, para que cree otro al entrar.
+
 ### Casos límite
 - Como cajero, si llego y **la caja tiene un turno abierto de otro cajero**, quiero que me diga de quién es y que necesito un supervisor.
 - Como cajero, si **mi turno quedó abierto desde ayer**, quiero seguir vendiendo, pero con un aviso visible.
@@ -119,14 +129,14 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **A1 · Botón POS en app.\*** — `Piloto`
 - [ ] En el navbar, junto a "Nueva": botón con texto **POS** e ícono de impresora (`printer`).
-- [ ] Visible solo si el tenant tiene `pos_enabled = 1` **y** el usuario tiene el módulo `pos` (o `*`). Oculto en móvil.
+- [ ] Visible si el tenant tiene `pos_enabled = 1`. Hasta 2026-11-18 pedía además el módulo `pos`; desde A5b es para **todo usuario de la empresa** (cada uno es empleado del POS). Administrar el POS en app.\* (cajas, empleados, equipos) sigue pidiendo el módulo `pos`. Oculto en móvil.
 - [ ] Abre `pos.fiscalpoint.com.do` en una pestaña nueva con un código de un solo uso (A2).
 
 **A2 · Paso de sesión de app.\* a pos.\*** — `Piloto`
 - [ ] El código vence en **60 s** y sirve **una sola vez**. Se guarda solo su hash.
 - [ ] Viaja después del `#` (`/#code=…`): no llega a ningún servidor ni queda en logs. El POS lo quita de la URL al leerlo.
 - [ ] Código vencido, usado o inválido → pantalla de login de admin (A3) con el mensaje "El enlace venció, entra con tu usuario".
-- [ ] Si el equipo **ya está habilitado** para ese tenant, el código se ignora y se va a la pantalla de PIN.
+- [ ] Si el equipo **ya está habilitado** para ese tenant, el código identifica al usuario (A5b): el POS lo canjea, ve si le toca crear su PIN (primera vez) o escribir el que ya tiene, y cierra esa sesión de FiscalPoint. Sin código, va directo a la pantalla de PIN.
 
 **A3 · Login de admin en pos.\*** — `Piloto`
 - [ ] Usuario o correo + clave, con el login que ya existe (`POST /api/auth/login`).
@@ -134,7 +144,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 
 **A4 · Habilitar equipo** — `Piloto`
 - [ ] Con sesión de admin, el POS pide elegir la caja ("Caja 1"…) o crear una.
-- [ ] El servidor entrega un **token de equipo** atado a tenant + caja. Se guarda en el `localStorage` de pos.\*; la sesión del admin se descarta.
+- [ ] El servidor entrega un **token de equipo** atado a tenant + caja. Se guarda en el `localStorage` de pos.\*; la sesión de FiscalPoint de quien lo habilitó solo se conserva hasta saber si le toca crear su PIN (A5b) y se cierra en seguida.
 - [ ] El token de equipo **solo** sirve para rutas `/api/pos/*`. No abre app.\* ni otras rutas.
 - [x] Revocable desde app.\* (M1). Tras revocarlo, la siguiente petición del equipo vuelve a "Equipo no habilitado".
 - [ ] Una caja puede tener **un solo** equipo habilitado a la vez. Habilitar otro equipo para esa caja revoca el anterior, con confirmación.
@@ -142,8 +152,17 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 **A5 · Empleados POS** — `Piloto`
 - [x] El admin los crea en app.\* (M1) con nombre y rol (`cajero` | `supervisor`).
 - [x] Al crearlo, el sistema **genera un PIN aleatorio de 4 dígitos, único en el tenant**, y lo muestra **una sola vez**. El admin puede regenerarlo; el anterior deja de servir y el nuevo nunca es igual al anterior.
-- [ ] El admin nunca elige el PIN, así que el sistema nunca dice "ese PIN ya existe" y no revela el de nadie.
+- [ ] El admin nunca elige el PIN, así que el sistema nunca dice "ese PIN ya existe" y no revela el de nadie. (Salvo en A5b: el usuario de FiscalPoint elige el suyo; ahí el servidor sí puede decir "no disponible", y por eso se limita.)
 - [ ] Un empleado desactivado no entra ni autoriza. Sus turnos e históricos se conservan.
+
+**A5b · Usuarios de FiscalPoint como empleados** — `v1` (2026-11-19)
+- [x] Todo usuario de la empresa (`users.tenant_id`) es empleado del POS **sin que nadie lo dé de alta**: su empleado (`pos_empleados.user_id`, migración 040) se crea solo, con el PIN **pendiente**, la primera vez que llega al POS o cuando un administrador abre Empleados en app.\* (`POST /api/pos-admin/empleados/sincronizar`). Rol: `supervisor` si el rol de FiscalPoint del usuario administra el POS (módulo `pos` o `*`), `cajero` en los demás; el administrador lo cambia después y la sincronización no lo pisa.
+- [x] **Primera vez = crea su PIN ahí mismo.** El botón POS de app.\* (o, en el teclado del PIN, "¿Primera vez? Usa tu usuario") identifica al usuario; si su PIN está pendiente, el POS le pide escribir 4 dígitos y confirmarlos, lo guarda (`POST /api/pos/yo/pin`) y **entra con él sin pedirlo otra vez**. "Ahora no" vuelve al teclado del PIN. Si ya tiene PIN, el teclado del PIN lo saluda por su nombre.
+- [x] El PIN se elige **una sola vez**: con PIN, el administrador solo puede **restablecerlo** (se borra, sus sesiones se cierran y el usuario crea otro al entrar al POS). Nunca se genera ni se muestra el PIN de un usuario.
+- [x] El PIN elegido: 4 dígitos, nada obvio (las mismas reglas que el generado: ni 0000, ni 1234, ni 4321…) y único en la empresa. Si ya lo usa otro empleado el servidor responde "no está disponible" sin decir de quién, y tras 5 PIN no disponibles en 15 minutos pide esperar (`PIN_DEMASIADOS_INTENTOS`, con `espera_segundos`). Elegirlo queda en la bitácora **sin** el PIN.
+- [x] El nombre del empleado sigue al de su usuario (la sincronización lo pone al día; no se edita en el POS). Un usuario que se borra deja de entrar en el acto: se desactiva el empleado y se cierran sus sesiones. Un empleado que un administrador desactivó no se reactiva solo, ni siquiera al crear PIN (`ACCESO_DESACTIVADO`).
+- [x] Quien es de **otra empresa** (soporte con acceso global dentro de un cliente) no es empleado de ella: puede habilitar el equipo, no entrar a vender.
+- Los empleados creados a mano (A5) siguen igual, sin usuario y con el PIN generado; no se funden con los usuarios aunque se llamen igual.
 
 **A6 · Entrada con PIN** — `Piloto`
 - [ ] Pantalla con teclado numérico grande. Solo PIN, sin elegir nombre.
@@ -491,15 +510,18 @@ productos, ventas y turnos se administran y se ven en app.\*, con los mismos dat
 | 28 | Turno propio de ayer | Se permite, con aviso |
 | 29 | Turno de otro cajero | Un supervisor lo cierra primero |
 | 30 | Entrada | Equipo habilitado + PIN |
-| 31 | Cajeros | Empleados POS, sin cuenta de app.\* |
+| 31 | Cajeros | Empleados POS, sin cuenta de app.\* (los usuarios de FiscalPoint también son empleados: decisión 40) |
 | 32 | Identificación | Solo PIN, único en el tenant |
-| 33 | PIN | Lo genera el sistema, de **4 dígitos** (cambiado de 6 el 2026-10-08, por rapidez en mostrador), con bloqueo progresivo por equipo |
+| 33 | PIN | Lo genera el sistema, de **4 dígitos** (cambiado de 6 el 2026-10-08, por rapidez en mostrador), con bloqueo progresivo por equipo; el de un usuario de FiscalPoint lo elige él (decisión 41) |
 | 34 | Retiros | No en v1 |
 | 35 | Imágenes | No en v1 (iniciales + color) |
 | 36 | Precio en la ficha | Hoy se escribe sin ITBIS. Se agrega una casilla y se guarda el neto a 4 decimales |
 | 37 | Piloto | Gratex, térmica de 80 mm, menos de 500 productos, 4 semanas |
 | 38 | La venta no se detiene | Si falla el certificado, o cualquier cosa impide generar el e-CF, la venta sale como factura simple: sin e-NCF, sin ITBIS y sin envío a la DGII. El cajero no ve nada; el admin ve un aviso en app.\* (2026-10-12) |
 | 39 | Secuencia agotada | Número siguiente al último: se guarda y se imprime, y no se envía hasta que un rango autorizado registrado lo incluya. La app avisa cuando quedan pocos números y cuando se agotan (2026-10-12) |
+| 40 | Usuarios de FiscalPoint en el POS | Todo usuario de la empresa es empleado del POS sin alta previa y entra con un PIN que elige él mismo la primera vez (2026-11-19). Cambia las decisiones 31 y 33 solo para estos empleados; los creados a mano siguen igual y no se funden con los usuarios |
+| 41 | PIN elegido por el usuario | Una sola vez; con PIN solo el administrador lo restablece (nunca lo genera ni lo ve); 4 dígitos, no obvio, único en la empresa; "no disponible" no dice de quién y tras 5 no disponibles en 15 min hay que esperar; la bitácora nunca lo guarda. Es el contrapeso de la decisión 32 («solo PIN, único») ahora que alguien lo elige |
+| 42 | Quién ve el botón POS | Todo usuario de la empresa con el POS activo; administrar (cajas, empleados, equipos) sigue pidiendo el módulo `pos`. `PosUsuarios::puedeUsarPos()` es el único sitio a tocar si se quisiera exigir un módulo |
 
 ## 8. Decisiones por defecto — revisar
 
@@ -553,7 +575,8 @@ Pantalla de PIN
 Ventas: Authorization: Bearer <token equipo>  +  X-POS-Sesion: <token sesión>
 ```
 
-- `auth` es `public` en `config/permissions.php`: `pos-handoff` valida el token del usuario **en el controller** y exige el módulo `pos`.
+- `auth` es `public` en `config/permissions.php`: `pos-handoff` valida el token del usuario **en el controller** y exige ser usuario de la empresa (hasta A5b, el módulo `pos`).
+- **Usuarios de FiscalPoint (A5b):** `POST /api/pos/yo` y `POST /api/pos/yo/pin` llevan **a la vez** el token del equipo y el `Bearer` del usuario (el que saca el canje del código o su login). El controller valida el Bearer con `AuthMiddleware` y exige que sea de la empresa del equipo (`EQUIPO_OTRA_EMPRESA`); el gate no cambia (`'pos' => 'pos-caja'`). pos.\* cierra esa sesión de FiscalPoint en cuanto sabe qué le toca.
 - **Principal nuevo `pos-caja`** en `PermissionGate`, análogo a `integration`: el gate resuelve el tenant desde el token de equipo (tabla del master) y el controller valida la sesión del empleado.
 - **Mapa de rutas** (toda ruta nueva **tiene** que estar mapeada, o el tenant no se resuelve y el 500 sale vacío):
   - `'pos' => 'pos-caja'`
@@ -584,6 +607,14 @@ Ventas: Authorization: Bearer <token equipo>  +  X-POS-Sesion: <token sesión>
 | `product_barcodes` | `product_id` (FK `ON DELETE CASCADE`), `codigo` VARCHAR(64) UNIQUE |
 | `facturas` + | `turno_id`, `pos_empleado_id`, `pos_idempotency_key` CHAR(36) UNIQUE, `envio_pendiente` TINYINT DEFAULT 0 (el indicador de precios con ITBIS se lee del XML: no lleva columna) |
 
+**Tenant — `db/migrations/040_pos_empleados_usuario.sql`** (A5b; y reflejado en `db/tenant_schema.sql`)
+
+| Columna | Contenido |
+|---|---|
+| `pos_empleados.user_id` | `INT(11) NULL`, UNIQUE: el usuario de FiscalPoint (`master.users.id`) del que es empleado; `NULL` = creado a mano |
+| `pos_empleados.pin_hmac`, `pin_generado_at` | Ahora aceptan `NULL`: PIN **pendiente** (un usuario que todavía no lo creó). El UNIQUE de `pin_hmac` admite varios `NULL`, y un PIN pendiente nunca coincide al entrar |
+| `pos_empleados.pin_choques`, `pin_choque_at` | Cuántos PIN no disponibles eligió y cuándo fue el último (el límite de A5b) |
+
 **Tenant — `db/migrations/029_precios_4_decimales.sql`** (aparte: afecta a toda la app) — *escrita en la fase 0*
 - `products.precio`, `precio_2`, `precio_3` y `precio_4` → `DECIMAL(18,4)`. Antes de correrla, revisar todo lo que lee esas columnas (Q5).
 
@@ -591,14 +622,15 @@ Ventas: Authorization: Bearer <token equipo>  +  X-POS-Sesion: <token sesión>
 
 | Método y ruta | Principal | Qué hace |
 |---|---|---|
-| `POST /api/auth/pos-handoff` | usuario (módulo `pos`) | Genera el código de traspaso |
-| `POST /api/auth/pos-handoff/canje` | público | Código → sesión de admin |
+| `POST /api/auth/pos-handoff` | usuario de la empresa | Genera el código de traspaso |
+| `POST /api/auth/pos-handoff/canje` | público | Código → sesión del usuario (para habilitar el equipo si administra, o para crear su PIN, A5b) |
 | `POST /api/pos-admin/equipos` | usuario (`pos`) | Habilita el equipo → token de equipo |
 | `GET/POST/PUT /api/pos-admin/cajas` | usuario (`pos`) | Gestión de cajas |
-| `GET/POST/PUT /api/pos-admin/empleados` | usuario (`pos`) | Empleados; `POST …/{id}/pin` regenera el PIN |
+| `GET/POST/PUT /api/pos-admin/empleados` | usuario (`pos`) | Empleados; `POST …/{id}/pin` regenera el PIN (a un usuario de FiscalPoint se lo restablece); `POST …/sincronizar` crea los empleados de los usuarios (A5b) |
 | `GET /api/pos-admin/turnos` · `/{id}` | usuario (`pos`) | Cierres y su detalle |
 | `DELETE /api/pos-admin/equipos/{id}` | usuario (`pos`) | Revoca un equipo |
 | `POST /api/pos/sesion` · `DELETE` | `pos-caja` | Entrar con PIN · bloquear o salir |
+| `POST /api/pos/yo` · `POST /api/pos/yo/pin` | `pos-caja` + `Bearer` de usuario | Qué le toca a un usuario de FiscalPoint (se crea su empleado) y crear su PIN (A5b) |
 | `GET /api/pos/catalogo` | `pos-caja` | Productos, precio final, códigos, categorías |
 | `GET/POST /api/pos/turno` · `POST /api/pos/turno/cerrar` | `pos-caja` | Turno actual, apertura y cierre |
 | `POST /api/pos/autorizar` | `pos-caja` | Valida un PIN de supervisor para una acción y devuelve un permiso de un solo uso |

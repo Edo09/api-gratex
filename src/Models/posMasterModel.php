@@ -37,6 +37,39 @@ class posMasterModel
     }
 
     // ------------------------------------------------------------------
+    // Usuarios de FiscalPoint (master.users) que usan el POS como empleados
+    // (src/Pos/PosUsuarios.php). El empleado vive en la base de la empresa y
+    // guarda el id del usuario; aqui se lee a quien es de esa empresa.
+    // ------------------------------------------------------------------
+
+    /**
+     * El usuario si es de ESA empresa (users.tenant_id). null si no existe o es
+     * de otra: un usuario de soporte con acceso global que esta dentro de una
+     * empresa ajena no es empleado de ella.
+     *
+     * @return array{id:int|string,name:string,last_name:string,username:string,role:string}|null
+     */
+    public function usuarioDeEmpresa(int $userId, int $tenantId): ?array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT id, name, last_name, username, role FROM users WHERE id = :u AND tenant_id = :t LIMIT 1'
+        );
+        $stmt->execute([':u' => $userId, ':t' => $tenantId]);
+        $f = $stmt->fetch();
+        return $f ?: null;
+    }
+
+    /** Todos los usuarios de la empresa, por id. */
+    public function usuariosDeEmpresa(int $tenantId): array
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT id, name, last_name, username, role FROM users WHERE tenant_id = :t ORDER BY id'
+        );
+        $stmt->execute([':t' => $tenantId]);
+        return $stmt->fetchAll();
+    }
+
+    // ------------------------------------------------------------------
     // Codigo de traspaso (boton POS de app.* -> pos.* ya autenticado)
     // ------------------------------------------------------------------
 

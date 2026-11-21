@@ -5,7 +5,9 @@ el porqué están en [../specs/pos.md](../specs/pos.md). Venta, turnos y devoluc
 se agregan aquí cuando existan.
 
 Requiere las migraciones `master_migrations/012_pos.sql` y `migrations/030_pos.sql`,
-la variable `POS_PIN_PEPPER` en el `.env` del server y `tenants.pos_enabled = 1`.
+la variable `POS_PIN_PEPPER` en el `.env` del server y `tenants.pos_enabled = 1`. Los
+usuarios de FiscalPoint como empleados (A5b) piden además `migrations/040_pos_empleados_usuario.sql`
+**en cada base de empresa antes de subir el código** (es aditiva: el código viejo sigue andando).
 
 ## Tres credenciales, tres encabezados
 
@@ -17,6 +19,11 @@ la variable `POS_PIN_PEPPER` en el `.env` del server y `tenants.pos_enabled = 1`
 
 El token del equipo no abre rutas de app.\* y el de usuario no sirve como equipo. Los
 tres se guardan como sha256; el valor en claro solo existe del lado del cliente.
+
+Una excepción, a propósito: `POST /api/pos/yo` y `POST /api/pos/yo/pin` (A5b) llevan **dos**
+credenciales a la vez, `X-POS-EQUIPO` y `Authorization: Bearer` de un usuario de FiscalPoint de
+**la misma empresa** que el equipo. Cualquier usuario de la empresa sirve (no hace falta el
+módulo `pos`): cada uno es empleado del POS.
 
 ## Errores
 
@@ -36,7 +43,18 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `EMPRESA_INACTIVA` | 403 | Igual |
 | `CODIGO_INVALIDO` | 401 | El enlace del botón POS venció o se usó: login normal |
 | `SIN_ACCESO_GLOBAL` | 403 | Canje: el código es de una empresa que no es la del usuario (un usuario de soporte que estaba en un cliente) y ya no puede estar en ella: login normal. Ver [../modules/acceso-global.md](../modules/acceso-global.md) |
-| `SIN_PERMISO` | 403 | El usuario no tiene el módulo `pos` |
+| `SIN_PERMISO` | 403 | Habilitar equipos y administrar (`/api/pos-admin/*`) piden el módulo `pos`: pos.\* muestra "este equipo todavía no es una caja, hace falta un administrador". El botón POS y el canje, no: los pide cualquier usuario de la empresa |
+| `USUARIO_NO_AUTENTICADO` | 401 | `/api/pos/yo*`: venció la sesión de FiscalPoint del usuario: entrar de nuevo con su usuario |
+| `EQUIPO_OTRA_EMPRESA` | 403 | `/api/pos/yo*`: el usuario es de otra empresa que la del equipo |
+| `USUARIO_OTRA_EMPRESA` | 403 | Crear PIN: el usuario (soporte) no es empleado de esta empresa |
+| `ACCESO_DESACTIVADO` | 403 | Crear PIN: un administrador desactivó el acceso de ese empleado |
+| `USUARIO_SIN_ACCESO` | 403 | Entrar con el PIN: el usuario de FiscalPoint de ese empleado ya no existe en la empresa (el empleado se desactiva). Dentro del POS la misma situación responde `SESION_REQUERIDA` |
+| `PIN_OBVIO` | 422 | Crear PIN: 0000, 1234, 4321… Elegir otro |
+| `PIN_YA_CREADO` | 409 | Crear PIN: ya tiene uno; un administrador lo restablece |
+| `PIN_NO_DISPONIBLE` | 409 | Crear PIN: otro empleado ya usa ese PIN (no se dice quién): elegir otro |
+| `PIN_DEMASIADOS_INTENTOS` | 429 | Crear PIN: demasiados no disponibles seguidos; trae `espera_segundos` |
+| `NOMBRE_DE_USUARIO` | 422 | `PUT /empleados/{id}`: el nombre de un usuario sale de su cuenta |
+| `EMPLEADO_NO_CREADO` | 500 | No se pudo preparar el empleado de un usuario: reintentar |
 | `CAJA_OCUPADA` | 409 | "Esta caja ya tiene un equipo": confirmar y repetir con `reemplazar: true` |
 | `DUPLICADO`, `NOMBRE_REQUERIDO`, `ROL_INVALIDO`, `CAMPO_INVALIDO` | 409 / 422 | Error en el formulario |
 | `POS_SIN_CONFIGURAR` | 500 | Falta `POS_PIN_PEPPER` en el server |
@@ -67,8 +85,9 @@ antes que `/api/pos-admin` (para pos.\* es el mismo `SIN_PERMISO`).
 
 ## Botón POS de app.\* (A1, A2)
 
-**`POST /api/auth/pos-handoff`** — con la sesión de app.\*. Pide el módulo `pos`
-y el POS activo.
+**`POST /api/auth/pos-handoff`** — con la sesión de app.\*. Lo pide **cualquier usuario de la
+empresa** (cada uno es empleado del POS, A5b; antes pedía el módulo `pos`) y el POS tiene que
+estar activo.
 
 ```json
 { "success": true, "data": { "url": "https://pos.fiscalpoint.com.do/#code=<48 hex>", "code": "<48 hex>", "expira_en": 60 } }
@@ -79,8 +98,10 @@ ningún servidor ni queda en logs.
 
 **`POST /api/auth/pos-handoff/canje`** `{ "code": "<48 hex>" }` — público. Un solo
 uso, 60 s. Responde **igual que el login** (`{success, data: {token, user}}`). pos.\*
-usa ese token solo para habilitar el equipo y después lo cierra con
-`POST /api/auth/signout`.
+usa ese token para saber quién llegó (`POST /api/pos/yo`: crear su PIN, saludarlo) y, si el
+equipo todavía no es una caja y el usuario administra el POS, para habilitarlo; en cuanto
+termina lo cierra con `POST /api/auth/signout`. Sin el módulo `pos` el canje igual sirve: lo que
+no puede hacer es habilitar el equipo (`SIN_PERMISO` en `/api/pos-admin/*`).
 
 ## Administración — `/api/pos-admin/*` (usuario con el módulo `pos`)
 
@@ -89,10 +110,11 @@ usa ese token solo para habilitar el equipo y después lo cierra con
 | `GET /cajas` | — | `{cajas: [{id, nombre, activa, created_at, updated_at}]}` |
 | `POST /cajas` | `{nombre}` | `{caja}` · 201 |
 | `PUT /cajas/{id}` | `{nombre?, activa?: bool}` | `{caja}` |
-| `GET /empleados` | — | `{empleados: [{id, nombre, rol, activo, pin_generado_at, ...}]}` (sin PIN) |
+| `GET /empleados` | — | `{empleados: [{id, nombre, rol, activo, usuario_id, pin_pendiente, pin_generado_at, ...}]}` (sin PIN). `usuario_id`: el usuario de FiscalPoint del que es empleado, `null` si lo creó un administrador. `pin_pendiente`: es un usuario que todavía no creó su PIN (`pin_generado_at` viene `null`) |
+| `POST /empleados/sincronizar` | — | `{creados, renombrados, desactivados}` — crea el empleado de cada usuario de la empresa que no lo tiene (PIN pendiente), sigue los cambios de nombre y desactiva al empleado cuyo usuario ya no existe. Nunca reactiva ni cambia el rol de nadie. Se puede repetir (A5b) |
 | `POST /empleados` | `{nombre, rol: "cajero"\|"supervisor"}` | `{empleado, pin}` · 201 — **el PIN se ve una sola vez** |
-| `PUT /empleados/{id}` | `{nombre?, rol?, activo?: bool}` | `{empleado}` — desactivar cierra sus sesiones |
-| `POST /empleados/{id}/pin` | — | `{empleado, pin}` — el anterior deja de servir y sus sesiones se cierran |
+| `PUT /empleados/{id}` | `{nombre?, rol?, activo?: bool}` | `{empleado}` — desactivar cierra sus sesiones. El nombre de un usuario de FiscalPoint no se cambia aquí (`422 NOMBRE_DE_USUARIO`) |
+| `POST /empleados/{id}/pin` | — | `{empleado, pin}` — el anterior deja de servir y sus sesiones se cierran. Si el empleado es un **usuario de FiscalPoint** no se genera nada: se **restablece** (su PIN se borra, sus sesiones se cierran) y responde `pin: null`; él crea otro al entrar al POS |
 | `GET /equipos` | — | `{equipos: [{id, caja_id, caja, nombre, last_used, bloqueado, bloqueo_segundos, habilitado_por_nombre}]}` |
 | `POST /equipos` | `{caja_id, nombre?, reemplazar?: bool}` | `{equipo: {id, nombre, caja}, token}` · 201 — **el token se ve una sola vez** |
 | `DELETE /equipos/{id}` | — | `{revocado}` — el equipo deja de entrar y sus sesiones se cierran |
@@ -124,7 +146,9 @@ abierto_at, fondo_inicial, de_dia_anterior}`) o `null`. Sirve para las reglas K4
 **`POST /api/pos/sesion`** `{ "pin": "0123" }` → `{token, empleado, caja, turno_caja}`.
 
 - Entrar con otro PIN en el mismo equipo cierra la sesión anterior (cambio de cajero).
-- PIN de **4 dígitos**, generado por el sistema (nunca 0000, 1234, 4321 ni similares).
+- PIN de **4 dígitos**, generado por el sistema (nunca 0000, 1234, 4321 ni similares) o, en un usuario de
+  FiscalPoint, elegido por él mismo (A5b, mismas reglas). Un empleado que es usuario entra solo mientras su
+  usuario siga en la empresa: si lo borraron, `403 USUARIO_SIN_ACCESO` (no cuenta como PIN incorrecto).
 - 5 PIN incorrectos seguidos en un equipo → `423 EQUIPO_BLOQUEADO` con `bloqueo_segundos`.
   El bloqueo es **progresivo**: 5 minutos, y cada bloqueo seguido el doble (10, 20, 40…)
   hasta un día; ni el PIN correcto entra mientras dure. Entrar con un PIN válido
@@ -133,6 +157,39 @@ abierto_at, fondo_inicial, de_dia_anterior}`) o `null`. Sirve para las reglas K4
 
 **`DELETE /api/pos/sesion`** (con `X-POS-SESION`) — cierra la sesión: bloqueo de
 pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
+
+### Usuarios de FiscalPoint en el POS (A5b)
+
+Los dos llevan `X-POS-EQUIPO` **y** `Authorization: Bearer <token del usuario>`. El token es el que
+saca el canje del código del botón POS o `POST /api/auth/login` desde la pantalla del PIN ("¿Primera vez?
+Usa tu usuario"); pos.\* lo cierra con `POST /api/auth/signout` cuando ya no hace falta.
+
+**`POST /api/pos/yo`** — qué le toca al usuario. Si todavía no tiene empleado en esta empresa, **lo crea**
+(PIN pendiente; bitácora `POS_USUARIO_VINCULADO`).
+
+```json
+{ "status": true, "data": {
+  "elegible": true, "motivo": null, "mensaje": null,
+  "empleado": { "id": 7, "nombre": "Ana Pérez", "rol": "cajero" },
+  "tiene_pin": false
+} }
+```
+
+- `tiene_pin: false` → pos.\* muestra "Crea tu PIN"; `true` → el teclado del PIN con un saludo.
+- `elegible: false` (sin `empleado`): `motivo` = `OTRA_EMPRESA` (un usuario de soporte que está dentro de un
+  cliente: puede habilitar el equipo, no entrar a vender) o `DESACTIVADO` (un administrador desactivó su
+  acceso). `mensaje` trae el texto para la persona.
+- Errores: `USUARIO_NO_AUTENTICADO` (401), `EQUIPO_OTRA_EMPRESA` (403).
+
+**`POST /api/pos/yo/pin`** `{ "pin": "2468" }` → `{ "creado": true }` — el usuario crea **su** PIN, solo si
+todavía no tiene. Va como **texto**. Se rechaza, en este orden y sin tocar ningún contador, un PIN mal formado
+(`422 PIN_FORMATO`) o fácil de adivinar (`422 PIN_OBVIO`); después `403 ACCESO_DESACTIVADO`,
+`409 PIN_YA_CREADO` y `429 PIN_DEMASIADOS_INTENTOS` (`espera_segundos`); por último, si otro empleado ya usa ese
+PIN, `409 PIN_NO_DISPONIBLE` (cuenta como un choque: 5 en 15 minutos y hay que esperar). Un PIN creado no se
+cambia por aquí: lo restablece un administrador (`POST /api/pos-admin/empleados/{id}/pin`). Bitácora:
+`POS_PIN_CREADO` y `POS_PIN_NO_DISPONIBLE` (`success = 0`), sin el PIN.
+
+Después de crearlo pos.\* entra con `POST /api/pos/sesion` y ese mismo PIN: el usuario no lo vuelve a escribir.
 
 **`GET /api/pos/catalogo`** (con `X-POS-SESION`) — el catálogo completo de la caja
 (C1–C4). El POS lo guarda en memoria y busca ahí; lo vuelve a pedir cada 5 minutos.
@@ -403,7 +460,9 @@ abierto).
 Todo va a `audit_logs` con módulo `pos`: `POS_TRASPASO_CREADO`, `POS_CAJA_CREADA` /
 `_ACTUALIZADA`, `POS_EMPLEADO_CREADO` / `_ACTUALIZADO`, `POS_PIN_REGENERADO`,
 `POS_EQUIPO_HABILITADO` / `_REVOCADO`, `POS_SESION_ABIERTA` / `_CERRADA`,
-`POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`, `POS_TURNO_ABIERTO`, `POS_VENTA` (toda venta entregada:
+`POS_PIN_FALLIDO`, `POS_EQUIPO_BLOQUEADO`, `POS_USUARIO_VINCULADO` (el empleado de un usuario de
+FiscalPoint se creó), `POS_PIN_CREADO`, `POS_PIN_NO_DISPONIBLE` (`success = 0`), `POS_PIN_RESTABLECIDO`,
+`POS_USUARIOS_SINCRONIZADOS`, `POS_EMPLEADO_DESACTIVADO` (su usuario ya no existe), `POS_TURNO_ABIERTO`, `POS_VENTA` (toda venta entregada:
 aceptada, rechazada o sin respuesta), `POS_VENTA_FACTURA_SIMPLE` (la venta salió como factura simple;
 trae la clase del fallo, sin secretos), `POS_VENTA_ENVIADA` (el reenvío la confirmó),
 `POS_VENTA_RECHAZADA` (la DGII la rechazó, al cobrar o después en el reenvío, con el motivo; la venta

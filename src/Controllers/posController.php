@@ -8,6 +8,9 @@
 //                               la caja. Es lo primero que pide pos.* al cargar.
 //   POST   /api/pos/sesion   -> {pin} -> {token, empleado, caja, turno_caja}
 //   DELETE /api/pos/sesion   -> cierra la sesion (bloqueo de pantalla o salir)
+//   POST   /api/pos/yo       -> con X-POS-EQUIPO + Authorization: Bearer de un usuario de FiscalPoint:
+//                               su empleado (se crea solo) y si le falta crear el PIN (A5b)
+//   POST   /api/pos/yo/pin   -> {pin} el usuario crea SU PIN, solo si todavia no tiene (A5b)
 //   GET    /api/pos/catalogo -> productos con su precio final, categorias (C1-C4)
 //   POST   /api/pos/turno    -> {fondo_centavos} abre el turno del empleado (K2, K3)
 //   POST   /api/pos/ventas   -> cobra y emite (§9.5); ver src/Pos/PosVenta.php
@@ -25,6 +28,7 @@
 //   EQUIPO_NO_HABILITADO -> habilitar el equipo     SESION_REQUERIDA -> PIN
 //   EQUIPO_BLOQUEADO     -> cuenta regresiva (bloqueo_segundos)
 //   PIN_INCORRECTO       -> intentos_restantes      POS_INACTIVO / CAJA_INACTIVA
+//   USUARIO_SIN_ACCESO   -> su usuario de FiscalPoint ya no existe (al entrar con el PIN)
 
 require_once __DIR__ . '/../Pos/PosError.php';
 require_once __DIR__ . '/../Pos/PosPin.php';
@@ -37,6 +41,8 @@ require_once __DIR__ . '/../Pos/PosVenta.php';
 require_once __DIR__ . '/../Pos/PosCierre.php';
 require_once __DIR__ . '/../Pos/PosAutorizacion.php';
 require_once __DIR__ . '/../Pos/PosCliente.php';
+require_once __DIR__ . '/../Pos/PosUsuarios.php';
+require_once __DIR__ . '/../Middleware/AuthMiddleware.php';
 
 /** Una linea de auditoria del POS. Nunca con el PIN ni tokens. */
 function posAudit(string $action, $entityId, ?array $new, string $descripcion, bool $ok = true): void
@@ -52,6 +58,25 @@ function posResponder(int $http, array $data): void
 {
     http_response_code($http);
     echo json_encode(['status' => true, 'data' => $data], JSON_UNESCAPED_UNICODE);
+}
+
+/**
+ * El usuario de FiscalPoint que pide (Authorization: Bearer, la sesion que el POS saco con el
+ * codigo del boton POS o con su usuario y clave), validado contra la empresa de ESTE equipo.
+ * Va ademas del token del equipo: solo se crea un PIN desde una caja de la propia empresa.
+ *
+ * @return array|null su fila de master.users en esta empresa; null si es de otra (soporte)
+ */
+function posUsuarioDelRequest(array $equipo): ?array
+{
+    $v = (new AuthMiddleware())->validateRequest();
+    if (empty($v['valid']) || ($v['user_id'] ?? null) === null) {
+        throw new PosError('Tu sesión de FiscalPoint venció. Entra de nuevo con tu usuario.', 401, 'USUARIO_NO_AUTENTICADO');
+    }
+    if ((int) ($v['tenant_id'] ?? 0) !== (int) $equipo['tenant_id']) {
+        throw new PosError('Este equipo es de otra empresa. Entra con un usuario de la empresa de este equipo o habilítalo de nuevo.', 403, 'EQUIPO_OTRA_EMPRESA');
+    }
+    return (new posMasterModel())->usuarioDeEmpresa((int) $v['user_id'], (int) $equipo['tenant_id']);
 }
 
 /** Caja del equipo; si se desactivo despues de habilitarlo, no se vende en ella. */
@@ -205,6 +230,10 @@ try {
                 throw new PosError('PIN incorrecto.', 401, 'PIN_INCORRECTO', ['intentos_restantes' => $fallo['intentos_restantes']]);
             }
 
+            // Un empleado que es usuario de FiscalPoint entra solo si su usuario sigue en la empresa.
+            // No es un PIN incorrecto: no cuenta para el bloqueo del equipo.
+            PosAuth::exigirUsuarioVigente($pos, $empleado, (int) TenantResolver::current()['id'], 'USUARIO_SIN_ACCESO');
+
             $master->reiniciarIntentos($equipo['id']);
             $token = $pos->abrirSesion($empleado['id'], $equipo['id']);
             RequestContext::set('username', 'POS · ' . $empleado['nombre']);
@@ -216,6 +245,29 @@ try {
                 'caja' => $caja,
                 'turno_caja' => $pos->turnoAbiertoDeCaja($caja['id']),
             ]);
+            break;
+
+        case 'POST yo':
+            // Un usuario de FiscalPoint llego al POS (boton POS de app.* o con su usuario y clave): que le toca
+            // hacer. Su empleado se crea aqui si todavia no existe (PIN pendiente).
+            $usuario = posUsuarioDelRequest($equipo);
+            $estado = PosUsuarios::estadoDe($pos, (int) $equipo['tenant_id'], $usuario);
+            if ($estado['creado']) {
+                AuditLogger::log([
+                    'module' => 'pos', 'action' => 'POS_USUARIO_VINCULADO', 'entity_type' => 'pos_empleado',
+                    'entity_id' => $pos->empleadoDeUsuario((int) $usuario['id'])['id'] ?? null,
+                    'new_values' => ['usuario_id' => (int) $usuario['id']],
+                    'description' => 'Empleado del POS creado para un usuario de FiscalPoint (PIN pendiente).',
+                ]);
+            }
+            unset($estado['creado']);
+            posResponder(200, $estado);
+            break;
+
+        case 'POST yo/pin':
+            $usuario = posUsuarioDelRequest($equipo);
+            $body = InputSanitizer::jsonInput() ?? [];
+            posResponder(200, ['creado' => PosUsuarios::crearPin($pos, (int) $equipo['tenant_id'], $usuario, is_array($body) ? ($body['pin'] ?? null) : null)['creado']]);
             break;
 
         case 'DELETE sesion':

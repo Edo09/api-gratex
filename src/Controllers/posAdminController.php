@@ -8,9 +8,14 @@
 //   POST   /api/pos-admin/cajas               -> {nombre}
 //   PUT    /api/pos-admin/cajas/{id}          -> {nombre?, activa?}
 //   GET    /api/pos-admin/empleados           -> empleados (sin PIN: no se puede volver a leer)
+//   POST   /api/pos-admin/empleados/sincronizar -> crea el empleado de cada usuario de FiscalPoint de la
+//                                                 empresa que no lo tiene (PIN pendiente) y pone al dia nombres
+//                                                 y bajas -> {creados, renombrados, desactivados}  (A5b)
 //   POST   /api/pos-admin/empleados           -> {nombre, rol} -> {empleado, pin}   el PIN se ve UNA vez
 //   PUT    /api/pos-admin/empleados/{id}      -> {nombre?, rol?, activo?}
-//   POST   /api/pos-admin/empleados/{id}/pin  -> {pin} nuevo; el anterior deja de servir
+//   POST   /api/pos-admin/empleados/{id}/pin  -> {pin} nuevo; el anterior deja de servir. Si el empleado es un
+//                                                 usuario de FiscalPoint NO se genera nada: se borra su PIN
+//                                                 ({pin: null}) y el usuario crea otro al entrar al POS
 //   GET    /api/pos-admin/equipos             -> equipos habilitados
 //   POST   /api/pos-admin/equipos             -> {caja_id, nombre?, reemplazar?} -> {equipo, token}  el token se ve UNA vez
 //   DELETE /api/pos-admin/equipos/{id}        -> revocar
@@ -27,6 +32,7 @@ require_once __DIR__ . '/../PermissionGate.php';
 require_once __DIR__ . '/../Pos/PosError.php';
 require_once __DIR__ . '/../Pos/PosPin.php';
 require_once __DIR__ . '/../Pos/PosAuth.php';
+require_once __DIR__ . '/../Pos/PosUsuarios.php';
 require_once __DIR__ . '/../Models/posModel.php';
 require_once __DIR__ . '/../Models/posMasterModel.php';
 
@@ -82,7 +88,9 @@ try {
     $recurso = $partes[0] ?? '';
     $id = isset($partes[1]) && ctype_digit($partes[1]) ? (int) $partes[1] : null;
     $accion = $partes[2] ?? null;
-    if (isset($partes[1]) && $id === null) {
+    // La unica accion de coleccion (sin id): /empleados/sincronizar.
+    $accionColeccion = $id === null && ($partes[1] ?? null) === 'sincronizar' && !isset($partes[2]) ? 'sincronizar' : null;
+    if (isset($partes[1]) && $id === null && $accionColeccion === null) {
         throw new PosError('Ruta no encontrada.', 404, 'RUTA_NO_EXISTE');
     }
     $metodo = $_SERVER['REQUEST_METHOD'];
@@ -91,7 +99,7 @@ try {
         throw new PosError('No se pudieron leer los datos. Recarga la página e inténtalo de nuevo.', 400, 'CUERPO_INVALIDO');
     }
 
-    switch ("{$metodo} {$recurso}" . ($id !== null ? ' :id' : '') . ($accion !== null ? " {$accion}" : '')) {
+    switch ("{$metodo} {$recurso}" . ($id !== null ? ' :id' : '') . ($accion !== null ? " {$accion}" : '') . ($accionColeccion !== null ? " {$accionColeccion}" : '')) {
 
         // ---------------------------------------------------------------- cajas
         case 'GET cajas':
@@ -123,6 +131,15 @@ try {
             posAdminResponder(200, ['empleados' => $pos->listarEmpleados()]);
             break;
 
+        case 'POST empleados sincronizar':
+            $resumen = PosUsuarios::sincronizar($pos, $master, $tenantId);
+            if ($resumen['creados'] + $resumen['renombrados'] + $resumen['desactivados'] > 0) {
+                posAdminAudit('POS_USUARIOS_SINCRONIZADOS', 'pos_empleado', null, $resumen,
+                    'Empleados del POS puestos al día con los usuarios de FiscalPoint de la empresa.');
+            }
+            posAdminResponder(200, $resumen);
+            break;
+
         case 'POST empleados':
             $generar = static function () use ($tenantId): array {
                 $pin = PosPin::generar();
@@ -140,12 +157,31 @@ try {
                 $campos['activo'] = posAdminBool($campos['activo'], 'activo');
             }
             $antes = $pos->empleadoPorId($id);
+            // El nombre de un usuario de FiscalPoint sale de su cuenta (la sincronizacion lo sigue): cambiarlo aqui
+            // duraria hasta la proxima. Mandar el mismo nombre que ya tiene no es un cambio.
+            if ($antes !== null && $antes['usuario_id'] !== null && array_key_exists('nombre', $campos)
+                && trim((string) $campos['nombre']) !== $antes['nombre']) {
+                throw new PosError('El nombre de un usuario de FiscalPoint sale de su cuenta: cámbialo en Usuarios.', 422, 'NOMBRE_DE_USUARIO');
+            }
+            if ($antes !== null && $antes['usuario_id'] !== null) {
+                unset($campos['nombre']);
+            }
             $empleado = $pos->actualizarEmpleado($id, $campos);
             posAdminAudit('POS_EMPLEADO_ACTUALIZADO', 'pos_empleado', $id, $empleado, 'Empleado del POS actualizado.', $antes);
             posAdminResponder(200, ['empleado' => $empleado]);
             break;
 
         case 'POST empleados :id pin':
+            $actual = $pos->empleadoPorId($id);
+            if ($actual !== null && $actual['usuario_id'] !== null) {
+                // Un usuario de FiscalPoint elige SU PIN: el administrador no lo genera (lo conoceria) sino que lo borra, y el
+                // usuario crea otro la proxima vez que entre al POS. Sus sesiones se cierran.
+                $pos->restablecerPin($id);
+                posAdminAudit('POS_PIN_RESTABLECIDO', 'pos_empleado', $id, null,
+                    'PIN restablecido: el usuario crea otro al entrar al POS y sus sesiones se cerraron.');
+                posAdminResponder(200, ['empleado' => $pos->empleadoPorId($id), 'pin' => null]);
+                break;
+            }
             $generar = static function () use ($tenantId): array {
                 $pin = PosPin::generar();
                 return [$pin, PosPin::hmac($pin, $tenantId)];

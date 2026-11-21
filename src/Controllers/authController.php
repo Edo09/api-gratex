@@ -212,13 +212,16 @@ switch ($_SERVER['REQUEST_METHOD']) {
 /**
  * POST /api/auth/pos-handoff — con la sesion de app.*: crea el codigo y la URL
  * de pos.* que lo lleva en el fragmento (#code=, nunca llega a un servidor).
- * Pide el modulo 'pos' y el POS activo en la empresa.
+ * Lo pide quien administra el POS (modulo 'pos') o cualquier usuario de la
+ * empresa: los usuarios de FiscalPoint son empleados del POS y crean su PIN la
+ * primera vez (docs/specs/pos.md A5b). El POS tiene que estar activo en la empresa.
  */
 function authPosHandoff(AuthMiddleware $auth): void
 {
     require_once __DIR__ . '/../Models/RoleModel.php';
     require_once __DIR__ . '/../PermissionGate.php';
     require_once __DIR__ . '/../Pos/PosAuth.php';
+    require_once __DIR__ . '/../Pos/PosUsuarios.php';
     require_once __DIR__ . '/../Models/posMasterModel.php';
     try {
         $v = $auth->validateRequest();
@@ -226,7 +229,8 @@ function authPosHandoff(AuthMiddleware $auth): void
             throw new PosError('Inicia sesión para abrir el POS.', 401, 'SESION_REQUERIDA');
         }
         $perms = (new RoleModel())->getPermissionsForRole($v['tenant_id'] ?? null, (string) ($v['role'] ?? ''));
-        if (!PermissionGate::permMatches($perms, 'pos')) {
+        if (!PermissionGate::permMatches($perms, 'pos')
+            && !PosUsuarios::puedeUsarPos((new posMasterModel())->usuarioDeEmpresa((int) $v['user_id'], (int) $v['tenant_id']))) {
             throw new PosError('No tienes permiso para abrir el POS. Pídeselo a un administrador.', 403, 'SIN_PERMISO');
         }
         PosAuth::exigirPosActivo(TenantResolver::current());
@@ -265,6 +269,7 @@ function authPosCanje(authModel $authModel, $body): void
     require_once __DIR__ . '/../Models/RoleModel.php';
     require_once __DIR__ . '/../PermissionGate.php';
     require_once __DIR__ . '/../Pos/PosAuth.php';
+    require_once __DIR__ . '/../Pos/PosUsuarios.php';
     require_once __DIR__ . '/../Models/posMasterModel.php';
     try {
         $codigo = is_object($body) ? trim((string) ($body->code ?? '')) : '';
@@ -279,7 +284,8 @@ function authPosCanje(authModel $authModel, $body): void
         // La empresa es la del codigo: la de la sesion de app.* que lo pidio (para un
         // usuario de soporte, la empresa en la que estaba, no la suya).
         $perfil = $authModel->getUserProfile($canje['user_id'], (int) $canje['tenant_id']);
-        if ($perfil === null || !PermissionGate::permMatches($perfil['permissions'] ?? [], 'pos')) {
+        if ($perfil === null || (!PermissionGate::permMatches($perfil['permissions'] ?? [], 'pos')
+            && !PosUsuarios::puedeUsarPos((new posMasterModel())->usuarioDeEmpresa($canje['user_id'], (int) $canje['tenant_id'])))) {
             throw new PosError('No tienes permiso para abrir el POS. Pídeselo a un administrador.', 403, 'SIN_PERMISO');
         }
 
