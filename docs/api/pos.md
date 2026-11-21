@@ -161,8 +161,7 @@ pantalla o salida. Volver a entrar es otro `POST /api/pos/sesion`.
 ### Usuarios de FiscalPoint en el POS (A5b)
 
 Los dos llevan `X-POS-EQUIPO` **y** `Authorization: Bearer <token del usuario>`. El token es el que
-saca el canje del código del botón POS o `POST /api/auth/login` desde la pantalla del PIN ("¿Primera vez?
-Usa tu usuario"); pos.\* lo cierra con `POST /api/auth/signout` cuando ya no hace falta.
+saca el canje del código del botón POS o `POST /api/auth/login` desde la pantalla del PIN ("Crear mi PIN con mi usuario"); pos.\* lo cierra con `POST /api/auth/signout` cuando ya no hace falta.
 
 **`POST /api/pos/yo`** — qué le toca al usuario. Si todavía no tiene empleado en esta empresa, **lo crea**
 (PIN pendiente; bitácora `POS_USUARIO_VINCULADO`).
