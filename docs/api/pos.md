@@ -34,7 +34,7 @@ puede cambiar; `codigo` es estable** y es lo que decide la pantalla:
 | `codigo` | HTTP | Pantalla en pos.\* |
 |---|---|---|
 | `EQUIPO_NO_HABILITADO` | 401 | Habilitar el equipo (login de admin) |
-| `SESION_REQUERIDA` | 401 | Teclado de PIN |
+| `SESION_REQUERIDA` | 401 | Teclado de PIN. Con `pin_restablecido: true` (un administrador le restableció el PIN a quien estaba dentro, A5b) no hay PIN que escribir: pos.\* va directo a "Crea tu PIN con tu usuario", con el aviso |
 | `PIN_INCORRECTO` | 401 | "PIN incorrecto", con `intentos_restantes` |
 | `EQUIPO_BLOQUEADO` | 423 | Cuenta regresiva con `bloqueo_segundos` |
 | `PIN_FORMATO` | 422 | El PIN tiene 4 dígitos y va como **texto** (`"0123"`, nunca `123`) |
@@ -127,7 +127,9 @@ navegador y el sistema operativo que lo habilitaron.
 
 **`GET /api/pos/estado`** — lo primero que pide pos.\* al cargar. Con un
 `X-POS-SESION` válido incluye al empleado; si la sesión venció, `empleado: null`
-(no es error).
+(no es error). `pin_restablecido` es `true` solo cuando se mandó una sesión que ya no vale
+**porque un administrador le restableció el PIN** a ese empleado (A5b): pos.\* lo lleva a crear
+otro con su usuario en vez de pedirle el viejo. En cualquier otro caso, `false`.
 
 ```json
 { "status": true, "data": {
@@ -135,6 +137,7 @@ navegador y el sistema operativo que lo habilitaron.
   "equipo": { "id": 3, "nombre": "PC mostrador", "bloqueado": false, "bloqueo_segundos": 0 },
   "caja": { "id": 1, "nombre": "Caja 1", "activa": true },
   "empleado": null,
+  "pin_restablecido": false,
   "turno_caja": null
 } }
 ```
@@ -473,6 +476,12 @@ estas dos últimas quedan con `success = 0`,
 valores. **Nunca se registra un PIN ni un token.**
 
 ## Pruebas
+
+`tools/test_pos_sesion_restablecida.php`: 24 verificaciones, **en proceso y con SQLite en memoria** (sin
+servidor, sin MySQL, sin red; `php -d extension=pdo_sqlite tools/test_pos_sesion_restablecida.php`), de por qué
+deja de valer una sesión: solo un usuario de FiscalPoint activo con el PIN pendiente, en el equipo de la
+petición, da `pin_restablecido`; un token desconocido, otro equipo, quien tiene PIN, un empleado creado a
+mano y uno desactivado dan el mensaje de siempre. No está en la línea base de `express_baseline.php`.
 
 `tools/test_pos_backend.php`: 103 verificaciones contra un API local con dos tenants de
 prueba (traspaso, administración, bloqueo por PIN, sesiones, catálogo y precio final,

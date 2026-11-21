@@ -407,6 +407,29 @@ class posModel
         return ['sesion_id' => (int) $f['sesion_id'], 'empleado' => self::normalizarEmpleado($f)];
     }
 
+    /**
+     * ¿A quien tenia esta sesion un administrador le restablecio el PIN? Sirve cuando la sesion ya no esta
+     * vigente (sesionVigente = null) para decirle POR QUE, en vez de mandarlo a escribir un PIN que ya no
+     * existe (docs/specs/pos.md A5b). Es verdad solo si el token es de una sesion de ESTE equipo, de un empleado
+     * que es usuario de FiscalPoint, sigue activo y tiene el PIN pendiente (migracion 040): sin PIN nadie abre
+     * una sesion, asi que solo el restablecimiento deja asi a quien ya tuvo una. Cualquier otra causa (bloqueo de
+     * pantalla, vencimiento, token desconocido o de otro equipo) da falso, y no revela nada a quien no conoce un
+     * token: la consulta parte de un token que ya tenia.
+     */
+    public function sesionPerdidaPorRestablecimiento(string $tokenHash, int $equipoId): bool
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT 1
+             FROM pos_sesiones s
+             JOIN pos_empleados e ON e.id = s.empleado_id
+             WHERE s.token_hash = :h AND s.equipo_id = :q
+               AND e.user_id IS NOT NULL AND e.pin_hmac IS NULL AND e.activo = 1
+             LIMIT 1'
+        );
+        $stmt->execute([':h' => $tokenHash, ':q' => $equipoId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function cerrarSesion(int $sesionId): void
     {
         $this->conexion->prepare('UPDATE pos_sesiones SET cerrada_at = NOW() WHERE id = :id AND cerrada_at IS NULL')

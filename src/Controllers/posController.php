@@ -6,6 +6,8 @@
 //   GET    /api/pos/estado   -> equipo, caja, empresa; con X-POS-SESION valida,
 //                               tambien el empleado. Siempre el turno abierto de
 //                               la caja. Es lo primero que pide pos.* al cargar.
+//                               pin_restablecido: true si la sesion que se mando ya no
+//                               vale porque un administrador le restablecio el PIN (A5b).
 //   POST   /api/pos/sesion   -> {pin} -> {token, empleado, caja, turno_caja}
 //   DELETE /api/pos/sesion   -> cierra la sesion (bloqueo de pantalla o salir)
 //   POST   /api/pos/yo       -> con X-POS-EQUIPO + Authorization: Bearer de un usuario de FiscalPoint:
@@ -179,11 +181,14 @@ try {
         case 'GET estado':
             $tenant = TenantResolver::current();
             $empleado = null;
+            $pinRestablecido = false;
             if (trim((string) ($_SERVER['HTTP_X_POS_SESION'] ?? '')) !== '') {
                 try {
                     $empleado = PosAuth::requerirSesion($pos, $equipo)['empleado'];
                 } catch (PosError $e) {
-                    // Sesion vencida o cerrada: el estado responde igual, sin empleado.
+                    // Sesion vencida o cerrada: el estado responde igual, sin empleado. Si fue porque un administrador le
+                    // restablecio el PIN, lo dice, para que el POS lo lleve a crear otro en vez de pedirle el viejo.
+                    $pinRestablecido = PosAuth::esPinRestablecido($e);
                 }
             }
             $caja = $pos->cajaPorId($equipo['caja_id']);
@@ -195,6 +200,7 @@ try {
                 ],
                 'caja' => $caja,
                 'empleado' => $empleado,
+                'pin_restablecido' => $pinRestablecido,
                 'turno_caja' => $caja !== null ? $pos->turnoAbiertoDeCaja($caja['id']) : null,
             ]);
             break;

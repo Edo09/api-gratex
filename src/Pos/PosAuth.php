@@ -62,14 +62,30 @@ final class PosAuth
         if ($token === '') {
             throw new PosError('Entra con tu PIN.', 401, 'SESION_REQUERIDA');
         }
-        $sesion = $pos->sesionVigente(hash('sha256', $token), $equipo['id']);
+        $tokenHash = hash('sha256', $token);
+        $sesion = $pos->sesionVigente($tokenHash, $equipo['id']);
         if ($sesion === null) {
+            // Si un administrador le restablecio el PIN no se le manda a escribir uno que ya no existe: se le dice y
+            // pos.* lo lleva a crear otro con su usuario. El codigo no cambia (el front anterior sigue yendo al PIN).
+            if ($pos->sesionPerdidaPorRestablecimiento($tokenHash, $equipo['id'])) {
+                throw new PosError('Un administrador restableció tu PIN. Entra con tu usuario para crear uno nuevo.', 401, 'SESION_REQUERIDA',
+                    ['pin_restablecido' => true]);
+            }
             throw new PosError('Tu sesión se cerró. Entra de nuevo con tu PIN.', 401, 'SESION_REQUERIDA');
         }
         // Un empleado que es usuario de FiscalPoint sigue valiendo solo mientras su usuario exista.
         self::exigirUsuarioVigente($pos, $sesion['empleado'], (int) $equipo['tenant_id'], 'SESION_REQUERIDA');
         RequestContext::set('username', 'POS · ' . $sesion['empleado']['nombre']);
         return $sesion;
+    }
+
+    /**
+     * ¿Este error de sesion es porque un administrador restablecio el PIN? Lo manda requerirSesion
+     * (`pin_restablecido`); GET /api/pos/estado, que no corta con ese error, lo repite en su respuesta.
+     */
+    public static function esPinRestablecido(PosError $e): bool
+    {
+        return $e->codigo() === 'SESION_REQUERIDA' && ($e->cuerpo()['pin_restablecido'] ?? false) === true;
     }
 
     /**
