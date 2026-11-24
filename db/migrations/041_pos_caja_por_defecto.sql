@@ -27,9 +27,11 @@
 -- master 020. El resultado es la ultima consulta de este archivo.
 --
 -- COMO CORRERLA (phpMyAdmin): base del tenant, pestana SQL, pegar TODO y ejecutar.
---   La primera sentencia guarda la base en @db (ver db/migrations/README.md y la
---   028). Para no depender de la base seleccionada, cambia la primera linea por:
---     SET @db := 'smhynzte_002';
+--   Elige la base de la empresa en el panel IZQUIERDO ANTES de pegar. NO fijes @db
+--   a mano en la primera linea, como se puede hacer en otras migraciones: aqui solo
+--   la guardia usa @db; el INSERT y el resultado final nombran pos_cajas sin base y
+--   actuan sobre la base SELECCIONADA, asi que forzar @db haria que la guardia
+--   revisara una base y el INSERT fuera a otra.
 --   El resultado (la ultima consulta) es una fila: base, cajas (total de cajas de
 --   la empresa) y caja_1 (cuantas se llaman "Caja 1"). Despues de correrla,
 --   cajas es al menos 1; caja_1 es 1 si la empresa no tenia ninguna caja.

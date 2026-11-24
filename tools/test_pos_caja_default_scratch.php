@@ -11,8 +11,8 @@
  *   2) El archivo COMPLETO sobre la pos_cajas real de la base de prueba, dentro de una transaccion que se deshace:
  *      corre sin error, el resultado trae base, cajas y caja_1, la segunda corrida no cambia el total y al final la
  *      base queda como estaba (otras suites POS crean su propia "Caja 1" y chocarian si se quedara sembrada).
- *   3) La guardia: sin base de empresa seleccionada (phpMyAdmin parado en otra base) falla en el EXECUTE de la
- *      guardia, antes del INSERT, y no escribe nada.
+ *   3) La guardia: sin base de empresa seleccionada (phpMyAdmin parado en otra base) falla en el PREPARE o en el
+ *      EXECUTE de la guardia, antes del INSERT, con el error de la guardia (#1049, #1142 o #1044), y no escribe nada.
  *
  * Solo bases de prueba: wa_pdo() se niega a usar una base sin la tabla marca zz_write_ahead_scratch.
  *
@@ -131,14 +131,25 @@ wa_chk('la base de prueba queda como estaba: mismo total de cajas que al empezar
 echo "\n3) La guardia: sin base de empresa seleccionada\n";
 $sinBase = wa_conectar();   // al servidor, sin base: DATABASE() es NULL, como phpMyAdmin parado en otro lado
 $indiceFallo = null;
+$errorGuardia = null;
 try {
     foreach (array_slice($sent, 0, 5) as $i => $s) {
         $sinBase->exec($s);
     }
 } catch (PDOException $e) {
     $indiceFallo = $i;
+    $errorGuardia = [(int) ($e->errorInfo[1] ?? 0), (string) ($e->errorInfo[2] ?? $e->getMessage())];
 }
-wa_chk('sin base seleccionada la guardia falla en su EXECUTE (sentencia 4 de 7), antes del INSERT', $indiceFallo === 3, $indiceFallo);
+// MySQL resuelve las tablas de una sentencia ya en el PREPARE, asi que el fallo puede salir en la sentencia 3 (PREPARE) o en
+// la 4 (EXECUTE); lo que importa es que sea ANTES del INSERT y que sea el error de la guardia, no cualquier otro. Con sinBase
+// la guardia consulta `ALTO_elige_la_base_de_la_empresa_en_el_panel`.`x`: MySQL contesta #1049 (la base no existe) a quien tiene
+// permisos globales y #1142 (SELECT denegado en la tabla 'x') o #1044 (acceso denegado a esa base) al usuario de pruebas.
+$esGuardia = $errorGuardia !== null
+    && (($errorGuardia[0] === 1049 && stripos($errorGuardia[1], 'ALTO_elige_la_base_de_la_empresa_en_el_panel') !== false)
+        || ($errorGuardia[0] === 1142 && str_contains($errorGuardia[1], "'x'"))
+        || ($errorGuardia[0] === 1044 && stripos($errorGuardia[1], 'ALTO_elige_la_base_de_la_empresa_en_el_panel') !== false));
+wa_chk('sin base seleccionada la guardia falla (PREPARE o EXECUTE, sentencia 3 o 4 de 7), antes del INSERT, y con el error de la guardia',
+    in_array($indiceFallo, [2, 3], true) && $esGuardia, [$indiceFallo, $errorGuardia]);
 wa_chk('...y no escribio nada: el total de cajas de la base de prueba no cambio', $total($pdo) === $totalAntes, [$totalAntes, $total($pdo)]);
 
 wa_fin();

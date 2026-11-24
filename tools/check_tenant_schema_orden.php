@@ -917,6 +917,11 @@ $ultima041 = $sent041 === [] ? '' : $sent041[count($sent041) - 1];
 $chk('041: el unico SELECT de nivel superior es el ultimo y devuelve base, cajas y caja_1',
     $sent041 !== [] && $selects041 === [count($sent041) - 1]
     && str_contains($ultima041, '@db AS base') && str_contains($ultima041, 'AS cajas') && str_contains($ultima041, 'AS caja_1'));
+// El INSERT y el SELECT final de la 041 nombran pos_cajas sin base: actuan sobre la base SELECCIONADA. Solo la guardia usa
+// @db, asi que un encabezado que mande a cambiar la primera linea por SET @db := '<base>' (como la 030) enviaria el INSERT a
+// otra base que la que la guardia reviso.
+$chk("041: el encabezado no manda a cambiar la primera linea por SET @db := '<base>' (el INSERT y el SELECT usan la base seleccionada)",
+    $hay041 && preg_match("/SET @db := '/", (string) file_get_contents($ruta041)) === 0);
 $snapPlano = (string) preg_replace('/\s+/', ' ', $sql);
 $posCajas = strpos($snapPlano, 'CREATE TABLE IF NOT EXISTS pos_cajas (');
 $posSiembra = strpos($snapPlano, $insertCaja1 . ';');
