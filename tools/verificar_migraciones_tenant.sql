@@ -1,8 +1,10 @@
 -- =============================================================================
 -- verificar_migraciones_tenant.sql — SOLO LECTURA. No cambia nada.
 --
--- Dice que migraciones de db/migrations/ (012 a 035, la 038 y la 039; la 036 y
--- la 037 estan reservadas y no tienen archivo ni fila) ya estan aplicadas en la
+-- Dice que migraciones de db/migrations/ (012 a 035, la 038, la 039 y la 040; la 036 y
+-- la 037 estan reservadas y no tienen archivo ni fila; la 041, "Caja 1" por defecto, es
+-- solo datos y tampoco tiene fila: este verificador solo lee information_schema y contar
+-- filas de pos_cajas lo romperia en una base sin la 030) ya estan aplicadas en la
 -- base de UN tenant. No existe una tabla que lleve ese registro (se corren a
 -- mano), asi que cada fila busca en information_schema lo que su migracion deja
 -- creado: una columna, una tabla, un indice o el tipo o ancho nuevo de una columna.
@@ -13,7 +15,7 @@
 --
 -- Cada fila dice APLICADA o FALTA. Corre SOLO las que dicen FALTA, en orden de
 -- numero: varias (014, 016, 019, 020, 021, 023) fallan si se corren dos veces.
--- La 025, la 026, la 027, la 028, la 029, la 030, la 031, la 032, la 033, la 034, la 035, la 038 y la 039 si se pueden repetir sin dano.
+-- La 025, la 026, la 027, la 028, la 029, la 030, la 031, la 032, la 033, la 034, la 035, la 038, la 039 y la 040 si se pueden repetir sin dano.
 --
 -- Las de db/migrations/deprecated/ no hacen falta: son anteriores al snapshot.
 -- Solo mira information_schema: funciona aunque falte una tabla entera.
@@ -203,5 +205,16 @@ FROM (
          'columna clients.lista_precio',
          (SELECT COUNT(*) FROM information_schema.COLUMNS
           WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'lista_precio') = 1
+  UNION ALL
+  SELECT '040', '040_pos_empleados_usuario.sql',
+         'pos_empleados.user_id (unico), pin_choques y pin_choque_at, y pin_hmac y pin_generado_at que admiten NULL',
+         (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pos_empleados'
+            AND COLUMN_NAME IN ('user_id', 'pin_choques', 'pin_choque_at')) = 3
+         AND (SELECT COUNT(*) FROM information_schema.STATISTICS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pos_empleados' AND INDEX_NAME = 'uk_pos_empleado_user') > 0
+         AND (SELECT COUNT(*) FROM information_schema.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'pos_empleados'
+            AND COLUMN_NAME IN ('pin_hmac', 'pin_generado_at') AND IS_NULLABLE = 'YES') = 2
 ) m
 ORDER BY m.migracion;

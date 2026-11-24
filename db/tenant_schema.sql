@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..039  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
+--   - 012..041  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
 --               la 036 y la 037 estan reservadas y no tienen archivo: ver el README).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
@@ -979,17 +979,29 @@ CREATE TABLE IF NOT EXISTS pos_cajas (
   UNIQUE KEY uk_pos_caja_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Caja por defecto de la empresa: solo si no tiene ninguna (migracion 041). Una caja se
+-- renombra y se desactiva pero no se borra, asi que no reaparece despues de un cambio.
+INSERT INTO pos_cajas (nombre)
+SELECT 'Caja 1' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM pos_cajas);
+
 CREATE TABLE IF NOT EXISTS pos_empleados (
   id               INT(11)      NOT NULL AUTO_INCREMENT,
   nombre           VARCHAR(80)  NOT NULL,
   rol              VARCHAR(12)  NOT NULL DEFAULT 'cajero' COMMENT 'cajero | supervisor',
-  pin_hmac         CHAR(64)     NOT NULL COMMENT 'HMAC-SHA256(pin, POS_PIN_PEPPER + tenant). El PIN lo genera el sistema',
-  pin_generado_at  DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  -- Migracion 040: un empleado puede ser un usuario de FiscalPoint (user_id) y
+  -- tener el PIN pendiente (pin_hmac NULL) hasta que el propio usuario lo cree.
+  user_id          INT(11)      NULL DEFAULT NULL COMMENT 'users.id del master: el empleado es un usuario de FiscalPoint (sin FK, otra base). NULL = creado a mano',
+  pin_hmac         CHAR(64)     NULL DEFAULT NULL COMMENT 'HMAC-SHA256(pin, POS_PIN_PEPPER + tenant). NULL = el usuario de FiscalPoint todavia no creo su PIN',
+  pin_generado_at  DATETIME     NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Cuando se fijo el PIN actual. NULL = PIN pendiente',
+  pin_choques      TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'PIN elegidos que ya usaba otro empleado, dentro de la ventana de pin_choque_at',
+  pin_choque_at    DATETIME     NULL DEFAULT NULL COMMENT 'Ultimo PIN elegido que ya estaba en uso; inicia la ventana del limite',
   activo           TINYINT(1)   NOT NULL DEFAULT 1,
   created_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at       DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
-  UNIQUE KEY uk_pos_empleado_pin (pin_hmac)
+  UNIQUE KEY uk_pos_empleado_pin (pin_hmac),
+  UNIQUE KEY uk_pos_empleado_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS pos_sesiones (

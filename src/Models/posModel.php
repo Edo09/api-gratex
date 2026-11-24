@@ -20,6 +20,14 @@ class posModel
     /** Una sesion de empleado sin uso por mas de esto ya no vale (pide PIN otra vez). */
     public const SESION_MAX_HORAS = 16;
 
+    /**
+     * Columnas de un empleado. Sin pin_hmac: el PIN no se puede volver a leer, ni
+     * siquiera su hash; solo si esta pendiente (NULL: un usuario de FiscalPoint que
+     * todavia no creo el suyo, migracion 040). user_id: el usuario del master.
+     */
+    private const COLUMNAS_EMPLEADO =
+        'id, nombre, rol, activo, user_id, (pin_hmac IS NULL) AS pin_pendiente, pin_generado_at, created_at, updated_at';
+
     private PDO $conexion;
 
     public function __construct()
@@ -89,36 +97,172 @@ class posModel
     // Empleados
     // ------------------------------------------------------------------
 
-    /** Sin pin_hmac: el PIN no se puede volver a leer, ni siquiera su hash. */
     public function listarEmpleados(): array
     {
         $filas = $this->conexion->query(
-            'SELECT id, nombre, rol, activo, pin_generado_at, created_at, updated_at
-             FROM pos_empleados ORDER BY activo DESC, nombre'
+            'SELECT ' . self::COLUMNAS_EMPLEADO . ' FROM pos_empleados ORDER BY activo DESC, nombre'
         )->fetchAll();
         return array_map([self::class, 'normalizarEmpleado'], $filas);
     }
 
     public function empleadoPorId(int $id): ?array
     {
-        $stmt = $this->conexion->prepare(
-            'SELECT id, nombre, rol, activo, pin_generado_at, created_at, updated_at FROM pos_empleados WHERE id = :id'
-        );
+        $stmt = $this->conexion->prepare('SELECT ' . self::COLUMNAS_EMPLEADO . ' FROM pos_empleados WHERE id = :id');
         $stmt->execute([':id' => $id]);
         $f = $stmt->fetch();
         return $f ? self::normalizarEmpleado($f) : null;
     }
 
-    /** Empleado ACTIVO dueño de ese PIN (por su HMAC), o null. */
+    /** Empleado ACTIVO dueño de ese PIN (por su HMAC), o null. Con el PIN pendiente (NULL) nunca coincide. */
     public function empleadoPorPin(string $pinHmac): ?array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT id, nombre, rol, activo, pin_generado_at, created_at, updated_at
-             FROM pos_empleados WHERE pin_hmac = :h AND activo = 1'
+            'SELECT ' . self::COLUMNAS_EMPLEADO . ' FROM pos_empleados WHERE pin_hmac = :h AND activo = 1'
         );
         $stmt->execute([':h' => $pinHmac]);
         $f = $stmt->fetch();
         return $f ? self::normalizarEmpleado($f) : null;
+    }
+
+    // --- Empleados que son usuarios de FiscalPoint (migracion 040, src/Pos/PosUsuarios.php) ---
+
+    /** El empleado de un usuario de FiscalPoint (users.id del master), o null si todavia no tiene. */
+    public function empleadoDeUsuario(int $userId): ?array
+    {
+        $stmt = $this->conexion->prepare('SELECT ' . self::COLUMNAS_EMPLEADO . ' FROM pos_empleados WHERE user_id = :u');
+        $stmt->execute([':u' => $userId]);
+        $f = $stmt->fetch();
+        return $f ? self::normalizarEmpleado($f) : null;
+    }
+
+    /**
+     * Crea el empleado de un usuario de FiscalPoint con el PIN PENDIENTE: lo elige
+     * el propio usuario la primera vez que entra al POS. Un usuario, un empleado
+     * (UNIQUE user_id): si dos peticiones lo crean a la vez, la segunda se queda
+     * con el que ya existe.
+     *
+     * @return array el empleado, nuevo o el que ya estaba
+     */
+    public function crearEmpleadoDeUsuario(int $userId, string $nombre, string $rol): array
+    {
+        $nombre = self::nombreValido($nombre, 80, 'del empleado');
+        $rol = self::rolValido($rol);
+        try {
+            $stmt = $this->conexion->prepare(
+                'INSERT INTO pos_empleados (nombre, rol, user_id, pin_hmac, pin_generado_at) VALUES (:n, :r, :u, NULL, NULL)'
+            );
+            $stmt->execute([':n' => $nombre, ':r' => $rol, ':u' => $userId]);
+        } catch (PDOException $e) {
+            if (!self::esDuplicado($e)) {
+                throw $e;
+            }
+        }
+        $empleado = $this->empleadoDeUsuario($userId);
+        if ($empleado === null) {
+            throw new PosError('No se pudo preparar tu acceso al POS. Inténtalo de nuevo.', 500, 'EMPLEADO_NO_CREADO');
+        }
+        return $empleado;
+    }
+
+    /**
+     * Los empleados que son usuarios, por id de usuario: para sincronizar con la
+     * lista de usuarios de la empresa sin una consulta por cada uno.
+     *
+     * @return array<int,array{id:int,nombre:string,activo:bool}>
+     */
+    public function empleadosVinculados(): array
+    {
+        $salida = [];
+        foreach ($this->conexion->query('SELECT id, user_id, nombre, activo FROM pos_empleados WHERE user_id IS NOT NULL')->fetchAll() as $f) {
+            $salida[(int) $f['user_id']] = ['id' => (int) $f['id'], 'nombre' => $f['nombre'], 'activo' => (int) $f['activo'] === 1];
+        }
+        return $salida;
+    }
+
+    /** El nombre de un empleado que es usuario sigue al de su cuenta (lo pone la sincronizacion). */
+    public function renombrarEmpleado(int $id, string $nombre): void
+    {
+        $nombre = self::nombreValido($nombre, 80, 'del empleado');
+        $this->conexion->prepare('UPDATE pos_empleados SET nombre = :n WHERE id = :id')->execute([':n' => $nombre, ':id' => $id]);
+    }
+
+    /**
+     * Fija el PIN de un empleado de FiscalPoint que todavia no tiene (lo eligio el
+     * propio usuario). El WHERE pin_hmac IS NULL hace que dos peticiones a la vez
+     * no se pisen y que un PIN ya creado no se cambie por aqui (para eso el
+     * administrador lo restablece).
+     *
+     * @return string 'ok' | 'ocupado' (otro empleado ya usa ese PIN: UNIQUE) |
+     *                'no_aplica' (ya tiene PIN, esta inactivo, no es un usuario o no existe)
+     */
+    public function fijarPinDeUsuario(int $empleadoId, string $hmac): string
+    {
+        try {
+            $stmt = $this->conexion->prepare(
+                'UPDATE pos_empleados
+                 SET pin_hmac = :h, pin_generado_at = NOW(), pin_choques = 0, pin_choque_at = NULL
+                 WHERE id = :id AND pin_hmac IS NULL AND activo = 1 AND user_id IS NOT NULL'
+            );
+            $stmt->execute([':h' => $hmac, ':id' => $empleadoId]);
+        } catch (PDOException $e) {
+            if (self::esDuplicado($e)) {
+                return 'ocupado';
+            }
+            throw $e;
+        }
+        return $stmt->rowCount() === 1 ? 'ok' : 'no_aplica';
+    }
+
+    /**
+     * Cuantas veces, dentro de la ventana, este empleado eligio un PIN que ya usa
+     * otro. Elegir un PIN ocupado le revela que otro empleado lo tiene: llegado al
+     * tope se deja de probar hasta que termine la ventana.
+     *
+     * @return array{choques:int,espera_segundos:int} espera_segundos > 0 solo si ya llego al tope
+     */
+    public function estadoChoquesPin(int $empleadoId, int $maximo, int $ventanaMinutos): array
+    {
+        $v = (int) $ventanaMinutos;
+        $stmt = $this->conexion->prepare(
+            'SELECT IF(pin_choque_at IS NOT NULL AND pin_choque_at > NOW() - INTERVAL ' . $v . ' MINUTE, pin_choques, 0) AS choques,
+                    GREATEST(TIMESTAMPDIFF(SECOND, NOW(), pin_choque_at + INTERVAL ' . $v . ' MINUTE), 0) AS espera
+             FROM pos_empleados WHERE id = :id'
+        );
+        $stmt->execute([':id' => $empleadoId]);
+        $f = $stmt->fetch() ?: ['choques' => 0, 'espera' => 0];
+        $choques = (int) $f['choques'];
+        return ['choques' => $choques, 'espera_segundos' => $choques >= $maximo ? (int) $f['espera'] : 0];
+    }
+
+    /**
+     * Cuenta un choque. Fuera de la ventana la cuenta vuelve a 1. Un solo UPDATE:
+     * MySQL asigna de izquierda a derecha, asi que pin_choques se calcula con el
+     * pin_choque_at VIEJO, antes de ponerlo en NOW().
+     */
+    public function registrarChoquePin(int $empleadoId, int $ventanaMinutos): void
+    {
+        $v = (int) $ventanaMinutos;
+        $this->conexion->prepare(
+            'UPDATE pos_empleados
+             SET pin_choques = IF(pin_choque_at IS NULL OR pin_choque_at <= NOW() - INTERVAL ' . $v . ' MINUTE, 1, LEAST(pin_choques + 1, 250)),
+                 pin_choque_at = NOW()
+             WHERE id = :id'
+        )->execute([':id' => $empleadoId]);
+    }
+
+    /**
+     * Borra el PIN de un empleado que es usuario de FiscalPoint: queda pendiente y
+     * el usuario crea otro la proxima vez que entre al POS. Sus sesiones se cierran
+     * (quien lo tenga anotado ya no entra). Para un empleado creado a mano no hace
+     * nada: a esos se les genera un PIN nuevo (regenerarPin).
+     */
+    public function restablecerPin(int $id): void
+    {
+        $this->conexion->prepare(
+            'UPDATE pos_empleados SET pin_hmac = NULL, pin_generado_at = NULL, pin_choques = 0, pin_choque_at = NULL
+             WHERE id = :id AND user_id IS NOT NULL'
+        )->execute([':id' => $id]);
+        $this->cerrarSesionesDeEmpleado($id);
     }
 
     /**
@@ -164,7 +308,7 @@ class posModel
         // que se queria invalidar pasa 1 de cada 10,000 veces.
         $stmt = $this->conexion->prepare('SELECT pin_hmac FROM pos_empleados WHERE id = :id');
         $stmt->execute([':id' => $id]);
-        $actual = (string) $stmt->fetchColumn();
+        $actual = (string) $stmt->fetchColumn(); // '' si el PIN esta pendiente (NULL)
         for ($i = 0; $i < 10; $i++) {
             [$pin, $hmac] = $generar();
             if (hash_equals($actual, $hmac)) {
@@ -246,7 +390,8 @@ class posModel
     public function sesionVigente(string $tokenHash, int $equipoId): ?array
     {
         $stmt = $this->conexion->prepare(
-            'SELECT s.id AS sesion_id, e.id, e.nombre, e.rol, e.activo, e.pin_generado_at, e.created_at, e.updated_at
+            'SELECT s.id AS sesion_id, e.id, e.nombre, e.rol, e.activo, e.user_id, (e.pin_hmac IS NULL) AS pin_pendiente,
+                    e.pin_generado_at, e.created_at, e.updated_at
              FROM pos_sesiones s
              JOIN pos_empleados e ON e.id = s.empleado_id
              WHERE s.token_hash = :h AND s.equipo_id = :q AND s.cerrada_at IS NULL AND e.activo = 1
@@ -260,6 +405,29 @@ class posModel
         }
         $this->conexion->prepare('UPDATE pos_sesiones SET ultimo_uso = NOW() WHERE id = :id')->execute([':id' => $f['sesion_id']]);
         return ['sesion_id' => (int) $f['sesion_id'], 'empleado' => self::normalizarEmpleado($f)];
+    }
+
+    /**
+     * ¿A quien tenia esta sesion un administrador le restablecio el PIN? Sirve cuando la sesion ya no esta
+     * vigente (sesionVigente = null) para decirle POR QUE, en vez de mandarlo a escribir un PIN que ya no
+     * existe (docs/specs/pos.md A5b). Es verdad solo si el token es de una sesion de ESTE equipo, de un empleado
+     * que es usuario de FiscalPoint, sigue activo y tiene el PIN pendiente (migracion 040): sin PIN nadie abre
+     * una sesion, asi que solo el restablecimiento deja asi a quien ya tuvo una. Cualquier otra causa (bloqueo de
+     * pantalla, vencimiento, token desconocido o de otro equipo) da falso, y no revela nada a quien no conoce un
+     * token: la consulta parte de un token que ya tenia.
+     */
+    public function sesionPerdidaPorRestablecimiento(string $tokenHash, int $equipoId): bool
+    {
+        $stmt = $this->conexion->prepare(
+            'SELECT 1
+             FROM pos_sesiones s
+             JOIN pos_empleados e ON e.id = s.empleado_id
+             WHERE s.token_hash = :h AND s.equipo_id = :q
+               AND e.user_id IS NOT NULL AND e.pin_hmac IS NULL AND e.activo = 1
+             LIMIT 1'
+        );
+        $stmt->execute([':h' => $tokenHash, ':q' => $equipoId]);
+        return $stmt->fetchColumn() !== false;
     }
 
     public function cerrarSesion(int $sesionId): void
@@ -864,7 +1032,11 @@ class posModel
             'nombre' => $f['nombre'],
             'rol' => $f['rol'],
             'activo' => (int) $f['activo'] === 1,
-            'pin_generado_at' => $f['pin_generado_at'],
+            // El usuario de FiscalPoint (master.users.id) si el empleado lo es; null = creado a mano.
+            'usuario_id' => ($f['user_id'] ?? null) !== null ? (int) $f['user_id'] : null,
+            // Un usuario de FiscalPoint que todavia no creo su PIN: no puede entrar con PIN.
+            'pin_pendiente' => (int) ($f['pin_pendiente'] ?? 0) === 1,
+            'pin_generado_at' => $f['pin_generado_at'] ?? null,
             'created_at' => $f['created_at'],
             'updated_at' => $f['updated_at'],
         ];

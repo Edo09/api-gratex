@@ -62,12 +62,53 @@ final class PosAuth
         if ($token === '') {
             throw new PosError('Entra con tu PIN.', 401, 'SESION_REQUERIDA');
         }
-        $sesion = $pos->sesionVigente(hash('sha256', $token), $equipo['id']);
+        $tokenHash = hash('sha256', $token);
+        $sesion = $pos->sesionVigente($tokenHash, $equipo['id']);
         if ($sesion === null) {
+            // Si un administrador le restablecio el PIN no se le manda a escribir uno que ya no existe: se le dice y
+            // pos.* lo lleva a crear otro con su usuario. El codigo no cambia (el front anterior sigue yendo al PIN).
+            if ($pos->sesionPerdidaPorRestablecimiento($tokenHash, $equipo['id'])) {
+                throw new PosError('Un administrador restableció tu PIN. Entra con tu usuario para crear uno nuevo.', 401, 'SESION_REQUERIDA',
+                    ['pin_restablecido' => true]);
+            }
             throw new PosError('Tu sesión se cerró. Entra de nuevo con tu PIN.', 401, 'SESION_REQUERIDA');
         }
+        // Un empleado que es usuario de FiscalPoint sigue valiendo solo mientras su usuario exista.
+        self::exigirUsuarioVigente($pos, $sesion['empleado'], (int) $equipo['tenant_id'], 'SESION_REQUERIDA');
         RequestContext::set('username', 'POS · ' . $sesion['empleado']['nombre']);
         return $sesion;
+    }
+
+    /**
+     * ¿Este error de sesion es porque un administrador restablecio el PIN? Lo manda requerirSesion
+     * (`pin_restablecido`); GET /api/pos/estado, que no corta con ese error, lo repite en su respuesta.
+     */
+    public static function esPinRestablecido(PosError $e): bool
+    {
+        return $e->codigo() === 'SESION_REQUERIDA' && ($e->cuerpo()['pin_restablecido'] ?? false) === true;
+    }
+
+    /**
+     * Un empleado que es usuario de FiscalPoint (usuario_id) solo entra y vende mientras
+     * ese usuario exista en ESTA empresa. Si lo borraron, el empleado se desactiva en el
+     * acto (se le cierran las sesiones) y se corta con $codigo: SESION_REQUERIDA dentro
+     * del POS (pide el PIN otra vez), otro al entrar con el PIN. Un empleado creado a mano
+     * (sin usuario) no pasa por aqui.
+     */
+    public static function exigirUsuarioVigente(posModel $pos, array $empleado, int $tenantId, string $codigo): void
+    {
+        $usuarioId = $empleado['usuario_id'] ?? null;
+        if ($usuarioId === null || (new posMasterModel())->usuarioDeEmpresa((int) $usuarioId, $tenantId) !== null) {
+            return;
+        }
+        $pos->actualizarEmpleado((int) $empleado['id'], ['activo' => false]);
+        AuditLogger::log([
+            'module' => 'pos', 'action' => 'POS_EMPLEADO_DESACTIVADO', 'entity_type' => 'pos_empleado', 'entity_id' => (int) $empleado['id'],
+            'new_values' => ['usuario_id' => (int) $usuarioId],
+            'description' => 'Su usuario de FiscalPoint ya no existe en la empresa: el empleado se desactivó y se le cerraron las sesiones.',
+        ]);
+        throw new PosError('Tu usuario de FiscalPoint ya no existe o ya no es de esta empresa. Habla con un administrador.',
+            $codigo === 'SESION_REQUERIDA' ? 401 : 403, $codigo);
     }
 
     /**
