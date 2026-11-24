@@ -20,6 +20,12 @@ class ECFXmlBuilder
     /** Patron XSD de Decimal18D1or2 (MontoItem, DescuentoMonto, montos del set). */
     private const PATRON_DECIMAL_18_2 = '/^[0-9]{1,16}(\.[0-9]{1,2})?$/';
 
+    /**
+     * Tipos cuyo XSD trae DescuentoMonto y TablaSubDescuento en el Item (el 43 y el 47 no).
+     * Ver appendSubDescuentos().
+     */
+    private const TIPOS_CON_SUBDESCUENTO = ['31', '32', '33', '34', '41', '44', '45', '46'];
+
     /** Set de pruebas DGII (strict_input): ver decimal(). Se fija en cada build(). */
     private bool $strict = false;
 
@@ -516,7 +522,7 @@ class ECFXmlBuilder
                 $descuento = $item['descuento_monto_raw'];
             }
             $this->appendMoneyIfSet($doc, $itemEl, 'DescuentoMonto', $descuento);
-            $this->appendSubDescuentos($doc, $itemEl, $item['subdescuentos'] ?? []);
+            $this->appendSubDescuentos($doc, $itemEl, $item['subdescuentos'] ?? [], $tipoEcf, $descuento);
             $this->appendMoneyIfSet($doc, $itemEl, 'RecargoMonto', $item['recargo_monto'] ?? null, true);
             $this->appendSubRecargos($doc, $itemEl, $item['subrecargos'] ?? []);
             $this->appendItemImpuestosAdicionales($doc, $itemEl, $item['impuestos_adicionales'] ?? []);
@@ -567,8 +573,28 @@ class ECFXmlBuilder
         if ($tabla->childNodes->length > 0) $itemEl->appendChild($tabla);
     }
 
-    private function appendSubDescuentos(DOMDocument $doc, DOMElement $itemEl, array $subdescuentos): void
+    /**
+     * TablaSubDescuento del Item. La DGII la exige en toda linea con DescuentoMonto: sin ella
+     * rechaza con 2020 "El campo TablaSubDescuento de la seccion DetallesItems de la linea N no es
+     * valido" (AGROVISA FERRETERIA, E310000000001, 2026-11-24: su ERP manda 0.01 de descuento en
+     * las lineas donde el redondeo se pasa un centavo, y el XML salia sin la tabla). Todo e-CF con
+     * descuento que la DGII acepto la trae. El cliente de integracion no tiene por que mandarla (la
+     * doc no la pide): si no manda `subdescuentos`, sale un solo SubDescuento en monto ($) igual al
+     * DescuentoMonto de la linea. Con `subdescuentos` propios se respetan tal cual.
+     *
+     * En el set de pruebas (strict_input) no se inventa nada: la DGII compara contra su set, que
+     * ya trae la tabla en las lineas que la llevan. Y no en los tipos cuyo XSD no la tiene.
+     *
+     * @param mixed $descuentoMonto El mismo valor que se escribio en DescuentoMonto de la linea.
+     */
+    private function appendSubDescuentos(DOMDocument $doc, DOMElement $itemEl, array $subdescuentos, string $tipoEcf, $descuentoMonto): void
     {
+        if ($subdescuentos === []
+            && !$this->strict
+            && in_array($tipoEcf, self::TIPOS_CON_SUBDESCUENTO, true)
+            && $descuentoMonto !== null && $descuentoMonto !== '') {
+            $subdescuentos = [['tipo_sub_descuento' => '$', 'monto_sub_descuento' => $descuentoMonto]];
+        }
         if ($subdescuentos === []) return;
         $tabla = $doc->createElement('TablaSubDescuento');
         foreach (array_slice($subdescuentos, 0, 12) as $sub) {

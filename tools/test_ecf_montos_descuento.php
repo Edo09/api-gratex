@@ -13,6 +13,9 @@
  * se firma el texto del xlsx tal cual — tambien "3752" (MontoItem[3] de
  * E310000000004), no "3752.00" —; en la emision normal, 2 decimales.
  *
+ * Tambien (2026-11-24, AGROVISA FERRETERIA): toda linea con DescuentoMonto lleva su
+ * TablaSubDescuento; sin ella la DGII rechaza con 2020. Ver la seccion "TablaSubDescuento".
+ *
  * Uso:
  *   php tools/test_ecf_montos_descuento.php      (sale con 1 si algo falla)
  */
@@ -182,6 +185,65 @@ $msg = $falla(fn() => $xmlDe('31', [['numero_linea' => 1, 'nombre_item' => 'A', 
 $chk('Normal: recargo "1,000.00" falla claro (antes se habria firmado 1.00)', $msg !== null && str_contains($msg, '1,000.00'), $msg);
 $msg = $falla(fn() => $xmlDe('34', [$linea + ['recargo_monto' => '350.00']], true));
 $chk('Set: un monto valido no lanza nada', $msg === null, $msg);
+
+echo "\nTablaSubDescuento: toda linea con DescuentoMonto la lleva (rechazo DGII 2020)\n";
+
+// AGROVISA FERRETERIA (tenant 18), E310000000001, 2026-11-24: la DGII rechazo con "El campo
+// TablaSubDescuento de la seccion DetallesItems de la linea 1 no es valido" (codigo 2020). Su ERP
+// manda descuento_monto 0.01 en las lineas donde el redondeo se pasa un centavo (200 x 13.9831 =
+// 2796.62 contra 2796.61 de su base) y el XML salia con DescuentoMonto pero sin la tabla, porque
+// solo se escribia si el cliente mandaba `subdescuentos` (la doc de integracion no lo menciona).
+$redondeo = [
+    ['numero_linea' => 1, 'indicador_facturacion' => 1, 'nombre_item' => 'Cable', 'indicador_bien_servicio' => 1,
+        'cantidad' => 200, 'precio_unitario' => 13.9831, 'descuento_monto' => 0.01],
+    ['numero_linea' => 2, 'indicador_facturacion' => 1, 'nombre_item' => 'Caja', 'indicador_bien_servicio' => 1,
+        'cantidad' => 10, 'precio_unitario' => 42.3729],
+];
+$xp = $xmlDe('31', $redondeo, false);
+$chk('Linea con DescuentoMonto 0.01 y sin subdescuentos: el XML trae UN SubDescuento',
+    $xp->query('//Item[1]/TablaSubDescuento/SubDescuento')->length === 1,
+    $xp->query('//Item[1]/TablaSubDescuento/SubDescuento')->length);
+$chk('DescuentoMonto sigue en "0.01"', $texto($xp, '//Item[1]/DescuentoMonto') === '0.01', $texto($xp, '//Item[1]/DescuentoMonto'));
+$chk('TipoSubDescuento "$" (descuento en monto)', $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/TipoSubDescuento') === '$', $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/TipoSubDescuento'));
+$chk('MontoSubDescuento "0.01" = DescuentoMonto', $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento') === '0.01', $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento'));
+$chk('Sin SubDescuentoPorcentaje (el tipo es monto)', $xp->query('//Item[1]/TablaSubDescuento/SubDescuento/SubDescuentoPorcentaje')->length === 0);
+$orden = [];
+foreach ($xp->query('//Item[1]/*') as $n) {
+    $orden[] = $n->nodeName;
+}
+$chk('Orden del XSD en la linea: DescuentoMonto, TablaSubDescuento, MontoItem', array_slice($orden, -3) === ['DescuentoMonto', 'TablaSubDescuento', 'MontoItem'], $orden);
+$chk('MontoItem neto del descuento (200 x 13.9831 - 0.01 = 2796.61)', $texto($xp, '//Item[1]/MontoItem') === '2796.61', $texto($xp, '//Item[1]/MontoItem'));
+$chk('La linea sin descuento no lleva tabla', $xp->query('//Item[2]/TablaSubDescuento')->length === 0);
+
+$xp = $xmlDe('31', $conPct, false);
+$chk('Descuento 10% del cliente (DescuentoMonto "30.00"): MontoSubDescuento "30.00"',
+    $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento') === '30.00', $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento'));
+
+$xp = $xmlDe('31', $conTexto, false);
+$chk('Texto "200" del cliente: DescuentoMonto y MontoSubDescuento salen iguales ("200.00")',
+    $texto($xp, '//Item[1]/DescuentoMonto') === '200.00' && $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento') === '200.00',
+    [$texto($xp, '//Item[1]/DescuentoMonto'), $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/MontoSubDescuento')]);
+
+$xp = $xmlDe('34', $redondeo, false);
+$chk('E34 (nota) con descuento tambien lleva la tabla', $xp->query('//Item[1]/TablaSubDescuento/SubDescuento')->length === 1);
+
+$propio = [['numero_linea' => 1, 'nombre_item' => 'A', 'cantidad' => 1, 'precio_unitario' => 100, 'descuento_monto' => 10,
+    'subdescuentos' => [['tipo_sub_descuento' => '%', 'sub_descuento_porcentaje' => 10, 'monto_sub_descuento' => 10]]]];
+$xp = $xmlDe('31', $propio, false);
+$chk('Si el cliente manda subdescuentos se respetan: una sola fila, la suya (%)',
+    $xp->query('//Item[1]/TablaSubDescuento/SubDescuento')->length === 1
+    && $texto($xp, '//Item[1]/TablaSubDescuento/SubDescuento/TipoSubDescuento') === '%',
+    $xp->query('//Item[1]/TablaSubDescuento/SubDescuento')->length);
+
+$sinSubDelSet = [['numero_linea' => 1, 'nombre_item' => 'A', 'cantidad' => '1.00', 'precio_unitario' => '100.00', 'descuento_monto' => '10.00']];
+$xp = $xmlDe('31', $sinSubDelSet, true);
+$chk('Set (strict_input): la linea lleva su DescuentoMonto "10.00"', $texto($xp, '//Item[1]/DescuentoMonto') === '10.00', $texto($xp, '//Item[1]/DescuentoMonto'));
+$chk('Set (strict_input): si el set no trae subdescuentos no se inventa la tabla (la DGII compara contra su set)',
+    $xp->query('//Item[1]/TablaSubDescuento')->length === 0);
+
+$e43Desc = [['numero_linea' => 1, 'indicador_facturacion' => 4, 'nombre_item' => 'Gasto', 'cantidad' => 1, 'precio_unitario' => 700, 'descuento_monto' => 5]];
+$xp = $xmlDe('43', $e43Desc, false);
+$chk('E43 (su XSD no tiene TablaSubDescuento) no la lleva aunque la linea traiga descuento', $xp->query('//Item[1]/TablaSubDescuento')->length === 0);
 
 echo "\nDescuentosORecargos globales (E310000000004 / E320000000004 del set de CAGLIARI)\n";
 

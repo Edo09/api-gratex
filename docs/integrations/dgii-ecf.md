@@ -400,6 +400,29 @@ xlsx se firman tal cual si cumplen el patrón del XSD; en la emisión normal, `m
 decimales). Cubre `MontoItem`, `DescuentoMonto`, `RecargoMonto`, las subtablas y todo lo que
 pasa por `appendMoneyIfSet`. Pruebas: `php tools/test_ecf_montos_descuento.php`.
 
+### Línea con `DescuentoMonto` sin `TablaSubDescuento` — rechazo 2020
+
+Rechazo: *"El campo TablaSubDescuento de la sección DetallesItems de la línea 1 no es válido"*
+(código 2020; AGROVISA FERRETERIA, `ecf`, E310000000001, 2026-11-24). La DGII exige la
+`TablaSubDescuento` en **toda línea que lleve `DescuentoMonto`**; el XSD la deja opcional, así que
+el XML era válido y se firmó sin ella. El ERP del cliente manda `descuento_monto: 0.01` en las líneas
+donde corrige un centavo de redondeo (200 × 13.9831 = 2,796.62 contra su base de 2,796.61, líneas
+1, 2 y 9), y la doc de integración no pide `subdescuentos`: el builder solo la escribía si el cliente
+la mandaba. Todo e-CF con descuento que la DGII aceptó la trae (E31, E41, E44 y E46 de la
+certificación, en `ecf_integracion_backup` y en las bases `app`); el único completo sin ella fue este.
+Un E32 de menos de RD$250,000 no lo habría delatado: la DGII solo recibe el resumen (RFCE), no las
+líneas.
+
+Regla de `ECFXmlBuilder::appendSubDescuentos`: si la línea trae `DescuentoMonto` y no trae
+`subdescuentos`, sale un solo `SubDescuento` en monto (`TipoSubDescuento` `$`) igual al
+`DescuentoMonto`; los `subdescuentos` propios se respetan. No se inventa en el set de pruebas
+(`strict_input`: la DGII compara contra su set) ni en E43/E47 (su XSD no la tiene). Los totales no
+cambian: es la misma línea con la tabla que faltaba. `RecargoMonto` / `TablaSubRecargo` quedó igual
+(sin evidencia de que la DGII lo exija del mismo modo). Este rechazo llegó con
+`secuenciaUtilizada: true` (los de certificación de ese tenant, con `false`): el e-NCF queda
+consumido y el reenvío corregido va con el siguiente número (ver la guía de integración).
+Pruebas: `php tools/test_ecf_montos_descuento.php`.
+
 ### Set de pruebas — `TipoIngresos` vacío en una nota
 
 Rechazo: *"El formato del XML no es válido.. La propiedad TipoIngresos no es válida debido a
