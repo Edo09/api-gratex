@@ -28,6 +28,7 @@ require_once __DIR__ . '/../src/Utils/FacturacionElectronica/EcfItemMapper.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFXmlBuilder.php';
 require_once __DIR__ . '/../src/Utils/FacturacionElectronica/RFCEXmlBuilder.php';
 require_once __DIR__ . '/../src/Utils/Pdf/EcfDocumento.php';
+require_once __DIR__ . '/../src/Utils/FacturacionElectronica/ECFEmissionService.php';
 
 $fallos = 0;
 $total = 0;
@@ -338,6 +339,203 @@ $sinIndicador = new EcfDocumento([
 $tt = $sinIndicador->totales();
 $chk('Sin indicador: 30.00 + 5.40 = 35.40, como siempre',
     !$sinIndicador->preciosIncluyenItbis() && $igual($tt['subtotal'], 30) && $igual($tt['total'], 35.40), $tt);
+
+// ---------------------------------------------------------------------------
+echo "\n7. Integracion: la rama de emitir() sin el indicador\n";
+
+// ECFEmissionService::prepararItemsIntegracion es lo que emitir() hace con los items y los
+// totales de un payload de integracion (sin DB ni red): cuando no llega el indicador en 1, lo
+// de siempre. Linea del cliente de integracion: precio SIN ITBIS (13.9831 x 200 = 2796.62) y un
+// descuento de redondeo de 0.01 para llegar a la base real 2796.61.
+$prep = static fn(array $p): array => ECFEmissionService::prepararItemsIntegracion($p);
+$base = ['tipo_ecf' => '31', 'items' => [$linea(1, 200, 13.9831, 0.01)]];
+
+$r = $prep($base);
+$chk('Sin indicador: totales = map + totales sobre el neto, como siempre',
+    $r['totales'] === EcfItemMapper::totales(EcfItemMapper::map($base['items'], false)), $r['totales']);
+$chk('Sin indicador: MontoItem 2796.61 y MontoTotal 3300.00 (la linea con descuento de redondeo)',
+    $igual($r['items'][0]['monto_item'], 2796.61) && $igual($r['totales']['monto_total'], 3300.00), $r);
+$chk('Sin indicador: sale "0", lo mismo que el builder ya escribia (el XML no cambia)', ($r['indicador_monto_gravado'] ?? null) === '0', $r);
+$chk('Indicador "0": queda tal cual', $prep($base + ['indicador_monto_gravado' => '0'])['indicador_monto_gravado'] === '0');
+$r = $prep($base + ['totales' => ['monto_total' => 999.99, 'total_itbis' => null]]);
+$chk('Override del cliente gana clave por clave; null no cuenta',
+    $r['totales']['monto_total'] === 999.99 && $igual($r['totales']['total_itbis'], 503.39), $r['totales']);
+$r = $prep($base + ['strict_input' => true, 'totales' => ['monto_total' => 999.99]]);
+$chk('Estricto con override: solo el override', $r['totales'] === ['monto_total' => 999.99], $r['totales']);
+$r = $prep(['tipo_ecf' => '31', 'items' => []]);
+$chk('Sin items: totales en cero y sin error', $r['items'] === [] && $r['totales']['monto_total'] === 0.0, $r);
+
+// ---------------------------------------------------------------------------
+echo "\n8. Integracion con indicador_monto_gravado = 1 (precios con ITBIS)\n";
+
+// El ERP del cliente guarda el precio pactado CON ITBIS (200 x 16.50 = 3300.00 = base 2796.61 +
+// ITBIS 503.39). Con el indicador en 1 el precio y el descuento van con ITBIS y el ITBIS se desglosa
+// por tasa, como en el POS. Antes el indicador se copiaba al XML y el ITBIS se sumaba encima (3894.00):
+// el 1934 de la empresa 002. Solo emision normal y solo E31-E34; el set de pruebas queda como estaba.
+$exacto = static fn($a, $b): bool => abs((float) $a - (float) $b) < 1e-9;
+$con = static fn(string $tipo, array $items, $flag = 1, array $extra = []): array =>
+    ECFEmissionService::prepararItemsIntegracion(['tipo_ecf' => $tipo, 'indicador_monto_gravado' => $flag, 'items' => $items] + $extra);
+$tipoFalla = static function (string $tipo) use ($con, $linea): ?string {
+    try {
+        $con($tipo, [$linea(1, 200, 16.50)]);
+        return null;
+    } catch (EcfUsuarioException $e) {
+        return $e->getMessage();
+    }
+};
+
+$r = $con('31', [$linea(1, 200, 16.50)]);
+$chk('Caso del proveedor: 200 x 16.50 = MontoItem 3300.00 = base 2796.61 + ITBIS 503.39',
+    $igual($r['items'][0]['monto_item'], 3300.00) && $igual($r['totales']['monto_gravado_i1'], 2796.61)
+    && $igual($r['totales']['total_itbis1'], 503.39) && $igual($r['totales']['monto_total'], 3300.00), $r['totales']);
+$chk('Caso del proveedor: el indicador sale en "1"', $r['indicador_monto_gravado'] === '1', $r['indicador_monto_gravado']);
+
+$catorce = [];
+foreach ([[200, 16.50], [200, 16.50], [10, 50], [5, 50], [5, 125], [1, 120], [5, 125], [25, 7], [40, 3], [1, 580], [20, 2], [1, 150], [1, 550], [1, 350]] as [$q, $p]) {
+    $catorce[] = $linea(1, $q, $p);
+}
+$r = $con('31', $catorce);
+$suma = 0.0;
+$conDescuento = 0;
+foreach ($r['items'] as $it) {
+    $suma += $it['monto_item'];
+    $conDescuento += empty($it['descuento_monto']) ? 0 : 1;
+}
+$chk('Factura de 14 lineas: gravado 9055.08 + ITBIS 1629.92 = 10685.00',
+    $igual($r['totales']['monto_gravado_i1'], 9055.08) && $igual($r['totales']['total_itbis1'], 1629.92)
+    && $igual($r['totales']['monto_total'], 10685.00), $r['totales']);
+$chk('Factura de 14 lineas: MontoTotal es la suma de los MontoItem y ninguna linea lleva descuento',
+    $igual($r['totales']['monto_total'], $suma) && $conDescuento === 0, [$suma, $conDescuento]);
+
+$r = $con('31', [$linea(1, 200, 16.50, 100.00)]);
+$chk('Descuento real de 100.00 (con ITBIS): MontoItem 3200.00 = base 2711.86 + ITBIS 488.14',
+    $igual($r['items'][0]['monto_item'], 3200.00) && $igual($r['totales']['monto_gravado_i1'], 2711.86)
+    && $igual($r['totales']['total_itbis1'], 488.14) && $igual($r['totales']['monto_total'], 3200.00), $r['totales']);
+
+// Toda forma que el XSD lee como 1 (xs:integer con enumeracion 0/1: "01", " 1", "+1"...) activa el modo y
+// sale como "1": si no, el XML diria 1 con el calculo neto (la trampa del 1934). "01" es plausible: el
+// mismo JSON manda "tipo_ingresos": "01".
+foreach ([['"1"', '1'], ['true', true], ['1.0', 1.0], ['" 1"', ' 1'], ['"1 "', '1 '], ['"01"', '01'],
+    ['"+1"', '+1'], ['"1\n"', "1\n"], ['"1.0"', '1.0']] as [$nombre, $flag]) {
+    $r = $con('31', [$linea(1, 200, 16.50)], $flag);
+    $chk("Indicador $nombre se trata como 1: nunca un 1 en el XML con calculo neto",
+        $igual($r['totales']['monto_total'], 3300.00) && $r['indicador_monto_gravado'] === '1', $r);
+}
+foreach ([['0', 0], ['"0"', '0'], ['""', ''], ['null', null], ['false', false], ['"00"', '00'], ['" 0 "', ' 0 '],
+    ['0.0', 0.0]] as [$nombre, $flag]) {
+    $r = $con('31', [$linea(1, 200, 16.50)], $flag);
+    $chk("Indicador $nombre: calculo neto de siempre (3894.00) y sale \"0\", lo que el builder ya escribia",
+        $igual($r['totales']['monto_total'], 3894.00) && $r['indicador_monto_gravado'] === '0', $r);
+}
+// Un valor que no es 0 ni 1 en ninguna grafia: error claro antes de firmar (el XSD de la DGII lo
+// rechazaria despues, con el e-NCF ya enviado).
+$flagFalla = static function ($flag) use ($con, $linea): ?string {
+    try {
+        $con('31', [$linea(1, 200, 16.50)], $flag);
+        return null;
+    } catch (EcfUsuarioException $e) {
+        return $e->getMessage();
+    }
+};
+foreach ([['2', 2], ['"2"', '2'], ['"abc"', 'abc'], ['"true"', 'true'], ['[1]', [1]], ['-1', -1], ['1.5', 1.5]] as [$nombre, $flag]) {
+    $msg = $flagFalla($flag);
+    $chk("Indicador $nombre: error claro (solo 0 o 1), sin barras que se enmascaren como ruta",
+        $msg !== null && str_contains($msg, 'indicador_monto_gravado') && str_contains($msg, '0 o 1') && !str_contains($msg, '/'), $msg);
+}
+
+// E310000000005 del set de la DGII (las cuatro tasas), por la ruta de integracion.
+$setE31 = [$linea(1, 21, 35), $linea(2, 547, 145), $linea(3, 14, 55), $linea(4, 25, 65), $linea(2, 35, 25)];
+$r = $con('31', $setE31);
+foreach (['monto_gravado_i1' => 622.88, 'monto_gravado_i2' => 69129.31, 'monto_gravado_i3' => 770.00,
+    'monto_exento' => 1625.00, 'total_itbis' => 11172.81, 'monto_total' => 83320.00] as $k => $v) {
+    $chk("Tasas mezcladas por integracion: $k = $v", $igual($r['totales'][$k], $v), $r['totales'][$k]);
+}
+
+foreach (['32', '33', '34'] as $tipo) {
+    $r = $con($tipo, [$linea(1, 200, 16.50)]);
+    $chk("E$tipo admite el modo (MontoTotal 3300.00)", $igual($r['totales']['monto_total'], 3300.00), $r['totales']);
+}
+foreach (['41', '43', '44', '45', '46', '47'] as $tipo) {
+    $msg = $tipoFalla($tipo);
+    $chk("E$tipo con indicador 1: error claro antes de firmar, sin barras que se enmascaren como ruta",
+        $msg !== null && str_contains($msg, 'indicador_monto_gravado') && str_contains($msg, 'E31, E32, E33 y E34')
+        && !str_contains($msg, '/'), $msg);
+}
+
+$r = $con('45', [$linea(1, 200, 16.50)], 1, ['strict_input' => true]);
+$chk('Set de pruebas (strict_input): no lanza, el indicador queda como llego y el calculo es el neto (3894.00)',
+    $r['indicador_monto_gravado'] === 1 && $igual($r['totales']['monto_total'], 3894.00), $r);
+$r = $con('31', [$linea(1, 200, 16.50)], '01', ['strict_input' => true]);
+$chk('Set de pruebas: el indicador "01" queda como llego y el calculo es el neto (el set trae sus montos)',
+    $r['indicador_monto_gravado'] === '01' && $igual($r['totales']['monto_total'], 3894.00), $r);
+$r = $con('31', [$linea(1, 200, 16.50)], 'abc', ['strict_input' => true]);
+$chk('Set de pruebas: un indicador que no es 0 ni 1 no lanza ni se toca (lo valida la DGII contra su set)',
+    $r['indicador_monto_gravado'] === 'abc', $r);
+
+$r = $con('31', [$linea(1, 200, 16.50)], 1, ['totales' => ['total_itbis1' => 500.00]]);
+$chk('Override del cliente en el modo: gana su clave y el resto se calcula',
+    $r['totales']['total_itbis1'] === 500.00 && $igual($r['totales']['monto_total'], 3300.00), $r['totales']);
+
+// Con precios con ITBIS, MontoItem sale de cantidad x precio como los imprime el XML (2 y 4 decimales).
+// Mas decimales es un error, no un redondeo en silencio: 1.125 x 1000.00 se firmaria como 1.13 x 1000.00 =
+// 1130.00 contra los 1125.00 del cliente. Igual que la app, que valida antes de normalizar.
+$decimalesFalla = static function (array $items, array $extra = []) use ($con): ?string {
+    try {
+        $con('31', $items, 1, $extra);
+        return null;
+    } catch (EcfUsuarioException $e) {
+        return $e->getMessage();
+    }
+};
+$msg = $decimalesFalla([$linea(1, 1.125, 1000.00)]);
+$chk('Cantidad con 3 decimales (1.125): error claro con la linea, no un 1.13 en silencio',
+    $msg !== null && str_contains($msg, 'Línea 1') && str_contains($msg, 'decimales') && !str_contains($msg, '/'), $msg);
+$msg = $decimalesFalla([$linea(1, 2, 16.50), $linea(1, 3, 16.12345)]);
+$chk('Precio con 5 decimales en la linea 2: el error nombra la linea 2',
+    $msg !== null && str_contains($msg, 'Línea 2') && !str_contains($msg, 'Línea 1'), $msg);
+$r = $con('31', [$linea(1, 0.1 + 0.2, 16.50), $linea(1, 2.5, 16.1235)]);
+$chk('El ruido binario (0.1 + 0.2) no es un decimal de mas: cantidad 0.3 y MontoItem 4.95; 2.5 x 16.1235 = 40.31',
+    $exacto($r['items'][0]['cantidad'], 0.3) && $exacto($r['items'][0]['monto_item'], 4.95)
+    && $exacto($r['items'][1]['monto_item'], 40.31), $r['items']);
+$sinModo = null;
+try {
+    $prep(['tipo_ecf' => '31', 'items' => [$linea(1, 1.126, 16.123456)]]);
+} catch (Throwable $e) {
+    $sinModo = $e->getMessage();
+}
+$chk('Sin el indicador, los decimales de mas siguen sin error (como siempre)', $sinModo === null, $sinModo);
+$sinModo = $decimalesFalla([$linea(1, 1.126, 16.123456)], ['strict_input' => true]);
+$chk('Set de pruebas con el indicador: los decimales de mas no se validan (el set trae sus montos)', $sinModo === null, $sinModo);
+
+$r = $con('31', []);
+$chk('Sin items con el indicador: totales en cero, sin error y el indicador en "1"',
+    $r['items'] === [] && $r['totales']['monto_total'] === 0.0 && $r['indicador_monto_gravado'] === '1', $r);
+
+// Por el builder del XML y contra el XSD de la DGII (los helpers de la seccion 5).
+$r = $con('31', [$linea(1, 200, 16.50)]);
+$xml = $xmlEcf('31', [], ['items' => $r['items'], 'totales' => $r['totales'], 'indicador_monto_gravado' => $r['indicador_monto_gravado']]);
+$chk('XML del caso del proveedor: IndicadorMontoGravado 1, MontoItem 3300.00, MontoGravadoI1 2796.61, TotalITBIS1 503.39, MontoTotal 3300.00',
+    $campo($xml, 'IndicadorMontoGravado') === '1' && $campo($xml, 'MontoItem') === '3300.00'
+    && $campo($xml, 'MontoGravadoI1') === '2796.61' && $campo($xml, 'TotalITBIS1') === '503.39' && $campo($xml, 'MontoTotal') === '3300.00',
+    [$campo($xml, 'IndicadorMontoGravado'), $campo($xml, 'MontoItem'), $campo($xml, 'MontoGravadoI1'), $campo($xml, 'TotalITBIS1'), $campo($xml, 'MontoTotal')]);
+[$ok, $err] = $validarXsd($xml, "$xsdDir/e-CF 31 v.1.0.xsd");
+$chk('XML del caso del proveedor valida contra el XSD de la DGII (E31)', $ok, $err);
+
+$r = $con('31', [$linea(1, 200, 16.50, 100.00)]);
+$xml = $xmlEcf('31', [], ['items' => $r['items'], 'totales' => $r['totales'], 'indicador_monto_gravado' => $r['indicador_monto_gravado']]);
+$chk('XML con descuento real: DescuentoMonto y MontoSubDescuento 100.00, MontoTotal 3200.00',
+    $campo($xml, 'DescuentoMonto') === '100.00' && $campo($xml, 'MontoSubDescuento') === '100.00' && $campo($xml, 'MontoTotal') === '3200.00',
+    [$campo($xml, 'DescuentoMonto'), $campo($xml, 'MontoSubDescuento'), $campo($xml, 'MontoTotal')]);
+[$ok, $err] = $validarXsd($xml, "$xsdDir/e-CF 31 v.1.0.xsd");
+$chk('XML con descuento real valida contra el XSD de la DGII (E31)', $ok, $err);
+
+// Sin el indicador el XML es el de siempre: IndicadorMontoGravado 0, lo que el builder escribia con el campo ausente.
+$r = $prep($base);
+$xmlNuevo = $xmlEcf('31', [], ['items' => $r['items'], 'totales' => $r['totales'], 'indicador_monto_gravado' => $r['indicador_monto_gravado']]);
+$xmlViejo = $xmlEcf('31', [], ['items' => $r['items'], 'totales' => $r['totales'], 'indicador_monto_gravado' => null]);
+$chk('Sin indicador: el XML trae IndicadorMontoGravado 0, igual que antes del cambio',
+    $campo($xmlNuevo, 'IndicadorMontoGravado') === '0' && $campo($xmlViejo, 'IndicadorMontoGravado') === '0',
+    [$campo($xmlNuevo, 'IndicadorMontoGravado'), $campo($xmlViejo, 'IndicadorMontoGravado')]);
 
 // ---------------------------------------------------------------------------
 echo "\n" . ($fallos === 0 ? "TODO OK ($total verificaciones)" : "$fallos de $total FALLARON") . "\n";

@@ -291,30 +291,8 @@ class ECFEmissionService
                 throw new RuntimeException('Integracion: el payload debe incluir emisor con rnc, razon_social y direccion.');
             }
             $ambienteEarly = (string) ($payload['ambiente'] ?? 'ecf');
-            // La ruta app normaliza los items en facturaController antes de llegar
-            // aqui; la de integracion no pasa por ese controller. Sin esto los
-            // items entran crudos y <MontoItem> sale 0.00 (DGII lo rechaza por el
-            // MinInclusive de Decimal18D2ValidationTypeMayor).
-            $payload['items'] = EcfItemMapper::map(
-                is_array($payload['items'] ?? null) ? $payload['items'] : [],
-                !empty($payload['strict_input'])
-            );
-            // Y lo mismo con los Totales: el cliente puede mandar solo las tasas
-            // (o nada). Sin los montos derivados de los items, DGII rechaza con
-            // "El campo MontoGravadoI1 / MontoExento ... no es valido".
-            // Mismas reglas de override que facturaController: en modo estricto
-            // (set de pruebas) manda lo que venga en el payload, tal cual.
-            $totalesOverride = is_array($payload['totales'] ?? null)
-                ? array_filter($payload['totales'], fn($v) => $v !== null && $v !== '')
-                : [];
-            $totalesCalc = EcfItemMapper::totales($payload['items']);
-            if (!empty($payload['strict_input']) && $totalesOverride) {
-                $payload['totales'] = $totalesOverride;
-            } elseif ($totalesOverride) {
-                $payload['totales'] = array_merge($totalesCalc, $totalesOverride);
-            } else {
-                $payload['totales'] = $totalesCalc;
-            }
+            // Items y Totales como los pide el XML: ver prepararItemsIntegracion().
+            $payload = self::prepararItemsIntegracion($payload);
         } else {
             $emisor = $this->emisorModel()->get();
             if (!$emisor) {
@@ -1351,6 +1329,118 @@ class ECFEmissionService
             return substr(preg_replace('/\s+/', '', $m[1]), 0, 6);
         }
         return null;
+    }
+
+    /**
+     * Items y Totales de un payload de integracion, como los necesita el XML: lo que
+     * emitir() hace en su rama de integracion, aparte para poder probarlo sin firmar
+     * ni enviar nada. Devuelve el mismo payload con `items` mapeados y `totales`
+     * resueltos.
+     *
+     * Con `indicador_monto_gravado` = 1 en cualquier grafia que lea el XSD (y fuera del set de
+     * pruebas) el precio y el descuento de cada linea traen el ITBIS: se calcula como el POS
+     * (IndicadorMontoGravado = 1, EcfItemMapper::desglosarIncluido) y solo en E31-E34. Con 0,
+     * vacio o ausente, lo de siempre: precio neto y el ITBIS encima. En emision normal el
+     * payload sale con el indicador ya resuelto en '1' o '0'.
+     *
+     * @throws EcfUsuarioException indicador que no es 0 ni 1; indicador en 1 en un tipo que no
+     *   admite el modo; en el modo, cantidad con mas de 2 decimales o precio con mas de 4
+     */
+    public static function prepararItemsIntegracion(array $payload): array
+    {
+        $strict = !empty($payload['strict_input']);
+        // Invariante, en emision normal: el XML lleva IndicadorMontoGravado = 1 si y solo si el
+        // calculo incluye el ITBIS. Antes el indicador se copiaba tal cual y el ITBIS se sumaba
+        // encima (la E31 de la empresa 002: 950.00 + 171.00 = 1,121.00 y la observacion 1934 de
+        // la DGII). Por eso el valor se lee como lo lee el XSD (1, "1", "01", " 1", "+1", true...)
+        // y sale ya resuelto en '1' o '0'; lo que no es 0 ni 1 es un error. El set de pruebas
+        // (strict_input) va tal cual: trae sus propios montos y la DGII los compara uno a uno.
+        $preciosConItbis = false;
+        if (!$strict) {
+            $preciosConItbis = self::indicadorMontoGravadoEsUno($payload['indicador_monto_gravado'] ?? null);
+            $payload['indicador_monto_gravado'] = $preciosConItbis ? '1' : '0';
+        }
+        $items = is_array($payload['items'] ?? null) ? $payload['items'] : [];
+        if ($preciosConItbis) {
+            $tipo = (string) ($payload['tipo_ecf'] ?? '');
+            if (!in_array($tipo, EcfItemMapper::TIPOS_PRECIOS_CON_ITBIS, true)) {
+                throw new EcfUsuarioException(
+                    'indicador_monto_gravado = 1 (precios con ITBIS incluido) solo se admite en E31, E32, E33 y E34; este comprobante es E' . $tipo . '. Quite el indicador y envíe los precios sin ITBIS.',
+                    'Los precios con ITBIS incluido solo se admiten en facturas de crédito fiscal y de consumo, y en sus notas de débito y crédito.'
+                );
+            }
+            // MontoItem sale de cantidad x precio como los imprime el XML (2 y 4 decimales). Mas
+            // decimales es un error y no un redondeo en silencio: 1.125 x 1000.00 se firmaria como
+            // 1.13 x 1000.00 = 1130.00 contra los 1125.00 del cliente. Igual que la app, que valida
+            // antes de normalizar (assertCantidadesEcf); normalizar solo limpia el ruido binario.
+            foreach (array_values($items) as $i => $raw) {
+                $cantidad = (float) (is_array($raw) ? ($raw['cantidad'] ?? $raw['quantity'] ?? 1) : 1);
+                $precio = (float) (is_array($raw) ? ($raw['precio_unitario'] ?? $raw['amount'] ?? 0) : 0);
+                if (abs($cantidad - round($cantidad, 2)) > 1e-7 || abs($precio - round($precio, 4)) > 1e-7) {
+                    $linea = is_array($raw) && isset($raw['numero_linea']) && is_numeric($raw['numero_linea'])
+                        ? (int) $raw['numero_linea'] : $i + 1;
+                    throw new EcfUsuarioException(
+                        'Línea ' . $linea . ': con indicador_monto_gravado = 1 la cantidad admite hasta 2 decimales y el precio hasta 4. Corrija la línea y reenvíe.',
+                        'Alguna línea tiene más decimales de los admitidos: la cantidad admite hasta 2 y el precio hasta 4.'
+                    );
+                }
+            }
+            $items = EcfItemMapper::normalizarCantidadPrecio($items);
+        }
+        // La ruta app normaliza los items en facturaController antes de llegar
+        // aqui; la de integracion no pasa por ese controller. Sin esto los
+        // items entran crudos y <MontoItem> sale 0.00 (DGII lo rechaza por el
+        // MinInclusive de Decimal18D2ValidationTypeMayor).
+        $payload['items'] = EcfItemMapper::map($items, $strict, $preciosConItbis);
+        // Y lo mismo con los Totales: el cliente puede mandar solo las tasas
+        // (o nada). Sin los montos derivados de los items, DGII rechaza con
+        // "El campo MontoGravadoI1 / MontoExento ... no es valido".
+        // Mismas reglas de override que facturaController: en modo estricto
+        // (set de pruebas) manda lo que venga en el payload, tal cual.
+        $totalesOverride = is_array($payload['totales'] ?? null)
+            ? array_filter($payload['totales'], fn($v) => $v !== null && $v !== '')
+            : [];
+        $totalesCalc = EcfItemMapper::totales($payload['items'], $preciosConItbis);
+        if ($strict && $totalesOverride) {
+            $payload['totales'] = $totalesOverride;
+        } elseif ($totalesOverride) {
+            $payload['totales'] = array_merge($totalesCalc, $totalesOverride);
+        } else {
+            $payload['totales'] = $totalesCalc;
+        }
+        return $payload;
+    }
+
+    /**
+     * true si el indicador es 1 en cualquier forma que el XSD lee como 1 (xs:integer con
+     * enumeracion 0/1: 1, "1", "01", " 1", "+1", true); false si es 0 (0, "0", "", null, false,
+     * "00"). Cualquier otro valor no es una forma de 0 ni de 1: EcfUsuarioException, antes de
+     * firmar (la DGII lo rechazaria por el XSD con el e-NCF ya enviado).
+     */
+    private static function indicadorMontoGravadoEsUno($valor): bool
+    {
+        if (is_string($valor)) {
+            $valor = trim($valor);
+        }
+        if ($valor === null || $valor === '' || $valor === false) {
+            return false;
+        }
+        if ($valor === true) {
+            return true;
+        }
+        if (is_numeric($valor)) {
+            $n = (float) $valor;
+            if ($n === 1.0) {
+                return true;
+            }
+            if ($n === 0.0) {
+                return false;
+            }
+        }
+        throw new EcfUsuarioException(
+            'indicador_monto_gravado solo admite 0 o 1 (0 = precios sin ITBIS, 1 = precios con ITBIS incluido). Corríjalo y reenvíe.',
+            'El indicador de precios con ITBIS solo admite 0 o 1.'
+        );
     }
 
     private function extractTrackId(array $reception): ?string

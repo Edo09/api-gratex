@@ -423,6 +423,37 @@ cambian: es la misma línea con la tabla que faltaba. `RecargoMonto` / `TablaSub
 consumido y el reenvío corregido va con el siguiente número (ver la guía de integración).
 Pruebas: `php tools/test_ecf_montos_descuento.php`.
 
+### Precios con ITBIS incluido en integración (`indicador_monto_gravado = 1`)
+
+Hasta el 2026-11-24 `/api/integracion/ecf` copiaba `indicador_monto_gravado` al XML pero calculaba
+siempre «precio neto + ITBIS encima» (rama de integración de `ECFEmissionService`): quien lo mandaba
+en 1 con precios con ITBIS firmaba un e-CF inconsistente (200 × RD$16.50 salía 3,300.00 + 594.00 =
+**3,894.00**). Ya había pasado en la app: E310000000011 de la empresa 002 (2026-09-15, precio 950.00 +
+ITBIS 171.00 encima = 1,121.00) quedó `ACEPTADO_CONDICIONAL` con la observación **1934** *«El campo
+MontoGravadoI1 … no coincide con la sumatoria de los valores del detalle gravado con tasa 18% …»*.
+Lo pidió AGROVISA FERRETERIA: su ERP guarda el precio pactado con ITBIS y compensaba el redondeo de
+4 decimales con un descuento de RD$0.01 (ver el rechazo 2020 de arriba).
+
+Regla de `ECFEmissionService::prepararItemsIntegracion`, en emisión normal (sin `strict_input`):
+`indicador_monto_gravado` se lee como lo lee el XSD (`xs:integer` con enumeración 0/1: `1`, `"1"`,
+`"01"`, `" 1"`, `"+1"`, `true`) y el payload sale con `'1'` o `'0'` ya resuelto; lo que no es 0 ni 1 es
+un error 502 antes de firmar. Con 1, el precio y el descuento de cada línea traen el ITBIS y se
+calcula como el POS (`EcfItemMapper::map/totales(..., true)`: gravado por tasa = `round(Σ MontoItem /
+1.18, 2)`, ITBIS = la diferencia). Solo E31, E32, E33 y E34: en otro tipo lanza `EcfUsuarioException`
+(502 `Fallo emitiendo e-CF: …`). Más de 2 decimales de cantidad o de 4 de precio en el modo también es
+un error que nombra la línea, no un redondeo en silencio (la app valida igual con
+`assertCantidadesEcf`). Con 0, vacío o ausente el XML es el de siempre (`IndicadorMontoGravado` 0).
+Invariante, **en emisión normal**: el XML lleva `IndicadorMontoGravado = 1` si y solo si el cálculo
+incluye el ITBIS.
+
+`strict_input` lo puede mandar cualquier cliente de integración (el runner de certificación lo manda a
+este endpoint: tenants 19 y 21 en `integracion_request_log`): con él el indicador y los montos van como
+llegan y la invariante no aplica. **Antes de desplegar**, correr
+`tools/verificar_indicador_monto_gravado_integracion.sql` en la master (solo lectura): si alguien manda
+el indicador en 1 con precios sin ITBIS, su total bajaría cerca de un 15 % sin ningún error. Guía para
+el cliente: `docs/api/integracion-precios-con-itbis.md`. Pruebas: `php
+tools/test_precios_itbis_incluido.php` (secciones 7 y 8).
+
 ### Set de pruebas — `TipoIngresos` vacío en una nota
 
 Rechazo: *"El formato del XML no es válido.. La propiedad TipoIngresos no es válida debido a
