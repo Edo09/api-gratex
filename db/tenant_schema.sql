@@ -5,7 +5,7 @@
 -- migraciones ya aplicadas:
 --   - 001..011  hoy en db/migrations/deprecated/ (solo historial de los DBs que
 --               se actualizaron incrementalmente, ej. Gratex).
---   - 012..040  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
+--   - 012..041  en db/migrations/ (activas solo para DBs de tenant ya desplegados;
 --               la 036 y la 037 estan reservadas y no tienen archivo: ver el README).
 --
 -- Un tenant nuevo corre SOLO este archivo (tools/create_tenant.php lo aplica);
@@ -978,6 +978,12 @@ CREATE TABLE IF NOT EXISTS pos_cajas (
   PRIMARY KEY (id),
   UNIQUE KEY uk_pos_caja_nombre (nombre)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Caja por defecto de la empresa: solo si no tiene ninguna (migracion 041). Una caja se
+-- renombra y se desactiva pero no se borra, asi que no reaparece despues de un cambio.
+INSERT INTO pos_cajas (nombre)
+SELECT 'Caja 1' FROM DUAL
+WHERE NOT EXISTS (SELECT 1 FROM pos_cajas);
 
 CREATE TABLE IF NOT EXISTS pos_empleados (
   id               INT(11)      NOT NULL AUTO_INCREMENT,

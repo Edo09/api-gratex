@@ -143,7 +143,7 @@ tiene que estar antes del lanzamiento (2026-11-19). Todos son P0 salvo los de §
 - [ ] Sirve **solo para habilitar el equipo**. No hay ventas con la sesión de un admin.
 
 **A4 · Habilitar equipo** — `Piloto`
-- [ ] Con sesión de admin, el POS pide elegir la caja ("Caja 1"…) o crear una.
+- [ ] Con sesión de admin, el POS pide elegir la caja ("Caja 1"…) o crear una. Toda empresa nace con una "Caja 1" (migración 041 y `db/tenant_schema.sql`), así que lo normal es elegirla; "crear una" queda para más cajas.
 - [ ] El servidor entrega un **token de equipo** atado a tenant + caja. Se guarda en el `localStorage` de pos.\*; la sesión de FiscalPoint de quien lo habilitó solo se conserva hasta saber si le toca crear su PIN (A5b) y se cierra en seguida.
 - [ ] El token de equipo **solo** sirve para rutas `/api/pos/*`. No abre app.\* ni otras rutas.
 - [x] Revocable desde app.\* (M1). Tras revocarlo, la siguiente petición del equipo vuelve a "Equipo no habilitado".
@@ -603,7 +603,7 @@ Ventas: Authorization: Bearer <token equipo>  +  X-POS-Sesion: <token sesión>
 
 | Tabla / columna | Contenido |
 |---|---|
-| `pos_cajas` | `nombre` UNIQUE, `activa` |
+| `pos_cajas` | `nombre` UNIQUE, `activa`. Nace con una fila "Caja 1" si la empresa no tiene ninguna (migración 041; se renombra y se desactiva, no se borra) |
 | `pos_empleados` | `nombre`, `rol` (`cajero`/`supervisor`), `pin_hmac` CHAR(64) UNIQUE, `activo`, `created_at` |
 | `pos_sesiones` | `empleado_id`, `equipo_id`, `token_hash`, `created_at`, `cerrada_at` |
 | `pos_turnos` | `caja_id`, `empleado_id`, `abierto_at`, `fondo_inicial`, `estado`, `cerrado_at`, `cerrado_por`, `conteo_json` (denominaciones), `efectivo_contado`, `efectivo_esperado`, `diferencia`, `totales_json` (foto del cierre), `nota`. Un solo turno abierto por caja y por empleado (se garantiza con una columna `abierto` NULL/1 en `UNIQUE(caja_id, abierto)` y `UNIQUE(empleado_id, abierto)`) |

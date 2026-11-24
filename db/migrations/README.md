@@ -4,8 +4,8 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
 
 - Los tenants **nuevos** NO corren migraciones: `tools/create_tenant.php` aplica
   `db/tenant_schema.sql`, que es el snapshot completo consolidado (base + todas las
-  migraciones ya incluidas, hasta la 040: la 036 y la 037 están reservadas, ver más abajo).
-  Las migraciones sueltas activas (012–035, 038, 039 y 040) son solo para DBs de tenant **ya desplegados**.
+  migraciones ya incluidas, hasta la 041: la 036 y la 037 están reservadas, ver más abajo).
+  Las migraciones sueltas activas (012–035, 038, 039, 040 y 041) son solo para DBs de tenant **ya desplegados**.
 - Un cambio de esquema nuevo se hace en DOS lugares:
   1. `db/migrations/NNN_descripcion.sql` — para aplicar a mano en los DBs de
      tenant existentes (Gratex, etc.).
@@ -27,7 +27,7 @@ Migraciones incrementales para DBs de **tenant** (tipo app) **ya desplegados**.
   para el final. Ver 028 y 031 (la 031 también nombra con `@db` las tablas de
   sus `REFERENCES`, y lee con SQL armado la fila que muestra al final: una
   tabla que quizá no se creó no se puede nombrar en el `SELECT` final).
-- Desde la 029/030/031/032/033/034/035/038/039/040 (y la master 012) la segunda sentencia es una **guardia**: si
+- Desde la 029/030/031/032/033/034/035/038/039/040/041 (y la master 012) la segunda sentencia es una **guardia**: si
   `@db` es `information_schema` u otra base de sistema, o no tiene la tabla que
   la migracion espera, falla con `#1049 Unknown database 'ALTO_elige_la_base_...'`
   o `#1146 Table '<base>.<tabla>' doesn't exist` ANTES de tocar nada. Paso el
@@ -112,9 +112,18 @@ que ningún otro plan los tome:
   porque la 036 es de Express, la 037 del plan ITBIS, la 038 de Cobros y la 039 de las
   listas de precio. Va en la base de CADA empresa **antes** de subir el API: el API nuevo
   nombra `user_id` en toda consulta de empleados y, sin la columna, el POS no entra.
-- Los encabezados que dicen "hasta la 040" (este README, `db/tenant_schema.sql`,
-  `tools/verificar_migraciones_tenant.sql`) cuentan la 038, la 039 y la 040, que sí tienen archivo;
-  siguen sin nombrar la 036 ni la 037: un snapshot o un verificador no debe nombrar
+- **Tenant 041**: `db/migrations/041_pos_caja_por_defecto.sql` (2026-11-24). Crea la caja
+  "Caja 1" del POS en la empresa que no tiene ninguna (`INSERT … WHERE NOT EXISTS (SELECT 1
+  FROM pos_cajas)`); una caja se renombra y se desactiva pero no se borra, así que no
+  reaparece. Es **solo datos**: no tiene fila en `tools/verificar_migraciones_tenant.sql`
+  (el verificador solo lee `information_schema` y contar filas lo rompería en una base sin
+  la 030; mismo caso que la master 020), y su resultado es la última consulta del archivo.
+  Toma la 041 porque la 040 es de los usuarios como empleados del POS. Va en la base de CADA
+  empresa; no depende del código del API.
+- Los encabezados que dicen "hasta la 041" (este README y `db/tenant_schema.sql`) cuentan la
+  038, la 039, la 040 y la 041, que sí tienen archivo; `tools/verificar_migraciones_tenant.sql`
+  llega hasta la 040 (la 041 no tiene fila).
+  Siguen sin nombrar la 036 ni la 037: un snapshot o un verificador no debe nombrar
   una migración cuyo archivo no existe. Los planes de Express que crean la master
   015 y la tenant 036 los suben junto con el SQL; mientras tanto, este bloque y
   `tools/test_express_reservas.php` llevan la reserva.

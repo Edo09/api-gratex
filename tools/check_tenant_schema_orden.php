@@ -885,5 +885,48 @@ $chk('verificador de la master: la fila 023 pide la tabla cobro_sin_pago',
     preg_match("/SELECT '023', '023_cobro_sin_pago\.sql',\s*'[^']*',\s*"
         . "\(SELECT COUNT\(\*\) FROM information_schema\.TABLES\s+WHERE TABLE_SCHEMA = DATABASE\(\) AND TABLE_NAME = 'cobro_sin_pago'\) = 1/", (string) file_get_contents($rutaVerificadorMaster)) === 1);
 
+echo "\n== Migracion 041 (Caja 1 por defecto en el POS) ==\n";
+// Solo datos: agrega la caja "Caja 1" donde pos_cajas esta vacia. No tiene fila en el verificador porque este
+// solo lee information_schema (funciona aunque falte una tabla) y contar filas de pos_cajas lo romperia en una
+// base sin la 030. Mismo caso que la master 020. Diseno: fiscalo/docs/superpowers/specs/2026-11-24-caja-1-por-defecto-design.md
+$ruta041 = $raiz . '/db/migrations/041_pos_caja_por_defecto.sql';
+$hay041 = is_file($ruta041);
+$chk('existe db/migrations/041_pos_caja_por_defecto.sql', $hay041);
+$sent041 = $hay041 ? sentencias(sinComentarios((string) file_get_contents($ruta041))) : [];
+$plano = static fn(string $s): string => trim((string) preg_replace('/\s+/', ' ', $s));
+$insertCaja1 = "INSERT INTO pos_cajas (nombre) SELECT 'Caja 1' FROM DUAL WHERE NOT EXISTS (SELECT 1 FROM pos_cajas)";
+$chk('041: son 7 sentencias; la primera es SET @db := DATABASE() y la segunda la guardia (nombra pos_cajas y ALTO_elige_la_base_de_la_empresa_en_el_panel)',
+    count($sent041) === 7
+    && $plano($sent041[0]) === 'SET @db := DATABASE()'
+    && str_starts_with($plano($sent041[1]), 'SET @guardia := IF(')
+    && str_contains($sent041[1], 'pos_cajas') && str_contains($sent041[1], 'ALTO_elige_la_base_de_la_empresa_en_el_panel'));
+$chk('041: tras la guardia van PREPARE, EXECUTE, DEALLOCATE PREPARE, el INSERT y el SELECT final, en ese orden',
+    count($sent041) === 7
+    && str_starts_with($sent041[2], 'PREPARE ') && str_starts_with($sent041[3], 'EXECUTE ')
+    && str_starts_with($sent041[4], 'DEALLOCATE PREPARE ') && str_starts_with($sent041[5], 'INSERT INTO pos_cajas')
+    && str_starts_with($sent041[6], 'SELECT '));
+$chk('041: no consulta information_schema (solo datos: nada cambia la base de phpMyAdmin)',
+    $hay041 && preg_match('/information_schema\./i', implode(";\n", $sent041)) === 0);
+$inserts041 = array_values(array_filter($sent041, static fn(string $s): bool => stripos(ltrim($s), 'INSERT') === 0));
+$chk('041: el unico INSERT es el de Caja 1 con WHERE NOT EXISTS (SELECT 1 FROM pos_cajas)',
+    count($inserts041) === 1 && $plano($inserts041[0]) === $insertCaja1);
+$chk('041: no hace UPDATE, DELETE, ALTER, DROP ni TRUNCATE (solo agrega la fila)',
+    $hay041 && preg_match('/\b(UPDATE|DELETE|ALTER|DROP|TRUNCATE)\b/i', implode(";\n", $sent041)) === 0);
+$selects041 = array_keys(array_filter($sent041, static fn(string $s): bool => stripos(ltrim($s), 'SELECT') === 0));
+$ultima041 = $sent041 === [] ? '' : $sent041[count($sent041) - 1];
+$chk('041: el unico SELECT de nivel superior es el ultimo y devuelve base, cajas y caja_1',
+    $sent041 !== [] && $selects041 === [count($sent041) - 1]
+    && str_contains($ultima041, '@db AS base') && str_contains($ultima041, 'AS cajas') && str_contains($ultima041, 'AS caja_1'));
+$snapPlano = (string) preg_replace('/\s+/', ' ', $sql);
+$posCajas = strpos($snapPlano, 'CREATE TABLE IF NOT EXISTS pos_cajas (');
+$posSiembra = strpos($snapPlano, $insertCaja1 . ';');
+$posEmpleados = strpos($snapPlano, 'CREATE TABLE IF NOT EXISTS pos_empleados (');
+$chk('snapshot: la misma sentencia va una sola vez, despues del CREATE TABLE pos_cajas y antes del CREATE TABLE pos_empleados',
+    $posCajas !== false && $posSiembra !== false && $posEmpleados !== false
+    && $posCajas < $posSiembra && $posSiembra < $posEmpleados
+    && substr_count($snapPlano, $insertCaja1) === 1);
+$chk('verificador: la 041 no tiene fila (es solo datos y el verificador solo lee information_schema)',
+    $verificador !== '' && !str_contains($verificador, "'041'"));
+
 printf("\n%d/%d OK\n", $total - $fallos, $total);
 exit($fallos === 0 ? 0 : 1);
