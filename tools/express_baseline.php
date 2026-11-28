@@ -65,6 +65,7 @@ const BASELINE_SUITES = [
     ['archivo' => 'test_acceso_global.php', 'pinned' => false],
     ['archivo' => 'test_cobros.php', 'pinned' => false],
     ['archivo' => 'test_cobros_tenants.php', 'pinned' => false],
+    ['archivo' => 'test_dgii_auth_reintento.php', 'pinned' => false],
 ];
 
 /**

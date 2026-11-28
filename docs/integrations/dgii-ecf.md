@@ -86,6 +86,36 @@ Bearer: semilla → firmar con el `.p12` → enviar a `ValidarSemilla` → recib
 Lo implementa `src/Utils/FacturacionElectronica/DgiiAuthService.php`
 (`consultarEndpointAutenticado()` agrega `Authorization: Bearer` y descarta headers internos).
 
+### Reintento del login
+
+Cada emisión, consulta de estado y envío de ACECF pide un token **nuevo** (no se guarda), así que un solo
+tropiezo de la DGII al autenticar tumbaba la factura. El 2026-11-28 la DGII reseteó la mayor parte de las
+conexiones de `ecf.dgii.gov.do/ecf/autenticacion` durante hora y media (`Connection reset by peer`,
+`Received HTTP/0.9 when not allowed`, timeouts de 30 s): 2 de 13 intentos de los tenants 17 y 18 pasaron,
+mientras `testecf` y `certecf` respondían bien en el mismo momento.
+
+`DgiiAuthService::autenticar()` **repite el login completo, con una semilla nueva**, cuando la DGII no
+responde por la red (`DgiiTransportException`: una `RuntimeException` con el mismo mensaje de siempre,
+`HTTP request failed: ...`):
+
+- Hasta 3 intentos, con 1 s de pausa tras el primero y 2 s tras el segundo. Un login que reintenta tarda
+  esos segundos más; si todos fallan, el error es el del último intento, igual que antes.
+- **No** repite una respuesta HTTP de la DGII (401, 5xx, un cuerpo sin token) ni un fallo propio (el `.p12`,
+  la firma): son veredictos y fallan a la primera.
+- **Solo el login.** El envío del e-CF y las consultas (`consultarEndpointAutenticado`) siguen con un único
+  intento: repetirlos puede duplicar un comprobante, y de eso se ocupa el write-ahead. Hasta que el login
+  entrega el token no hay nada en la DGII ni en la secuencia, así que repetirlo no cuesta nada.
+- Tiempos: sin `timeout` en las opciones, cada llamada espera `DGII_AUTH_TIMEOUT` (10 s, nunca más que
+  `DGII_ECF_TIMEOUT`) y el login entero no pasa de ~30 s. Con un `timeout` pedido (el POS manda
+  `POS_DGII_TIMEOUT`), ese número es también el presupuesto de todo el login: un reset rápido (~0,2 s) se
+  reintenta dentro de él; una DGII que no contesta gasta el presupuesto y falla como antes.
+- `DGII_AUTH_INTENTOS` (opcional, de 1 a 5, 3 por defecto) lo acorta o lo alarga; `=1` apaga los reintentos.
+
+Bitácora ([../modules/auditoria.md](../modules/auditoria.md)): el fallo final (`DGII_AUTH_OUT_FAILED`) lleva
+`intentos`, y el login que solo salió al reintentar deja `DGII_AUTH_OUT_RETRY_OK` (una fila por login
+recuperado, no por factura): con ella se mide cuánto tropieza la DGII y cuánto ayudó el reintento. Pruebas:
+`tools/test_dgii_auth_reintento.php`.
+
 Endpoints internos (token de API propio vía `X-API-KEY`), útiles para diagnóstico:
 
 | Método | Endpoint | Uso |

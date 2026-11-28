@@ -4,12 +4,27 @@ require_once(__DIR__ . '/DgiiXmlSigner.php');
 require_once(__DIR__ . '/../../AmbienteResolver.php');
 require_once(__DIR__ . '/../../AuditLogger.php');
 
+/**
+ * La peticion a la DGII no obtuvo respuesta HTTP: conexion reseteada, timeout, respuesta que no
+ * es HTTP. Es una RuntimeException con el mismo mensaje de siempre ("HTTP request failed: ...");
+ * la clase solo marca los fallos de red, los unicos que DgiiAuthService::autenticar() repite
+ * (un veredicto de la DGII, como un 401 o un cuerpo sin token, no se repite).
+ */
+class DgiiTransportException extends RuntimeException
+{
+}
+
 class DgiiAuthService
 {
     private const DEFAULT_BASE_URL = 'https://ecf.dgii.gov.do';
     private const DEFAULT_ENVIRONMENT = 'testecf';
     private const DEFAULT_CERT_PATH = 'certificados/20260501-2020077-KQBYARLQB.p12';
     private const DEFAULT_TIMEOUT = 30;
+    // Login saliente (autenticar): 3 intentos, 10 s por llamada y ~30 s en total. Ver tiemposAuth().
+    private const AUTH_INTENTOS = 3;
+    private const AUTH_INTENTOS_MAX = 5;
+    private const AUTH_TIMEOUT = 10;
+    private const AUTH_PRESUPUESTO = 30;
 
     private string $projectRoot;
     private DgiiXmlSigner $signer;
@@ -78,35 +93,142 @@ class DgiiAuthService
         return $tokenResponse;
     }
 
+    /**
+     * Login saliente: semilla -> firma -> token.
+     *
+     * Si la DGII no responde por la red (DgiiTransportException: conexion reseteada, timeout,
+     * respuesta que no es HTTP) se repite el login completo, con una semilla NUEVA, hasta
+     * DGII_AUTH_INTENTOS veces (3), con una pausa de 1 s y luego de 2 s. Una respuesta HTTP de la
+     * DGII (un 401, un 5xx, un cuerpo sin token) o un fallo propio (el .p12, la firma) NO se
+     * repite: es un veredicto, no un tropiezo, y falla a la primera como siempre.
+     *
+     * Repetirlo es seguro porque hasta que entrega el token no hay nada en la DGII ni en la
+     * secuencia. El envio del e-CF y las consultas (consultarEndpointAutenticado) siguen con UN
+     * solo intento: repetirlos puede duplicar un comprobante, y de eso se ocupa el write-ahead.
+     *
+     * Tiempos (tiemposAuth): sin 'timeout' en $options cada llamada espera DGII_AUTH_TIMEOUT (10 s)
+     * y el login entero no pasa de ~30 s. Con 'timeout' (el POS manda POS_DGII_TIMEOUT) cada llamada
+     * espera eso y el login entero tambien: los reintentos solo caben si el fallo fue rapido (un
+     * reset tarda ~0,2 s); un cuelgue gasta el presupuesto y falla como antes.
+     */
     public function autenticar(array $options = []): array
     {
-        // Bitacora: solo los FALLOS. Se pide un token nuevo en cada emision, asi
-        // que registrar los exitos seria una fila extra por factura; un fallo, en
-        // cambio, es lo que explica un lote de emisiones caidas. La excepcion
-        // sigue su curso: el emisor la registra ademas como EMIT fallido.
-        $paso = 'pedir la semilla';
-        try {
-            $semilla = $this->obtenerSemilla($options);
-            $paso = 'firmar la semilla';
-            $signedXml = $this->firmarSemilla($semilla['xml'], $options);
-            $paso = 'validar la semilla firmada';
-            $token = $this->validarSemillaFirmada($signedXml, $options);
-        } catch (Throwable $e) {
-            AuditLogger::log([
-                'module'        => 'dgii-auth',
-                'action'        => 'DGII_AUTH_OUT_FAILED',
-                'entity_type'   => 'dgii_token',
-                'new_values'    => ['paso' => $paso],
-                'success'       => false,
-                'error_message' => $e->getMessage(),
-                'description'   => 'La DGII no entrego el token de autenticacion (fallo al ' . $paso . ').',
+        $maxIntentos = $this->intentosAuth();
+        [$porLlamada, $presupuesto] = $this->tiemposAuth($options);
+        $inicio = $this->reloj();
+        $intento = 0;
+        $primerFallo = null;
+
+        while (true) {
+            $intento++;
+            $paso = 'pedir la semilla';
+            try {
+                // El primer intento espera lo de siempre; un reintento nunca pasa de lo que queda
+                // del presupuesto.
+                $opcionesIntento = $options;
+                $opcionesIntento['timeout'] = $intento === 1
+                    ? $porLlamada
+                    : max(1, min($porLlamada, (int) floor($presupuesto - ($this->reloj() - $inicio))));
+                $semilla = $this->obtenerSemilla($opcionesIntento);
+                $paso = 'firmar la semilla';
+                $signedXml = $this->firmarSemilla($semilla['xml'], $opcionesIntento);
+                $paso = 'validar la semilla firmada';
+                $token = $this->validarSemillaFirmada($signedXml, $opcionesIntento);
+                break;
+            } catch (Throwable $e) {
+                $pausaMs = $this->pausaAuthMs($intento);
+                $quedan = $presupuesto - ($this->reloj() - $inicio) - $pausaMs / 1000;
+                if (!($e instanceof DgiiTransportException) || $intento >= $maxIntentos || $quedan < 1) {
+                    // Bitacora: solo los FALLOS. Se pide un token nuevo en cada emision, asi que
+                    // registrar los exitos seria una fila extra por factura; un fallo, en cambio,
+                    // es lo que explica un lote de emisiones caidas. La excepcion sigue su curso:
+                    // el emisor la registra ademas como EMIT fallido.
+                    $this->auditar([
+                        'module'        => 'dgii-auth',
+                        'action'        => 'DGII_AUTH_OUT_FAILED',
+                        'entity_type'   => 'dgii_token',
+                        'new_values'    => ['paso' => $paso, 'intentos' => $intento],
+                        'success'       => false,
+                        'error_message' => $e->getMessage(),
+                        'description'   => 'La DGII no entrego el token de autenticacion (fallo al ' . $paso
+                            . ($intento > 1 ? ', tras ' . $intento . ' intentos' : '') . ').',
+                    ]);
+                    throw $e;
+                }
+                $primerFallo ??= $e->getMessage();
+                $this->pausar($pausaMs);
+            }
+        }
+
+        if ($intento > 1) {
+            // El login que solo salio al reintentar no deja otro rastro: sin esta fila no se podria
+            // medir cuantas veces la DGII tropieza ni cuanto ayudo el reintento.
+            $this->auditar([
+                'module'      => 'dgii-auth',
+                'action'      => 'DGII_AUTH_OUT_RETRY_OK',
+                'entity_type' => 'dgii_token',
+                'new_values'  => ['intentos' => $intento, 'primer_error' => substr((string) $primerFallo, 0, 200)],
+                'success'     => true,
+                'description' => 'La DGII entrego el token en el intento ' . $intento . ' (los anteriores fallaron por red).',
             ]);
-            throw $e;
         }
 
         $token['semilla_fecha'] = $semilla['fecha'];
 
         return $token;
+    }
+
+    /** Intentos del login: DGII_AUTH_INTENTOS, de 1 (sin reintentos) a 5; 3 si no esta puesto. */
+    private function intentosAuth(): int
+    {
+        $crudo = trim((string) $this->env('DGII_AUTH_INTENTOS', ''));
+        $n = $crudo === '' ? self::AUTH_INTENTOS : (int) $crudo;
+
+        return max(1, min(self::AUTH_INTENTOS_MAX, $n));
+    }
+
+    /**
+     * @return array{0: int, 1: int} [segundos que espera cada llamada del login, segundos que
+     *         puede tardar el login entero contando los reintentos]
+     */
+    private function tiemposAuth(array $options): array
+    {
+        $pedido = (int) ($options['timeout'] ?? 0);
+        if ($pedido > 0) {
+            // Quien fija un timeout (el POS, un reenvio) quiere que la DGII caida se rinda pronto:
+            // ese mismo numero es el presupuesto de todo el login.
+            return [$pedido, $pedido];
+        }
+        $general = (int) $this->env('DGII_ECF_TIMEOUT', self::DEFAULT_TIMEOUT);
+        $general = $general > 0 ? $general : self::DEFAULT_TIMEOUT;
+        $propio = (int) $this->env('DGII_AUTH_TIMEOUT', self::AUTH_TIMEOUT);
+        $porLlamada = min($propio > 0 ? $propio : self::AUTH_TIMEOUT, $general);
+
+        return [$porLlamada, max($porLlamada, self::AUTH_PRESUPUESTO)];
+    }
+
+    /** Pausa antes del siguiente intento, en milisegundos: 1 s tras el primer fallo, 2 s tras los demas. */
+    private function pausaAuthMs(int $intento): int
+    {
+        return min(2000, 1000 * $intento);
+    }
+
+    /** Hora en segundos con decimales. protected: las pruebas la sustituyen para no esperar de verdad. */
+    protected function reloj(): float
+    {
+        return microtime(true);
+    }
+
+    /** Pausa entre intentos. protected por lo mismo que reloj(). */
+    protected function pausar(int $milisegundos): void
+    {
+        usleep($milisegundos * 1000);
+    }
+
+    /** AuditLogger::log (nunca lanza). protected para que las pruebas vean lo que se registra. */
+    protected function auditar(array $evento): void
+    {
+        AuditLogger::log($evento);
     }
 
     public function consultarEndpointAutenticado(string $method, string $pathOrUrl, string $bearerToken, $body = null, array $options = [], array $headers = []): array
@@ -375,7 +497,12 @@ class DgiiAuthService
         return $body;
     }
 
-    private function request(string $method, string $url, array $headers, ?string $body, int $timeout): array
+    /**
+     * Unica puerta de salida hacia la DGII. protected solo para que las pruebas puedan sustituirla
+     * (tools/test_dgii_auth_reintento.php): un metodo private no se puede sobreescribir.
+     * Un fallo de red lanza DgiiTransportException; una respuesta HTTP, del codigo que sea, vuelve.
+     */
+    protected function request(string $method, string $url, array $headers, ?string $body, int $timeout): array
     {
         $this->ensureHttpTransport($url);
 
@@ -421,8 +548,10 @@ class DgiiAuthService
         $rawResponse = curl_exec($ch);
         if ($rawResponse === false) {
             $error = curl_error($ch);
-            curl_close($ch);
-            throw new RuntimeException('HTTP request failed: ' . $error);
+            if (PHP_VERSION_ID < 80500) {
+                curl_close($ch);
+            }
+            throw new DgiiTransportException('HTTP request failed: ' . $error);
         }
 
         $statusCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
@@ -490,7 +619,7 @@ class DgiiAuthService
         $responseBody = file_get_contents($url, false, $context);
 
         if ($responseBody === false) {
-            throw new RuntimeException('HTTP request failed.');
+            throw new DgiiTransportException('HTTP request failed.');
         }
 
         $responseHeaders = function_exists('http_get_last_response_headers')
