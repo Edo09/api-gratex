@@ -1,8 +1,8 @@
 {
     "version": 1,
-    "git_sha": "fed449940bf0360e97887fec3792f6e69a053da2",
+    "git_sha": "29a65342cd0e1b4d9ee195366046e93ffbea9314",
     "php": "8.5",
-    "capturado": "2026-11-20T16:08:10-04:00",
+    "capturado": "2026-11-28T10:48:55-04:00",
     "suites": {
         "test_write_ahead_puro.php": {
             "total": 459,
@@ -33,7 +33,7 @@
             "estado": "OK"
         },
         "test_ecf_montos_descuento.php": {
-            "total": 33,
+            "total": 48,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
@@ -61,7 +61,7 @@
             "estado": "OK"
         },
         "test_precios_itbis_incluido.php": {
-            "total": 45,
+            "total": 111,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
@@ -132,6 +132,13 @@
         },
         "test_cobros_tenants.php": {
             "total": 236,
+            "fallos": 0,
+            "saltadas": 0,
+            "pinned": false,
+            "estado": "OK"
+        },
+        "test_dgii_auth_reintento.php": {
+            "total": 46,
             "fallos": 0,
             "saltadas": 0,
             "pinned": false,
